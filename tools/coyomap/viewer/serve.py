@@ -36,10 +36,10 @@ import sys
 import time
 import threading
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from coyomap.impact_git import WORKTREE as IMPACT_WORKTREE
@@ -47,6 +47,10 @@ from coyomap.impact_git import PREINDEX_JSON, compute_impact, load_map_extents
 from coyomap.impact_git import resolve_ref as impact_resolve_ref
 from coyomap.impact_ripple import RippleOptions, build_impact_result
 from coyomap.model import old_map_folder_hint
+from coyomap.viewer.compare import (
+    LOG_FORMAT, MapVersion, compare_payload, history_payload, load_map_doc, parse_history,
+    parse_ref, version_label,
+)
 from coyomap.model import ModelError, load_model
 from coyomap.viewer.diffmap import DiffRow, parse_unified_diff
 from coyomap.viewer.filetree import FileTreeNode, build_tree, node_path_index, resolved_path_index
@@ -56,7 +60,6 @@ from coyomap.viewer.running import RUNNING_PATH, forget_running, note_running
 from coyomap.views import model_to_graph
 
 MAP_JSON = "project-map.json"
-CHANGE_REPORT = "change-report.md"  # optional change-impact overlay, alongside the model in .coyomap/
 # `PREINDEX_JSON` is re-exported from impact_git — one home for the filename, since the extents
 # reader there resolves the same file.
 _DEFAULT_PORT = 8765
@@ -108,6 +111,9 @@ class Project:
     tree: FileTreeNode | None = None  # cached tree (built once per map version, on first /api/tree)
     view: ViewBundle | None = None    # cached view bundle (built once per map version, on first /api/view)
     symbols: list[dict[str, object]] | None = None  # cached code symbols (built once per map version)
+    #: `api/compare` answers by commit ref, cached per map version: a commit's map never changes, and
+    #: the served side is dropped with the other caches when the map file does.
+    compare_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _strip_dirty(commit: str) -> str:
@@ -288,6 +294,7 @@ def ensure_fresh(proj: Project) -> None:
     proj.commit, proj.title, proj.goal = fresh.commit, fresh.title, fresh.goal
     proj.map_mtime = fresh.map_mtime
     proj.tree = proj.view = proj.symbols = None
+    proj.compare_cache.clear()
 
 
 def build_projects(folders: list[str]) -> dict[str, Project]:
@@ -427,6 +434,101 @@ def worktree_read(root: Path, path: str) -> bytes | None:
         return None
 
 
+# --- compare with an old map (api/mapcommits + api/compare) --------------------------------------
+# The served map is the NEW side. The OLD side is a version out of the map file's own git history,
+# or a map file on disk named by a `path:` ref. The engine and the payload shape live in
+# `mapdiff` / `viewer/compare`; only the git reads and the disk read are here.
+
+_LEGACY_MAP_REL = ".coyodex/project-map.json"   # where the map lived before the 2026-09-13 rename
+
+
+@dataclass(frozen=True)
+class OldMap:
+    """The old side of a comparison: the map document, and the labels the picker showed for it."""
+    doc: dict[str, Any]
+    side: dict[str, Any]
+
+
+def _map_rel(proj: Project) -> str:
+    try:
+        return proj.map_json.resolve().relative_to(proj.repo_root.resolve()).as_posix()
+    except ValueError:
+        return f".coyomap/{MAP_JSON}"
+
+
+def map_history(proj: Project, limit: int = 60) -> dict[str, Any]:
+    """The commits that changed the map file, newest first, following the folder rename, and
+    whether the file on disk has edits the last commit does not."""
+    rel = _map_rel(proj)
+    code, out = _git(proj.repo_root, ["log", f"-n{limit}", "--follow", f"--format={LOG_FORMAT}",
+                                      "--name-only", "--", rel])
+    versions = parse_history(out.decode("utf-8", "replace")) if code == 0 else []
+    dirty_code, _ = _git(proj.repo_root, ["diff", "--quiet", "HEAD", "--", rel])
+    return history_payload(versions, dirty=bool(versions) and dirty_code == 1)
+
+
+def _old_map_at(proj: Project, sha: str) -> OldMap:
+    """The map file at `sha`, at whichever path it had then, and the version's labels. A sha the
+    history did not list still works when the file exists there under the current or the legacy
+    path."""
+    full = resolve_ref(proj.repo_root, sha)
+    if full is None or full == IMPACT_WORKTREE:
+        raise ValueError(f"{sha} is not a commit of this repo")
+    versions = map_history(proj)["versions"]
+    assert isinstance(versions, list)
+    known = next((v for v in versions if isinstance(v, dict) and v.get("sha") == full), None)
+    paths = ([str(known["path"])] if known else []) + [_map_rel(proj), _LEGACY_MAP_REL]
+    blob = None
+    for path in paths:
+        blob = git_show(proj.repo_root, full, path)
+        if blob is not None:
+            break
+    if blob is None:
+        raise ValueError(f"no map file in commit {sha[:10]}")
+    doc = load_map_doc(blob.decode("utf-8", "replace"), f"the map at {sha[:10]}")
+    if known:
+        label = version_label(MapVersion(str(known["sha"]), str(known["short"]), str(known["date"]),
+                                         str(known["subject"]), str(known["path"])))
+        old = {"label": label, "sha": known["sha"], "short": known["short"], "date": known["date"],
+               "subject": known["subject"], "path": None}
+    else:
+        old = {"label": f"commit {full[:10]}", "sha": full, "short": full[:7], "date": "",
+               "subject": "", "path": None}
+    return OldMap(doc, old)
+
+
+def _old_map_from_path(proj: Project, raw: str) -> OldMap:
+    """A map file on disk: an absolute path, `~`, or a path under the repo root."""
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = proj.repo_root / path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"cannot read {raw}: {e.strerror or e}") from None
+    doc = load_map_doc(text, raw)
+    return OldMap(doc, {"label": raw, "sha": None, "short": None, "date": "", "subject": "", "path": raw})
+
+
+def compare_with(proj: Project, ref: str) -> dict[str, Any]:
+    """`api/compare?ref=`: the change document between the old map `ref` names and the served map.
+    Commit refs are cached per map version; a path ref is read every time, since the file may move."""
+    parsed = parse_ref(ref)
+    if parsed is None:
+        raise ValueError("ref must be a commit sha or path:<file>")
+    kind, value = parsed
+    if kind == "commit" and ref in proj.compare_cache:
+        return proj.compare_cache[ref]
+    old = _old_map_at(proj, value) if kind == "commit" else _old_map_from_path(proj, value)
+    new_doc = load_map_doc(proj.map_json.read_text(encoding="utf-8"), "the served map")
+    new = {"label": "the current map", "sha": proj.commit or None,
+           "short": (proj.commit or "")[:7] or None, "date": "", "subject": "", "path": None}
+    payload = compare_payload(new_doc, old.doc, ref, old.side, new)
+    if kind == "commit":
+        proj.compare_cache[ref] = payload
+    return payload
+
+
 def impact_commits(proj: Project, limit: int = 25) -> dict[str, object]:
     """The impact picker's commit list: the pin's ancestors AND descendants (the map may be older
     than the code being compared), newest-first within each list."""
@@ -525,8 +627,8 @@ def project_tree(proj: Project) -> FileTreeNode:
 def project_view(proj: Project) -> ViewBundle:
     """The whole view bundle for a project — the graph plus every pre-rendered diagram, flow, colour,
     and config flag the generic frontend needs (see gen_viewer.build_view_bundle). Computed from the
-    committed model, source-links anchored on the map's `.coyomap/` folder, with the optional
-    `change-report.md` overlay applied when present. Cached on the Project after the first request.
+    committed model, source-links anchored on the map's `.coyomap/` folder. Cached on the Project
+    after the first request.
     The frontend fetches this at boot from /coyomap/<slug>/api/view and renders it."""
     if proj.view is not None:
         return proj.view
@@ -537,12 +639,10 @@ def project_view(proj: Project) -> ViewBundle:
     model = load_model(proj.map_json.read_text(encoding="utf-8"))
     extents = load_map_extents(proj.map_json)
     graph = model_to_graph(model, extents)
-    report = proj.map_json.parent / CHANGE_REPORT
     # The feature derivation needs the MODEL, not the graph projected from it, and both are already
     # in hand here — passing them keeps `build_view_bundle` from reading and parsing the same map a
     # second time on every cold request.
-    proj.view = build_view_bundle(graph, report if report.is_file() else None,
-                                  proj.map_json.parent, model=model, extents=extents)
+    proj.view = build_view_bundle(graph, proj.map_json.parent, model=model, extents=extents)
     return proj.view
 
 
@@ -794,7 +894,7 @@ class Handler(BaseHTTPRequestHandler):
         if rest == ["health"]:
             return self._json({"ok": True, "project": proj.slug, "commit": proj.commit})
         if rest == ["view"]:
-            # Widest of the API catches: build_view_bundle walks the whole model + change-report and
+            # Widest of the API catches: build_view_bundle walks the whole model and
             # assembles every diagram, so an odd-but-loadable map can raise KeyError/IndexError/TypeError
             # too. A bad map must yield a clean 500, never kill the worker thread or leak a traceback.
             try:
@@ -872,6 +972,20 @@ class Handler(BaseHTTPRequestHandler):
         if rest == ["impactcommits"]:
             # The impact picker's list: the pin's ancestors AND descendants (M3).
             return self._json(impact_commits(proj))
+        if rest == ["mapcommits"]:
+            # The compare picker's list: every commit that changed the map file, newest first.
+            return self._json(map_history(proj))
+        if rest == ["compare"]:
+            # The change document between an old map (?ref=<sha> or ?ref=path:<file>) and the served
+            # map. A ref the reader typed wrong is their input → 400; a git or disk fault → 500.
+            ref = (query.get("ref") or [""])[0]
+            try:
+                return self._json(compare_with(proj, ref))
+            except ValueError as e:
+                return self._send(400, "text/plain; charset=utf-8", str(e).encode("utf-8"))
+            except (OSError, KeyError, IndexError, TypeError) as e:
+                return self._send(500, "text/plain; charset=utf-8",
+                                  f"could not compare the maps: {e}".encode("utf-8"))
         if rest == ["impactsrcdiff"]:
             # One file's inline diff across an ARBITRARY range, for the impact code view (M3).
             path = (query.get("path") or [""])[0]

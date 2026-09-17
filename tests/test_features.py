@@ -475,7 +475,7 @@ def test_the_view_bundle_carries_the_feature_block_in_the_viewers_vocabulary():
     from coyomap.viewer.gen_viewer import build_view_bundle
     from coyomap.views import model_to_graph
     m = load_model(json.dumps(make_map()))
-    b = build_view_bundle(model_to_graph(m, EXTENTS), None, Path("."), model=m, extents=EXTENTS)
+    b = build_view_bundle(model_to_graph(m, EXTENTS), Path("."), model=m, extents=EXTENTS)
     f = b["features"]
     assert sorted(f) == ["areas", "componentFeatures", "coverage", "entityOwners", "features",
                          "interfaces", "ownerRecords", "roleFeatures", "ruleFeatures",
@@ -537,7 +537,7 @@ def test_a_bundle_built_without_a_readable_map_still_renders_the_rest():
     from coyomap.viewer.gen_viewer import build_view_bundle
     from coyomap.views import model_to_graph
     m = load_model(json.dumps(make_map()))
-    b = build_view_bundle(model_to_graph(m, EXTENTS), None, Path("/nonexistent-map-dir"))
+    b = build_view_bundle(model_to_graph(m, EXTENTS), Path("/nonexistent-map-dir"))
     assert b["features"] == {} and b["graph"]
 
 

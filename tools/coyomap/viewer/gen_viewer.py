@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the view bundle a coyomap map's frontend renders — the graph plus every pre-rendered diagram.
 
-Reads a graph.json (from build_graph.py) and (optionally) a change-impact report and produces a
+Reads a graph.json (from build_graph.py) and produces a
 `ViewBundle` (via `build_view_bundle`): the graph, every altitude's Mermaid source, the use-case
 flows, colours, and source-link config. `coyomap serve` calls this per request and serves the bundle
 as JSON at /coyomap/<slug>/api/view; the generic frontend (viewer.html + viewer.js/css, served from the
@@ -24,7 +24,7 @@ the ID still appears in the panel header and drives the bridge via the cy-<ID>
 class.
 
 Normally called in-process by `coyomap serve`. For two-stage debugging (dumps the bundle JSON):
-    python -m coyomap.viewer.gen_viewer [graph.json] [view-bundle.json] [report.md]
+    python -m coyomap.viewer.gen_viewer [graph.json] [view-bundle.json]
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import quote
 
-from coyomap.viewer.build_graph import DiffDict, GraphDict, build_diff
+from coyomap.viewer.build_graph import GraphDict
 from coyomap.features import as_bundle, build_index
 from coyomap.model import ModelError, ProjectModel, load_model
 from coyomap import records
@@ -193,34 +193,24 @@ def _edge_label(text: str) -> str:
     return f'"{inner}"'
 
 
-def _draw_nodes(graph: GraphDict, diff: DiffDict | None) -> list[tuple[str, str, str]]:
-    """(id, label, kind) for every node drawn at component level, incl. added ones."""
-    out: list[tuple[str, str, str]] = []
-    for nid, node in graph["nodes"].items():
-        kind = str(node["kind"])
-        if kind in DIAGRAM_KINDS:
-            out.append((nid, str(node["name"]), kind))
-    if diff:
-        for c in diff["changes"]:
-            if c["change"] == "added" and c["kind"] in DIAGRAM_KINDS:
-                out.append((c["id"], c["name"] or c["id"], c["kind"]))
-    return out
+def _draw_nodes(graph: GraphDict) -> list[tuple[str, str, str]]:
+    """(id, label, kind) for every node drawn at component level."""
+    return [(nid, str(node["name"]), str(node["kind"])) for nid, node in graph["nodes"].items()
+            if str(node["kind"]) in DIAGRAM_KINDS]
 
 
-def _diagram_edges(graph: GraphDict, diff: DiffDict | None, ids: set[str]) -> list[tuple[str, str, str]]:
+def _diagram_edges(graph: GraphDict, ids: set[str]) -> list[tuple[str, str, str]]:
     edges: list[tuple[str, str, str]] = [
         (str(e["src"]), str(e["verb"]), str(e["dst"])) for e in graph["edges"]
     ]
-    if diff:
-        edges += [(e["src"], e["verb"], e["dst"]) for e in diff["new_edges"]]
     return [(s, v, d) for (s, v, d) in edges if s in ids and d in ids]
 
 
-def gen_mermaid(graph: GraphDict, diff: DiffDict | None = None, only: set[str] | None = None) -> str:
+def gen_mermaid(graph: GraphDict, only: set[str] | None = None) -> str:
     """Nodes keep their baseline kind styling; change status is shown by JS badges, not fill.
     `only` (a set of ids) restricts the drawing to those components + the deps they touch — used
     for the per-subsystem drill-down view."""
-    draw = _draw_nodes(graph, diff)
+    draw = _draw_nodes(graph)
     if only is not None:
         keep = set(only)
         for e in graph["edges"]:
@@ -237,7 +227,7 @@ def gen_mermaid(graph: GraphDict, diff: DiffDict | None = None, only: set[str] |
         label = _safe_label(name)  # name only — no ID prefix
         lines.append(f"  {nid}{open_b}{label}{close_b}:::cy-{nid}")
         lines.append(f"  class {nid} {kind}")
-    for src, verb, dst in _diagram_edges(graph, diff, ids):
+    for src, verb, dst in _diagram_edges(graph, ids):
         lines.append(f"  {src} -->|{_edge_label(verb)}| {dst}")
     lines.append(f"  classDef component {COMPONENT_STYLE};")
     lines.append(f"  classDef dep {DEP_STYLE};")
@@ -1282,7 +1272,7 @@ def gen_subsystem_card_mermaid(graph: GraphDict, sid: str) -> str:
     for sd in sorted(bridge_sd):  # collapsed subdomain boxes the subsystem's data bridges to
         lines.append(f'  {sd}["{_slot("subdomain", "compact", sd)}"]:::cy-{sd}')
         lines.append(f"  class {sd} itembox")
-    for src, verb, dst in _diagram_edges(graph, None, keep):  # internal + dep edges (labelled)
+    for src, verb, dst in _diagram_edges(graph, keep):  # internal + dep edges (labelled)
         lines.append(f"  {src} -->|{_edge_label(verb)}| {dst}")
     for (src, dst), c in sorted(cross.items()):  # neighbourhood arrows (click -> edge card)
         lines.append(f"  {src} -->{_count_label(c)} {dst}")
@@ -1337,9 +1327,9 @@ def gen_edge_card_mermaid(graph: GraphDict, a: str, b: str) -> str:
     lines = [SLOT_MAP_INIT, "flowchart LR",  # item-box slots: no node padding, arrows stop on the boxes
              *_component_subgraph(graph, a, keep=drawn),
              *_component_subgraph(graph, b, keep=drawn)]
-    for src, verb, dst in _diagram_edges(graph, None, members_a):  # a's inner links, between drawn boxes
+    for src, verb, dst in _diagram_edges(graph, members_a):  # a's inner links, between drawn boxes
         lines.append(f"  {src} -->|{_edge_label(verb)}| {dst}")
-    for src, verb, dst in _diagram_edges(graph, None, members_b):  # b's inner links, between drawn boxes
+    for src, verb, dst in _diagram_edges(graph, members_b):  # b's inner links, between drawn boxes
         lines.append(f"  {src} -->|{_edge_label(verb)}| {dst}")
     for s, verb, d in direct:
         lines.append(f"  {s} -->|{_edge_label(verb)}| {d}")
@@ -1354,20 +1344,6 @@ def edge_card_mermaids(graph: GraphDict) -> dict[str, str]:
     level, not only top-level — keyed 'A>B' to match the rendered arrow's endpoints (overview or nested
     card). Built from the one _edge_card_pairs source."""
     return {f"{a}>{b}": gen_edge_card_mermaid(graph, a, b) for (a, b) in sorted(_edge_card_pairs(graph))}
-
-
-def compute_state(graph: GraphDict, diff: DiffDict | None) -> dict[str, str]:
-    """Per-node change state for the diff badges: added / modified / deleted / rippled."""
-    if not diff:
-        return {}
-    draw = _draw_nodes(graph, diff)
-    ids = {nid for nid, _, _ in draw}
-    changed = {c["id"]: c["change"] for c in diff["changes"]}
-    state: dict[str, str] = dict(changed)
-    for src, _, dst in _diagram_edges(graph, diff, ids):
-        if src in changed and dst not in changed:
-            state[dst] = "rippled"
-    return state
 
 
 def _field_ci(node: dict[str, Any], key: str) -> str:
@@ -3202,27 +3178,9 @@ def flow_actors_map(graph: GraphDict) -> dict[str, list[dict[str, Any]]]:
     return {str(f["uc"]): flow_actors(graph, f) for f in all_walks(graph)}
 
 
-def merged_graph(graph: GraphDict, diff: DiffDict | None) -> dict[str, Any]:
-    """Graph + diff annotations (added nodes inserted, change status on nodes) for the panel."""
-    g = cast("dict[str, Any]", copy.deepcopy(graph))
-    if diff:
-        for c in diff["changes"]:
-            nid = c["id"]
-            if nid in g["nodes"]:
-                g["nodes"][nid]["change"] = c["change"]
-                if c["note"]:
-                    g["nodes"][nid]["fields"]["Change"] = f'{c["change"]} — {c["note"]}'
-            elif c["change"] == "added":
-                g["nodes"][nid] = {
-                    "id": nid,
-                    "kind": c["kind"] or "component",
-                    "name": c["name"] or nid,
-                    "file": None,
-                    "line": None,
-                    "fields": {"Change": f'added — {c["note"]}'},
-                    "change": "added",
-                }
-    return g
+def merged_graph(graph: GraphDict) -> dict[str, Any]:
+    """A copy of the graph the panel's extra nodes (context, deployment) are added to."""
+    return cast("dict[str, Any]", copy.deepcopy(graph))
 
 
 def gen_channel_mermaids(graph: GraphDict) -> dict[str, str]:
@@ -3280,7 +3238,6 @@ class ViewBundle(TypedDict):
     ghCommit: str | None
     graph: dict[str, Any]          # the MERGED graph (base+diff, with Context nodes added)
     mermaidBase: str
-    mermaidDiff: str
     mermaidContext: str
     mermaidContainer: str
     mermaidBySub: dict[str, str]
@@ -3325,7 +3282,6 @@ class ViewBundle(TypedDict):
     mermaidByBucketFold: dict[str, str]
     foldedBuckets: list[dict[str, Any]]
     contextEdges: dict[str, dict[str, Any]]
-    hasDiff: bool
     hasGrouping: bool
     hasDomain: bool
     hasSubdomains: bool
@@ -3333,7 +3289,6 @@ class ViewBundle(TypedDict):
     mermaidChannels: dict[str, str]  # per-broker async flowchart (dep id → source), for brokers with
                                      # ≥2 channels; rendered inside the Data tab's broker pane
     meta: str                      # the header meta line (HTML)
-    diffState: dict[str, str]
     features: dict[str, Any]       # the feature-led derivation (coyomap.features.as_bundle): what
                                    # each feature owns, the inverse lookups and the coverage
                                    # line. `{}` when no model could be read beside the graph.
@@ -3367,7 +3322,7 @@ def owner_records(m: ProjectModel) -> dict[str, str]:
     return out
 
 
-def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
+def build_view_bundle(graph: GraphDict, anchor: Path,
                       model: ProjectModel | None = None,
                       extents: Extents | None = None) -> ViewBundle:
     """Compute every derived view artifact for one map — the pure-data core that `coyomap serve`
@@ -3383,7 +3338,7 @@ def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
     `anchor` is the directory that source links resolve against (the map's `.coyomap/` folder): the
     repo root + GitHub URL are derived from the git work tree around it, overridable in the viewer's
     Settings. Nothing here touches the output file or the frontend assets, so it is safe to call per
-    request. `report` is the optional change-impact overlay; None renders the plain baseline.
+    request.
     """
     if model is None:
         map_json = anchor / 'project-map.json'
@@ -3399,12 +3354,9 @@ def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
     # map's own build record. The Features page joins the two by area id.
     if model and feature_block:
         feature_block["ownerRecords"] = owner_records(model)
-    diff = build_diff(report) if report and report.exists() else None
-    base_mm = gen_mermaid(graph, None)
-    diff_mm = gen_mermaid(graph, diff) if diff else base_mm
+    base_mm = gen_mermaid(graph)
     context_mm = gen_context_mermaid(graph)
     context_edges = gen_context_edges(graph)
-    state = compute_state(graph, diff)
     # Source-link config, derived from the mapped repo (the anchor dir sits inside its work tree).
     # Seeded into the viewer; the user can override the root / GitHub URL in Settings (localStorage).
     repo_root = repo_root_default(anchor)
@@ -3413,27 +3365,24 @@ def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
     # Repo root name in the header — so the map plainly states which repo its file links resolve into.
     repo_name = Path(repo_root).name or repo_root
     repo_tag = f'<strong class="repo" title="{html_escape(repo_root, quote=True)}">{html_escape(repo_name)}</strong> · '
-    if diff:
-        meta = f"diff: <code>{diff['base']}</code> → <code>{diff['new']}</code> · {len(diff['changes'])} changes"
-    else:
-        commit = graph['commit'] or 'unknown'
-        # The pin reads `commit <sha> <date> <time>` — no "from", which read as if the SHA came from
-        # the date. The time is resolved from git (commit_stamp); the stored date is the fallback.
-        stamp = commit_stamp(anchor, graph.get('commit'), graph.get('committed'))
-        meta = f"baseline @ commit <code>{commit}</code>" + (f" {html_escape(stamp)}" if stamp else "")
-        built = graph.get('built')
-        if built:
-            meta += f" · built {html_escape(built)}"
-        # The map's `format` ("coyomap-map") is deliberately NOT shown: it is the same literal on every
-        # map ever written, so it told a reader nothing about the map in front of them. It stays in the
-        # model, where the loader checks it.
+    commit = graph['commit'] or 'unknown'
+    # The pin reads `commit <sha> <date> <time>` — no "from", which read as if the SHA came from
+    # the date. The time is resolved from git (commit_stamp); the stored date is the fallback.
+    stamp = commit_stamp(anchor, graph.get('commit'), graph.get('committed'))
+    meta = f"baseline @ commit <code>{commit}</code>" + (f" {html_escape(stamp)}" if stamp else "")
+    built = graph.get('built')
+    if built:
+        meta += f" · built {html_escape(built)}"
+    # The map's `format` ("coyomap-map") is deliberately NOT shown: it is the same literal on every
+    # map ever written, so it told a reader nothing about the map in front of them. It stays in the
+    # model, where the loader checks it.
     meta = repo_tag + meta
     grouping = has_grouping(graph)
     domain = has_domain(graph)
     subdomains = has_subdomains(graph)
     hp = has_hp(graph)
     deployment = has_deployment(graph)
-    mg = merged_graph(graph, diff)
+    mg = merged_graph(graph)
     add_context_nodes(mg, graph)
     if deployment:
         add_deployment_nodes(mg, graph)
@@ -3443,7 +3392,7 @@ def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
         repoRoot=repo_root, repoState=repo_state(anchor, graph.get('commit')), exported=False,
         ghRepo=gh_repo, ghCommit=gh_commit,
         graph=mg,
-        mermaidBase=base_mm, mermaidDiff=diff_mm, mermaidContext=context_mm,
+        mermaidBase=base_mm, mermaidContext=context_mm,
         mermaidContainer=gen_container_mermaid(graph) if grouping else "",
         mermaidBySub=subsystem_component_mermaids(graph) if grouping else {},
         mermaidEdgeCard=edge_card_mermaids(graph) if grouping else {},
@@ -3481,30 +3430,28 @@ def build_view_bundle(graph: GraphDict, report: Path | None, anchor: Path,
         mermaidByBucketFold=mermaid_by_bucketfold(graph),
         foldedBuckets=folded_buckets_roster(graph),
         contextEdges=context_edges,
-        hasDiff=diff is not None,
         hasGrouping=grouping, hasDomain=domain, hasSubdomains=subdomains, hasHp=hp,
         mermaidChannels=gen_channel_mermaids(graph),
-        meta=meta, diffState=state, features=feature_block,
+        meta=meta, features=feature_block,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     """Two-stage debug entry: dump the view bundle (the JSON the frontend fetches) for a graph.json.
 
-        python -m coyomap.viewer.gen_viewer [graph.json] [view-bundle.json] [report.md]
+        python -m coyomap.viewer.gen_viewer [graph.json] [view-bundle.json]
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     src = Path(argv[0] if len(argv) > 0 else "build/graph.json")
     out = Path(argv[1] if len(argv) > 1 else "build/view-bundle.json")
-    report = Path(argv[2]) if len(argv) > 2 else None
     if not src.exists():
         print(f"ERROR: {src} not found (build the graph first)", file=sys.stderr)
         return 1
     graph = cast(GraphDict, json.loads(src.read_text(encoding="utf-8")))
-    bundle = build_view_bundle(graph, report, out.resolve().parent)
+    bundle = build_view_bundle(graph, out.resolve().parent)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
-    print(f"Wrote view bundle -> {out}  (diff: {'yes' if report and report.exists() else 'no'})")
+    print(f"Wrote view bundle -> {out}")
     return 0
 
 

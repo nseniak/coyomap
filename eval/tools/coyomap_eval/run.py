@@ -135,7 +135,7 @@ def archive_view_bundle(map_path: Path, bundle_path: Path) -> None:
         from coyomap.viewer.gen_viewer import build_view_bundle
         from coyomap.views import model_to_graph
         bundle = build_view_bundle(
-            model_to_graph(load_model(map_path.read_text(encoding="utf-8"))), None, bundle_path.parent)
+            model_to_graph(load_model(map_path.read_text(encoding="utf-8"))), bundle_path.parent)
         bundle_path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
     except Exception as e:  # archiving must survive a build failure
         print(f"WARNING: could not archive {bundle_path.name}: {e}", file=sys.stderr)

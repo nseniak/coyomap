@@ -26,11 +26,11 @@ from coyomap.views import _relation_item, and_list, model_to_graph
 VIEWER_DIR = Path(gen_viewer.__file__).resolve().parent  # the served shell + viewer.js/css live here
 
 
-def bundle_of(json_text: str, report: Path | None = None) -> gen_viewer.ViewBundle:
+def bundle_of(json_text: str) -> gen_viewer.ViewBundle:
     """The view bundle a served map exposes at /api/view — the data the generic frontend fetches. The
     render→HTML file is gone; the diagrams/flows/config now live here (build_view_bundle), so the tests
     that used to grep the baked HTML assert on this bundle (and on the static shell for page chrome)."""
-    return gen_viewer.build_view_bundle(parse_map(json_text), report, VIEWER_DIR)
+    return gen_viewer.build_view_bundle(parse_map(json_text), VIEWER_DIR)
 
 
 def make_grouped_map(layout: str = "proper") -> str:
@@ -1815,18 +1815,6 @@ def test_bundle_has_nested_drill_data() -> None:
     assert "S2>S3" in keys and "S1>S3" in keys and "S1>S2" not in keys
 
 
-def make_report_map() -> str:
-    """A minimal change-impact report: C2 modified, C9 added (C9 is not in the base map). Drives the
-    diff overlay — its base→new header + a `change` table are what build_diff parses."""
-    return (
-        "# Change impact: abc → def\n\n"
-        "| Element | Change | Name | Kind | Note |\n"
-        "|---|---|---|---|---|\n"
-        "| **C2** | modified | Engine | component | tweaked |\n"
-        "| **C9** | added | NewWorker | component | new |\n"
-    )
-
-
 def test_shell_has_no_components_tab_but_js_keeps_generators() -> None:
     # The flat Components map is no longer a tab; its generators stay in the frontend so it can be restored.
     shell = (VIEWER_DIR / "viewer.html").read_text(encoding="utf-8")
@@ -1834,22 +1822,6 @@ def test_shell_has_no_components_tab_but_js_keeps_generators() -> None:
     assert 'data-view="component"' not in shell        # the Components tab button is gone
     assert 'data-view="container"' in shell            # Subsystems remains
     assert "MERMAID_BASE" in js and "bindComponent" in js  # generators kept dormant (restorable)
-
-
-def test_diff_overlay_bundle_and_landing() -> None:
-    # With a change-impact report the diff overlay is armed: the bundle carries hasDiff + diffState, the
-    # frontend lands on the Subsystems overview for a diff, and never resurrects the flat Components map.
-    with tempfile.TemporaryDirectory() as d:
-        report = Path(d) / "report.md"
-        report.write_text(make_report_map(), encoding="utf-8")
-        b = bundle_of(make_grouped_map("proper"), report)
-    assert b["hasDiff"] is True
-    assert b["diffState"].get("C2") == "modified" and b["diffState"].get("C9") == "added"
-    js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
-    assert "(HAS_DIFF && HAS_GROUPING) ? 'container'" in js  # still lands on Subsystems for a diff
-    assert "HAS_HP ? 'hp'" in js                             # otherwise the Happy Path is the landing view
-    shell = (VIEWER_DIR / "viewer.html").read_text(encoding="utf-8")
-    assert 'data-view="component"' not in shell        # never resurrects the flat map
 
 
 def test_glued_collection_relation_is_labelled() -> None:
@@ -3955,7 +3927,7 @@ def test_bundle_meta_carries_built_and_pin_and_tests() -> None:
                      commit="abc1234", committed="2026-01-01")
     m.use_cases = [UseCase(id="UC1", name="Login")]
     m.tests = [GapRow(targets=["UC1"], tested="yes")]
-    b = gen_viewer.build_view_bundle(model_to_graph(m), None, VIEWER_DIR)
+    b = gen_viewer.build_view_bundle(model_to_graph(m), VIEWER_DIR)
     assert "built 2026-01-02 03:04" in b["meta"]
     # The pin reads `commit <sha> <when>` — no "from" between them. `when` is the commit's real
     # date+time when git can resolve the sha, else the stored date (this fake sha resolves nowhere).

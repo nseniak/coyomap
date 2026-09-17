@@ -56,7 +56,7 @@ def _run_js(snippet: str) -> str:
         pytest.skip("node not installed — skipping viewer JS behaviour gate")
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
     start = js.index("const esc = (s) =>")
-    end = js.index("let mode = HAS_DIFF")
+    end = js.index("let mode = 'base';")
     lifted = js[start:end]
     assert "const mdRefs" in lifted, "mdRefs moved out of the lifted region — fix the slice"
     with tempfile.TemporaryDirectory() as td:
@@ -1227,7 +1227,8 @@ def test_a_page_that_draws_its_own_contents_does_not_also_list_them_in_a_card() 
                  "showDeploymentUnit(s.unit)", "showLibsFold()", "showBucketFold(s.bkid)"):
         assert gone not in body, gone
     assert "showDeployment(); return;" in body, "the unplaced threads are on no box, so they keep the card"
-    assert "showImpactSummary() : showDiffSummary()" in body, "a diff render leads with what changed"
+    assert "IMPACT) showImpactSummary();" in body, "an armed impact overlay leads with what it hits"
+    assert "showDiffSummary" not in js, "the baked report's summary card is gone with the report"
     # The three arrow builders live on: they are what a SELECTED arrow shows, which is the card's one job.
     for kept in ("function showContainerEdge(", "function showDomainContainerEdge(", "function showBridgeEdge(",
                  "function showLibsFold(", "function showBucketFold("):
@@ -3109,7 +3110,9 @@ def test_a_grouped_card_list_is_one_component_used_by_its_screens() -> None:
     css = (VIEWER_DIR / "viewer.css").read_text()
     body = js[js.index("function elementCardGroupsHtml(groups) {"):
               js.index("\nfunction ", js.index("function elementCardGroupsHtml(groups) {") + 10)]
-    assert "csec" in body and "body(g.ids, g.per)" in body
+    # A group names its members by id, or brings them already DRAWN (`cards`) — the Changes tab lists
+    # removed boxes and arrows, which are no element of this map — and the section is the same either way.
+    assert "csec" in body and "body(g.ids, g.per, g.cards)" in body and "cards !== undefined ? cards" in body
     # A count and a description are OFFERED, not automatic. The callers that DO pass a count give it
     # a noun ("8 rules"), which is information — and the count goes in the SHARED count pill, so a
     # group's count over a card list and the same count on a card are one badge, not two.
@@ -3122,8 +3125,8 @@ def test_a_grouped_card_list_is_one_component_used_by_its_screens() -> None:
         assert boxed not in rule, "a section must not draw itself as a card"
     # An empty group is dropped, and a lone group draws no frame: one heading repeating the page title
     # says nothing.
-    assert "filter((g) => g.ids && g.ids.length)" in body
-    assert "if (live.length === 1) return body(live[0].ids, live[0].per);" in body
+    assert "filter((g) => (g.ids && g.ids.length) || g.cards)" in body
+    assert "if (live.length === 1) return body(live[0].ids, live[0].per, live[0].cards);" in body
     for caller in ("function ruleAnalysisGapsHtml() {", "function unreachedHtml() {"):
         fn = js[js.index(caller): js.index("\nfunction ", js.index(caller) + 10)]
         assert "elementCardGroupsHtml(" in fn, caller
@@ -3615,7 +3618,7 @@ def test_a_map_lands_on_what_the_product_does() -> None:
         "the description is the first thing a reader meets"
     assert "HAS_HP ? 'hp'" in landing
     assert "'actors'" not in landing, "the Actors view left the fallback chain with its tab"
-    assert "(HAS_DIFF && HAS_GROUPING) ? 'container'" in landing   # a diff still opens on the overlay
+    assert "HAS_DIFF" not in js, "the baked report path is gone: change mode is armed by the reader, not by a file"
     assert "'goal'" not in js and "renderGoal" not in js, "the Goal tab is gone, not hidden"
     # …and the description leads the Features page, above a labelled block of feature cards.
     over = js[js.index("function renderOverview() {"): js.index("\nfunction ", js.index("function renderOverview() {") + 10)]
@@ -3645,7 +3648,8 @@ def test_code_and_operations_read_as_one_question() -> None:
     assert "'Under the hood'" in table
     hood = re.findall(r'<button data-view="(\w+)" data-group="hood">', html)
     # Storage is a machine fact — where the data physically lives — so it sits under the hood too.
-    assert set(hood) == {"container", "data", "context", "tests", "deployment", "system"}, hood
+    # …plus the Changes tab, shown only while a comparison with an old map is armed (syncCompareUi).
+    assert set(hood) == {"container", "data", "context", "tests", "deployment", "system", "hoodchanges"}, hood
 
 
 def test_a_component_says_how_many_features_it_serves() -> None:
@@ -4838,7 +4842,8 @@ def test_the_url_carries_every_field_that_names_a_screen_and_reads_it_back() -> 
     there is carried by the URL with no second edit, and cannot be forgotten here."""
     every = "Object.fromEntries([['kind', 'rules']].concat(STATE_FIELDS.map((f) => [f, 'X_' + f])))"
     got = json.loads(_run_js_regions(
-        [("const STATE_FIELDS = [", "function stateKey(s) {"),
+        [("let CMP = null;", "let CMP_INDEX = null;"),   # the comparison rider the encoder reads (none armed here)
+         ("const STATE_FIELDS = [", "function stateKey(s) {"),
          ("const URL_WORD = {", "// `history` (the app's own stack) SHADOWS")],
         """
 const trip = (s) => stateFromUrl('#' + urlFromState(s, false));

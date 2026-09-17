@@ -1803,29 +1803,35 @@ table.cvcode td.cvtag { position: sticky; right: 0; width: 1%; white-space: nowr
 /* --- mechanical diff picker (header) ------------------------------------------------------------ */
 /* A small dropdown anchored under the "Diff…" button: pick a range and the changed map elements badge.
    Positioned relative to #impactctl so it floats under the button as the header stays fixed. */
-#impactctl { position: relative; display: inline-block; }
+#impactctl, #comparectl { position: relative; display: inline-block; }
+/* The Compare button is a WORD, not an icon: it is the one control in the bar that changes what every
+   screen says, so it earns its name. Armed, it wears the change-mode colour the tab's pill and the
+   card badges share. */
+header button#comparebtn { width: auto; padding: 0 9px; font-weight: 600; }
+#comparebtn.armed { background: #8250df; color: #fff; }
+#comparectl[hidden] { display: none; }
 /* The author `display` above would otherwise beat the UA's [hidden] rule, so the impact control has to
    be switched off explicitly. See the HIDDEN FOR NOW note on #impactctl in viewer.html. */
 #impactctl[hidden] { display: none; }
-#impactpop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; width: 260px;
+.diffpop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; width: 300px;
            background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px;
            box-shadow: 0 8px 28px rgba(0,0,0,.16); font-size: 12px; color: #111827; }
-#impactpop .diffpop-title { font-weight: 700; font-size: 11px; text-transform: uppercase;
+.diffpop .diffpop-title { font-weight: 700; font-size: 11px; text-transform: uppercase;
            letter-spacing: .05em; color: #6b7280; margin-bottom: 8px; }
-#impactpop .diffpop-sep { margin: 10px 0 6px; color: #9ca3af; font-size: 11px; }
-#impactpop button.diffpop-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+.diffpop .diffpop-sep { margin: 10px 0 6px; color: #9ca3af; font-size: 11px; }
+.diffpop button.diffpop-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
            width: 100%; text-align: left; background: #f3f4f6; color: #111827; border: 1px solid #e5e7eb;
            padding: 7px 9px; border-radius: 7px; }
-#impactpop button.diffpop-opt:hover { background: #eef2ff; border-color: #c7d2fe; }
-#impactpop button.diffpop-opt span { font-size: 10.5px; color: #6b7280; font-weight: 400; }
-#impactpop .diffpop-row { display: flex; gap: 6px; }
-#impactpop .diffpop-row input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px;
+.diffpop button.diffpop-opt:hover { background: #eef2ff; border-color: #c7d2fe; }
+.diffpop button.diffpop-opt span { font-size: 10.5px; color: #6b7280; font-weight: 400; }
+.diffpop .diffpop-row { display: flex; gap: 6px; }
+.diffpop .diffpop-row input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12px;
            padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; }
-#impactpop .diffpop-row button { flex: 0 0 auto; }
-#impactpop #impClear { margin-top: 10px; background: #fff; color: #374151; border: 1px solid #e5e7eb; }
-#impactpop #impClear:hover { background: #f9fafb; }
-#impactpopmsg { margin-top: 8px; color: #b91c1c; font-size: 11px; min-height: 0; }
-#impactpopmsg:empty { display: none; }
+.diffpop .diffpop-row button { flex: 0 0 auto; }
+.diffpop .diffpop-clear { margin-top: 10px; background: #fff; color: #374151; border: 1px solid #e5e7eb; }
+.diffpop .diffpop-clear:hover { background: #f9fafb; }
+.diffpop-msg { margin-top: 8px; color: #b91c1c; font-size: 11px; min-height: 0; }
+.diffpop-msg:empty { display: none; }
 
 /* --- code-view inline diff ---------------------------------------------------------------------- */
 /* Reuses the .cvcode table shell (font, gutter, padding); rows get +/- colouring and a sign column. */
@@ -1865,6 +1871,54 @@ button.diffcommit .dc-sha { flex: 0 0 auto; font-family: ui-monospace, SFMono-Re
            font-size: 11px; color: #6366f1; }
 button.diffcommit .dc-subj { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: #374151;
            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.diffcommit .dc-date { flex: 0 0 auto; font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums; }
+button.diffcommit .dc-tag { flex: 0 0 auto; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+           letter-spacing: .04em; color: #166534; background: #eef7f0; border: 1px solid #c3ddcc;
+           border-radius: 8px; padding: 0 5px; }
+
+/* --- change mode: compare with an old map ------------------------------------------------------
+   One colour language for the three states, wherever a change is marked — the tab's count pill, a
+   card's badge, a diagram badge (the JS BADGE table) and the "What changed" block on a page. */
+.badge { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+         padding: 1px 7px; border-radius: 10px; vertical-align: middle; }
+#viewsw button .count-pill { margin-left: 6px; }
+.cmp-head { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+            background: #fafafa; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.cmp-since { margin: 0; font-size: 12.5px; color: #374151; flex: 1 1 100%; }
+.cmp-since b { font-weight: 600; color: #111827; }
+.cmp-counts { margin: 0; font-size: 12px; color: #6b7280; }
+.cmp-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: #6b7280; }
+button.cmp-filter { font: inherit; font-size: 11.5px; padding: 2px 9px; border-radius: 9px; cursor: pointer;
+                    background: #fff; color: #6b7280; border: 1px solid #e5e7eb; }
+button.cmp-filter.on { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+button.cmp-stop { font: inherit; font-size: 11.5px; padding: 2px 9px; border-radius: 9px; cursor: pointer;
+                  background: #fff; color: #374151; border: 1px solid #e5e7eb; margin-left: auto; }
+button.cmp-stop:hover { background: #f9fafb; }
+.cmp-warn { margin: 0; flex: 1 1 100%; font-size: 12px; color: #92400e; background: #fef3c7;
+            border-radius: 7px; padding: 6px 9px; }
+/* THE "WHAT CHANGED" BLOCK on a page about one box: the same framed section every item page uses,
+   with the old words struck and the new words marked, and a list's items as came / went. */
+.cmpsec { margin: 12px 0 16px; padding: 10px 14px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+          background: #fff; font-size: 13px; line-height: 1.5; color: #374151; }
+.cmpsec h3 { margin: 0 0 8px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+             letter-spacing: .05em; color: #6b7280; display: flex; align-items: center; gap: 8px; }
+.cmpsec h3 .muted { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.cmpsec p { margin: 0 0 6px; }
+.cmpsec dl { margin: 0; }
+.cmpsec dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+             color: #6b7280; margin-top: 8px; }
+.cmpsec dd { margin: 2px 0 0; }
+.cmpsec del, .cmp-del { text-decoration: line-through; background: #ffebe9; color: #82071e;
+                        border-radius: 3px; padding: 0 2px; }
+.cmpsec ins, .cmp-add { text-decoration: none; background: #dafbe1; color: #116329;
+                        border-radius: 3px; padding: 0 2px; }
+.cmp-arrow { color: #9ca3af; margin: 0 5px; }
+.cmp-items { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.cmp-steps { margin: 0; padding-left: 18px; }
+.cmp-steps li { margin: 2px 0; }
+.cmp-steps .cmp-n { color: #6b7280; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.cmp-link { color: #6b7280; font-size: 12px; }
+.cmp-link code { font-size: 11.5px; }
 
 /* --- impact explorer ----------------------------------------------------------------------------
    The picker mirrors the diff popover (selectors widened above); below are the impact-only bits:

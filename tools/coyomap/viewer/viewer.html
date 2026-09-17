@@ -39,6 +39,24 @@
        the source rail. -->
   <button id="searchbtn" title="Search the map (press /)" aria-label="Search the map">&#128269;</button>
   <button id="setbtn" title="Source link settings (editor + repo root)" aria-label="Source link settings">&#9881;</button>
+  <!-- Compare with an old map: the served map is the NEW side; the old one is a version out of the
+       map file's own git history (the list) or a map file on disk (the field). Picking one arms
+       change mode — badges on every changed box, a Changes tab under each group — and the choice
+       rides the link as `cmp=`. Server-only, like the impact explorer: an export hides it. -->
+  <span id="comparectl">
+    <button id="comparebtn" title="Compare this map with an older version of it">Compare…</button>
+    <div id="comparepop" class="diffpop" hidden>
+      <div class="diffpop-title">Compare with an old map</div>
+      <div id="cmpcommits" class="diffpop-commits"></div>
+      <div class="diffpop-sep">or a map file on disk</div>
+      <div class="diffpop-row">
+        <input id="cmpPath" type="text" placeholder="path to a project-map.json" spellcheck="false" autocomplete="off">
+        <button id="cmpGo" type="button">Compare</button>
+      </div>
+      <button id="cmpClear" type="button" class="diffpop-opt diffpop-clear" hidden>Stop comparing</button>
+      <div id="cmppopmsg" class="diffpop-msg"></div>
+    </div>
+  </span>
   <!-- Impact explorer (design: impact-and-update-design.md): project ANY diff — any base/target,
        including ranges that don't touch the map's commit — onto the map, with typed ripple.
        HIDDEN FOR NOW: the feature works but is not good enough to advertise, so the whole control is
@@ -46,7 +64,7 @@
        `hidden` attribute — and the `#impactctl[hidden]` rule in viewer.css — to bring it back. -->
   <span id="impactctl" hidden>
     <button id="impactbtn" title="Project a diff onto the map: what does it impact?">Impact…</button>
-    <div id="impactpop" hidden>
+    <div id="impactpop" class="diffpop" hidden>
       <div class="diffpop-title">Impact of a diff</div>
       <button id="impSinceMap" type="button" class="diffpop-opt">Map's commit → working tree<span>including uncommitted edits</span></button>
       <div class="diffpop-sep">or any range — base → target (empty target = working tree)</div>
@@ -63,8 +81,8 @@
         <button type="button" class="imp-depth on" data-th="6">+Behavior</button>
         <button type="button" class="imp-depth" data-th="7">+Calls</button>
       </div>
-      <button id="impClear" type="button" class="diffpop-opt">Clear impact</button>
-      <div id="impactpopmsg"></div>
+      <button id="impClear" type="button" class="diffpop-opt diffpop-clear">Clear impact</button>
+      <div id="impactpopmsg" class="diffpop-msg"></div>
     </div>
   </span>
   <button id="toggle" style="display:none"></button>
@@ -125,6 +143,7 @@
             <button data-view="rules" data-group="product">Rules</button>  <!-- T7: the decisions this product makes (hidden when the map states none) -->
             <button data-view="domain" data-group="product">Data</button>  <!-- internal kind stays `domain`; the things the product knows about, under Product beside the rules that decide about them -->
             <button data-view="glossary" data-group="product">Glossary</button>  <!-- term table, not a diagram (hidden when empty); the product's own words sit with the product -->
+            <button data-view="changes" data-group="product">Changes</button>  <!-- what changed in the product since the old map; only while a comparison is armed (syncCompareUi) -->
 
             <!-- UNDER THE HOOD — how the code is arranged, what it pulls in, how well it is tested,
                  and what actually runs. Code and Operations used to be two groups; they answer the same
@@ -139,9 +158,10 @@
 
             <button data-view="deployment" data-group="hood">Deployment</button>  <!-- processes/threads ↔ subsystems (hidden when no deployment[] units) -->
             <button data-view="system" data-group="hood">System</button>  <!-- operational reference tables: run/observability/security/config/entry-points (hidden when empty) -->
+            <button data-view="hoodchanges" data-group="hood">Changes</button>  <!-- what changed under the hood since the old map; only while a comparison is armed -->
 
             <!-- Components tab intentionally removed: the flat whole-repo component map is too heavy to be a
-                 landing view. Its generators (gen_mermaid / MERMAID_BASE / MERMAID_DIFF) and the viewer's
+                 landing view. Its generators (gen_mermaid / MERMAID_BASE) and the viewer's
                  `component` machinery are kept dormant so the tab can be restored by re-adding this button.
                  Components are now reached by drilling a subsystem; change impact lives on the Subsystems view. -->
           </span>

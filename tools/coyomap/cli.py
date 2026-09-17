@@ -189,7 +189,7 @@ def _dispatch(cmd: str, rest: list[str]) -> int:
         from coyomap import assemble  # stdlib-only
         return assemble.main(rest)
     if cmd == "diff":
-        from coyomap import mapdiff  # stdlib-only; two assembles of the SAME work, never two builds
+        from coyomap import mapdiff  # stdlib-only; two maps of one lineage — it says when they are not
         return mapdiff.main(rest)
     if cmd == "dump":
         from coyomap import dump  # stdlib-only; defaults to .coyomap/project-map.json

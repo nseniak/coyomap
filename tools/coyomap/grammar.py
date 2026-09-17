@@ -646,8 +646,7 @@ def is_separator_row(line: str) -> bool:
 def iter_pipe_runs(lines: list[str]) -> list[tuple[int, list[str]]]:
     """Each maximal run of ``|``-prefixed lines as ``(start_index, block_lines)`` (0-based start).
 
-    This is the table grouping the change-impact report parser (`viewer/build_graph.build_diff`)
-    reads: a markdown table is a contiguous run of ``|``-lines, so ANY non-pipe line inside it (a
+    This is the table grouping the markdown readers share: a markdown table is a contiguous run of ``|``-lines, so ANY non-pipe line inside it (a
     blank line, stray prose, an HTML comment) breaks the run into two. Run on fence-free text
     (``strip_fences``) so a ``|`` row inside a code fence is never grouped as a table."""
     out: list[tuple[int, list[str]]] = []

@@ -1823,9 +1823,9 @@ def test_blocks_and_rules_are_graph_nodes() -> None:
 
 def test_the_bundle_gates_the_tab_on_the_map_having_rules() -> None:
     from coyomap.viewer import gen_viewer
-    assert gen_viewer.build_view_bundle(model_to_graph(make_viewer_model()), None,
+    assert gen_viewer.build_view_bundle(model_to_graph(make_viewer_model()),
                                         VIEWER)["hasBusinessRules"] is True
-    assert gen_viewer.build_view_bundle(model_to_graph(make_base_model()), None,
+    assert gen_viewer.build_view_bundle(model_to_graph(make_base_model()),
                                         VIEWER)["hasBusinessRules"] is False
 
 

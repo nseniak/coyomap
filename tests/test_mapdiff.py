@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""`coyomap diff` — what changed between two maps, row by row.
+"""`coyomap diff` — what changed between two maps, as a reader would ask it.
 
-Nothing could answer that: `coyomap-eval compare` compares aggregate COUNTS, so a retrospective read
-`auth surfaces 39 -> 21`, got REGRESSED, and needed an hour of hand-reading to find that the rows had
-been re-expressed rather than lost.
+The engine pairs rows (by id, then by name, then by code file), aligns a use case's steps like lines
+of text, keys an arrow by its ends, classes every changed field (wording / structure / link), and
+renders three ways: text for the agent, markdown for people, JSON for the viewer's change mode.
 
 Run either way (needs an editable install: `make deps`):
     python3 tests/test_mapdiff.py
@@ -14,11 +14,15 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from coyomap import mapdiff
-from coyomap.mapdiff import diff_arrays, format_diff
+from coyomap.mapdiff import (
+    ElementDelta, KindCount, MapDelta, align_steps, diff_maps, field_deltas, to_json, to_markdown,
+    to_text, word_spans,
+)
 
 FORMAT = "coyomap-map"
 
@@ -26,9 +30,13 @@ FORMAT = "coyomap-map"
 def make_map(**overrides) -> dict:
     doc = {
         "format": FORMAT, "title": "t", "goal": "g",
-        "use_cases": [{"id": "UC1", "name": "Do"}],
-        "components": [{"id": "C1", "name": "A", "source": "a.py:1"}],
-        "entities": [{"id": "E1", "name": "Thing"}],
+        "roles": [{"id": "R1", "name": "Reader", "wants": "a map"}],
+        "use_cases": [{"id": "UC1", "name": "Open the map", "actors": ["R1"],
+                       "trigger_outcome": "The reader opens the map and sees the overview."}],
+        "flows": [{"uc": "UC1", "title": "Open the map", "steps": make_steps(3)}],
+        "components": [{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map"}],
+        "entities": [{"id": "E1", "name": "Thing", "meaning": "one thing", "source": "m.py:3",
+                      "fields": [{"name": "id", "type": "str"}, {"name": "size", "type": "int"}]}],
         "edges": [],
         "rules": [],
         "entry_points": [],
@@ -37,70 +45,18 @@ def make_map(**overrides) -> dict:
     return doc
 
 
-def make_rule(rid: str, statement: str, risk: str = "r") -> dict:
-    return {"id": rid, "name": statement[:20], "statement": statement, "risk": risk,
-            "sites": [{"where": "a.py:1", "why": "guards"}]}
+def make_steps(n: int, src: str = "R1", dst: str = "C1") -> list[dict]:
+    return [{"n": i + 1, "src": src, "dst": dst, "phrase": f"does thing {i + 1}", "where": f"srv.py:{20 + i}"}
+            for i in range(n)]
 
 
-def by_array(diffs, name):
-    return next((d for d in diffs if d.array == name), None)
+def make_rule(rid: str, statement: str, risk: str = "r", where: str = "a.py:1") -> dict:
+    return {"id": rid, "name": statement, "statement": statement, "risk": risk,
+            "sites": [{"where": where, "why": "guards"}]}
 
-
-# --- id-keyed arrays --------------------------------------------------------------------
-
-def test_an_unchanged_map_reports_nothing():
-    m = make_map(rules=[make_rule("BR1", "A token is checked")])
-    assert diff_arrays(m, json.loads(json.dumps(m))) == []
-
-
-def test_a_changed_field_names_the_row_and_the_field():
-    before = make_map(rules=[make_rule("BR1", "A token is checked", risk="old")])
-    after = make_map(rules=[make_rule("BR1", "A token is checked", risk="new")])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None and d.changed == [("BR1", ["risk"])]
-    assert not d.added and not d.dropped
-
-
-def test_several_moved_fields_are_all_listed():
-    before = make_map(rules=[make_rule("BR1", "A", risk="r1")])
-    after = make_map(rules=[make_rule("BR1", "B", risk="r2")])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None and d.changed[0][1] == ["name", "risk", "statement"]
-
-
-def test_an_added_and_a_dropped_row_are_separated():
-    before = make_map(rules=[make_rule("BR1", "A token is checked")])
-    after = make_map(rules=[make_rule("BR2", "A plan has a cap")])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None
-    assert d.added == ["BR2"] and d.dropped == ["BR1"] and d.changed == []
-
-
-def test_a_count_change_is_reported_even_with_no_row_detail():
-    d = by_array(diff_arrays(make_map(), make_map(rules=[make_rule("BR1", "x")])), "rules")
-    assert d is not None and (d.count_before, d.count_after) == (0, 1)
-
-
-# --- content-keyed arrays ---------------------------------------------------------------
 
 def make_edge(src: str, verb: str, dst: str, where: str, why: str = "w") -> dict:
     return {"src": src, "verb": verb, "dst": dst, "where": where, "why": why}
-
-
-def test_edges_match_on_their_triple_and_anchor_since_they_carry_no_id():
-    before = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1", why="old")])
-    after = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1", why="new")])
-    d = by_array(diff_arrays(before, after), "edges")
-    assert d is not None and d.changed and d.changed[0][1] == ["why"]
-
-
-def test_a_re_anchored_edge_reads_as_dropped_and_added_not_as_changed():
-    """The anchor is part of an edge's identity — `dedup-edge` exists because the same triple at two
-    different call sites is two rows, not one."""
-    before = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1")])
-    after = make_map(edges=[make_edge("C1", "reads", "E1", "b.py:9")])
-    d = by_array(diff_arrays(before, after), "edges")
-    assert d is not None and len(d.added) == 1 and len(d.dropped) == 1 and not d.changed
 
 
 def make_ep(source: str, trigger: str, eid: str = "", cadence: str = "") -> dict:
@@ -112,50 +68,426 @@ def make_ep(source: str, trigger: str, eid: str = "", cadence: str = "") -> dict
     return row
 
 
+def copy(doc: Any) -> Any:
+    return json.loads(json.dumps(doc))
+
+
+def rows(delta: MapDelta, kind: str) -> list[ElementDelta]:
+    return [e for e in delta.elements if e.kind == kind]
+
+
+def count(delta: MapDelta, kind: str) -> KindCount | None:
+    return next((c for c in delta.counts if c.kind == kind), None)
+
+
+# --- pairing by id -----------------------------------------------------------------------
+
+def test_an_unchanged_map_reports_nothing():
+    m = make_map(rules=[make_rule("BR1", "A token is checked")])
+    d = diff_maps(m, copy(m))
+    assert d.elements == [] and d.arrows == [] and d.counts == [] and d.warnings == []
+
+
+def test_a_changed_field_names_the_row_its_label_and_its_class():
+    before = make_map(rules=[make_rule("BR1", "A token is checked", risk="old")])
+    after = make_map(rules=[make_rule("BR1", "A token is checked", risk="new")])
+    (e,) = rows(diff_maps(before, after), "rules")
+    assert e.change == "modified" and e.id_new == "BR1"
+    assert [(f.key, f.label, f.cls, f.old, f.new) for f in e.fields] == [("risk", "Risk", "structure", "old", "new")]
+    assert e.summary == "risk changed"
+
+
+def test_several_moved_fields_are_all_listed():
+    before = make_map(rules=[make_rule("BR1", "A token is checked", risk="old")])
+    after = make_map(rules=[make_rule("BR1", "A token is checked twice", risk="new")])
+    (e,) = rows(diff_maps(before, after), "rules")
+    assert sorted(f.key for f in e.fields) == ["name", "risk", "statement"]
+    assert e.classes == ["wording", "structure"]
+
+
+def test_an_added_and_a_removed_row_are_separated_and_counted():
+    before = make_map(rules=[make_rule("BR1", "old rule")])
+    after = make_map(rules=[make_rule("BR2", "new rule")])
+    d = diff_maps(before, after)
+    assert [(e.change, e.key) for e in rows(d, "rules")] == [("removed", "BR1"), ("added", "BR2")]
+    c = count(d, "rules")
+    assert c is not None and (c.added, c.removed, c.modified) == (1, 1, 0)
+
+
+def test_a_removed_row_carries_every_old_field_and_its_old_steps_for_its_page():
+    before = make_map()
+    after = make_map(use_cases=[], flows=[])
+    (e,) = rows(diff_maps(before, after), "use_cases")
+    assert e.change == "removed" and e.name_old == "Open the map"
+    assert {(f.key, f.new) for f in e.fields} >= {("name", None), ("trigger_outcome", None), ("actors", None)}
+    assert [f.old for f in e.fields if f.key == "actors"] == ["Reader"], "a reader never meets an id"
+    assert [s.state for s in e.steps] == ["removed"] * 3 and e.summary == "removed"
+
+
+def test_a_reference_field_reads_by_name_on_both_sides():
+    before = make_map(roles=[{"id": "R1", "name": "Reader"}, {"id": "R2", "name": "Admin"}])
+    after = make_map(roles=[{"id": "R1", "name": "Reader"}, {"id": "R2", "name": "Admin"}],
+                     use_cases=[{**make_map()["use_cases"][0], "actors": ["R2"]}])
+    (e,) = rows(diff_maps(before, after), "use_cases")
+    (f,) = [f for f in e.fields if f.key == "actors"]
+    assert (f.old, f.new, f.added, f.removed) == ("Reader", "Admin", ["Admin"], ["Reader"])
+
+
+def test_a_step_that_runs_a_shared_sub_flow_is_named_by_it():
+    sf = {"id": "SF1", "name": "Sign in", "steps": make_steps(1)}
+    steps = make_steps(3) + [{"n": 4, "src": "R1", "dst": "C1", "phrase": "", "subflow": "SF1"}]
+    before = make_map(subflows=[sf])
+    after = make_map(subflows=[sf], flows=[{"uc": "UC1", "title": "Open the map", "steps": steps}])
+    (e,) = rows(diff_maps(before, after), "use_cases")
+    (st,) = [s for s in e.steps if s.state == "added"]
+    assert st.phrase_new is None and st.subflow == "Sign in"
+    assert "+ step 4: runs Sign in" in to_markdown(diff_maps(before, after))
+
+
+def test_an_added_row_s_summary_is_its_own_sentence():
+    after = make_map(rules=[make_rule("BR1", "A token is checked")])
+    (e,) = rows(diff_maps(make_map(), after), "rules")
+    assert e.summary == "A token is checked"
+
+
+def test_a_count_change_is_reported_even_with_no_row_detail():
+    before = make_map(tests=[{"label": "a"}])
+    after = make_map(tests=[{"label": "a"}, {"label": "b"}])
+    d = diff_maps(before, after)
+    c = count(d, "tests")
+    assert c is not None and (c.before, c.after) == (1, 2) and rows(d, "tests") == []
+    assert "counted only" in to_text(d)
+
+
+def test_a_duplicate_id_in_an_id_keyed_array_is_reported_by_count_not_paired():
+    before = make_map(rules=[make_rule("BR1", "one"), make_rule("BR1", "two")])
+    after = make_map(rules=[make_rule("BR1", "three")])
+    d = diff_maps(before, after)
+    c = count(d, "rules")
+    assert c is not None and c.collisions == ["BR1"] and c.removed == 1 and c.modified == 0
+    assert "! BR1" in to_text(d)
+
+
+def test_a_unique_key_is_still_compared_field_by_field_beside_a_collision():
+    before = make_map(rules=[make_rule("BR1", "one"), make_rule("BR1", "two"), make_rule("BR2", "x", risk="a")])
+    after = make_map(rules=[make_rule("BR1", "one"), make_rule("BR1", "two"), make_rule("BR2", "x", risk="b")])
+    (e,) = rows(diff_maps(before, after), "rules")
+    assert e.id_new == "BR2" and [f.key for f in e.fields] == ["risk"]
+
+
+def test_an_unmodelled_field_is_still_compared():
+    """A diff that only saw modelled fields would go quiet exactly on the extras a build writes."""
+    before = make_map(components=[{"id": "C1", "name": "A", "source": "a.py:1", "made_up": 1}])
+    after = make_map(components=[{"id": "C1", "name": "A", "source": "a.py:1", "made_up": 2}])
+    (e,) = rows(diff_maps(before, after), "components")
+    assert [(f.key, f.label, f.old, f.new) for f in e.fields] == [("made_up", "Made up", "1", "2")]
+
+
+# --- code links are a class of their own ---------------------------------------------------
+
+def test_a_moved_code_line_is_a_link_change_counted_apart():
+    before = make_map(components=[{"id": "C1", "name": "A", "source": "a.py:1"}])
+    after = make_map(components=[{"id": "C1", "name": "A", "source": "a.py:9"}])
+    d = diff_maps(before, after)
+    (e,) = rows(d, "components")
+    assert e.classes == ["link"] and e.summary == "code link moved"
+    c = count(d, "components")
+    assert c is not None and (c.modified, c.link_only) == (0, 1)
+    assert "≈ C1  [source]" in to_text(d)
+
+
+def test_enforcement_sites_whose_lines_moved_are_a_link_change_with_no_items():
+    before = make_map(rules=[make_rule("BR1", "x", where="a.py:1")])
+    after = make_map(rules=[make_rule("BR1", "x", where="a.py:40")])
+    (e,) = rows(diff_maps(before, after), "rules")
+    (f,) = e.fields
+    assert f.key == "sites" and f.cls == "link" and not f.added and not f.removed
+
+
+def test_a_new_enforcement_site_is_a_structural_item():
+    before = make_map(rules=[make_rule("BR1", "x")])
+    after = make_map(rules=[{**make_rule("BR1", "x"), "sites": [{"where": "a.py:1", "why": "guards"},
+                                                                {"where": "b.py:2", "why": "checks"}]}])
+    (e,) = rows(diff_maps(before, after), "rules")
+    (f,) = e.fields
+    assert f.added == ["checks (b.py)"] and f.removed == []
+
+
+# --- words and lists ------------------------------------------------------------------------
+
+def test_a_reworded_sentence_carries_word_spans_that_rejoin_to_both_texts():
+    old, new = "The reader opens the map and sees the overview.", "The reader opens the map and lands on the overview."
+    spans = word_spans(old, new)
+    assert "".join(s.text for s in spans if s.op != "ins") == old
+    assert "".join(s.text for s in spans if s.op != "del") == new
+    assert [s.op for s in spans] == ["eq", "del", "ins", "eq"]
+    assert [s.text for s in spans if s.op == "ins"] == ["lands on"]
+
+
+def test_a_list_field_names_the_items_that_came_and_went():
+    before = make_map()
+    after = make_map(entities=[{**make_map()["entities"][0],
+                                "fields": [{"name": "id", "type": "str"}, {"name": "owner", "type": "str"}]}])
+    (e,) = rows(diff_maps(before, after), "entities")
+    (f,) = e.fields
+    assert (f.label, f.cls, f.added, f.removed) == ("Fields", "structure", ["owner (str)"], ["size (int)"])
+
+
+def test_a_reordered_list_is_not_a_change():
+    a = {"id": "C1", "name": "A", "files": ["x.py", "y.py"]}
+    b = {"id": "C1", "name": "A", "files": ["y.py", "x.py"]}
+    assert field_deltas(a, b, {}) == []
+
+
+# --- steps: aligned like lines of text -----------------------------------------------------
+
+def test_a_step_inserted_in_the_middle_is_one_addition_and_the_rest_renumbered():
+    old = make_steps(3)
+    new = [old[0], {"n": 2, "src": "R1", "dst": "C1", "phrase": "confirms the plan", "where": "srv.py:99"},
+           {**old[1], "n": 3}, {**old[2], "n": 4}]
+    steps = align_steps(old, new, {})
+    assert [(s.state, s.n_old, s.n_new) for s in steps] == [("added", None, 2), ("renumbered", 2, 3), ("renumbered", 3, 4)]
+
+
+def test_a_reworded_step_keeps_its_place_and_shows_the_changed_words():
+    old = make_steps(2)
+    new = copy(old)
+    new[1]["phrase"] = "does the second thing"
+    (s,) = align_steps(old, new, {})
+    assert s.state == "modified" and s.n_new == 2 and s.phrase_old == "does thing 2"
+    assert "".join(t.text for t in s.spans if t.op != "ins") == "does thing 2"
+    assert "".join(t.text for t in s.spans if t.op != "del") == "does the second thing"
+    assert {t.op for t in s.spans} == {"eq", "del", "ins"}
+
+
+def test_a_step_whose_code_line_moved_is_a_link_change_not_a_rewording():
+    old = make_steps(1)
+    new = copy(old)
+    new[0]["where"] = "srv.py:200"
+    (s,) = align_steps(old, new, {})
+    assert s.state == "modified" and s.spans == [] and [(f.key, f.cls) for f in s.fields] == [("where", "link")]
+    assert s.classes == ["link"]
+
+
+def test_a_use_case_whose_steps_only_moved_in_the_code_is_a_link_only_change():
+    before = make_map()
+    after = make_map(flows=[{"uc": "UC1", "title": "Open the map",
+                             "steps": [{**st, "where": f"srv.py:{100 + i}"} for i, st in enumerate(make_steps(3))]}])
+    d = diff_maps(before, after)
+    (e,) = rows(d, "use_cases")
+    assert e.classes == ["link"] and e.summary == "3 steps moved in the code"
+    c = count(d, "use_cases")
+    assert c is not None and (c.modified, c.link_only) == (0, 1)
+
+
+def test_the_steps_phrase_tells_reworded_from_moved_in_the_code():
+    old = make_steps(3)
+    new = copy(old)
+    new[0]["phrase"] = "does the first thing"
+    new[1]["where"] = "srv.py:900"
+    new.append({"n": 4, "src": "R1", "dst": "C1", "phrase": "does a fourth thing", "where": "srv.py:30"})
+    (e,) = rows(diff_maps(make_map(), make_map(flows=[{"uc": "UC1", "title": "Open the map", "steps": new}])), "use_cases")
+    assert e.summary == "steps: 1 added, 1 reworded, 1 moved in the code"
+
+
+def test_step_changes_land_on_the_use_case_row_with_a_phrase():
+    before = make_map()
+    after = make_map(flows=[{"uc": "UC1", "title": "Open the map", "steps": make_steps(5)}])
+    d = diff_maps(before, after)
+    (e,) = rows(d, "use_cases")
+    assert e.change == "modified" and e.summary == "2 steps added"
+    assert [s.state for s in e.steps] == ["added", "added"] and e.fields == []
+    assert "~ UC1  [steps +2]" in to_text(d)
+
+
+def test_a_flow_s_own_title_lands_on_its_use_case():
+    before = make_map()
+    after = make_map(flows=[{"uc": "UC1", "title": "Open a map", "steps": make_steps(3)}])
+    (e,) = rows(diff_maps(before, after), "use_cases")
+    assert [f.key for f in e.fields] == ["title"] and e.summary == "title reworded"
+
+
+def test_a_shared_sub_flow_s_steps_are_aligned_too():
+    sf = {"id": "SF1", "name": "Sign in", "steps": make_steps(2)}
+    before = make_map(subflows=[sf])
+    after = make_map(subflows=[{**sf, "steps": make_steps(3)}])
+    (e,) = rows(diff_maps(before, after), "subflows")
+    assert [s.state for s in e.steps] == ["added"] and e.summary == "1 step added"
+
+
+# --- arrows: keyed by their ends ------------------------------------------------------------
+
+def test_arrows_match_on_their_ends_and_a_reason_change_is_wording():
+    before = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1", why="old reason")])
+    after = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1", why="new reason")])
+    (a,) = diff_maps(before, after).arrows
+    assert a.change == "modified" and a.classes == ["wording"] and [f.key for f in a.fields] == ["why"]
+
+
+def test_a_moved_call_line_keeps_the_arrow_paired_as_a_link_change():
+    """The old engine keyed an arrow by its line, so a line shift read as removed plus added —
+    158 arrows on the live map carry a line, and every refactor lit them all."""
+    before = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1")])
+    after = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:9")])
+    d = diff_maps(before, after)
+    (a,) = d.arrows
+    assert a.change == "modified" and a.classes == ["link"] and (a.where_old, a.where_new) == ("a.py:1", "a.py:9")
+    c = count(d, "edges")
+    assert c is not None and (c.added, c.removed, c.link_only) == (0, 0, 1)
+
+
+def test_two_arrows_with_the_same_ends_at_two_call_sites_stay_two_rows():
+    """`assemble` deliberately keeps two no-call-site edges on one triple so a differing `why` can
+    tell two couplings apart; deleting one must read as one removal, not as nothing."""
+    both = [make_edge("C1", "uses", "E1", "", why="first coupling"),
+            make_edge("C1", "uses", "E1", "", why="second coupling")]
+    d = diff_maps(make_map(edges=both), make_map(edges=both[1:]))
+    assert [(a.change, a.summary) for a in d.arrows] == [("removed", "Server uses Thing")]
+
+
+def test_a_new_call_site_beside_an_old_one_is_an_addition():
+    before = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1")])
+    after = make_map(edges=[make_edge("C1", "reads", "E1", "a.py:1"), make_edge("C1", "reads", "E1", "b.py:7")])
+    (a,) = diff_maps(before, after).arrows
+    assert a.change == "added" and a.where_new == "b.py:7"
+
+
+# --- ways in: matched on content ------------------------------------------------------------
+
 def test_entry_points_match_on_content_so_a_renumber_alone_is_not_a_change():
     """EP ids are minted and re-sorted on every assemble: one anchor edit moved 22 of 104 on a real
     map. Matching by id would report a fifth of them as replaced when nothing about them changed."""
-    before = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP1"),
-                                    make_ep("b.py:2", "serve it", eid="EP2")])
-    after = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP7"),
-                                   make_ep("b.py:2", "serve it", eid="EP8")])
-    assert by_array(diff_arrays(before, after), "entry_points") is None
+    before = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP1"), make_ep("b.py:2", "serve it", eid="EP2")])
+    after = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP7"), make_ep("b.py:2", "serve it", eid="EP8")])
+    d = diff_maps(before, after)
+    assert rows(d, "entry_points") == [] and count(d, "entry_points") is None
+
+
+def test_a_way_in_whose_line_moved_is_the_same_way_in_with_a_moved_code_link():
+    before = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP1")])
+    after = make_map(entry_points=[make_ep("a.py:30", "run it", eid="EP1")])
+    d = diff_maps(before, after)
+    (e,) = rows(d, "entry_points")
+    assert e.change == "modified" and e.classes == ["link"] and e.summary == "code link moved"
+    c = count(d, "entry_points")
+    assert c is not None and (c.added, c.removed, c.link_only) == (0, 0, 1)
+
+
+def test_a_way_in_whose_file_was_renamed_is_still_the_same_way_in():
+    """A package rename moves every anchor at once; 97 of 97 ways in read as replaced on a live map."""
+    before = make_map(entry_points=[make_ep("tools/old/a.py:1", "run it", eid="EP1")])
+    after = make_map(entry_points=[make_ep("tools/new/a.py:1", "run it", eid="EP1")])
+    (e,) = rows(diff_maps(before, after), "entry_points")
+    assert e.change == "modified" and e.classes == ["link"]
+
+
+def test_two_ways_in_with_one_trigger_pair_by_their_files():
+    before = make_map(entry_points=[make_ep("a.py:1", "run it"), make_ep("b.py:1", "run it")])
+    after = make_map(entry_points=[make_ep("b.py:9", "run it"), make_ep("a.py:1", "run it")])
+    (e,) = rows(diff_maps(before, after), "entry_points")
+    assert e.classes == ["link"] and e.fields[0].old == "b.py:1" and e.fields[0].new == "b.py:9"
 
 
 def test_a_real_entry_point_change_is_still_caught_under_content_matching():
     before = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP1")])
     after = make_map(entry_points=[make_ep("a.py:1", "run it", eid="EP1", cadence="daily")])
-    d = by_array(diff_arrays(before, after), "entry_points")
-    assert d is not None and d.changed[0][1] == ["cadence"]
+    (e,) = rows(diff_maps(before, after), "entry_points")
+    assert [f.key for f in e.fields] == ["cadence"] and e.name_new == "run it"
 
 
-# --- fields the model does not know about ------------------------------------------------
+# --- the same box under a new id --------------------------------------------------------------
 
-def test_an_unmodelled_field_is_still_compared():
-    """A diff that only saw modelled fields would go quiet exactly on the extras a build writes."""
-    before = make_map(rules=[{**make_rule("BR1", "x"), "hand_note": "before"}])
-    after = make_map(rules=[{**make_rule("BR1", "x"), "hand_note": "after"}])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None and d.changed[0][1] == ["hand_note"]
+def test_a_box_that_kept_its_name_under_a_new_id_is_the_same_box():
+    before = make_map(components=[{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves"}],
+                      edges=[make_edge("C1", "reads", "E1", "srv.py:12")])
+    after = make_map(components=[{"id": "C9", "name": "Server", "source": "srv.py:10", "purpose": "serves and caches"}],
+                     edges=[make_edge("C9", "reads", "E1", "srv.py:12")])
+    d = diff_maps(before, after)
+    (e,) = rows(d, "components")
+    assert e.reidentified and (e.id_old, e.id_new) == ("C1", "C9") and e.change == "modified"
+    assert [f.key for f in e.fields] == ["purpose"] and "same component under a new id" in e.summary
+    assert d.arrows == [], "an arrow naming the re-identified box must not read as changed"
+    assert d.idmap == {"C1": "C9"} and "⇒ C1 → C9" in to_text(d)
 
 
-def test_only_restricts_to_one_array():
-    before = make_map(rules=[make_rule("BR1", "a")], entities=[{"id": "E1", "name": "Old"}])
-    after = make_map(rules=[make_rule("BR1", "b")], entities=[{"id": "E1", "name": "New"}])
-    assert [d.array for d in diff_arrays(before, after, only="rules")] == ["rules"]
+def test_a_box_that_kept_its_code_file_under_a_new_id_and_name_is_the_same_box():
+    before = make_map(components=[{"id": "C1", "name": "Server", "source": "srv.py:10"}])
+    after = make_map(components=[{"id": "C2", "name": "Map server", "source": "srv.py:10"}])
+    (e,) = rows(diff_maps(before, after), "components")
+    assert e.reidentified and e.summary == "renamed from Server · same component under a new id"
 
 
-# --- rendering --------------------------------------------------------------------------
+def test_a_guess_never_pairs_when_the_name_is_held_twice():
+    before = make_map(components=[{"id": "C1", "name": "Worker", "source": "a.py:1"}])
+    after = make_map(components=[{"id": "C5", "name": "Worker", "source": "b.py:1"},
+                                 {"id": "C6", "name": "Worker", "source": "c.py:1"}])
+    d = diff_maps(before, after)
+    assert sorted(e.change for e in rows(d, "components")) == ["added", "added", "removed"]
 
-def test_the_text_view_marks_dropped_added_and_changed_distinctly():
-    before = make_map(rules=[make_rule("BR1", "a"), make_rule("BR2", "b")])
-    after = make_map(rules=[make_rule("BR2", "b", risk="r2"), make_rule("BR3", "c")])
-    text = format_diff(diff_arrays(before, after), "old", "new")
-    assert "- BR1" in text and "+ BR3" in text and "~ BR2  [risk]" in text
+
+# --- naming and warnings --------------------------------------------------------------------
+
+def test_a_happy_path_step_is_named_by_its_use_case():
+    before = make_map(happy_path=[{"id": "HP1", "uc": "UC1", "why": "first"}])
+    after = make_map(happy_path=[{"id": "HP1", "uc": "UC1", "why": "first, and only"}])
+    (e,) = rows(diff_maps(before, after), "happy_path")
+    assert e.name_new == "Open the map"
+
+
+def test_two_maps_that_look_like_separate_builds_are_flagged():
+    ucs_old = [{"id": f"UC{i}", "name": f"Old goal {i}"} for i in range(1, 5)]
+    ucs_new = [{"id": f"UC{i}", "name": f"New goal {i}"} for i in range(1, 5)]
+    d = diff_maps(make_map(use_cases=ucs_old, flows=[]), make_map(use_cases=ucs_new, flows=[]))
+    assert any("separate builds" in w and "0 of 4 use cases" in w for w in d.warnings)
+
+
+def test_the_separate_builds_check_needs_three_shared_use_cases():
+    d = diff_maps(make_map(use_cases=[{"id": "UC1", "name": "a"}], flows=[]),
+                  make_map(use_cases=[{"id": "UC1", "name": "b"}], flows=[]))
+    assert d.warnings == []
+
+
+def test_an_older_format_is_compared_with_a_warning_not_refused():
+    old = make_map(format="coyodex-map")
+    d = diff_maps(old, make_map())
+    assert any("older format" in w for w in d.warnings)
+
+
+# --- the three renderings -------------------------------------------------------------------
+
+def test_the_text_form_marks_removed_added_changed_and_link_only_distinctly():
+    before = make_map(rules=[make_rule("BR1", "one"), make_rule("BR2", "two"), make_rule("BR3", "three", where="a.py:1")])
+    after = make_map(rules=[make_rule("BR1", "one!"), make_rule("BR3", "three", where="a.py:2"), make_rule("BR4", "four")])
+    txt = to_text(diff_maps(before, after))
+    assert "    - BR2" in txt and "    + BR4" in txt
+    assert "    ~ BR1  [name, statement]" in txt and "    ≈ BR3  [sites]" in txt
 
 
 def test_no_change_says_so_rather_than_printing_an_empty_report():
-    assert "no row changed" in format_diff([], "old", "new")
+    m = make_map()
+    assert to_text(diff_maps(m, copy(m), "a", "b")) == "map diff — a → b\n  no row changed."
+
+
+def test_the_markdown_form_names_boxes_and_shows_the_changed_words_under_their_group():
+    before = make_map(rules=[make_rule("BR1", "A token is checked")])
+    after = make_map(rules=[make_rule("BR1", "A token is checked twice")],
+                     components=[{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map fast"}])
+    md = to_markdown(diff_maps(before, after, "old", "new"))
+    assert md.startswith("# What changed: old → new")
+    assert "0 boxes added · 0 removed · 2 modified · 0 moved in the code only" in md
+    assert md.index("## Product") < md.index("### Rules") < md.index("## Under the hood") < md.index("### Components")
+    assert "- **A token is checked twice** (modified): renamed from A token is checked · statement reworded" in md
+    assert "  - Name: A token is checked **twice**" in md and "  - Statement: A token is checked **twice**" in md
+    assert "Purpose: serves the map **fast**" in md
+
+
+def test_the_json_form_is_the_whole_document():
+    before = make_map(rules=[make_rule("BR1", "x", risk="r1")])
+    after = make_map(rules=[make_rule("BR1", "x", risk="r2")])
+    payload = to_json(diff_maps(before, after))
+    assert payload["kind"] == "coyomap-map-diff" and payload["version"] == 2
+    (e,) = payload["elements"]
+    assert e["kind"] == "rules" and e["fields"][0]["label"] == "Risk" and payload["counts"][0]["modified"] == 1
 
 
 # --- the CLI ----------------------------------------------------------------------------
@@ -172,26 +504,32 @@ def test_cli_emits_parseable_json(capsys):
         assert mapdiff.main([a, b, "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
     assert payload["kind"] == "coyomap-map-diff"
-    assert payload["arrays"][0]["changed"] == [{"key": "BR1", "fields": ["risk"]}]
+    assert [f["key"] for f in payload["elements"][0]["fields"]] == ["risk"]
 
 
-def test_cli_refuses_a_malformed_map_rather_than_diffing_nonsense(capsys):
+def test_cli_emits_markdown(capsys):
+    with tempfile.TemporaryDirectory() as td:
+        a = write_map(Path(td) / "a.json", make_map(rules=[make_rule("BR1", "x", risk="r1")]))
+        b = write_map(Path(td) / "b.json", make_map(rules=[make_rule("BR1", "x", risk="r2")]))
+        assert mapdiff.main([a, b, "--md"]) == 0
+        assert "### Rules" in capsys.readouterr().out
+
+
+def test_cli_refuses_a_document_that_is_not_a_map(capsys):
     with tempfile.TemporaryDirectory() as td:
         a = write_map(Path(td) / "a.json", make_map())
         bad = Path(td) / "b.json"
-        bad.write_text('{"format": "coyomap-map", "components": [{"id": "NOPE1"}]}', encoding="utf-8")
+        bad.write_text('[1, 2, 3]', encoding="utf-8")
         assert mapdiff.main([a, str(bad)]) == 2
-        assert "ERROR" in capsys.readouterr().err
+        assert "not a map" in capsys.readouterr().err
 
 
-def test_cli_names_the_scope_when_an_older_schema_is_handed_to_it(capsys):
+def test_cli_compares_an_older_format_and_says_so(capsys):
     with tempfile.TemporaryDirectory() as td:
-        a = write_map(Path(td) / "a.json", make_map())
-        old = write_map(Path(td) / "b.json",
-                        make_map(grounding={"claims_total": 5, "claims_grounded": 5}))
-        assert mapdiff.main([a, old]) == 2
-        err = capsys.readouterr().err
-        assert "two assembles of the same work" in err.lower(), err
+        a = write_map(Path(td) / "a.json", make_map(format="coyodex-map"))
+        b = write_map(Path(td) / "b.json", make_map())
+        assert mapdiff.main([a, b]) == 0
+        assert "older format" in capsys.readouterr().out
 
 
 def test_cli_needs_exactly_two_maps(capsys):
@@ -206,6 +544,26 @@ def test_cli_refuses_an_unknown_option_with_the_usage(capsys):
     assert "usage: coyomap diff" in capsys.readouterr().err
 
 
+def test_only_restricts_to_one_array():
+    before = make_map(rules=[make_rule("BR1", "x", risk="a")], components=[{"id": "C1", "name": "A"}])
+    after = make_map(rules=[make_rule("BR1", "x", risk="b")], components=[{"id": "C1", "name": "B"}])
+    d = diff_maps(before, after, only="rules")
+    assert [e.kind for e in d.elements] == ["rules"] and [c.kind for c in d.counts] == ["rules"]
+
+
+def test_only_with_an_unknown_array_fails_loudly(capsys):
+    with tempfile.TemporaryDirectory() as td:
+        a = write_map(Path(td) / "a.json", make_map())
+        b = write_map(Path(td) / "b.json", make_map())
+        assert mapdiff.main([a, b, "--only", "edge"]) == 2
+        assert "not an array in either map" in capsys.readouterr().err
+
+
+def test_only_refuses_a_flag_as_its_value(capsys):
+    assert mapdiff.main(["a", "b", "--only", "--json"]) == 2
+    assert "another flag" in capsys.readouterr().err
+
+
 def test_cli_writes_nothing():
     with tempfile.TemporaryDirectory() as td:
         a = write_map(Path(td) / "a.json", make_map(rules=[make_rule("BR1", "x")]))
@@ -217,58 +575,3 @@ def test_cli_writes_nothing():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
-
-
-# --- regressions from the adversarial review (2026-08-14) -----------------------------------------
-
-def test_two_rows_sharing_an_identity_are_not_silently_collapsed():
-    """A dict comprehension kept the LAST row per key, so `assemble`'s deliberately-preserved pair of
-    no-call-site edges on one triple collapsed to one diff key — and deleting one was reported as
-    ZERO row-level changes, under a line claiming edges carry no identity to match on."""
-    both = [make_edge("C1", "uses", "E1", "", why="first coupling"),
-            make_edge("C1", "uses", "E1", "", why="second coupling")]
-    d = by_array(diff_arrays(make_map(edges=both), make_map(edges=both[1:])), "edges")
-    assert d is not None
-    assert len(d.dropped) == 1, d
-    assert d.key_collisions, "a repeated identity must be named, not silently paired"
-
-
-def test_deleting_the_other_of_a_shared_identity_pair_reads_the_same():
-    """Deleting the SECOND used to be mis-reported as a field change rather than a deletion."""
-    both = [make_edge("C1", "uses", "E1", "", why="first coupling"),
-            make_edge("C1", "uses", "E1", "", why="second coupling")]
-    d = by_array(diff_arrays(make_map(edges=both), make_map(edges=both[:1])), "edges")
-    assert d is not None and len(d.dropped) == 1 and not d.changed, d
-
-
-def test_a_duplicate_id_in_an_id_keyed_array_is_reported_by_count_not_paired():
-    before = make_map(rules=[make_rule("BR1", "a"), make_rule("BR1", "b")])
-    after = make_map(rules=[make_rule("BR1", "b")])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None and d.dropped == ["BR1"] and not d.changed
-
-
-def test_a_unique_key_is_still_compared_field_by_field():
-    before = make_map(rules=[make_rule("BR1", "x", risk="r1")])
-    after = make_map(rules=[make_rule("BR1", "x", risk="r2")])
-    d = by_array(diff_arrays(before, after), "rules")
-    assert d is not None and d.changed == [("BR1", ["risk"])] and not d.key_collisions
-
-
-def test_only_with_an_unknown_array_fails_loudly(capsys):
-    """`--only edge` (the obvious typo) used to print "no row changed" and exit 0 — a clean answer to
-    a question that was never asked."""
-    with tempfile.TemporaryDirectory() as td:
-        a = write_map(Path(td) / "a.json", make_map(rules=[make_rule("BR1", "x", risk="r1")]))
-        b = write_map(Path(td) / "b.json", make_map(rules=[make_rule("BR1", "x", risk="r2")]))
-        assert mapdiff.main([a, b, "--only", "edge"]) == 2
-        err = capsys.readouterr().err
-        assert "not an array in either map" in err and "edges" in err
-
-
-def test_only_refuses_a_flag_as_its_value(capsys):
-    with tempfile.TemporaryDirectory() as td:
-        a = write_map(Path(td) / "a.json", make_map())
-        b = write_map(Path(td) / "b.json", make_map())
-        assert mapdiff.main([a, b, "--only", "--json"]) == 2
-        assert "another flag" in capsys.readouterr().err

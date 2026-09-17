@@ -12,7 +12,7 @@ let GRAPH;
 // `const` declared further down is not yet initialised at that moment — the boot threw on it once.
 const MEMBER_BORDER_MIX = 34;
 const CONTAINER_BORDER_MIX = 65;
-let MERMAID_BASE, MERMAID_DIFF, MERMAID_CONTEXT, MERMAID_CONTAINER;
+let MERMAID_BASE, MERMAID_CONTEXT, MERMAID_CONTAINER;
 let MERMAID_BY_SUB;         // subsystem neighbourhood: sid -> sub-diagram
 let MERMAID_EDGE_CARD;      // edge pair: 'A>B' -> two-subsystem sub-diagram
 let CONTAINER_EDGES;        // inter-subsystem arrow 'A>B' -> [crossing component edges]
@@ -93,7 +93,6 @@ let RULES_VIEW;      // the T7 payload (GRAPH.rules_view) — blocks, rules, and
                      // is computed server-side by the one Python implementation; re-deriving any of
                      // it here is the drift the layer exists to prevent.
 let CONTEXT_EDGES;
-let HAS_DIFF;
 let META;
 let DIFF_STATE;
 let REPO_ROOT_DEFAULT;  // absolute repo root for 'open in editor' links (overridable in Settings)
@@ -107,7 +106,7 @@ const API_BASE = /^https?:$/.test(location.protocol) ? new URL('./api/', locatio
 // see gen_viewer.ViewBundle for the shape. Keep this in step with that TypedDict.
 function applyBundle(b) {
   GRAPH = b.graph;
-  MERMAID_BASE = b.mermaidBase; MERMAID_DIFF = b.mermaidDiff; MERMAID_CONTEXT = b.mermaidContext;
+  MERMAID_BASE = b.mermaidBase; MERMAID_CONTEXT = b.mermaidContext;
   MERMAID_CONTAINER = b.mermaidContainer; MERMAID_BY_SUB = b.mermaidBySub;
   MERMAID_EDGE_CARD = b.mermaidEdgeCard; CONTAINER_EDGES = b.containerEdges;
   MERMAID_DOMAIN = b.mermaidDomain; MERMAID_DOMAIN_CONTAINER = b.mermaidDomainContainer;
@@ -129,7 +128,7 @@ function applyBundle(b) {
   MERMAID_LIBS = b.mermaidLibs; FOLDED_LIBS = b.foldedLibs; CONTEXT_EDGES = b.contextEdges;
   MERMAID_BY_BUCKETFOLD = b.mermaidByBucketFold || {}; FOLDED_BUCKETS = b.foldedBuckets || [];
   HAS_GROUPING = b.hasGrouping; HAS_DOMAIN = b.hasDomain; HAS_SUBDOMAINS = b.hasSubdomains;
-  HAS_HP = b.hasHp; HAS_DIFF = b.hasDiff; META = b.meta; DIFF_STATE = b.diffState;
+  HAS_HP = b.hasHp; META = b.meta; DIFF_STATE = {};
   REPO_ROOT_DEFAULT = b.repoRoot; GH_REPO_DEFAULT = b.ghRepo; GH_COMMIT = b.ghCommit;
   EXPORTED = !!b.exported;
   REPO_STATE = b.repoState || 'ok';   // the notice is painted at boot (below), not here:
@@ -413,20 +412,24 @@ function matchGlossTerms(text, matcher) {
   return out;
 }
 
-let mode = HAS_DIFF ? 'diff' : 'base';  // a diff render arms the change-impact overlay from the start
-// Live mechanical diff (fetched from api/diff for a chosen range), distinct from the baked AI-report
-// diff that may arrive in the bundle. When LIVE_DIFF is set it OWNS the overlay: DIFF_STATE is derived
-// from it and the base diagram (not MERMAID_DIFF, which only the baked report has) carries the badges.
-// BAKED_DIFF_STATE snapshots the bundle's diffState so clearing a live diff restores the baked one.
+let mode = 'base';   // 'diff' while an overlay is armed: the impact explorer, or change mode
+// Live mechanical diff (fetched from api/diff for a chosen range). When LIVE_DIFF is set it OWNS the
+// overlay: DIFF_STATE is derived from it and the base diagram carries the badges.
 const DIFF_WORKTREE = 'WORKTREE';  // sentinel target = the current working tree (mirrors diffmap.WORKTREE)
-const BAKED_DIFF_STATE = DIFF_STATE || null;
 let LIVE_DIFF = null;  // {base,target,mapSide,direction,elements,changes,counts} or null
 // Impact explorer (design: impact-and-update-design.md). When armed it OWNS the diff overlay rails:
 // LIVE_DIFF gets a synthesized {impact:true,...} range (tree badges + code-diff mode ride along) and
 // DIFF_STATE is projected from the ImpactResult, filtered by the ripple-depth threshold.
 let IMPACT = null;     // the api/impact payload, or null
 let impactTh = 6;      // strength threshold: 0 direct-only · 4 +structural · 6 +behavioral/data · 7 +call-graph
-function hasDiff() { return !!(LIVE_DIFF || HAS_DIFF); }  // any diff overlay available for this render
+// CHANGE MODE: the served map compared with an old one (api/compare). `CMP` is the change document
+// plus the reader's three filters; `CMP_INDEX` finds a box's row by its id on either side. While
+// armed, DIFF_STATE is projected from it, so the badges, the feature cards' marks and the use-case
+// state read one table whichever overlay filled it. The ref rides every link as `cmp=`.
+let CMP = null;
+let CMP_INDEX = null;
+const CMP_FILTERS_DEFAULT = { wording: true, structure: true, link: false };
+function hasDiff() { return !!(LIVE_DIFF || CMP); }  // any diff overlay armed for this render
 let mainPz = null;     // svg-pan-zoom for the current diagram
 let rc = 0;
 let renderSeq = 0;     // bumped each render(); an in-flight render bails if it's no longer current
@@ -1416,7 +1419,7 @@ function elementCardHtml(id, opts) {
     // TWICE, in two different colours, side by side: a feature whose audience is `staff` read
     // "feature · staff · staff". Invisible until now because it only shows on a card whose element
     // HAS pills, and those are a feature's audience, an actor's nature and a dependency's kind.
-    extra: o.extra || '',
+    extra: (o.extra || '') + cmpBadgeHtml(id),
     foot: o.foot || '',
     bare: o.bare,
     cls: 'ecard',
@@ -1520,10 +1523,12 @@ function elementCardGridHtml(ids, per) {
 // `groups` = [{ title, count, desc, ids, per }]. Empty groups are dropped, and a single group draws no
 // heading at all — one section title repeating the page title says nothing.
 function elementCardGroupsHtml(groups) {
-  const live = (groups || []).filter((g) => g.ids && g.ids.length);
+  // A group names its members by id, or brings them DRAWN (`cards`) when some are not elements of
+  // this map — a removed box, an arrow, a way in — and the section around them is the same either way.
+  const live = (groups || []).filter((g) => (g.ids && g.ids.length) || g.cards);
   if (!live.length) return '';
-  const body = elementCardListHtml;
-  if (live.length === 1) return body(live[0].ids, live[0].per);
+  const body = (ids, per, cards) => (cards !== undefined ? cards : elementCardListHtml(ids, per));
+  if (live.length === 1) return body(live[0].ids, live[0].per, live[0].cards);
   // A count and a description are OFFERED, not automatic. A count that only restates how many cards
   // follow it says nothing a reader cannot see, and a heading that needs a sentence to explain it is
   // usually the wrong heading. Callers that have something to add still pass `count` / `desc`.
@@ -1531,7 +1536,7 @@ function elementCardGroupsHtml(groups) {
     + `<div class="csec-head"><h3 class="csec-title">${esc(g.title)}</h3>`
     + (g.count ? countPillOf(g.count) : '') + '</div>'
     + (g.desc ? `<p class="csec-desc">${esc(g.desc)}</p>` : '')
-    + body(g.ids, g.per) + '</section>').join('')}</div>`;
+    + body(g.ids, g.per, g.cards) + '</section>').join('')}</div>`;
 }
 
 
@@ -2886,7 +2891,7 @@ function nodeDetailBodyHtml(id, noExplain) {
   const n = GRAPH.nodes[id];
   if (!n) return '';
   const fields = n.fields || {};
-  const chg = n.change ? `<span class="badge ${n.change}">${n.change}</span>` : '';
+  const chg = cmpBadgeHtml(id);
   const explainKey = noExplain ? '' : explanationKey(fields);
   const explain = explainKey ? `<p class="explain">${mdInline(fields[explainKey])}</p>` : '';
   const dropped = new Set(REDUNDANT_FIELD_BY_KIND[n.kind] || []);
@@ -3080,7 +3085,7 @@ function renderLeafPair(a, b) {
 function renderElementDetails(id) {
   const n = GRAPH.nodes[id];
   if (!n) { diagram.innerHTML = '<p class="empty">This element is not in the map.</p>'; return; }
-  const chg = n.change ? `<span class="badge ${n.change}">${n.change}</span>` : '';
+  const chg = cmpBadgeHtml(id);
   // The type (and a dependency's kind) now ride the breadcrumb beside the name, so the hero holds only
   // what is left: a dependency's bucket and roles, and a change badge in diff mode. For an entity, a
   // component or a process nothing is left, and the hero is not drawn at all — it was a 48px strip
@@ -4272,6 +4277,8 @@ const VIEW_Q = {
   // does not, so the question is fixed for the view the way every question but Features' is.
   rules: 'Which rules does this product apply?',
   interfaces: 'Where does this product meet the outside world?',
+  changes: 'What changed in the product since the old map?',
+  hoodchanges: 'What changed under the hood since the old map?',
 };
 // The hexagon outline as polygon points for a box — ONE definition for the sequence-diagram
 // service-actor figure, so nothing can drift into drawing a different hexagon for the same meaning. The notch is a fifth of the width (capped at half the height, so a squat box stays a
@@ -4394,7 +4401,7 @@ function applyDiffOverlay(s) {
     for (const id in mainScene.nodeEls) {
       if (DIFF_STATE[id]) addBadge(mainScene.nodeEls[id], DIFF_STATE[id]);
     }
-  } else if (IMPACT) {  // impact spans every view: badge whatever impacted elements this diagram draws
+  } else if (IMPACT || CMP) {  // impact and change mode span every view: badge whatever this diagram draws
     for (const id in mainScene.nodeEls) {
       if (DIFF_STATE[id]) addBadge(mainScene.nodeEls[id], DIFF_STATE[id]);
     }
@@ -4403,57 +4410,13 @@ function applyDiffOverlay(s) {
 // A use case "contains changes" when any element its T6 flow touches is changed (FLOWS_NARR × DIFF_STATE)
 // — the behavioural layer of the diff, DERIVED from the element changes, not a separate source.
 function usecaseDiffState(uc) {
+  if (CMP) return DIFF_STATE[uc] ? 'modified' : null;   // change mode marks the use case itself
   for (const st of flowStepsDeep(uc)) {
     for (const id of [st.srcId, st.dstId]) {
       if (id && DIFF_STATE[id] && DIFF_STATE[id] !== 'rippled') return 'modified';
     }
   }
   return null;
-}
-function changedUseCaseIds() { return (UC_NODES || []).map((n) => n.id).filter((uc) => usecaseDiffState(uc)); }
-// The Subsystems-overview panel in diff mode: every changed element grouped by state, each name
-// clickable to locate it in its home view. Added elements appear here even though they badge no box.
-function showDiffSummary() {
-  const order = ['added', 'modified', 'deleted', 'rippled'];
-  const groups = { added: [], modified: [], deleted: [], rippled: [] };
-  for (const id in DIFF_STATE) { const st = DIFF_STATE[id]; if (groups[st]) groups[st].push(id); }
-  const nm = (id) => (GRAPH.nodes[id] ? GRAPH.nodes[id].name : id);
-  const total = order.reduce((sum, k) => sum + groups[k].length, 0);
-  let html = '<h2>Change impact</h2>';
-  if (LIVE_DIFF) {   // show the range being compared + the changed-file count for a live mechanical diff
-    const short = (r) => (r === DIFF_WORKTREE ? 'working tree' : (r || '').slice(0, 8));
-    const files = (LIVE_DIFF.counts && LIVE_DIFF.counts.files) || (LIVE_DIFF.changes || []).length;
-    html += '<p class="muted" style="margin:0 0 8px">' + esc(short(LIVE_DIFF.base)) + ' → '
-      + esc(short(LIVE_DIFF.target)) + ' · ' + countLabel(files, 'file') + ' changed</p>';
-  }
-  html += '<div class="badges"><span class="badge kind">' + countLabel(total, 'change') + '</span></div>';
-  for (const st of order) {
-    const ids = groups[st];
-    if (!ids.length) continue;
-    ids.sort((a, b) => nm(a).localeCompare(nm(b)));
-    html += '<dl><dt><span class="badge ' + st + '">' + st + '</span></dt>'
-      + ids.map((id) => {
-          const n = GRAPH.nodes[id];
-          const kind = n && n.kind ? ' <span class="muted">' + esc(n.kind) + '</span>' : '';
-          return '<dd><a href="#" class="diffref" data-id="' + esc(id) + '">' + esc(nm(id)) + '</a>' + kind + '</dd>';
-        }).join('') + '</dl>';
-  }
-  // Behavioural layer: which use cases a code change reaches, via their flow steps. Derived, so it
-  // rides the same element diff — each links to that use case's flow.
-  const changedUCs = changedUseCaseIds().sort((a, b) => nm(a).localeCompare(nm(b)));
-  if (changedUCs.length) {
-    html += '<dl class="diff-uc"><dt><span class="badge modified">use cases affected</span></dt>'
-      + changedUCs.map((uc) => '<dd><a href="#" class="diffucref" data-uc="' + esc(uc) + '">' + esc(nm(uc)) + '</a></dd>').join('')
-      + '</dl>';
-  }
-  if (!total) html += '<p class="empty">No changes recorded.</p>';
-  panel.innerHTML = html;
-  panel.querySelectorAll('a.diffref').forEach((a) => a.addEventListener('click', (ev) => {
-    ev.preventDefault(); selectFromTree(a.getAttribute('data-id'));
-  }));
-  panel.querySelectorAll('a.diffucref').forEach((a) => a.addEventListener('click', (ev) => {
-    ev.preventDefault(); go({ kind: 'usecase', uc: a.getAttribute('data-uc') });
-  }));
 }
 
 function idOf(el) {
@@ -5241,7 +5204,7 @@ function liveSelKeys() {
 // is a large change for a small one. ONE table maps the two directions instead.
 // The INTERNAL name is not a link word: `v=usecases` names no screen, and lands where any other
 // unknown word does. There is one word per screen, so a link cannot be read two ways.
-const URL_WORD = { usecases: 'features' };
+const URL_WORD = { usecases: 'features', hoodchanges: 'hood-changes' };
 const URL_KIND = Object.fromEntries(Object.entries(URL_WORD).map(([k, w]) => [w, k]));
 function kindFromWord(w) { return URL_KIND[w] || (URL_WORD[w] ? null : w); }
 function urlFromState(s, live) {
@@ -5258,6 +5221,10 @@ function urlFromState(s, live) {
     ? liveSelKeys()
     : ((s.sels && s.sels.length) ? s.sels : (s.sel ? [s.sel] : []));
   for (const k of sels) if (k) q.append('sel', k);
+  // The comparison is not part of the screen (it is not in STATE_FIELDS, so two screens are not two
+  // different screens for wearing it), but it IS part of the address: reload, Back and a pasted link
+  // keep the old map they were made against.
+  if (CMP) q.set('cmp', CMP.ref);
   return q.toString();
 }
 // A fragment is text a reader can type, so a value in it is not automatically an id this map holds.
@@ -5477,6 +5444,8 @@ window.addEventListener('hashchange', () => {
 // keeps working from here, adopting each older entry the same way.
 function adoptUrlState(from) {
   const s = stateFromUrl(location.hash) || { kind: LANDING };
+  const want = cmpFromHash(location.hash);   // a pasted link names its old map; arm it, then draw
+  if (want && (!CMP || CMP.ref !== want) && !EXPORTED) armCompare(want, { navigate: false });
   history = [s];
   hi = 0;
   urlStarted = true;
@@ -6859,9 +6828,8 @@ function mermaidFor(s) {
   if (isFlowState(s)) return flowMermaidFor(flowIdOf(s));  // Sequence or Map — the flow picker's choice
   if (s.kind === 'libs') return MERMAID_LIBS;
   if (s.kind === 'bucketfold') return MERMAID_BY_BUCKETFOLD[s.bkid];
-  // component: the baked report ships a diff-styled diagram (MERMAID_DIFF); a live diff has none, so it
-  // renders the base diagram and lets applyDiffOverlay badge it.
-  return (mode === 'diff' && MERMAID_DIFF && !LIVE_DIFF) ? MERMAID_DIFF : MERMAID_BASE;  // component
+  // component: the base diagram; an armed overlay badges it (applyDiffOverlay).
+  return MERMAID_BASE;
 }
 // A tab's OWN overview (not a drilled card) — `container` yes, `subsystem` no. Those are the states
 // whose pane leads with the view intro.
@@ -7265,7 +7233,7 @@ function heroSubjectHtml(id, chain) {
   const n = GRAPH.nodes[id];
   const c = n ? cardFacts(id) : null;
   if (!c) return '';
-  const pills = kindPillsExtra(n) + (n.change ? `<span class="badge ${n.change}">${n.change}</span>` : '');
+  const pills = kindPillsExtra(n) + cmpBadgeHtml(id);
   return pageHeroHtml({ glyph: elementHeroGlyph(n.kind), name: c.name, type: c.type, pills,
                         desc: c.desc ? mdInline(c.desc) : '', noDesc: false,
                         meta: n.kind === 'process' ? heroDetailsLinkHtml(id) : '' })
@@ -7298,7 +7266,7 @@ function walkHeadHtml(s, chain) {
     type: sub ? 'shared sub-use case' : elementLabel('usecase'),
     // A use case's pills are THE SAME ONES ITS CARD SHOWS after the type one, from the one function
     // that decides them, plus the change badge in diff mode.
-    pills: sub ? '' : elementSidePillsHtml(id) + (n.change ? `<span class="badge ${n.change}">${n.change}</span>` : ''),
+    pills: sub ? '' : elementSidePillsHtml(id) + cmpBadgeHtml(id),
     desc: c && c.desc ? mdInline(c.desc) : '',
     noDesc: false,
   }) + (inTrail || sub ? '' : useCaseFeatureFootHtml(id));
@@ -7458,6 +7426,8 @@ const LANDING_COUNT = {
   context: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'dep').length, 'dependency'],
   deployment: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'process').length, 'process'],
   glossary: () => [(GRAPH.glossary || []).length, 'term'],
+  changes: () => [cmpCount('product'), 'change'],
+  hoodchanges: () => [cmpCount('hood'), 'change'],
 };
 // A VIEW'S LANDING SCREEN WEARS ITS NAME AND ITS QUESTION AS THE HEAD OF ITS FIRST BLOCK — the same
 // grey strip every section of an item page is headed by: the view's name, how many of its things the
@@ -8092,7 +8062,7 @@ function applyDefaultPanelBody(s) {
   if (s.kind === 'deployment') { showDeployment(); return; }        // overview: surfaces unplaced threads
   // The Subsystems overview in diff mode leads with the change-impact summary (which subsystems/elements
   // changed), since that is the whole point of opening a diff render.
-  else if (s.kind === 'container' && mode === 'diff' && hasDiff()) (IMPACT ? showImpactSummary() : showDiffSummary());
+  else if (s.kind === 'container' && IMPACT) showImpactSummary();
   // Anything else with nothing selected draws NOTHING, and paneSync then takes the card off the screen.
   // The Happy Path used to open on the product's own card here, 257px of the project description. The
   // Features page already leads with the same text at full width, so the diagram keeps the room instead.
@@ -8123,6 +8093,8 @@ function elementHomeView(id) {
 }
 function topView(kind, id) {  // which top-level button a state lives under (container/subsystem/edge → Subsystems)
   if (kind === 'element') return id ? elementHomeView(id) : 'container';
+  if (kind === 'changes' || kind === 'hoodchanges') return kind;
+  if (kind === 'removed') return cmpTabOf(id);   // a removed box's page hangs under the Changes tab of its group
   if (kind === 'overview' || kind === 'context' || kind === 'component' || kind === 'domain' || kind === 'glossary' || kind === 'system' || kind === 'data' || kind === 'tests' || kind === 'rules' || kind === 'interfaces') return kind;
   if (kind === 'sysSection') return 'system';  // one System collection lives under the System tab
   if (kind === 'domsub' || kind === 'domedge') return 'domain';  // subdomain card + edge pair live under the Domain button
@@ -8219,6 +8191,8 @@ function stateTitle(s) {
   if (s.kind === 'rule') return ruleCrumbTitle(s.br);
   if (s.kind === 'overview') return 'Overview';
   if (s.kind === 'glossary') return 'Glossary';
+  if (s.kind === 'changes' || s.kind === 'hoodchanges') return 'Changes';
+  if (s.kind === 'removed') { const e = cmpRemoved(s.id); return e ? (e.name_old || 'Removed') : 'Removed'; }
   if (s.kind === 'system') return 'System';
   if (s.kind === 'sysSection') {
     if (s.epk) return s.epk;   // one entry-point kind, named by the kind itself
@@ -8375,6 +8349,8 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   }
   if (s.kind === 'overview') return [{ kind: 'overview' }];
   if (s.kind === 'glossary') return [{ kind: 'glossary' }];
+  if (s.kind === 'changes' || s.kind === 'hoodchanges') return [{ kind: s.kind }];
+  if (s.kind === 'removed') return [{ kind: cmpTabOf(s.id) }, { kind: 'removed', id: s.id }];
   if (s.kind === 'system') return [{ kind: 'system' }];
   if (s.kind === 'data') return [{ kind: 'data' }];
   if (s.kind === 'tests') return [{ kind: 'tests' }];
@@ -8389,7 +8365,7 @@ function renderChrome(s) {
   // not the removed flat Components map: the overview badges each subsystem with its subtree's change,
   // and the cards badge their member components (via bindNodes).
   const diffHost = IMPACT ? true
-    : (s.kind === 'container' || s.kind === 'subsystem' || s.kind === 'edge');
+    : (!CMP && (s.kind === 'container' || s.kind === 'subsystem' || s.kind === 'edge'));
   // The lit tab is the ROOT OF THE TRAIL, not a lookup on this state's own kind: the trail's own
   // first item is the one answer to which view a page hangs under, however it was reached.
   const chain = ancestors(s);
@@ -8480,6 +8456,7 @@ function renderChrome(s) {
   // Every path through render() ends here, so this is the ONE place the URL has to be restated after a
   // screen is drawn. The identity test skips the drill animation's intermediate flashes, which render a
   // throwaway state that is not where the reader ends up.
+  placeCompareSection(s);
   if (s === history[hi]) refreshUrl();
 }
 
@@ -13939,6 +13916,13 @@ async function renderView(sArg, transient, seq) {
   if (s.kind === 'data') { renderData(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
   // The Tests tab is the test-completeness gap table (HTML) — same shape as the System/Glossary tabs.
   if (s.kind === 'tests') { renderTests(); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
+  // The two Changes tabs and a removed box's page: HTML lists, the same shape as Rules.
+  if (s.kind === 'changes' || s.kind === 'hoodchanges') {
+    renderChanges(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
+  }
+  if (s.kind === 'removed') {
+    renderRemoved(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
+  }
   // The Interfaces tab is the two-shore card list (HTML) — the same shape as Rules.
   if (s.kind === 'interfaces') {
     renderInterfaces(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
@@ -16486,8 +16470,8 @@ function clearLiveDiff() {
   IMPACT = null;
   document.getElementById('impactbtn').classList.remove('armed');
   LIVE_DIFF = null;
-  DIFF_STATE = BAKED_DIFF_STATE || {};
-  mode = HAS_DIFF ? 'diff' : 'base';
+  DIFF_STATE = {};
+  mode = 'base';
   syncTreeDiff();                                       // clear the file-browser badges + hide the filter
   if (cvPath && cvDiffMode) loadCode(cvPath, cvLine);   // revert an open diff back to the plain file
   captureViewState();
@@ -16499,6 +16483,364 @@ if (treeDiffOnlyBtn) treeDiffOnlyBtn.addEventListener('click', () => {
   treeDiffOnlyBtn.classList.toggle('on', diffOnly);
   applyDiffFilterAll();
 });
+
+// --- change mode: compare with an old map --------------------------------------------------------
+// The engine (mapdiff.py) did the comparing; this side draws it. Three places read the change
+// document: the badges on every box (through DIFF_STATE), the Changes tab under each group (a grouped
+// card list, one section per kind, each card's sentence the change summary), and the "What changed"
+// block on a changed box's page (old words struck, new words marked, steps aligned).
+const CMP_BADGE_WORD = { added: 'new', modified: 'modified', deleted: 'removed' };
+const CMP_CLASS_LABEL = { wording: 'wording', structure: 'structure', link: 'code links' };
+function cmpFromHash(hash) {
+  const v = new URLSearchParams(String(hash || '').replace(/^#/, '')).get('cmp');
+  return v && (/^[0-9a-f]{7,40}$/.test(v) || v.startsWith('path:')) ? v : null;
+}
+function cmpKindSpec(array) { return ((CMP && CMP.kinds) || []).find((k) => k.array === array) || null; }
+function cmpTabOf(idOrKind) {
+  const e = CMP_INDEX ? (CMP_INDEX.byId[idOrKind] || CMP_INDEX.removed[idOrKind]) : null;
+  const spec = cmpKindSpec(e ? e.kind : idOrKind);
+  return spec && spec.group === 'hood' ? 'hoodchanges' : 'changes';
+}
+function cmpRemoved(id) { return CMP_INDEX ? CMP_INDEX.removed[id] || null : null; }
+// The old map's label, short enough for a heading: a commit's date and the start of its message.
+function cmpOldShort() {
+  const l = (CMP && CMP.old && CMP.old.label) || '';
+  return l.length > 72 ? l.slice(0, 70).replace(/\s+\S*$/, '') + '…' : l;
+}
+// An actor's row is keyed by its role id in the map, but its node — the card, the page — by the name.
+function cmpCardId(e) {
+  if (e.kind === 'roles') return actorNodeId(e.name_new || e.name_old || '') || null;
+  return e.id_new || e.id_old || null;
+}
+function buildCmpIndex() {
+  const idx = { byId: {}, removed: {}, byKind: {} };
+  for (const e of CMP.elements || []) {
+    const id = cmpCardId(e);
+    if (e.change === 'removed') { if (e.id_old) idx.removed[e.id_old] = e; if (id) idx.removed[id] = e; }
+    else if (id) idx.byId[id] = e;
+    if (e.id_new) idx.byId[e.id_new] = idx.byId[e.id_new] || e;
+    (idx.byKind[e.kind] = idx.byKind[e.kind] || []).push(e);
+  }
+  CMP_INDEX = idx;
+}
+// A row passes the filters when it is an addition or a removal, or when one of its change classes is
+// switched on — so "code links" off hides the boxes that only moved in the code, and says how many.
+function cmpShown(row) {
+  if (row.change !== 'modified') return true;
+  return (row.classes || []).some((c) => CMP.filters[c]);
+}
+function cmpProjection() {
+  const out = {};
+  if (!CMP) return out;
+  for (const e of CMP.elements || []) {
+    const id = cmpCardId(e);
+    if (!id || !cmpShown(e)) continue;
+    out[id] = e.change === 'added' ? 'added' : e.change === 'removed' ? 'deleted' : 'modified';
+  }
+  return out;
+}
+function cmpRows(group) {
+  const out = [];
+  for (const k of (CMP && CMP.kinds) || []) {
+    if (k.group !== group) continue;
+    const rows = k.array === 'edges' ? (CMP.arrows || []) : ((CMP_INDEX && CMP_INDEX.byKind[k.array]) || []);
+    for (const r of rows) if (cmpShown(r)) out.push([k, r]);
+  }
+  return out;
+}
+function cmpCount(group) { return CMP ? cmpRows(group).length : 0; }
+function cmpBadgeHtml(id) {
+  const st = CMP && id && DIFF_STATE[id];
+  return st && CMP_BADGE_WORD[st] ? `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>` : '';
+}
+function cmpBadgeOf(row) {
+  const st = row.change === 'added' ? 'added' : row.change === 'removed' ? 'deleted' : 'modified';
+  return `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>`;
+}
+// ── the two tabs ──────────────────────────────────────────────────────────────────────────────
+function syncCompareUi() {
+  for (const [view, group] of [['changes', 'product'], ['hoodchanges', 'hood']]) {
+    const b = viewsw.querySelector(`button[data-view="${view}"]`);
+    if (!b) continue;
+    b.style.display = CMP ? '' : 'none';
+    b.innerHTML = 'Changes' + (CMP ? countPillOf(String(cmpCount(group))) : '');
+  }
+  const btn = document.getElementById('comparebtn');
+  if (btn) btn.classList.toggle('armed', !!CMP);
+  const clear = document.getElementById('cmpClear');
+  if (clear) clear.hidden = !CMP;
+}
+function cmpCountsText(group) {
+  const rows = cmpRows(group).map(([, r]) => r);
+  const n = (pred) => rows.filter(pred).length;
+  const parts = [[n((r) => r.change === 'added'), 'new'], [n((r) => r.change === 'removed'), 'removed'],
+                 [n((r) => r.change === 'modified' && (r.classes || []).some((c) => c !== 'link')), 'modified'],
+                 [n((r) => r.change === 'modified' && (r.classes || []).every((c) => c === 'link')), 'moved in the code only']];
+  return parts.filter(([k]) => k).map(([k, w]) => `${k} ${w}`).join(' · ') || 'nothing';
+}
+function cmpHeadHtml(group) {
+  // What is hidden is COUNTED where it is hidden: the boxes that only moved in the code are named on
+  // the code-links filter itself, so switching it off never makes them vanish without a trace.
+  const all = ((CMP_INDEX && CMP_INDEX.byKind) ? Object.values(CMP_INDEX.byKind).flat() : []).concat(CMP.arrows || []);
+  const linkOnly = all.filter((r) => r.change === 'modified' && (r.classes || []).every((c) => c === 'link')).length;
+  const filters = ['wording', 'structure', 'link'].map((c) =>
+    `<button type="button" class="cmp-filter${CMP.filters[c] ? ' on' : ''}" data-cls="${c}">`
+    + esc(CMP_CLASS_LABEL[c]) + (c === 'link' && linkOnly ? ` <span class="muted">${linkOnly}</span>` : '')
+    + '</button>').join('');
+  const warns = (CMP.warnings || []).map((w) => `<p class="cmp-warn">${esc(w)}</p>`).join('');
+  return `<div class="cmp-head">`
+    + `<p class="cmp-since">Compared with <b>${esc(CMP.old.label)}</b> · ${esc(cmpCountsText(group))}</p>`
+    + `<div class="cmp-filters"><span>Show</span>${filters}</div>`
+    + `<button type="button" class="cmp-stop">Stop comparing</button>${warns}</div>`;
+}
+function cmpArrowCardHtml(a) {
+  const nm = (id) => (GRAPH.nodes[id] ? GRAPH.nodes[id].name : id);
+  const desc = a.change === 'modified' ? a.summary : (a.where_new || a.where_old || '');
+  return plainCardHtml({ key: 'arrow:' + a.src, name: `${nm(a.src)} ${a.verb} ${nm(a.dst)}`, desc,
+                         pill: cmpBadgeOf(a) + '<span class="ecard-type ecard-type-plain">arrow</span>' });
+}
+function cmpElementCardHtml(k, e) {
+  const id = cmpCardId(e);
+  if (e.change !== 'removed' && id && GRAPH.nodes[id]) {
+    return elementCardHtml(id, { desc: e.summary, foot: e.reidentified ? '<p class="ecard-extra">Kept under a new id in the map.</p>' : '' });
+  }
+  const key = e.change === 'removed' ? 'removed:' + (e.id_old || id || '')
+    : k.array === 'use_cases' && id ? 'uc:' + id
+    : k.array === 'subflows' && id ? 'sf:' + id
+    : k.array === 'happy_path' ? 'hp' : k.array === 'glossary' ? 'glossary' : '';
+  const desc = e.change === 'removed' && e.sentence_old ? `${e.summary} · ${e.sentence_old}` : e.summary;
+  return plainCardHtml({ key, name: e.name_new || e.name_old || k.word, desc,
+                         pill: cmpBadgeOf(e) + `<span class="ecard-type ecard-type-plain">${esc(k.word)}</span>` });
+}
+function cmpOpenKey(key) {
+  const i = key.indexOf(':');
+  const kind = i > 0 ? key.slice(0, i) : key, id = i > 0 ? key.slice(i + 1) : '';
+  if (kind === 'removed') go({ kind: 'removed', id });
+  else if (kind === 'uc') go({ kind: 'usecase', uc: id });
+  else if (kind === 'sf') go({ kind: 'subflow', sf: id });
+  else if (kind === 'hp') go({ kind: 'hp' });
+  else if (kind === 'glossary') go({ kind: 'glossary' });
+  else if (kind === 'arrow' && GRAPH.nodes[id]) showInContext(id);
+}
+function renderChanges(s) {
+  const group = s.kind === 'hoodchanges' ? 'hood' : 'product';
+  const groups = [];
+  for (const k of CMP.kinds || []) {
+    if (k.group !== group) continue;
+    const rows = cmpRows(group).filter(([kk]) => kk.array === k.array).map(([, r]) => r);
+    if (!rows.length) continue;
+    const cards = rows.map((r) => (k.array === 'edges' ? cmpArrowCardHtml(r) : cmpElementCardHtml(k, r))).join('');
+    groups.push({ title: sentenceCase(k.plural), count: countLabel(rows.length, 'change'), cards: `<div class="ecard-list">${cards}</div>` });
+  }
+  const body = elementCardGroupsHtml(groups);
+  diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Changes') + cmpHeadHtml(group)
+    + (body || '<p class="empty">Nothing changed here since the old map.</p>') + '</div>';
+  bindElementCards(diagram);
+  bindPlainCards(diagram, cmpOpenKey);
+  bindCmpHead(diagram);
+}
+function bindCmpHead(root) {
+  root.querySelectorAll('button.cmp-filter').forEach((b) => b.addEventListener('click', () => {
+    const c = b.getAttribute('data-cls');
+    CMP.filters[c] = !CMP.filters[c];
+    DIFF_STATE = cmpProjection();
+    syncCompareUi();
+    captureViewState(); render();
+  }));
+  root.querySelectorAll('button.cmp-stop').forEach((b) => b.addEventListener('click', clearCompare));
+}
+// ── a removed box's page: as it was in the old map ────────────────────────────────────────────
+function renderRemoved(s) {
+  const e = cmpRemoved(s.id);
+  if (!e) { diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>'; return; }
+  const k = cmpKindSpec(e.kind) || { word: 'box' };
+  const hero = pageHeroHtml({ name: e.name_old || k.word, type: k.word,
+                              pills: '<span class="badge deleted">removed</span>',
+                              desc: e.sentence_old ? mdInline(e.sentence_old) : '', noDesc: false,
+                              meta: e.source_old ? heroSourceLine(e.source_old) : '' });
+  // The block IS this page's body, so it wears `cmpsec-page`: the placement pass that removes a
+  // stale block from a previous screen leaves it alone, and the next render's rewrite of the page
+  // takes it away.
+  diagram.innerHTML = '<div class="usecases-wrap glossary-wrap">' + hero
+    + cmpSectionHtml(e, { all: true }).replace('class="cmpsec"', 'class="cmpsec cmpsec-page"') + '</div>';
+  bindElementCards(diagram);
+}
+// ── the "What changed" block ──────────────────────────────────────────────────────────────────
+function cmpSpansHtml(spans) {
+  return spans.map((sp) => sp.op === 'eq' ? esc(sp.text) : sp.op === 'del' ? `<del>${esc(sp.text)}</del>` : `<ins>${esc(sp.text)}</ins>`).join('');
+}
+function cmpFieldHtml(f) {
+  if (f.spans && f.spans.length) return cmpSpansHtml(f.spans);
+  if ((f.added && f.added.length) || (f.removed && f.removed.length)) {
+    return '<span class="cmp-items">' + (f.added || []).map((x) => `<span class="cmp-add">+ ${esc(x)}</span>`).join('')
+      + (f.removed || []).map((x) => `<span class="cmp-del">− ${esc(x)}</span>`).join('') + '</span>';
+  }
+  if (f.cls === 'link') {
+    if (f.old != null && f.new != null) return `<span class="cmp-link"><code>${esc(f.old)}</code><span class="cmp-arrow">→</span><code>${esc(f.new)}</code></span>`;
+    if (f.old != null) return `<span class="cmp-link"><del><code>${esc(f.old)}</code></del></span>`;
+    if (f.new != null) return `<span class="cmp-link"><ins><code>${esc(f.new)}</code></ins></span>`;
+    return '<span class="cmp-link">code links moved</span>';
+  }
+  if (f.old == null) return `<ins>${esc(f.new || '')}</ins>`;
+  if (f.new == null) return `<del>${esc(f.old)}</del>`;
+  return `<del>${esc(f.old)}</del><span class="cmp-arrow">→</span><ins>${esc(f.new)}</ins>`;
+}
+function cmpStepHtml(st) {
+  const n = (v) => `<span class="cmp-n">step ${v}</span>`;
+  const words = (phrase) => esc(phrase || (st.subflow ? 'runs ' + st.subflow : ''));   // a sub-flow step has no phrase of its own
+  if (st.state === 'added') return `<li><span class="cmp-add">+</span> ${n(st.n_new)}${words(st.phrase_new)}</li>`;
+  if (st.state === 'removed') return `<li><span class="cmp-del">−</span> ${n(st.n_old)}<del>${words(st.phrase_old)}</del></li>`;
+  const body = st.spans && st.spans.length ? cmpSpansHtml(st.spans) : words(st.phrase_new);
+  const extra = (st.fields || []).map((f) => `${esc(f.label.toLowerCase())}: ${cmpFieldHtml(f)}`).join(' · ');
+  return `<li>${n(st.n_new)}${body}${extra ? ` <span class="muted">(${extra})</span>` : ''}</li>`;
+}
+function cmpSectionHtml(e, opts) {
+  const o = opts || {};
+  const k = cmpKindSpec(e.kind) || { word: 'box' };
+  const fields = (e.fields || []).filter((f) => o.all || CMP.filters[f.cls]);
+  const hiddenLinks = (e.fields || []).filter((f) => !o.all && !CMP.filters[f.cls] && f.cls === 'link').length;
+  let html = `<section class="cmpsec"><h3>What changed ${cmpBadgeOf(e)} <span class="muted">since ${esc(cmpOldShort())}</span></h3>`;
+  if (e.change === 'added') html += '<p>New in this map.</p>';
+  else if (e.change === 'removed') html += '<p>Not in the current map. Below is what the old map said about it.</p>';
+  else if (e.reidentified) html += `<p>The same ${esc(k.word)}, kept under a new id in the map.</p>`;
+  if (e.change === 'modified' && e.name_old && e.name_new && e.name_old !== e.name_new && !fields.some((f) => f.key === 'name')) {
+    html += `<p>Renamed from <del>${esc(e.name_old)}</del>.</p>`;
+  }
+  let dl = '';
+  for (const f of fields) dl += `<dt>${esc(f.label)}</dt><dd>${cmpFieldHtml(f)}</dd>`;
+  // A step reads by the filters too: one that only moved in the code is hidden with the code links,
+  // and a renumbered one is never listed, only counted — a number is not a change to read.
+  const steps = e.steps || [];
+  if (steps.length) {
+    const passes = (st) => o.all || (st.classes || []).some((c) => CMP.filters[c]);
+    const renum = steps.filter((st) => st.state === 'renumbered').length;
+    const listed = steps.filter((st) => st.state !== 'renumbered' && passes(st));
+    const hiddenSteps = steps.filter((st) => st.state !== 'renumbered' && !passes(st)).length;
+    const notes = [];
+    if (hiddenSteps) notes.push(`${countLabel(hiddenSteps, 'step')} only moved in the code`);
+    if (renum) notes.push(`${countLabel(renum, 'step')} only renumbered`);
+    if (listed.length || notes.length) {
+      dl += '<dt>Steps</dt><dd>' + (listed.length ? '<ol class="cmp-steps">' + listed.map(cmpStepHtml).join('') + '</ol>' : '')
+        + (notes.length ? `<span class="muted">${esc(notes.join(' · '))}.</span>` : '') + '</dd>';
+    }
+  }
+  if (dl) html += `<dl>${dl}</dl>`;
+  if (hiddenLinks) html += `<p class="cmp-link">${countLabel(hiddenLinks, 'code link')} moved — switch on “code links” on the Changes tab to see them.</p>`;
+  if (e.change === 'modified' && !dl && !hiddenLinks) html += '<p class="muted">Changed in a way the filters hide.</p>';
+  return html + '</section>';
+}
+// WHICH ROW A PAGE IS ABOUT. A page about one element names it in its state (pageElementId); an
+// interface's page and a shared sub-flow's are keyed differently, and an actor's by its name.
+function cmpSubjectRow(s) {
+  if (!CMP || !CMP_INDEX || !s) return null;
+  if (s.kind === 'interfaces' && s.iface) return CMP_INDEX.byId[s.iface] || null;
+  if (s.kind === 'subflow' && s.sf) return CMP_INDEX.byId[s.sf] || null;
+  const id = pageElementId(s);
+  return id ? CMP_INDEX.byId[id] || null : null;
+}
+function placeCompareSection(s) {
+  document.querySelectorAll('.cmpsec:not(.cmpsec-page)').forEach((el) => el.remove());
+  if (!CMP || !s || s.kind === 'changes' || s.kind === 'hoodchanges' || s.kind === 'removed') return;
+  const e = cmpSubjectRow(s);
+  if (!e) return;
+  const html = cmpSectionHtml(e);
+  const column = diagram.querySelector('.usecases-wrap, .glossary-wrap');
+  if (column) {
+    const hero = column.querySelector('.page-hero');
+    if (hero) hero.insertAdjacentHTML('afterend', html); else column.insertAdjacentHTML('afterbegin', html);
+    return;
+  }
+  // A drawn page: the block sits in the head over the drawing, after the hero when the head holds
+  // one (a use case's), else first — above the strip that names the drawing.
+  const hero = diaghead.querySelector('.page-hero');
+  if (hero) hero.insertAdjacentHTML('afterend', html); else diaghead.insertAdjacentHTML('afterbegin', html);
+  diaghead.hidden = false;
+}
+// ── arming and clearing ───────────────────────────────────────────────────────────────────────
+async function armCompare(ref, opts) {
+  const o = opts || {};
+  const msg = document.getElementById('cmppopmsg');
+  if (msg) msg.textContent = '';
+  let data;
+  try {
+    const res = await fetch(API_BASE + 'compare?ref=' + encodeURIComponent(ref), { cache: 'no-store' });
+    const body = await res.text();
+    if (!res.ok) { if (msg) msg.textContent = body || ('compare failed (' + res.status + ')'); return false; }
+    data = JSON.parse(body);
+  } catch (_) { if (msg) msg.textContent = 'Could not reach the server to compare the maps.'; return false; }
+  if (IMPACT) { IMPACT = null; LIVE_DIFF = null; impactbtn.classList.remove('armed'); syncTreeDiff(); }  // one overlay at a time
+  CMP = Object.assign({ ref, filters: Object.assign({}, CMP_FILTERS_DEFAULT) }, data);
+  buildCmpIndex();
+  DIFF_STATE = cmpProjection();
+  mode = 'diff';
+  syncCompareUi();
+  closeComparePop();
+  if (o.render === false) return true;
+  const cur = history[hi];
+  if (o.navigate === false || (cur && cur.kind === 'changes')) { captureViewState(); render(); }
+  else go({ kind: 'changes' });
+  return true;
+}
+function clearCompare() {
+  const cur = history[hi];
+  // A screen that exists only while comparing — a Changes tab, a removed box's page — hands over to
+  // its group's own landing. Decided before the comparison is dropped, since a removed box's group
+  // is read off the change document.
+  const gone = cur && (cur.kind === 'changes' || cur.kind === 'hoodchanges' || cur.kind === 'removed');
+  const hood = gone && (cur.kind === 'hoodchanges' || (cur.kind === 'removed' && cmpTabOf(cur.id) === 'hoodchanges'));
+  CMP = null; CMP_INDEX = null;
+  DIFF_STATE = {};
+  mode = 'base';
+  syncCompareUi();
+  closeComparePop();
+  if (gone) go({ kind: hood ? (HAS_GROUPING ? 'container' : 'context') : LANDING });
+  else { captureViewState(); render(); }
+}
+// ── the picker ────────────────────────────────────────────────────────────────────────────────
+const comparectl = document.getElementById('comparectl');
+const comparebtn = document.getElementById('comparebtn');
+const comparepop = document.getElementById('comparepop');
+function closeComparePop() { if (comparepop) comparepop.hidden = true; }
+async function loadMapCommits() {
+  const host = document.getElementById('cmpcommits');
+  if (!host) return;
+  host.innerHTML = '<div class="diffpop-loading">Loading the map’s history…</div>';
+  let data;
+  try {
+    const r = await fetch(API_BASE + 'mapcommits', { cache: 'no-store' });
+    if (!r.ok) throw new Error('mapcommits ' + r.status);
+    data = await r.json();
+  } catch (_) { host.innerHTML = '<div class="diffpop-loading">The map’s history is not available.</div>'; return; }
+  const versions = data.versions || [];
+  if (!versions.length) { host.innerHTML = '<div class="diffpop-loading">No committed version of this map yet.</div>'; return; }
+  host.innerHTML = versions.map((v, i) =>
+    `<button type="button" class="diffcommit${CMP && CMP.ref === v.sha ? ' on' : ''}" data-sha="${esc(v.sha)}" title="${esc(v.subject)}">`
+    + `<span class="dc-date">${esc(v.date)}</span>`
+    + (i === 0 && data.dirty ? '<span class="dc-tag">last committed</span>' : '')
+    + `<span class="dc-subj">${esc(v.subject)}</span></button>`).join('');
+  host.querySelectorAll('.diffcommit').forEach((b) =>
+    b.addEventListener('click', () => armCompare(b.getAttribute('data-sha'), {})));
+}
+function openComparePop() {
+  if (!comparepop) return;
+  comparepop.hidden = false;
+  const msg = document.getElementById('cmppopmsg');
+  if (msg) msg.textContent = '';
+  loadMapCommits();
+}
+if (EXPORTED && comparectl) comparectl.hidden = true;   // needs git and the disk: a static copy has neither
+if (comparebtn && !EXPORTED) {
+  comparebtn.addEventListener('click', (e) => { e.stopPropagation(); comparepop.hidden ? openComparePop() : closeComparePop(); });
+  document.addEventListener('click', (e) => { if (!comparepop.hidden && !comparectl.contains(e.target)) closeComparePop(); });
+  const goPath = () => {
+    const v = document.getElementById('cmpPath').value.trim();
+    if (!v) { document.getElementById('cmppopmsg').textContent = 'Type the path of a map file, or pick a version above.'; return; }
+    armCompare('path:' + v, {});
+  };
+  document.getElementById('cmpGo').addEventListener('click', goPath);
+  document.getElementById('cmpPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') goPath(); });
+  document.getElementById('cmpClear').addEventListener('click', clearCompare);
+}
 
 // --- impact explorer ---------------------------------------------------------------
 // Projects an ARBITRARY diff (any base/target, incl. ranges that don't touch the map's commit) onto
@@ -16657,6 +16999,7 @@ async function loadImpact(base, target) {
     if (!res.ok) { if (msg) msg.textContent = body || ('impact failed (' + res.status + ')'); return; }
     data = JSON.parse(body);
   } catch (_) { if (msg) msg.textContent = 'Could not reach the server for the impact.'; return; }
+  if (CMP) { CMP = null; CMP_INDEX = null; syncCompareUi(); }   // one overlay at a time
   IMPACT = data;
   LIVE_DIFF = { impact: true, base: data.spec.base, target: data.spec.target,
                 changes: (data.files || []).map((f) => ({ status: f.status, path: f.path,
@@ -16744,8 +17087,7 @@ if (impactbtn && !EXPORTED) {
 // fallback after that is the next thing down the product row: the Happy Path, and only then the
 // machine (Subsystems, and Dependencies for a map with no grouping at all). Actors left this chain
 // with their tab: their home is the Features diagram's cast column now.
-const LANDING = (HAS_DIFF && HAS_GROUPING) ? 'container'
-  : HAS_OVERVIEW ? 'overview'
+const LANDING = HAS_OVERVIEW ? 'overview'
   : HAS_USECASES ? 'usecases'
   : HAS_HP ? 'hp'
   : HAS_GROUPING ? 'container'
@@ -16755,6 +17097,13 @@ const LANDING = (HAS_DIFF && HAS_GROUPING) ? 'container'
 // catch that, because every screen already carries its own answer — the pages that take an id say "not
 // in the map", and the diagram path degrades to "This view could not be rendered". A second list would
 // be one more thing to keep in step with the map's own kinds.
+// A link that names an old map arms the comparison BEFORE the first screen is drawn, so the badges
+// and the Changes tabs are there when it lands rather than one repaint later.
+{
+  const bootCmp = URL_SYNC && !EXPORTED ? cmpFromHash(location.hash) : null;
+  if (bootCmp) await armCompare(bootCmp, { navigate: false, render: false });
+}
+syncCompareUi();
 go((URL_SYNC && stateFromUrl(location.hash)) || { kind: LANDING });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

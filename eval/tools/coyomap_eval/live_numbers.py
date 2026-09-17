@@ -330,7 +330,7 @@ LEDGER: tuple[Claim, ...] = (
           quote="One role drove 25 use cases at mcpolis's dashboard",
           measure=_role_use_cases_at_dashboard,
           note="why a detail line is capped through `shown` and never by hand"),
-    Claim(site="tools/coyomap/viewer/gen_viewer.py:416", maps=MAP_NAMES,
+    Claim(site="tools/coyomap/viewer/gen_viewer.py:406", maps=MAP_NAMES,
           quote="Rare by nature (5 entities across three live maps)",
           measure=_entities_with_a_lifecycle,
           note="why a lifecycle marker costs the diagram nothing when absent"),

@@ -2,7 +2,7 @@
 """The viewer's graph data model + the change-impact report parser.
 
 The graph (`GraphDict`) is what `gen_viewer.build_view_bundle` turns into the viewer's data; it is
-produced by `coyomap.views.model_to_graph`, straight from the model. `build_diff` separately parses
+produced by `coyomap.views.model_to_graph`, straight from the model.
 the change-impact REPORT, a markdown artifact distinct from the map itself.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import TypedDict
 # Shared schema grammar lives in tools/coyomap/grammar.py (one grammar; the table helpers serve
 # the change-impact report parser below).
 from coyomap import grammar
-from coyomap.grammar import ID_TOKEN, is_separator_row, iter_pipe_runs, split_cells, strip_fences
+from coyomap.grammar import ID_TOKEN, is_separator_row, iter_pipe_runs, split_cells
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")  # markdown link -> href
 
@@ -187,21 +187,6 @@ class ExtraSectionView(TypedDict):
     refs: dict[str, TestTarget]   # element ids named in `body` → {id, name, node}, resolved server-side
 
 
-class DiffChange(TypedDict):
-    id: str
-    change: str
-    name: str | None
-    kind: str | None
-    note: str
-
-
-class DiffDict(TypedDict):
-    base: str | None
-    new: str | None
-    changes: list[DiffChange]
-    new_edges: list[dict[str, str]]
-
-
 _LINE_OF = re.compile(r"(?:#L|:)(\d+)(?:-L?\d+)?$")  # a trailing anchor's START line, either form
 
 
@@ -210,25 +195,6 @@ def _line_of(href: str | None) -> int | None:
         return None
     m = _LINE_OF.search(href)
     return int(m.group(1)) if m else None
-
-
-def _first_id(cell: str) -> str | None:
-    m = ID_TOKEN.search(cell)
-    return m.group(0) if m else None
-
-
-def _tables(lines: list[str]) -> list[tuple[list[str], list[list[str]]]]:
-    """Group consecutive `|`-prefixed lines into (headers, rows) tables, via the shared
-    grammar.iter_pipe_runs grouping — the SAME table model the validator uses, so the parser and the
-    gate cannot drift on where a table begins and ends. A run of < 2 lines is not a table; separator
-    rows are dropped from the body."""
-    tables: list[tuple[list[str], list[list[str]]]] = []
-    for _start, block in iter_pipe_runs(lines):
-        if len(block) >= 2:
-            headers = split_cells(block[0])
-            rows = [split_cells(b) for b in block[1:] if not is_separator_row(b)]
-            tables.append((headers, rows))
-    return tables
 
 
 SERVICE_HINTS = re.compile(
@@ -274,52 +240,5 @@ def _ensure_default_subsystem(nodes: dict[str, Node], title: str | None) -> None
         nodes[nid].parent = DEFAULT_SUBSYSTEM_ID
 
 
-DIFF_HDR = re.compile(r"`?(\w+)`?\s*(?:→|->)\s*`?(\w+)`?")
 
 
-def _col(row: list[str], ci: dict[str, int], key: str) -> str:
-    i = ci.get(key, -1)
-    return row[i].strip() if 0 <= i < len(row) else ""
-
-
-def build_diff(md_path: Path) -> DiffDict:
-    """Parse a change-impact report into per-element classifications + new edges."""
-    text = strip_fences(md_path.read_text(encoding="utf-8"))
-    lines = text.splitlines()
-    changes: list[DiffChange] = []
-    new_edges: list[dict[str, str]] = []
-    for headers, rows in _tables(lines):
-        hl = [h.lower() for h in headers]
-        if "change" in hl:
-            ci = {h: i for i, h in enumerate(hl)}
-            for row in rows:
-                if not row:                          # a header with a short/empty body row — skip it
-                    continue
-                eid = _first_id(row[0])
-                if not eid:
-                    continue
-                kind = _col(row, ci, "kind").lower()
-                changes.append(
-                    DiffChange(
-                        id=eid,
-                        change=_col(row, ci, "change").lower(),
-                        name=_col(row, ci, "name") or None,
-                        kind=kind or None,
-                        note=_col(row, ci, "note"),
-                    )
-                )
-        elif hl[:3] == ["from", "verb", "to"]:
-            for row in rows:
-                if len(row) < 3:                     # a short body row under from|verb|to — skip it
-                    continue
-                s, d = _first_id(row[0]), _first_id(row[2])
-                if s and d:
-                    new_edges.append({"src": s, "verb": row[1], "dst": d})
-    base = new = None
-    for line in lines:
-        if line.lstrip().startswith("#") and ("→" in line or "->" in line):
-            m = DIFF_HDR.search(line)
-            if m:
-                base, new = m.group(1), m.group(2)
-                break
-    return DiffDict(base=base, new=new, changes=changes, new_edges=new_edges)
