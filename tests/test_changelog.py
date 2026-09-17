@@ -16,12 +16,12 @@ import pytest
 
 from coyomap import changelog
 from coyomap.changelog import (
-    Addition, ChangeLog, Entry, FieldEdit, Waiver, apply, check, dump_log, get_field, lint, load_log,
-    render, set_field, touched_ids,
+    Addition, ChangeLog, Entry, FieldEdit, Waiver, apply, check, check_before_write, dump_log, get_field,
+    lint, load_log, render, set_field, touched_ids,
 )
 from coyomap.model import load_model
 
-from test_mapdiff import make_map, make_rule, make_steps
+from test_mapdiff import make_edge, make_map, make_rule, make_steps
 
 
 def make_entry(eid: str = "e1", elements: list[str] | None = None, **kw: Any) -> Entry:
@@ -288,6 +288,11 @@ def test_the_verbs_answer_with_exit_codes_and_check_json_is_json_only(capsys):
         assert changelog.main(["check", good, "--old", old, "--new", out, "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload == {"kind": "coyomap-changes-check", "ok": True, "errors": [], "warnings": []}
+        assert changelog.main(["check", good, "--map", old, "--json"]) == 0, "the same gate before the write"
+        assert json.loads(capsys.readouterr().out)["ok"] is True
+        assert json.loads(Path(old).read_text()) == doc, "…and it writes nothing"
+        assert changelog.main(["check", good, "--map", old, "--old", old, "--new", out]) == 2
+        assert "not both" in capsys.readouterr().err
         assert changelog.main(["render", good, "--map", old]) == 0
         assert "### The reader sees a plainer rule" in capsys.readouterr().out
 
@@ -298,9 +303,20 @@ def test_the_command_refuses_a_bad_verb_a_bad_option_and_a_missing_map(capsys):
         good = write(td, "g.json", dump_log(make_log(make_entry())))
         assert changelog.main(["lint", good, "--bogus"]) == 2 and "unknown option" in capsys.readouterr().err
         assert changelog.main(["lint", good]) == 2 and "needs --map" in capsys.readouterr().err
-        assert changelog.main(["check", good, "--old", good]) == 2
+        assert changelog.main(["check", good, "--old", good]) == 2 and "--map <map>" in capsys.readouterr().err
     assert changelog.main(["--help"]) == 0 and "usage: coyomap changes" in capsys.readouterr().out
     assert changelog.main([]) == 2
+
+
+def test_each_verb_prints_its_own_help(capsys):
+    """`changes lint --help` printed the generic usage; a reader wanting one verb read all four."""
+    assert changelog.main(["check", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("  check <log> --map <map>") and "--old <map> --new <map>" in out
+    assert "lint <log>" not in out and "render <log>" not in out
+    assert changelog.main(["lint", "-h"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("  lint <log> --map <map>") and "check <log>" not in out
 
 
 # --- the review's findings, each pinned ------------------------------------------------------
@@ -425,12 +441,21 @@ def test_an_added_way_in_renders_by_its_trigger():
 
 
 def test_the_new_words_of_an_edit_face_the_readability_check():
-    """F15: the reader meets the `now` text on the box's page, so a long one warns at lint."""
+    """F15: the reader meets the `now` text on the box's page, so a long one warns at lint — once,
+    though two checks read it; and a rule's risk warns too, though the diff engine files `risk` as
+    structure: the validator's own field walk is what decides what a reader meets."""
     doc = make_doc()
     long = " ".join(["word"] * 24) + "."
-    log = make_log(make_entry(edits=[FieldEdit("BR1", "statement", "A token is checked", long)]))
+    risky = " ".join(["risk"] * 22) + "."
+    log = make_log(make_entry(edits=[FieldEdit("BR1", "statement", "A token is checked", long),
+                                     FieldEdit("BR1", "risk", "a team is left open", risky)]))
     p = lint(log, doc)
-    assert p.ok and any("BR1.statement" in w and "long sentence" in w for w in p.warnings)
+    assert p.ok and any(w.startswith("entry e1 BR1 statement: long sentence") for w in p.warnings), p.warnings
+    assert sum("long sentence" in w and "word word" in w for w in p.warnings) == 1, p.warnings
+    assert any(w.startswith("entry e1 BR1 risk: long sentence") for w in p.warnings), p.warnings
+    # A wording field the walk does not read is judged from the edit itself, named by its key.
+    named = make_log(make_entry(edits=[FieldEdit("BR1", "name", "A token is checked", long)]))
+    assert any(w.startswith("entry e1 BR1.name: long sentence") for w in lint(named, doc).warnings)
 
 
 def test_lint_refuses_a_path_that_is_not_there_and_edits_on_rows_that_come_or_go():
@@ -447,6 +472,91 @@ def test_lint_refuses_a_path_that_is_not_there_and_edits_on_rows_that_come_or_go
     assert "entry e1: BR1.sites[5].where — no such field or item in the map" in errs
     assert "entry e3: edits E2, which an entry removes" in errs
     assert "entry e4: edits BR2, which this log adds — put the value in the added row" in errs
+
+
+# --- the rehearsal's findings (2026-09-17), each pinned -------------------------------------
+
+def test_an_index_one_past_the_end_appends_and_beyond_it_is_refused_in_words(capsys):
+    """The rehearsal's `sites[2]` with `was: null` on a two-site rule crashed lint with the bare
+    message `ERROR: 'sites[2]'`. Now it appends; an index further out, or a field of an item that
+    is not there, is refused with the append rule in the message."""
+    doc = make_doc()                                      # BR1 has one site
+    site = {"where": "srv.py:9", "why": "guards the second door"}
+    log = make_log(make_entry(edits=[FieldEdit("BR1", "sites[1]", None, site)]))
+    p = lint(log, doc)
+    assert p.ok, p.errors
+    new, done = apply(log, doc)
+    assert new["rules"][0]["sites"] == [{"where": "a.py:1", "why": "guards"}, site] and done.edits == 1
+    beyond = make_log(make_entry(edits=[FieldEdit("BR1", "sites[5]", None, site)]))
+    assert lint(beyond, doc).errors == ["entry e1: BR1.sites[5] — no such item in the map; a new item goes at "
+                                        "the index one past the end of its list, which appends it"]
+    nested = make_log(make_entry(edits=[FieldEdit("BR1", "sites[1].why", None, "w")]))
+    assert any("BR1.sites[1].why — no such item" in e for e in lint(nested, doc).errors)
+    with pytest.raises(ValueError, match="sites\\[3\\]: no such field or item"):
+        set_field({"sites": []}, "sites[3]", site)
+    with tempfile.TemporaryDirectory() as td:
+        old = write(td, "old.json", json.dumps(doc))
+        bad = write(td, "bad.json", dump_log(beyond))
+        assert changelog.main(["lint", bad, "--map", old]) == 1
+        text = capsys.readouterr()
+        assert "no such item in the map" in text.out and "KeyError" not in text.err and "'sites[5]'" not in text.err
+
+
+def test_a_useless_waiver_warns_whatever_the_flags():
+    """The warning was skipped whenever `--touched` was given, so a waiver on a box the code never
+    touched and the map never changed passed silently."""
+    old = make_doc()
+    new = copy(old)
+    impact = {"impacts": {"C1": {"cause": "direct", "change": "modified", "resolution": "line"}}}
+    log = make_log(make_entry(elements=["BR1"]), waived=[Waiver("C1", "a rename"), Waiver("E1", "nothing at all")])
+    p = check(log, old, new, impact)
+    assert p.ok and p.warnings == ["waived E1 did not change in the map and the code did not touch it"]
+    assert check(log, old, new).warnings == ["waived C1 did not change in the map", "waived E1 did not change in the map"]
+
+
+def test_the_sentences_of_an_added_row_face_the_readability_check():
+    """Added rows were never read by lint's readability check: the rehearsal met its new rule's
+    long risk and em dash only at validate, after apply and commit. Lint now reads the validator's
+    own field walk over what the log puts in the map, so a rule's risk and a way in's trigger count
+    (the diff engine files both as structure), and the sentences the map already held are not
+    judged again."""
+    doc = make_doc()
+    long = " ".join(["word"] * 24) + "."
+    row = make_rule("BR2", "A guard holds", risk=long)
+    row["statement"] = "A guard holds — always."
+    ep = {"id": "EP2", "kind": "cli", "trigger": " ".join(["step"] * 23) + ".", "component": "C1", "source": "srv.py:12",
+          "activation": "external", "runs_in": [], "cadence": "", "cadence_source": ""}
+    log = make_log(make_entry(elements=["BR2", "EP2"], added=[Addition("rules", row), Addition("entry_points", ep)]))
+    p = lint(log, doc)
+    assert p.ok, p.errors
+    warns = "\n".join(p.warnings)
+    assert "entry e1 BR2 risk: long sentence" in warns, warns
+    assert "entry e1 BR2 statement: em dash" in warns, warns
+    assert "entry e1 EP2 trigger: long sentence" in warns, warns
+    assert "BR1" not in warns and "C1 purpose" not in warns, "what the map already held is not judged again"
+
+
+def test_the_gate_runs_before_the_write_on_the_log_applied_to_a_copy():
+    """`check --map`: the same gate before `apply`, so a gap costs a trip back to the log and not a
+    restore of the map — the rehearsal found "back to step 3" impossible once apply had moved the
+    pin, because lint and apply then refused the log."""
+    doc = make_doc()
+    before = copy(doc)
+    arrow = Addition("edges", make_edge("C1", "reads", "E1", "srv.py:12"))
+    unnamed = make_log(make_entry(elements=["BR1"], added=[arrow]))
+    p = check_before_write(unnamed, doc)
+    assert p.errors == ["C1 an arrow added in the map, and no entry names it"] and doc == before
+    impact = {"impacts": {"C1": {"cause": "direct", "change": "modified", "resolution": "line"},
+                          "E1": {"cause": "direct", "change": "modified", "resolution": "symbol"}}}
+    named = make_log(make_entry(elements=["BR1", "C1"], added=[arrow]))
+    p = check_before_write(named, doc, impact)
+    assert p.ok and p.warnings == ["the code touched E1 and no entry names or waives it"] and doc == before
+    unfit = make_log(make_entry(edits=[FieldEdit("BR1", "risk", "stale", "new")]))
+    assert check_before_write(unfit, doc).errors == [
+        "lint: entry e1: BR1.risk — the map holds \"a team is left open\", the log says was \"stale\""]
+    new, _ = apply(named, doc)
+    after = check(named, doc, new, impact)
+    assert after.ok and after.warnings == p.warnings, "the gate after the write agrees with the one before"
 
 
 if __name__ == "__main__":

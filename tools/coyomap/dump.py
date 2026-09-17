@@ -5,8 +5,9 @@ The model IS the data, so this is a reader, not a query language: the slice surf
 deliberately tiny and fixed (Phase-3 brief) —
 
   (whole)          the canonical model JSON (what `load_model` parsed, re-serialized)
-  --id <ID>        resolve an id → its kind, display name, canonical source, and members
-  --record <ID>    the element's full stored record, verbatim
+  --id <ID>        resolve an id → its kind, display name, canonical source, and members; also
+                   the change log's own addresses (flow:UC6, step:UC6:3, rule:BR168:0, glossary:<term>)
+  --record <ID>    the element's full stored record, verbatim (an address's row too)
   --edges <ID>     the backbone edges into / out of a node
   --members <ID>   a subsystem's / subdomain's member records (components + child subsystems,
                    entities + child subdomains)
@@ -88,10 +89,76 @@ def _steps_as_members(steps: "list[FlowStep]") -> list[object]:
              "where": st.where, "subflow": st.subflow} for st in steps]
 
 
+def _flow_steps(m: ProjectModel, owner: str) -> list[FlowStep]:
+    """The steps a step address names its owner by: a use case's flow, or a shared sub-flow."""
+    if owner.startswith("SF"):
+        sf = next((s for s in m.subflows if s.id == owner), None)
+        return sf.steps if sf else []
+    flow = next((f for f in m.flows if f.uc == owner), None)
+    return flow.steps if flow else []
+
+
+def _address_target(m: ProjectModel, eid: str) -> tuple[str, str | None, str | None, list[object], object] | None:
+    """What a change-log address names: (kind word, display name, canonical source, `--id` members,
+    the row itself). The ids `coyomap changes` and `coyomap impact` mint for rows that carry no
+    authored id: `flow:<UC>` (a use case's flow), `step:<UC|SF>:<n>` (one step, by its number),
+    `rule:<BR>:<i>` (one enforcement site, by its position), and the keyed rows `glossary:<term>`,
+    `run:<action>`, `net:<name>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`.
+    A rehearsal of the update flow wrote `flow:UC6` into a log and could look it up nowhere:
+    `dump --id flow:UC6` answered "not defined in the map"."""
+    kind, sep, rest = eid.partition(":")
+    if not sep:
+        return None
+    if kind == "flow":
+        flow = next((f for f in m.flows if f.uc == rest), None)
+        return None if flow is None else ("flow", flow.title, None, _steps_as_members(flow.steps), flow)
+    if kind == "step":
+        owner, _, n = rest.rpartition(":")
+        st = next((s for s in _flow_steps(m, owner) if str(s.n) == n), None)
+        return None if st is None else ("flow_step", st.phrase, st.where, _steps_as_members([st]), st)
+    if kind == "rule":
+        rid, _, i = rest.rpartition(":")
+        rule = next((r for r in m.rules if r.id == rid), None)
+        if rule is None or not i.isdigit() or int(i) >= len(rule.sites):
+            return None
+        site = rule.sites[int(i)]
+        return ("rule_site", site.why, site.where, [asdict(site)], site)
+    keyed: dict[str, tuple[str, list[object], str, str | None]] = {
+        # prefix → (kind word, rows, the key field, the source field or None)
+        "glossary": ("glossary_term", list(m.glossary), "term", "source"),
+        "run": ("run_command", list(m.run_commands), "action", "source"),
+        "net": ("other_type", list(m.non_entity_types), "name", "source"),
+        "config": ("config_key", list(m.config), "key", None),
+        "deployment": ("deployment_unit", list(m.deployment), "unit", "config_source"),
+        "observability": ("signal", list(m.observability), "signal", "where_emitted"),
+    }
+    if kind not in keyed:
+        return None
+    word, rows, key_field, source_field = keyed[kind]
+    row = next((r for r in rows if getattr(r, key_field, None) == rest), None)
+    if row is None:
+        return None
+    source = getattr(row, source_field, None) if source_field else None
+    return (word, rest, source or None, [asdict(row)], row)  # type: ignore[call-overload]
+
+
+def resolve_address(m: ProjectModel, eid: str) -> dict[str, object] | None:
+    """The `--id` slice for a change-log address (`_address_target`). The members are the row
+    itself, verbatim, or a flow's steps, so the caller sees every field."""
+    hit = _address_target(m, eid)
+    if hit is None:
+        return None
+    kind, name, source, members, _row = hit
+    return {"id": eid, "kind": kind, "name": name, "source": source, "members": members}
+
+
 def resolve_id(m: ProjectModel, eid: str) -> dict[str, object] | None:
     """The `--id` slice: kind + display name + canonical source + members. Members are the
     group's derived children; for a component, its member entry points (every T4 row naming it —
-    the same set the self-describing L2 claims carry); for a use case or a sub-flow, its steps."""
+    the same set the self-describing L2 claims carry); for a use case or a sub-flow, its steps.
+    An address with a colon in it is the change log's (`resolve_address`)."""
+    if ":" in eid:
+        return resolve_address(m, eid)
     if eid.startswith("EP"):
         # Entry points are minted by `assemble` and live outside `ID_ARRAYS`, so every EP id was
         # `not defined in the map` — 0 of 311 addressable on one build, in a reader whose whole
@@ -134,7 +201,11 @@ def resolve_id(m: ProjectModel, eid: str) -> dict[str, object] | None:
 
 
 def record_of(m: ProjectModel, eid: str) -> dict[str, object] | None:
-    """The `--record` slice: the element's full stored record, verbatim."""
+    """The `--record` slice: the element's full stored record, verbatim — a change-log address's
+    row too (`flow:UC6` is a whole flow row, the shape a new use case's flow is written in)."""
+    if ":" in eid:
+        hit = _address_target(m, eid)
+        return None if hit is None else asdict(hit[4])  # type: ignore[call-overload]
     el = all_elements(m).get(eid)
     return None if el is None else asdict(el)  # type: ignore[call-overload]
 
@@ -319,7 +390,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         out = members_of(m, eid)
     else:
-        out = resolve_id(m, eid) if flag == "--id" else record_of(m, eid)
+        reader = {"--id": resolve_id, "--record": record_of}[flag]
+        out = reader(m, eid)
         if out is None:
             print(f"ERROR: {eid} is not defined in the map", file=sys.stderr)
             return 1

@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from coyomap import subverb_help
 from coyomap.provenance import agent_spans, session_agent_transcripts
 
 #: The fan-out phases a build actually has. A typo'd phase would record fine and then be found by
@@ -524,6 +525,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"coyomap timings: unknown verb '{args[0]}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
         return 2
+    # `timings show -h` was an argparse error (`add_help=False`, so `-h` read as an unknown
+    # argument): the same hole `fix`, `grounding` and `changes` had, closed the same way.
+    helped = subverb_help.handle(USAGE, args[0], args[1:])
+    if helped is not None:
+        return helped
     parsed = build_parser().parse_args(args)
     try:
         return int(parsed.func(parsed))

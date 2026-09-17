@@ -46,8 +46,11 @@ def verb_block(usage: str, verb: str) -> str | None:
         if not line.strip():
             continue
         this_indent = len(line) - len(line.lstrip())
-        # A sibling verb: same indent, and not the continuation prose that sits deeper.
-        if this_indent <= indent and not line.strip().startswith("-"):
+        # A sibling verb: same indent, and not the continuation prose that sits deeper. A line
+        # that starts with the SAME verb is another form of it (`record --lines-from …` under
+        # `record --slice …`), so it stays in the block.
+        if (this_indent <= indent and not line.strip().startswith("-")
+                and line.strip().split(" ")[0] != verb):
             end = j
             break
     return "\n".join(lines[start:end]).rstrip()

@@ -38,6 +38,19 @@ def read_record(tmp: str) -> list[dict]:
     return json.loads(record_path(tmp).read_text(encoding="utf-8"))["runs"]
 
 
+def test_each_verb_answers_help_instead_of_an_argparse_error(capsys) -> None:
+    """`timings show -h` was `error: unrecognized arguments: -h`, exit 2 — the sub-verb help hole
+    `fix`, `grounding` and `changes` had, on the one dispatcher that never went through
+    `subverb_help`."""
+    assert main(["show", "-h"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("  show [--json]") and "record --phase" not in out
+    assert main(["record", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("  record --phase") and "--lines-from" in out and "--from-agents" in out
+    assert "order --phase" not in out
+
+
 def test_a_project_with_no_record_is_told_so_and_not_blocked(capsys) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         assert main(["order", "--repo", make_repo(tmp), "--phase", "harvest"]) == 0

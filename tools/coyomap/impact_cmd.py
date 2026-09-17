@@ -9,7 +9,12 @@ moved, nothing changed), the resolution it was resolved at (line / symbol / file
 it ripples to through the map's own relations.
 
 Its JSON is what `coyomap changes check --touched` reads: a log that names or waives every box
-touched at line or symbol resolution has covered what the code says it changed. Stdlib-only.
+touched at line or symbol resolution (or whose file is gone) has covered what the code says it
+changed. The text marks those hits `*`, through the gate's own predicate, so the agent reads the
+list the gate will count; a hit at file resolution only says the file changed somewhere, and is
+listed for reading. The map's own folder is left out of the file count (a rehearsal read "308
+files changed" of which 290 were the map), and a way in shows its EP id, the one `dump --id`
+resolves, instead of the engine's `ep:<file>:<line>`. Stdlib-only.
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from coyomap.changelog import gated_box
 from coyomap.dump import resolve_id
 from coyomap.impact_git import WORKTREE, ImpactError, compute_impact, load_map_extents
 from coyomap.impact_ripple import RippleOptions, build_impact_result
@@ -28,6 +34,8 @@ USAGE = """usage: coyomap impact --map <project-map.json> [--repo <root>] [--bas
 
 Which boxes a code change touches, read off the map's code links: the direct hits (with the
 resolution each was found at) and what they ripple to. Defaults: base = the map's pin, target = HEAD.
+A hit marked `*` is one `coyomap changes check --touched` counts: a line or symbol hit, or a link
+into a deleted file. A file-resolution hit is listed for reading and needs no waiver.
 
   --repo <root>     the repo (default: the folder above the map's .coyomap/)
   --base <ref>      the older commit (default: the map's pin)
@@ -60,7 +68,7 @@ def _name(m: ProjectModel, eid: str) -> str:
         source = eid[3:]
         for ep in m.entry_points:
             if ep.source == source:
-                return f"way in: {ep.trigger}"
+                return ep.trigger
         return eid
     row = resolve_id(m, eid)
     if row:
@@ -71,16 +79,25 @@ def _name(m: ProjectModel, eid: str) -> str:
     return eid
 
 
-def format_result(m: ProjectModel, result: dict[str, Any]) -> str:
+def format_result(m: ProjectModel, result: dict[str, Any], map_dir: str | None = None) -> str:
+    """The text for the agent. `map_dir` is the map's own folder, repo-relative: its files are
+    changed by every update (the map, its view, the pre-index) and say nothing about the code, so
+    they are counted apart."""
     spec = result.get("spec") or {}
     counts = result.get("counts") or {}
+    impacts = result.get("impacts") or {}
     short = (lambda r: "working tree" if r == WORKTREE else str(r or "")[:10])
+    files = result.get("files") or []
+    own = [f for f in files if map_dir and any(str(f.get(side) or "").startswith(map_dir + "/")
+                                               for side in ("path", "p_path"))]
+    gated = sum(1 for eid, imp in impacts.items() if gated_box(str(eid), imp))
     lines = [f"impact — {short(spec.get('base'))} → {short(spec.get('target'))}: "
-             f"{len(result.get('files') or [])} file(s) changed, {counts.get('direct', 0)} box(es) hit, "
-             f"{counts.get('ripple', 0)} reached through the map"]
+             f"{len(files) - len(own)} file(s) changed, {counts.get('direct', 0)} box(es) hit, "
+             f"{gated} of them at the gate (*), {counts.get('ripple', 0)} reached through the map"
+             + (f"; {len(own)} file(s) under {map_dir}/ not counted" if own else "")]
     for w in result.get("warnings") or []:
         lines.append(f"  ! {w}")
-    impacts = result.get("impacts") or {}
+    ep_ids = {f"ep:{ep.source}": ep.id for ep in m.entry_points if ep.id}
     for t, ids in (result.get("byType") or {}).items():
         rows = []
         for eid in ids:
@@ -89,7 +106,8 @@ def format_result(m: ProjectModel, result: dict[str, Any]) -> str:
                 what = f"{imp.get('change')} at {imp.get('resolution')} resolution"
             else:
                 what = "reached" + (f" via {', '.join(h.get('from', '?') for h in imp.get('via') or [])}" if imp.get("via") else "")
-            rows.append(f"    {eid:<18} {_name(m, eid)[:50]:<50} {what}")
+            mark = "* " if gated_box(str(eid), imp) else "  "
+            rows.append(f"  {mark}{ep_ids.get(eid, eid):<18} {_name(m, eid)[:50]:<50} {what}")
         if rows:
             lines.append(f"  {_LABEL.get(t, t)}:")
             lines.extend(rows)
@@ -158,7 +176,13 @@ def main(argv: list[str] | None = None) -> int:
     if as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(format_result(m, result))
+        try:
+            map_dir = map_path.resolve().parent.relative_to(repo.resolve()).as_posix()
+        except ValueError:
+            # A copy of the map kept outside the repo (a rehearsal, a test): the repo's folder of
+            # the same name is still the map's own.
+            map_dir = map_path.resolve().parent.name
+        print(format_result(m, result, map_dir))
     return 0
 
 

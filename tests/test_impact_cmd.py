@@ -21,7 +21,9 @@ def make_changed_repo(td: str) -> tuple[Path, str, str]:
     root = Path(td)
     pin = commit(root, {"svc/guild.py": GUILD_V1, "README.md": "hi\n"}, msg="pin")
     (root / ".coyomap").mkdir()
-    (root / ".coyomap" / "project-map.json").write_text(to_canonical_json(make_model(pin)), encoding="utf-8")
+    doc = json.loads(to_canonical_json(make_model(pin)))
+    doc["entry_points"] = [{"id": "EP1", "kind": "cli", "trigger": "run it", "source": "svc/guild.py:12", "component": "C1"}]
+    (root / ".coyomap" / "project-map.json").write_text(json.dumps(doc), encoding="utf-8")
     lines = GUILD_V1.splitlines()
     lines[7] = lines[7] + "  # changed"
     head = commit(root, {"svc/guild.py": "\n".join(["# one", "# two", *lines]) + "\n"}, msg="edit")
@@ -33,9 +35,16 @@ def test_the_text_names_the_boxes_the_change_touched(capsys):
         root, pin, head = make_changed_repo(td)
         assert impact_cmd.main(["--map", str(root / ".coyomap" / "project-map.json"), "--target", head]) == 0
         out = capsys.readouterr().out
-        assert out.startswith(f"impact — {pin[:10]} → {head[:10]}: 2 file(s) changed"), "guild.py and the map file itself"
-        assert "Arrows:" in out and "Svc uses Store" in out, "an arrow reads by its ends, not by its id"
+        head_line = out.splitlines()[0]
+        assert head_line.startswith(f"impact — {pin[:10]} → {head[:10]}: 1 file(s) changed, 5 box(es) hit, "
+                                    "1 of them at the gate (*)"), head_line
+        assert head_line.endswith("; 1 file(s) under .coyomap/ not counted"), "the map file itself is counted apart"
+        assert "Arrows:" in out and "* edge:C1>uses>D1" in out and "Svc uses Store" in out, \
+            "an arrow reads by its ends, and the one hit the gate counts is marked"
         assert "at line resolution" in out
+        assert "  EP1 " in out and "run it" in out and "ep:svc/guild.py" not in out, \
+            "a way in shows the id `dump --id` resolves, named by its trigger"
+        assert "    E1 " in out and "* E1" not in out, "a file-resolution hit is listed for reading, unmarked"
 
 
 def test_the_json_is_the_engine_s_result_and_names_the_range(capsys):

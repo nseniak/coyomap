@@ -596,6 +596,15 @@ def test_grounding_sub_verbs_also_answer_help(capsys):
         assert capsys.readouterr().out.strip(), f"grounding {verb} printed no help"
 
 
+def test_a_verb_s_other_forms_stay_in_its_help_block():
+    """`timings record` is documented as three command lines, each starting with the verb; the
+    block used to stop at the second one, so `record --help` printed one line of three."""
+    from coyomap import subverb_help
+    usage = "usage: x <a | b>\n\n  a --one\n  a --two\n      what a does\n\n  b --three\n      what b does\n"
+    assert subverb_help.verb_block(usage, "a") == "  a --one\n  a --two\n      what a does"
+    assert subverb_help.verb_block(usage, "b") == "  b --three\n      what b does"
+
+
 def test_subverb_help_falls_back_to_the_whole_usage_when_no_block_matches():
     """The fallback is the branch production actually takes for 2 of the 6 surfaces, so it is the
     one that must never print nothing."""

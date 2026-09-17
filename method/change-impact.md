@@ -10,25 +10,33 @@ what the map already says.
 
 | Step | Action | Tool | Writes |
 |---|---|---|---|
-| **0 Gate** | the worktree must be clean; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old`; deleted at step 7, never committed) |
-| **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json` | the impact file, beside the log (deleted at step 7, never committed) |
-| **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit |
+| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` must FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes` | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
+| **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them | the impact file, beside the log (deleted at step 7, never committed) |
+| **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by a `where` edit in the entry that read that code (step 3) |
 | **3 Read and write** | read the diff and the touched boxes; write the log | you | `.coyomap/changes/<from>-<to>.json` |
 | **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
-| **5 Apply** | the entries land in the map, the pin moves | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
-| **6 Check** | the gate: the log explains every change the map's own diff shows | `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | nothing |
-| **7 Close** | the invariant, the rendering, the commit | validate → audit → render; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; delete the `.before.json` and `.impact.json` scratch files | the markdown view, the rendered log, the pre-index; **one commit** of map + log + views |
+| **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
+| **6 Apply** | the entries land in the map, the pin moves; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
+| **7 Close** | the invariant, the rendering, the commit | render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; delete the `.before.json` and `.impact.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index; **one commit** of map + log + views, with a plain `git add` — never `git add -f` |
 
-- **`update`** is the whole sequence. **`analyze`** is steps 0–4: the log written and linted, the
-  map's meaning untouched — its code links have moved (step 2), which is a change of no meaning —
-  for a reader who wants the log before it lands. **`accept`** is steps 5–7 on a log that already
-  exists; it finds the `.before.json` copy step 0 left beside the log.
+- **`update`** is the whole sequence. **`analyze`** is steps 0–5: the log written, linted and gated,
+  the map's meaning untouched — its code links have moved (step 2), which is a change of no meaning
+  — for a reader who wants the log before it lands. **`accept`** is steps 6–7 on a log that already
+  exists; it finds the `.before.json` copy and the `.impact.json` file that steps 0 and 1 left
+  beside the log.
 - **From and to are commits.** `from` is the map's pin, `to` is `HEAD`. A dirty tree cannot be
-  named, so step 0 refuses it: commit first, or stash. (The old rule analyzed the working tree so an
-  edit could be read before its commit; that preview is `git stash` away, and a log that names a
-  commit is worth more than one that names a moment.)
-- **`.coyomap/changes/` must be tracked.** A repo whose `.gitignore` covers the whole `.coyomap/`
-  folder cannot commit the log; say so at step 0 and fix the ignore rule with the user before going on.
+  named, so step 0 refuses it: commit first, or stash. An untracked product file is refused the same
+  way, because a file git does not know is a file no commit describes: commit it, or add it to
+  `.gitignore`. (The old rule analyzed the working tree so an edit could be read before its commit;
+  that preview is `git stash` away, and a log that names a commit is worth more than one that names
+  a moment.)
+- **`.coyomap/changes/` must be tracked.** The test, at step 0: `git check-ignore -q
+  .coyomap/changes/<from>-<to>.json` must fail (exit 1: the path is not ignored). If it passes, the
+  log would be left out of the commit without a word — a map whose files are tracked can still sit
+  under an ignore rule for the whole folder, and the tracked files hide it. Fix the rule with the
+  user before going on: git cannot re-include a path under an ignored folder, so a rule `.coyomap/`
+  becomes `.coyomap/*` plus `!.coyomap/changes/`. Never `git add -f` around it: a forced add works
+  once and leaves the next log ignored again.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
 
@@ -45,19 +53,27 @@ small logs; one per week gives one log with more entries. Either way every entry
   catches MODIFIED and REMOVED). Walking only the baseline would miss purely-additive changes, so
   the diff must be a driver, not just the guide.
 - **Bounded, not blind.** `coyomap impact` is the list of boxes whose code links fall in the changed
-  files, with the resolution each was found at. Read those first, and the changed files they are
-  not in. A box it names that no entry names or waives is a warning at step 6; a box it does not
-  name that an entry claims is your own finding, and says so in the entry's evidence.
+  files, with the resolution each was found at. Only some of them count at the gate: a hit at LINE
+  or SYMBOL resolution, and every link into a deleted file; the text marks those `*`. A hit at FILE
+  resolution only says the file changed somewhere, so it is listed for reading and needs no waiver.
+  Read the marked hits first, then the changed files they are not in. A marked box that no entry
+  names or waives is a warning at steps 5 and 6; a box `impact` does not name that an entry claims
+  is your own finding, and says so in the entry's evidence.
 - **Line moves are not changes.** `coyomap reanchor` moves every link whose line only shifted, and
-  lists the links into lines the code changed or files that are gone — those are yours to read. The
-  log never carries a line move, and `check` ignores link-only changes.
+  lists the links into lines the code changed or files that are gone. Those are yours to read, and
+  the reading lands in the log: a link `reanchor` left behind is re-pointed by a `where` edit (on
+  `flow:UC6`, key `steps[n=3].where`; on `BR168`, key `sites[0].where`) in the entry that read that
+  code, so the move and its reason travel together. The log never carries a move `reanchor` made,
+  and `check` ignores link-only changes.
 - **Per change.** Classify a box as modified / added / removed; **ripple** by following its
   relations (arrows, flows, Happy Path steps). Verify by reading the changed code; a pure refactor
   or move with no behaviour change is a **waiver**, not an entry (keep noise down).
 - **Resolution honesty.** Place a change at least at **component** level (which file → which
   component — always available). Sharpen to a record, a rule or a step where reading allows, and
-  say the resolution reached in the entry's `confidence`; never fake step precision. For a
-  widely-used helper the honest entry is "load-bearing, reaches these use cases", which is useful.
+  say the resolution reached, per change, in the log's `notes`; never fake step precision. An
+  entry's `confidence` says something else — how sure the reading is — and is one of three words:
+  `verified`, `likely`, `inferred`. For a widely-used helper the honest entry is "load-bearing,
+  reaches these use cases", which is useful.
 - **Seam caveat.** Tracing callers statically breaks at interface / dependency-injection
   boundaries (callers hit a port, not the impl). Resolve the binding by reading the wiring, and put
   where reachability is incomplete in the log's `notes` rather than claim a clean closure.
@@ -94,8 +110,11 @@ edits, adds or removes is among its `elements`. Every box the map's own diff say
 or structure) is named by an entry or covered by a waiver. `lint` enforces the first half against
 the map the log is written for — and runs the whole apply on a copy through the loader and the
 validator's blocking checks, so a row of an older shape is refused before any write; `check`
-enforces the second half against the map before and after `apply`. A gap at `check` sends you back
-to step 3: write the entry, or waive with a `why`.
+enforces the second half twice: at step 5 on that same copy, before anything is written, and at
+step 6 on the map before and after `apply`. A gap at step 5 sends you back to step 3 — write the
+entry, or waive with a `why` — and costs nothing else: the map on disk has not moved, so lint and
+the gate simply run again. Step 6's check should find nothing step 5 did not; if it does, the map on
+disk is not the one the log was gated on.
 
 **What counts as a box for the rule.** Every row with an id; a keyed row under a synthetic id
 (`glossary:<term>`, `run:<action>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
@@ -104,32 +123,39 @@ an edit on `map` takes one such field as its key); an arrow, credited to the box
 Outside the rule, because they carry no identity: `tests` and `extras` rows (added as whole rows,
 never edited), and the code-link moves.
 
-**What an entry says.** The `headline` is one line in product words, the words a card wears on the
-Changes tab. The `sentence` says what a user can now do or no longer do — or, for a box under the
-hood, what the machine now does differently. Both face the map's readability check (under 20 words
-a sentence, no code words). `elements` are ids; the viewer draws them by name, under Product or
-Under the hood by their kind, so the two views are derived from this list and nothing else is
-authored for them.
+**What an entry says.** The `headline` is one line of at most 14 words, in product words: the words
+a card wears on the Changes tab (`lint` counts them). The `sentence` says what a user can now do or
+no longer do — or, for a box under the hood, what the machine now does differently. Both face the
+map's readability check (under 20 words a sentence, no code words). `elements` are ids; the viewer
+draws them by name, under Product or Under the hood by their kind, so the two views are derived
+from this list and nothing else is authored for them.
 
-**Addressing an edit.** `id` names the box; `key` is a path inside its row: `risk`, `sites[0].where`,
-`fields[name=size].type`, `steps[n=4].phrase`. A use case's flow is the row `flow:<UC id>` (an edit
-on it is an edit on the use case, which the entry names); a shared sub-flow's steps are on its own
-row. `was` must equal what the map holds — `lint` refuses a stale `was`, since applying it would
-overwrite a change someone else made; one field is edited by one entry, and the log's
-`from_commit` must be the map's pin. `now: null` removes the field or the list item; an entry's
-removals land after its other edits, from the highest index down, so removing `sites[0]` never
-shifts what `sites[1].why` names. A row this log adds is written whole — never added and then
-edited; a row an entry removes is edited by no other. The new words face the map's readability
-check at `lint` (under 20 words a sentence, no em dash, no code word), as advice. Never a JSON
-pointer with an array index into the whole map: those break the moment a row above moves.
+**Addressing an edit.** `id` names the box; `key` is a path inside its row: `risk`,
+`sites[0].where`, `fields[name=size].type`, `steps[n=4].phrase`. A use case's flow is the row
+`flow:<UC id>` (an edit on it is an edit on the use case, which the entry names); a shared sub-flow's
+steps are on its own row. `coyomap dump --id <UC id>` shows a flow's steps and their numbers, and
+the log's own addresses resolve the same way: `dump --id flow:UC6`, `dump --id step:UC6:3`,
+`dump --id rule:BR168:0` (that rule's first site), `dump --id glossary:<term>`. `was` must equal
+what the map holds — `lint` refuses a stale `was`, since applying it would overwrite a change
+someone else made; one field is edited by one entry, and the log's `from_commit` must be the map's
+pin. `now: null` removes the field or the list item; an entry's removals land after its other
+edits, from the highest index down, so removing `sites[0]` never shifts what `sites[1].why` names.
+To add a list item, address the position one past the end with `was: null` and the whole item as
+`now`: `sites[2]` on a rule with two sites appends a third, and `sites[5]` on it is refused. A row
+this log adds is written whole — never added and then edited; a row an entry removes is edited by
+no other. The new words face the map's readability check at `lint` (under 20 words a sentence, no
+em dash, no code word), as advice — every sentence an added row carries too, through the same
+field walk `validate` reads at step 7. Never a JSON pointer with an array index into the whole map:
+those break the moment a row above moves.
 
 **A new box** goes in `added` as its whole row, id included, in the array it belongs to, in the
-shape the map holds today (`coyomap dump --id <a sibling>` shows it); a new use case brings its
-flow as a second added row (`kind: flows`, keyed by `uc`); a keyed row brings its key. A box that
-is gone goes in `removed` by id. **A box the code touched without changing its meaning** goes in
-`waived` with its `why`; the code-link moves `reanchor` made need no mention at all. Two dates:
-the log's `date` is the day it was written; `committed` in the map is the to-commit's date, which
-`apply --date` sets.
+shape the map holds today (`coyomap dump --record <a sibling>` shows it). Its id is the next number
+after the highest of its kind in the map — `BR209` when the last rule is `BR208`, `EP210` after
+`EP209`; `coyomap dump --legend` lists every id. A new use case brings its flow as a second added
+row (`kind: flows`, keyed by `uc`); a keyed row brings its key. A box that is gone goes in
+`removed` by id. **A box the code touched without changing its meaning** goes in `waived` with its
+`why`; the code-link moves `reanchor` made need no mention at all. Two dates: the log's `date` is
+the day it was written; `committed` in the map is the to-commit's date, which `apply --date` sets.
 
 ## Deliberately out of scope (for now)
 

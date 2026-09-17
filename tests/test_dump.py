@@ -299,6 +299,39 @@ def test_id_on_an_unknown_entry_point_is_still_none():
     assert resolve_id(_model_with_a_flow(), "EP99") is None
 
 
+def test_id_resolves_the_change_log_s_own_addresses():
+    """`flow:UC6`, `step:UC6:3`, `rule:BR168:0`, `glossary:<term>`: the ids a change log names a
+    flow, a step, an enforcement site and a keyed row by. A rehearsal wrote them into a log and
+    `dump --id` answered "not defined in the map" for every one."""
+    from coyomap.model import BusinessRule, GlossaryRow, RuleSite, RunRow
+    m = _model_with_a_flow()
+    m.rules = [BusinessRule(id="BR1", statement="A guard holds.", name="A guard",
+                            sites=[RuleSite(where="backend/auth.py:50", why="refuses a stranger")])]
+    m.glossary = [GlossaryRow(term="guild", meaning="a team", source="backend/org.py:1")]
+    m.run_commands = [RunRow(action="serve", command="make serve", source="Makefile:3")]
+    flow = resolve_id(m, "flow:UC1")
+    assert flow is not None and flow["kind"] == "flow" and flow["name"] == "Sign in"
+    assert [s["n"] for s in resolved_members(flow)] == [1, 2]
+    step = resolve_id(m, "step:UC1:2")
+    assert step is not None and step["kind"] == "flow_step" and step["source"] == "backend/auth.py:42"
+    assert resolved_members(step)[0]["phrase"] == "verifies the token"
+    sub = resolve_id(m, "step:SF1:1")
+    assert sub is not None and sub["name"] == "looks the org up"
+    site = resolve_id(m, "rule:BR1:0")
+    assert site is not None and site["kind"] == "rule_site" and site["source"] == "backend/auth.py:50"
+    assert resolved_members(site) == [{"where": "backend/auth.py:50", "why": "refuses a stranger", "no_call_site": False}]
+    term = resolve_id(m, "glossary:guild")
+    assert term is not None and term["kind"] == "glossary_term" and term["source"] == "backend/org.py:1"
+    assert resolved_members(term)[0]["meaning"] == "a team"
+    run = resolve_id(m, "run:serve")
+    assert run is not None and run["kind"] == "run_command" and resolved_members(run)[0]["command"] == "make serve"
+    for missing in ("flow:UC9", "step:UC1:9", "step:SF9:1", "rule:BR1:1", "rule:BR9:0", "glossary:nope", "run:nope", "bogus:x"):
+        assert resolve_id(m, missing) is None and record_of(m, missing) is None, missing
+    rec = record_of(m, "flow:UC1")
+    assert rec is not None and rec["uc"] == "UC1" and [s["n"] for s in rec["steps"]] == [1, 2], "the row, verbatim"
+    assert record_of(m, "rule:BR1:0") == {"where": "backend/auth.py:50", "why": "refuses a stranger", "no_call_site": False}
+
+
 def test_a_use_case_with_no_flow_yet_has_no_members():
     m = ProjectModel(use_cases=[UseCase(id="UC9", name="Not traced yet")])
     got = resolve_id(m, "UC9")

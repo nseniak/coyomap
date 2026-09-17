@@ -13,7 +13,9 @@ the agent that analyzed the code, and four tools read it:
   render  the same log as markdown for people: entries under Product / Under the hood, boxes by name
   apply   the entries' edits, additions and removals written into the map, the pin bumped
   check   the completeness gate: every box the map's own diff says changed is named by an entry or
-          waived, and every box an entry names exists — the two-way rule, enforced
+          waived, and every box an entry names exists — the two-way rule, enforced. It runs BEFORE
+          the write, on the log applied to a copy of the map (`--map`), and again after it, on the
+          map before and after (`--old`/`--new`), so a gap costs nothing to close
 
 ADDRESSING. An edit names a box by id and a field by a path inside its row: `risk`,
 `sites[0].where`, `steps[n=4].phrase` (a step by its number), `fields[name=size].type` (an item by
@@ -33,9 +35,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from coyomap import subverb_help
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_spec, looks_like_map
-from coyomap.model import ModelError, load_model
-from coyomap.prose import field_findings
+from coyomap.model import ModelError, ProjectModel, load_model
+from coyomap.prose import Finding, field_findings, iter_prose_fields
 from coyomap.validate_model import validate_model
 
 FORMAT = "coyomap-changes"
@@ -52,16 +55,24 @@ HEADLINE_WORDS_MAX = 14
 
 USAGE = """usage: coyomap changes <verb> [options]
 
-  lint <log> --map <map>                        is the log well formed against this map?
-  render <log> --map <map> [--out <file.md>]    the log as markdown for people
+  lint <log> --map <map>
+        is the log well formed against this map? Every id exists, every `was` matches, and the
+        whole apply runs on a copy through the loader and the validator's blocking checks; every
+        sentence the log changes or adds faces the readability check, as a warning
+  render <log> --map <map> [--out <file.md>]
+        the log as markdown for people: entries under Product / Under the hood, boxes by name
   apply <log> --map <map> [--out <map>] [--date <YYYY-MM-DD>]
-                                                write the entries into the map and bump its pin
-                                                (--date: the to-commit's date, into `committed`)
-  check <log> --old <map> --new <map> [--touched <impact.json>] [--json]
-                                                the completeness gate: the map's diff is explained
+        write the entries into the map and bump its pin (--date: the to-commit's date, into
+        `committed`); refuses a log that does not lint clean
+  check <log> --map <map> [--touched <impact.json>] [--json]
+        the completeness gate BEFORE the write: the log, applied to a copy of this map, explains
+        every change it makes, and names or waives every box the code touched (--touched)
+        --old <map> --new <map> in place of --map: the same gate AFTER apply, on the map before
+        and after it
 
 The log is `.coyomap/changes/<from>-<to>.json`, written by the agent that analyzed the code.
 Every verb is read-only except `apply`, which writes the map it is given (or `--out`).
+`coyomap changes <verb> --help` prints that verb's block alone.
 """
 
 Change = Literal["added", "removed", "modified"]
@@ -273,6 +284,8 @@ def _walk(row: Any, key: str, create: bool = False) -> tuple[Any, str | int] | N
         else:
             pos = next((k for k, it in enumerate(items)
                         if isinstance(it, dict) and str(it.get(sel_key)) == sel_val), -1)
+        if last and create and idx is not None and pos == len(items):
+            return items, pos                 # one past the end: the caller appends the item
         if pos < 0 or pos >= len(items):
             return None
         if last:
@@ -292,16 +305,22 @@ def get_field(row: dict[str, Any], key: str) -> Any:
 
 
 def set_field(row: dict[str, Any], key: str, value: Any) -> None:
-    """Set a path to `value`; `None` removes the field (a list item is removed too)."""
+    """Set a path to `value`; `None` removes the field (a list item is removed too). A positional
+    index one past the end of a list appends the item — the one way to add a site, a step or a
+    field row without rewriting the whole list. A path the row does not have is a ValueError in
+    words: the bare `KeyError: 'sites[2]'` it used to raise reached the reader as the whole message."""
     hit = _walk(row, key, create=value is not None)
     if hit is None:
-        raise KeyError(key)
+        raise ValueError(f"{key}: no such field or item")
     container, at = hit
     if isinstance(container, list):
+        pos = int(at)
         if value is None:
-            del container[int(at)]
+            del container[pos]
+        elif pos == len(container):
+            container.append(value)
         else:
-            container[int(at)] = value
+            container[pos] = value
     elif value is None:
         container.pop(at, None)
     else:
@@ -364,6 +383,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     index = index_map(doc)
     added_ids = _added_ids(log)
     removed_ids = {r for e in log.entries for r in e.removed}
+    prose: list[tuple[str, str, str]] = []   # (label, box, text) of every edit a reader will meet as words
     pin = doc.get("commit")
     if isinstance(pin, str) and pin and not _commit_matches(log.from_commit, pin):
         p.errors.append(f"the log starts from {log.from_commit}, the map is pinned to {pin}")
@@ -416,6 +436,10 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             if found is None and ed.was is not None:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — no such field or item in the map")
                 continue
+            if found is None and _walk(json.loads(json.dumps(hit[1])), ed.key, create=True) is None:
+                p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; a new item goes at the "
+                                f"index one past the end of its list, which appends it")
+                continue
             if current != ed.was:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — the map holds {json.dumps(current, ensure_ascii=False)[:80]}, "
                                 f"the log says was {json.dumps(ed.was, ensure_ascii=False)[:80]}")
@@ -424,8 +448,8 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             # The words a reader meets on the box's page face the map's own readability check.
             last = ed.key.split(".")[-1].split("[")[0]
             if isinstance(ed.now, str) and field_spec(last).cls == "wording":
-                for f in field_findings(f"{where} {ed.id}.{ed.key}", ed.now):
-                    p.warnings.append(f"{f.where}: {f.kind} — {f.detail}")
+                box = ed.id[len(FLOW_PREFIX):] if ed.id.startswith(FLOW_PREFIX) else ed.id
+                prose.append((f"{where} {ed.id}.{ed.key}", box, ed.now))
         for a in e.added:
             problem = _addition_problem(a, doc, index)
             if problem:
@@ -434,7 +458,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             if rid not in index:
                 p.errors.append(f"{where}: removes {rid}, which is not in the map")
         for f in field_findings(f"{where} sentence", e.sentence):
-            p.warnings.append(f"{f.where}: {f.kind} — {f.detail}")
+            p.warnings.append(_finding_line(f))
     for w in log.waived:
         if w.id not in index:
             p.warnings.append(f"waived {w.id} is not in the map")
@@ -443,6 +467,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     # The last check is the whole apply, on a copy, through the model's loader AND the validator's
     # blocking checks — so a row of an older shape, or a site that says `no_call_site` and carries a
     # `where`, is refused here with the field named, not by the close step after the write.
+    model: ProjectModel | None = None
     if p.ok:
         new = _applied(log, doc)
         try:
@@ -453,7 +478,56 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             problems, _warnings = validate_model(model, None, disclose_records=False)
             for problem in problems:
                 p.errors.append(f"the map would not validate after apply: {problem}")
+    p.warnings.extend(_prose_warnings(log, doc, model, prose))
     return p
+
+
+def _finding_line(f: Finding) -> str:
+    return f"{f.where}: {f.kind} — {f.detail}"
+
+
+def _walk_box(where: str) -> str:
+    """The box a label of the validator's field walk is about: its first word (`BR1 risk`,
+    `UC1 step 2 phrase`), or the synthetic id of a glossary term (`glossary 'guild'`)."""
+    if where.startswith("glossary '"):
+        return "glossary:" + where[len("glossary '"):].split("'", 1)[0]
+    return where.split(" ", 1)[0]
+
+
+def _prose_warnings(log: ChangeLog, doc: dict[str, Any], after: ProjectModel | None,
+                    edits: list[tuple[str, str, str]]) -> list[str]:
+    """The readability check over every reader-facing sentence the log puts in the map that was not
+    there before — an edit's new words, an added rule's risk, a new way in's trigger, a new step's
+    phrase — through the SAME field walk `validate` reads at the close step, so the advice arrives
+    before the write and not first from the validator after it. A sentence the map already held is
+    not judged again. An edited wording field the walk does not read (a name, a title, an arrow's
+    why) is judged from the edit itself; one the walk reads is judged once, by the walk. A finding on
+    a walked field is named by the entry that owns the box. `after` is None when the applied map did
+    not load: then only the edits are judged."""
+    out: list[str] = []
+    walked: set[tuple[str, str]] = set()
+    if after is not None:
+        try:
+            held = set(iter_prose_fields(load_model(json.dumps(doc))))
+        except ModelError:
+            held = set()
+        owner: dict[str, str] = {}
+        for e in log.entries:
+            for i in set(e.elements) | e.ids_edited():
+                owner.setdefault(i, e.id)
+        terms = [g.term for g in after.glossary]
+        for where, text in iter_prose_fields(after):
+            box = _walk_box(where)
+            walked.add((box, text))
+            if (where, text) in held:
+                continue
+            label = f"entry {owner[box]} {where}" if box in owner else where
+            out.extend(_finding_line(f) for f in field_findings(label, text, terms=terms))
+    for label, box, text in edits:
+        if (box, text) in walked:
+            continue
+        out.extend(_finding_line(f) for f in field_findings(label, text))
+    return out
 
 
 # ── apply: the entries written into the map ──────────────────────────────────────────────────────
@@ -529,19 +603,26 @@ def element_of(eid: str) -> str | None:
     return None
 
 
+def gated_box(eid: str, imp: Any) -> str | None:
+    """The box the gate counts this `coyomap impact` hit under, or None: a direct hit at line or
+    symbol resolution, or any link into a deleted file — never a drift, never the file rung (which
+    lights every anchor in a changed file), and never an anchor that belongs to no box. ONE
+    predicate: `check --touched` reads it and `coyomap impact` marks the same hits in its text, so
+    the agent reads the list the gate will count."""
+    if not isinstance(imp, dict) or imp.get("cause") != "direct":
+        return None
+    if imp.get("change") == "drifted":
+        return None
+    if imp.get("change") != "deleted" and imp.get("resolution") not in ("line", "symbol"):
+        return None
+    return element_of(eid)
+
+
 def touched_ids(impact: dict[str, Any]) -> set[str]:
-    """The boxes a code diff touched, read off `coyomap impact --json`: direct hits at line or
-    symbol resolution, never a drift and never the file rung, which lights every anchor in a
-    changed file."""
+    """The boxes a code diff touched, read off `coyomap impact --json` through `gated_box`."""
     out: set[str] = set()
     for eid, imp in (impact.get("impacts") or {}).items():
-        if not isinstance(imp, dict) or imp.get("cause") != "direct":
-            continue
-        if imp.get("change") == "drifted":
-            continue
-        if imp.get("change") != "deleted" and imp.get("resolution") not in ("line", "symbol"):
-            continue                     # the file rung lights every anchor in a changed file
-        box = element_of(str(eid))
+        box = gated_box(str(eid), imp)
         if box:
             out.add(box)
     return out
@@ -554,7 +635,7 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
     waiver covers — a keyed row (a glossary term, a run command…) counts under its synthetic id and
     the map's header under `map`; a box an entry names that the new map does not hold; a `to_commit`
     that is not the new map's pin. Warnings: a box the code touched that nobody names or waives, and
-    a waiver on a box that did not change."""
+    a waiver on a box that did not change — nor, when `--touched` is given, was touched."""
     p = Problems()
     new_pin = new_doc.get("commit")
     if isinstance(new_pin, str) and new_pin and not _commit_matches(log.to_commit, new_pin):
@@ -590,13 +671,26 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
     for box in sorted(named):
         if box not in new_index and box not in removed:
             p.errors.append(f"an entry names {box}, which the new map does not hold")
+    touched = touched_ids(impact) if impact is not None else set()
     for w in log.waived:
-        if w.id not in changed and impact is None:
-            p.warnings.append(f"waived {w.id} did not change in the map")
-    if impact is not None:
-        for box in sorted(touched_ids(impact) - named - waived):
-            p.warnings.append(f"the code touched {box} and no entry names or waives it")
+        if w.id not in changed and w.id not in touched:
+            p.warnings.append(f"waived {w.id} did not change in the map"
+                              + (" and the code did not touch it" if impact is not None else ""))
+    for box in sorted(touched - named - waived):
+        p.warnings.append(f"the code touched {box} and no entry names or waives it")
     return p
+
+
+def check_before_write(log: ChangeLog, doc: dict[str, Any],
+                       impact: dict[str, Any] | None = None) -> Problems:
+    """The same gate BEFORE the write: the log applied to a copy of the map in memory, and `check`
+    between the map as it is and that copy. Lint's errors come first, because the apply assumes a
+    log that fits; its warnings are lint's own to print. A gap here costs a trip back to the log and
+    nothing else — the map on disk has not moved."""
+    fit = lint(log, doc)
+    if not fit.ok:
+        return Problems(errors=[f"lint: {e}" for e in fit.errors])
+    return check(log, doc, _applied(log, doc), impact)
 
 
 # ── render: the log for people ────────────────────────────────────────────────────────────────────
@@ -761,9 +855,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: unknown verb '{verb}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
         return 2
-    if rest and rest[0] in ("-h", "--help"):
-        print(USAGE)
-        return 0
+    helped = subverb_help.handle(USAGE, verb, rest)
+    if helped is not None:
+        return helped
     try:
         as_json = "--json" in rest
         if as_json:
@@ -794,11 +888,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         if verb == "check":
-            if not old_opt or not new_opt:
-                print("ERROR: check needs --old <map> and --new <map>", file=sys.stderr)
+            if map_opt and (old_opt or new_opt):
+                print("ERROR: check takes --map <map> (before the write) or --old <map> --new <map> "
+                      "(after it), not both", file=sys.stderr)
+                return 2
+            if not map_opt and not (old_opt and new_opt):
+                print("ERROR: check needs --map <map> (before the write) or --old <map> --new <map> "
+                      "(after it)", file=sys.stderr)
                 return 2
             impact = json.loads(Path(touched_opt).read_text(encoding="utf-8")) if touched_opt else None
-            p = check(log, _read_map(Path(old_opt)), _read_map(Path(new_opt)), impact)
+            if map_opt:
+                p = check_before_write(log, _read_map(Path(map_opt)), impact)
+            else:
+                p = check(log, _read_map(Path(old_opt or "")), _read_map(Path(new_opt or "")), impact)
             if as_json:
                 print(json.dumps({"kind": "coyomap-changes-check", "ok": p.ok, "errors": p.errors,
                                   "warnings": p.warnings}, indent=2, ensure_ascii=False))
@@ -836,8 +938,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"applied {len(log.entries)} entries to {target}: {done.edits} fields edited, "
               f"{done.added} boxes added, {done.removed} removed; pin → {log.to_commit[:10]}")
         return 0
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except KeyError as e:
+        # Nothing here should raise one any more (a missing path is a ValueError in words); if one
+        # does, the reader still gets a sentence and not the bare quoted key.
+        print(f"ERROR: the log names {e.args[0] if e.args else e!r}, which the map does not hold", file=sys.stderr)
         return 2
 
 
