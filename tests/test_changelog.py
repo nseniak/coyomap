@@ -488,8 +488,8 @@ def test_an_index_one_past_the_end_appends_and_beyond_it_is_refused_in_words(cap
     new, done = apply(log, doc)
     assert new["rules"][0]["sites"] == [{"where": "a.py:1", "why": "guards"}, site] and done.edits == 1
     beyond = make_log(make_entry(edits=[FieldEdit("BR1", "sites[5]", None, site)]))
-    assert lint(beyond, doc).errors == ["entry e1: BR1.sites[5] — no such item in the map; a new item goes at "
-                                        "the index one past the end of its list, which appends it"]
+    assert lint(beyond, doc).errors == ["entry e1: BR1.sites[5] — no such item in the map; the list has 1 item(s) "
+                                        "and this log appends 0 before it, so sites[1] is the index that appends"]
     nested = make_log(make_entry(edits=[FieldEdit("BR1", "sites[1].why", None, "w")]))
     assert any("BR1.sites[1].why — no such item" in e for e in lint(nested, doc).errors)
     with pytest.raises(ValueError, match="sites\\[3\\]: no such field or item"):
@@ -500,6 +500,33 @@ def test_an_index_one_past_the_end_appends_and_beyond_it_is_refused_in_words(cap
         assert changelog.main(["lint", bad, "--map", old]) == 1
         text = capsys.readouterr()
         assert "no such item in the map" in text.out and "KeyError" not in text.err and "'sites[5]'" not in text.err
+
+
+def test_a_log_may_append_several_items_to_one_list_and_removals_never_shift_another_entry_s_edit():
+    """Two appends on one list, in one entry or two, land in order; the second is addressed one
+    past the end the first left. A removal in one entry and an edit by index in another read the
+    map as it was: the removals land last across the whole log, so `sites[1].why` still names B
+    after another entry removed `sites[0]`. An edit inside an item a removal takes out is refused,
+    because it would land and vanish."""
+    doc = make_doc()
+    doc["rules"][0]["sites"] = [{"where": "srv.py:1", "why": "A"}, {"where": "srv.py:2", "why": "B"}]
+    c, d = {"where": "srv.py:3", "why": "C"}, {"where": "srv.py:4", "why": "D"}
+    log = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[2]", None, c), FieldEdit("BR1", "sites[3]", None, d)]))
+    assert lint(log, doc).ok, lint(log, doc).errors
+    assert [x["why"] for x in apply(log, doc)[0]["rules"][0]["sites"]] == ["A", "B", "C", "D"]
+    two = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[2]", None, c)]),
+                   make_entry("e2", edits=[FieldEdit("BR1", "sites[3]", None, d)]))
+    assert lint(two, doc).ok and [x["why"] for x in apply(two, doc)[0]["rules"][0]["sites"]] == ["A", "B", "C", "D"]
+    skip = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[2]", None, c), FieldEdit("BR1", "sites[4]", None, d)]))
+    assert lint(skip, doc).errors == ["entry e1: BR1.sites[4] — no such item in the map; the list has 2 item(s) and "
+                                      "this log appends 1 before it, so sites[3] is the index that appends"]
+    shifted = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[0]", {"where": "srv.py:1", "why": "A"}, None)]),
+                       make_entry("e2", edits=[FieldEdit("BR1", "sites[1].why", "B", "B2"), FieldEdit("BR1", "sites[2]", None, c)]))
+    assert lint(shifted, doc).ok, lint(shifted, doc).errors
+    assert [x["why"] for x in apply(shifted, doc)[0]["rules"][0]["sites"]] == ["B2", "C"]
+    inside = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[1]", {"where": "srv.py:2", "why": "B"}, None)]),
+                      make_entry("e2", edits=[FieldEdit("BR1", "sites[1].why", "B", "B2")]))
+    assert lint(inside, doc).errors == ["entry e2: edits BR1.sites[1].why, inside sites[1], which entry e1 removes"]
 
 
 def test_a_useless_waiver_warns_whatever_the_flags():

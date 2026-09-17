@@ -294,6 +294,24 @@ def _walk(row: Any, key: str, create: bool = False) -> tuple[Any, str | int] | N
     return None
 
 
+_INDEXED = re.compile(r"^(.*)\[(\d+)\]$")
+
+
+def _append_slot(row: dict[str, Any], key: str) -> tuple[str, list[Any], int] | None:
+    """When `key` ends in a positional index (`sites[2]`), the list it names in this row, as
+    (list path, the list, the index); None for any other key or when the path is not a list."""
+    m = _INDEXED.match(key)
+    if not m:
+        return None
+    path, pos = m.group(1), int(m.group(2))
+    hit = _walk(row, path)
+    if hit is None:
+        return None
+    container, at = hit
+    items = container[int(at)] if isinstance(container, list) else container.get(at)
+    return (path, items, pos) if isinstance(items, list) else None
+
+
 def get_field(row: dict[str, Any], key: str) -> Any:
     hit = _walk(row, key)
     if hit is None:
@@ -384,6 +402,8 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     added_ids = _added_ids(log)
     removed_ids = {r for e in log.entries for r in e.removed}
     prose: list[tuple[str, str, str]] = []   # (label, box, text) of every edit a reader will meet as words
+    appends: dict[tuple[str, str], int] = {}  # (box, list path) → items this log has already appended
+    dropped: dict[tuple[str, str], str] = {}  # (box, item key) → the entry whose `now: null` removes it
     pin = doc.get("commit")
     if isinstance(pin, str) and pin and not _commit_matches(log.from_commit, pin):
         p.errors.append(f"the log starts from {log.from_commit}, the map is pinned to {pin}")
@@ -436,10 +456,23 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             if found is None and ed.was is not None:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — no such field or item in the map")
                 continue
-            if found is None and _walk(json.loads(json.dumps(hit[1])), ed.key, create=True) is None:
-                p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; a new item goes at the "
-                                f"index one past the end of its list, which appends it")
-                continue
+            if found is None:
+                slot = _append_slot(hit[1], ed.key)
+                if slot is not None:
+                    path, items, pos = slot
+                    ahead = appends.get((ed.id, path), 0)
+                    if pos != len(items) + ahead:
+                        p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; the list has "
+                                        f"{len(items)} item(s) and this log appends {ahead} before it, so "
+                                        f"{path}[{len(items) + ahead}] is the index that appends")
+                        continue
+                    appends[(ed.id, path)] = ahead + 1
+                elif _walk(json.loads(json.dumps(hit[1])), ed.key, create=True) is None:
+                    p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; a new item goes at the "
+                                    f"index one past the end of its list, which appends it")
+                    continue
+            elif ed.now is None and isinstance(found[0], list):
+                dropped[(ed.id, ed.key)] = e.id
             if current != ed.was:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — the map holds {json.dumps(current, ensure_ascii=False)[:80]}, "
                                 f"the log says was {json.dumps(ed.was, ensure_ascii=False)[:80]}")
@@ -459,6 +492,12 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
                 p.errors.append(f"{where}: removes {rid}, which is not in the map")
         for f in field_findings(f"{where} sentence", e.sentence):
             p.warnings.append(_finding_line(f))
+    # An edit inside an item another edit removes would land and then vanish with the item.
+    for e in log.entries:
+        for ed in e.edits:
+            for (box, item), by in dropped.items():
+                if ed.id == box and ed.key != item and ed.key.startswith(item) and ed.key[len(item)] in ".[":
+                    p.errors.append(f"entry {e.id}: edits {ed.id}.{ed.key}, inside {item}, which entry {by} removes")
     for w in log.waived:
         if w.id not in index:
             p.warnings.append(f"waived {w.id} is not in the map")
@@ -546,15 +585,21 @@ def _removal_index(key: str) -> int:
 
 def _applied(log: ChangeLog, doc: dict[str, Any], done: Applied | None = None) -> dict[str, Any]:
     """A copy of the map with every entry written in — no checks; `apply` and `lint` both run it.
-    Within an entry the field edits land first and the removals (`now: null`) last, positional ones
-    from the highest index down, so removing `sites[0]` never shifts what `sites[1].why` names."""
+    Every address in the log is read in the frame of the map as it was: the field edits land
+    first, in log order (so a second append on one list goes after the first), and the removals
+    (`now: null`) last, across the WHOLE log, positional ones from the highest index down. Removing
+    `sites[0]` in one entry never shifts what `sites[1].why` names in another — the first version
+    ordered removals last within each entry only, and an edit in a later entry landed on the
+    shifted list."""
     new = json.loads(json.dumps(doc))
     index = index_map(new)
     done = done or Applied()
+    drops: list[FieldEdit] = []
     for e in log.entries:
-        sets = [ed for ed in e.edits if ed.now is not None]
-        drops = sorted((ed for ed in e.edits if ed.now is None), key=lambda ed: -_removal_index(ed.key))
-        for ed in sets + drops:
+        for ed in e.edits:
+            if ed.now is None:
+                drops.append(ed)
+                continue
             set_field(index[ed.id][1], ed.key, ed.now)
             done.edits += 1
         for a in e.added:
@@ -565,6 +610,9 @@ def _applied(log: ChangeLog, doc: dict[str, Any], done: Applied | None = None) -
             array, row = index[rid]
             new[array] = [r for r in new[array] if r is not row]
             done.removed += 1
+    for ed in sorted(drops, key=lambda ed: -_removal_index(ed.key)):
+        set_field(index[ed.id][1], ed.key, None)
+        done.edits += 1
     new["commit"] = log.to_commit
     return new
 

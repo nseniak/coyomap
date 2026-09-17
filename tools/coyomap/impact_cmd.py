@@ -179,9 +179,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             map_dir = map_path.resolve().parent.relative_to(repo.resolve()).as_posix()
         except ValueError:
-            # A copy of the map kept outside the repo (a rehearsal, a test): the repo's folder of
-            # the same name is still the map's own.
-            map_dir = map_path.resolve().parent.name
+            # A copy of the map kept outside the repo (a rehearsal, a test): the repo's own
+            # `.coyomap/` is still the map's folder.
+            map_dir = ".coyomap"
         print(format_result(m, result, map_dir))
     return 0
 

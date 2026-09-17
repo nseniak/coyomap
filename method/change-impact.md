@@ -138,10 +138,12 @@ the log's own addresses resolve the same way: `dump --id flow:UC6`, `dump --id s
 `dump --id rule:BR168:0` (that rule's first site), `dump --id glossary:<term>`. `was` must equal
 what the map holds — `lint` refuses a stale `was`, since applying it would overwrite a change
 someone else made; one field is edited by one entry, and the log's `from_commit` must be the map's
-pin. `now: null` removes the field or the list item; an entry's removals land after its other
-edits, from the highest index down, so removing `sites[0]` never shifts what `sites[1].why` names.
-To add a list item, address the position one past the end with `was: null` and the whole item as
-`now`: `sites[2]` on a rule with two sites appends a third, and `sites[5]` on it is refused. A row
+pin. `now: null` removes the field or the list item; the log's removals land after every other
+edit, from the highest index down, so removing `sites[0]` in one entry never shifts what
+`sites[1].why` names in another — and an edit inside an item a removal takes out is refused. To
+add a list item, address the position one past the end with `was: null` and the whole item as
+`now`: `sites[2]` on a rule with two sites appends a third, `sites[3]` after it a fourth, and
+`sites[5]` on it is refused. A row
 this log adds is written whole — never added and then edited; a row an entry removes is edited by
 no other. The new words face the map's readability check at `lint` (under 20 words a sentence, no
 em dash, no code word), as advice — every sentence an added row carries too, through the same
