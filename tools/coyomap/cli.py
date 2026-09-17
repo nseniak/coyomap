@@ -77,6 +77,14 @@ Commands:
   diff       What changed between two maps, ROW BY ROW — added / dropped / changed, with the
              fields that moved. Two assembles of the SAME work (old map vs new, before vs after a
              `fix`), never two independent builds: those agree on neither numbering nor wording.
+  changes    The change log of one map update: lint / render / apply / check — the
+             entries that say what the product now does differently, each naming its
+             boxes and the map edits it makes; `check` is the gate that the log explains
+             every change the map's own diff shows.
+  impact     Which boxes a code change touches, read off the map's code links — the direct
+             hits with their resolution, and what they ripple to (`--json` feeds `changes check`).
+  reanchor   Move every code link whose line only shifted between the map's pin and a commit,
+             from git's line mapping; list the links into changed lines for the agent.
   dump       Emit the parsed model as JSON — whole, or a fixed slice (--id /
              --record / --edges / --members). Read-only lookups over the model.
   reconcile  Expand path RULES into an explicit `reconcile.json` (the synthesis
@@ -191,6 +199,15 @@ def _dispatch(cmd: str, rest: list[str]) -> int:
     if cmd == "diff":
         from coyomap import mapdiff  # stdlib-only; two maps of one lineage — it says when they are not
         return mapdiff.main(rest)
+    if cmd == "changes":
+        from coyomap import changelog  # stdlib-only; the log's four readers
+        return changelog.main(rest)
+    if cmd == "impact":
+        from coyomap import impact_cmd  # stdlib-only; the impact engine as a command
+        return impact_cmd.main(rest)
+    if cmd == "reanchor":
+        from coyomap import reanchor  # stdlib-only; git's line mapping applied to the map's code links
+        return reanchor.main(rest)
     if cmd == "dump":
         from coyomap import dump  # stdlib-only; defaults to .coyomap/project-map.json
         return dump.main(rest)

@@ -1,0 +1,565 @@
+{
+  "format": "coyomap-changes",
+  "version": 1,
+  "from_commit": "3a9e901",
+  "to_commit": "1b77f52",
+  "date": "2026-09-15",
+  "entries": [
+    {
+      "id": "e1",
+      "headline": "Removing or demoting the last admin is refused",
+      "sentence": "A team can no longer be left with nobody who can manage it. The store refuses the removal or the demotion inside its write lock. Only a member who has signed in counts as an admin.",
+      "elements": [
+        "BR209",
+        "BR168",
+        "C19",
+        "C13",
+        "UC6",
+        "UC7"
+      ],
+      "edits": [
+        {
+          "id": "BR168",
+          "key": "risk",
+          "was": "Only the screens hold this back, so a direct call still gets through. A team could end up with no admin at all.",
+          "now": "Only the screens hold this back, so a direct call still gets through. It can no longer empty a team of admins — BR209 refuses that in the store. What it can still do is let an admin change their own role or drop themselves while another admin remains."
+        },
+        {
+          "id": "C19",
+          "key": "purpose",
+          "was": "Decides which MCP servers and which of their tools a person's role may use. Denies a person with no role.",
+          "now": "Decides which MCP servers and which of their tools a person's role may use. Denies a person with no role. Also answers whether removing one member, or moving them off an admin role, would leave the team with nobody able to manage it."
+        },
+        {
+          "id": "C13",
+          "key": "purpose",
+          "was": "Builds one dashboard API out of fourteen smaller route groups, and shares their request and reply shapes. Also holds the helpers those groups reuse, such as readiness and change broadcasts.",
+          "now": "Builds one dashboard API out of fourteen smaller route groups, and shares their request and reply shapes. Also holds the helpers those groups reuse, such as readiness, change broadcasts, and which members have actually signed in rather than only been invited."
+        },
+        {
+          "id": "flow:UC6",
+          "key": "steps[n=3].where",
+          "was": "frontend/src/pages/admin/UserDetailPage.tsx:70",
+          "now": "frontend/src/pages/admin/UserDetailPage.tsx:76"
+        },
+        {
+          "id": "flow:UC7",
+          "key": "steps[n=3].where",
+          "was": "frontend/src/pages/admin/UserDetailPage.tsx:87",
+          "now": "frontend/src/pages/admin/UserDetailPage.tsx:101"
+        }
+      ],
+      "added": [
+        {
+          "kind": "rules",
+          "row": {
+            "id": "BR209",
+            "name": "The last admin cannot be removed",
+            "statement": "A team may not remove, or move off an admin role, the only member holding one who has signed in.",
+            "block": "BLK9",
+            "sites": [
+              {
+                "where": "backend/src/mcpolis/domain/services/settings_resolver.py:116",
+                "why": "Answers whether this one removal or role change would leave the team with no admin, counting only members who have signed in.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/domain/services/settings_resolver.py:150",
+                "why": "Refuses the write, with wording that tells the caller to give somebody else an admin role first.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/adapters/repositories/file_config_store.py:117",
+                "why": "Checks it inside the write lock when a member is removed, so two parallel removals cannot each see a surviving admin.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/adapters/repositories/file_config_store.py:129",
+                "why": "Same check when a member's role is changed.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/adapters/repositories/mongo_config_repository.py:150",
+                "why": "The cloud store applies the same check inside its own write lock on removal.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/adapters/repositories/mongo_config_repository.py:164",
+                "why": "Same on a role change.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/entrypoints/routes/dashboard/users_admin.py:132",
+                "why": "The Team screens' removal is refused with a conflict answer and the shared wording, before the store is reached.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/entrypoints/routes/dashboard/users_admin.py:189",
+                "why": "The Team screens' role change is refused the same way, but only once the chosen role is known to exist.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/entrypoints/controllers/admin_mcp_controller.py:883",
+                "why": "An assistant asking to remove a member gets the same refusal, so the rule holds on both doors.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/entrypoints/controllers/admin_mcp_controller.py:917",
+                "why": "Same when an assistant asks to change a member's role.",
+                "no_call_site": false
+              }
+            ],
+            "access": true,
+            "risk": "This is the one state a team cannot repair itself: every screen and every management tool needs an admin, so a team with none can only be fixed by a service operator, by hand. A check in the screens alone would not hold, because the assistant's tools and direct calls do not pass through them.",
+            "confidence": "verified"
+          }
+        },
+        {
+          "kind": "tests",
+          "row": {
+            "targets": [
+              "UC6",
+              "UC7",
+              "C19",
+              "C3"
+            ],
+            "tested": "yes",
+            "label": "A team cannot be left with nobody able to manage it",
+            "tests": [
+              {
+                "file": "backend/tests/unit/test_settings_resolver.py:132",
+                "why": "Covers the decision itself: the only admin is refused, one of two is allowed, a non-admin is always allowed, and a move to another admin role is allowed."
+              },
+              {
+                "file": "backend/tests/unit/test_settings_resolver.py:221",
+                "why": "Checks an invited address that never signed in does not count as an admin, so a mistyped invitation cannot license the real admin to leave."
+              },
+              {
+                "file": "backend/tests/unit/test_parametrized_config_store.py:138",
+                "why": "Checks both storage kinds refuse the removal and the demotion in their own write path."
+              },
+              {
+                "file": "backend/tests/unit/test_parametrized_config_store.py:167",
+                "why": "Checks two parallel removals cannot both pass and empty the admins, which is what putting the check inside the write lock buys."
+              },
+              {
+                "file": "backend/tests/unit/test_dashboard_api.py:2296",
+                "why": "Checks the Team screens get a conflict answer on removal and on the role change, and that a second admin unblocks both."
+              },
+              {
+                "file": "backend/tests/unit/test_dashboard_api.py:2365",
+                "why": "Checks a pending admin does not count, and that the mistyped invitation can still be cleaned up."
+              },
+              {
+                "file": "backend/tests/unit/test_admin_mcp.py:619",
+                "why": "Checks the assistant's own remove and role-change tools refuse the same way, so the rule holds on both doors."
+              }
+            ],
+            "gap": "Nothing drives this through a browser. The Team screens' new failure message is checked by no test at all, so a screen that swallowed the refusal and looked successful would still pass.",
+            "confidence": "verified"
+          }
+        }
+      ],
+      "removed": [],
+      "evidence": [
+        "backend/src/mcpolis/adapters/repositories/file_config_store.py",
+        "backend/src/mcpolis/adapters/repositories/mongo_config_repository.py",
+        "backend/src/mcpolis/domain/services/settings_resolver.py",
+        "backend/src/mcpolis/entrypoints/controllers/admin_mcp_controller.py",
+        "backend/src/mcpolis/entrypoints/routes/dashboard/users_admin.py"
+      ],
+      "confidence": "verified"
+    },
+    {
+      "id": "e2",
+      "headline": "A bare /my-tools address now lands on your own tools page",
+      "sentence": "Two links the service sends out carry no team name. They used to fall through to the marketing homepage. Now they land on the reader's own tools page, token included.",
+      "elements": [
+        "BR210",
+        "EP210",
+        "C61",
+        "UC29",
+        "UC44",
+        "C103",
+        "I1"
+      ],
+      "edits": [
+        {
+          "id": "C61",
+          "key": "purpose",
+          "was": "Mounts every screen at its own web address. Sends a signed-in person on to the first screen their role should see.",
+          "now": "Mounts every screen at its own web address. Sends a signed-in person on to the first screen their role should see, and resolves the addresses the service mails out without a team name to that reader's own team."
+        },
+        {
+          "id": "UC29",
+          "key": "entry_points",
+          "was": [
+            "EP197",
+            "EP84",
+            "EP85",
+            "EP132",
+            "EP168"
+          ],
+          "now": [
+            "EP197",
+            "EP210",
+            "EP84",
+            "EP85",
+            "EP132",
+            "EP168"
+          ]
+        },
+        {
+          "id": "UC44",
+          "key": "entry_points",
+          "was": [
+            "EP13"
+          ],
+          "now": [
+            "EP13",
+            "EP210"
+          ]
+        },
+        {
+          "id": "C103",
+          "key": "files",
+          "was": [
+            "tests/e2e/00-locator-hygiene.spec.ts",
+            "tests/e2e/01-auth-onboarding.spec.ts",
+            "tests/e2e/02-admin-dashboard.spec.ts",
+            "tests/e2e/03-user-dashboard.spec.ts",
+            "tests/e2e/06-join-flow.spec.ts",
+            "tests/e2e/07-organizations.spec.ts",
+            "tests/e2e/24-docs-stdio-authent-anchor.spec.ts",
+            "tests/e2e/25-signup-slug-taken.spec.ts",
+            "tests/e2e/29-org-switcher-non-admin-landing.spec.ts",
+            "tests/e2e/30-manage-switch-non-admin-landing.spec.ts",
+            "tests/e2e/31-manage-delete-button-visibility.spec.ts",
+            "tests/e2e/32-join-link-cookie-slug.spec.ts",
+            "tests/e2e/33-delete-non-current-org.spec.ts",
+            "tests/e2e/34-plan-gates.spec.ts"
+          ],
+          "now": [
+            "tests/e2e/00-locator-hygiene.spec.ts",
+            "tests/e2e/01-auth-onboarding.spec.ts",
+            "tests/e2e/02-admin-dashboard.spec.ts",
+            "tests/e2e/03-user-dashboard.spec.ts",
+            "tests/e2e/06-join-flow.spec.ts",
+            "tests/e2e/07-organizations.spec.ts",
+            "tests/e2e/24-docs-stdio-authent-anchor.spec.ts",
+            "tests/e2e/25-signup-slug-taken.spec.ts",
+            "tests/e2e/29-org-switcher-non-admin-landing.spec.ts",
+            "tests/e2e/30-manage-switch-non-admin-landing.spec.ts",
+            "tests/e2e/31-manage-delete-button-visibility.spec.ts",
+            "tests/e2e/32-join-link-cookie-slug.spec.ts",
+            "tests/e2e/33-delete-non-current-org.spec.ts",
+            "tests/e2e/34-plan-gates.spec.ts",
+            "tests/e2e/40-bare-my-tools-redirect.spec.ts"
+          ]
+        },
+        {
+          "id": "I1",
+          "key": "ways_in",
+          "was": [
+            "EP1",
+            "EP2",
+            "EP23",
+            "EP33",
+            "EP81",
+            "EP82",
+            "EP83",
+            "EP84",
+            "EP85",
+            "EP86",
+            "EP87",
+            "EP88",
+            "EP89",
+            "EP90",
+            "EP91",
+            "EP92",
+            "EP93",
+            "EP94",
+            "EP95",
+            "EP96",
+            "EP97",
+            "EP98",
+            "EP99",
+            "EP100",
+            "EP101",
+            "EP102",
+            "EP103",
+            "EP104",
+            "EP105",
+            "EP106",
+            "EP107",
+            "EP108",
+            "EP109",
+            "EP110",
+            "EP111",
+            "EP112",
+            "EP113",
+            "EP114",
+            "EP115",
+            "EP116",
+            "EP117",
+            "EP118",
+            "EP119",
+            "EP120",
+            "EP121",
+            "EP122",
+            "EP123",
+            "EP124",
+            "EP125",
+            "EP126",
+            "EP127",
+            "EP128",
+            "EP129",
+            "EP130",
+            "EP131",
+            "EP132",
+            "EP133",
+            "EP134",
+            "EP135",
+            "EP136",
+            "EP137",
+            "EP138",
+            "EP139",
+            "EP140",
+            "EP141",
+            "EP142",
+            "EP147",
+            "EP148",
+            "EP149",
+            "EP150",
+            "EP151",
+            "EP152",
+            "EP153",
+            "EP154",
+            "EP155",
+            "EP168",
+            "EP183",
+            "EP184",
+            "EP185",
+            "EP186",
+            "EP187",
+            "EP188",
+            "EP189",
+            "EP190",
+            "EP191",
+            "EP192",
+            "EP193",
+            "EP194",
+            "EP195",
+            "EP196",
+            "EP197"
+          ],
+          "now": [
+            "EP1",
+            "EP2",
+            "EP23",
+            "EP33",
+            "EP81",
+            "EP82",
+            "EP83",
+            "EP84",
+            "EP85",
+            "EP86",
+            "EP87",
+            "EP88",
+            "EP89",
+            "EP90",
+            "EP91",
+            "EP92",
+            "EP93",
+            "EP94",
+            "EP95",
+            "EP96",
+            "EP97",
+            "EP98",
+            "EP99",
+            "EP100",
+            "EP101",
+            "EP102",
+            "EP103",
+            "EP104",
+            "EP105",
+            "EP106",
+            "EP107",
+            "EP108",
+            "EP109",
+            "EP110",
+            "EP111",
+            "EP112",
+            "EP113",
+            "EP114",
+            "EP115",
+            "EP116",
+            "EP117",
+            "EP118",
+            "EP119",
+            "EP120",
+            "EP121",
+            "EP122",
+            "EP123",
+            "EP124",
+            "EP125",
+            "EP126",
+            "EP127",
+            "EP128",
+            "EP129",
+            "EP130",
+            "EP131",
+            "EP132",
+            "EP133",
+            "EP134",
+            "EP135",
+            "EP136",
+            "EP137",
+            "EP138",
+            "EP139",
+            "EP140",
+            "EP141",
+            "EP142",
+            "EP147",
+            "EP148",
+            "EP149",
+            "EP150",
+            "EP151",
+            "EP152",
+            "EP153",
+            "EP154",
+            "EP155",
+            "EP168",
+            "EP183",
+            "EP184",
+            "EP185",
+            "EP186",
+            "EP187",
+            "EP188",
+            "EP189",
+            "EP190",
+            "EP191",
+            "EP192",
+            "EP193",
+            "EP194",
+            "EP195",
+            "EP196",
+            "EP197",
+            "EP210"
+          ]
+        }
+      ],
+      "added": [
+        {
+          "kind": "rules",
+          "row": {
+            "id": "BR210",
+            "name": "A link with no team name lands on the reader's own team",
+            "statement": "The two addresses the service sends out without a team name resolve to the reader's own team, never to the marketing site.",
+            "block": "BLK9",
+            "sites": [
+              {
+                "where": "frontend/src/App.tsx:214",
+                "why": "Mounts the bare tools address so it no longer falls through to the catch-all that sends unknown addresses to the marketing homepage.",
+                "no_call_site": false
+              },
+              {
+                "where": "frontend/src/App.tsx:108",
+                "why": "Resolves the reader's own team name and forwards them, keeping whatever the link carried after the question mark.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/domain/services/tool_router.py:350",
+                "why": "The gateway's 'you are not signed in to this server' reply is one of the two senders of that address.",
+                "no_call_site": false
+              },
+              {
+                "where": "backend/src/mcpolis/domain/services/upstream_health_check.py:168",
+                "why": "The connection-expired message is the other, and its address carries a one-time token the destination needs.",
+                "no_call_site": false
+              }
+            ],
+            "access": false,
+            "risk": "Nothing fails loudly when this breaks. The web server answers every address with the dashboard, so a reader following the link sees a normal page — the wrong one — and the service never learns they did not arrive.",
+            "confidence": "verified"
+          }
+        },
+        {
+          "kind": "entry_points",
+          "row": {
+            "id": "EP210",
+            "kind": "ui-route",
+            "component": "C61",
+            "source": "frontend/src/App.tsx:214",
+            "trigger": "A browser asks for the bare tools address, with no team name in it.",
+            "activation": "external",
+            "runs_in": [],
+            "cadence": "",
+            "cadence_source": ""
+          }
+        },
+        {
+          "kind": "tests",
+          "row": {
+            "targets": [
+              "UC44",
+              "UC29",
+              "C61"
+            ],
+            "tested": "yes",
+            "label": "A link sent without a team name lands on the reader's own tools page",
+            "tests": [
+              {
+                "file": "tests/e2e/40-bare-my-tools-redirect.spec.ts:51",
+                "why": "Drives a browser to the bare address and checks it ends on the team's tools page, not the marketing homepage."
+              },
+              {
+                "file": "tests/e2e/40-bare-my-tools-redirect.spec.ts:78",
+                "why": "Checks the one-time token the expired-connection message carries survives the forwarding."
+              }
+            ],
+            "gap": "Nothing checks the two senders actually emit this address. The test proves the address resolves; a sender that changed its wording would still pass.",
+            "confidence": "verified"
+          }
+        }
+      ],
+      "removed": [],
+      "evidence": [
+        "frontend/src/App.tsx",
+        "backend/src/mcpolis/domain/services/tool_router.py",
+        "backend/src/mcpolis/domain/services/upstream_health_check.py"
+      ],
+      "confidence": "verified"
+    },
+    {
+      "id": "e3",
+      "headline": "The audit-log doc now matches the product",
+      "sentence": "The published page claimed the log records each call's arguments and reply. It does not, by design, and the map already said so; the doc was corrected, the map was right.",
+      "elements": [
+        "BR202"
+      ],
+      "edits": [],
+      "added": [],
+      "removed": [],
+      "evidence": [
+        "docs/audit-log.md"
+      ],
+      "confidence": "verified"
+    }
+  ],
+  "waived": [
+    {
+      "id": "C66",
+      "why": "the Team screens gained a failure message when a refusal comes back; the map does not describe per-screen error display"
+    },
+    {
+      "id": "D23",
+      "why": "the route table gained one address; the dependency itself did not change"
+    },
+    {
+      "id": "D22",
+      "why": "touched at file level only, no change of meaning"
+    }
+  ],
+  "notes": "Two step anchors moved inside a try and could not be mapped by git; they were read and written by hand (UC6 and UC7, step 3). The tests row 35 gained a test and a new gap sentence; tests rows carry no id, so that edit is not in this log. The e2e spec was read, not run."
+}

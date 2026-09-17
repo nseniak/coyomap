@@ -1,154 +1,140 @@
-# Change-impact analysis
+# Updating the map after the code changed
 
-After you change code, coyomap reports the impact on the existing baseline map — what is
-**modified / added / deleted** — so you understand the new code grounded in the model you
-already learned. No special machinery: the same skill as building the baseline (read code →
-meaning), scoped to the diff.
+After the code changed, coyomap **updates the map** and writes the **change log**: what the product
+now does differently, in entries that name the boxes they are about, with the map edits each entry
+makes. The log is the product of the update; the updated map is what it leaves behind. The same skill
+as building the baseline — read code → meaning — scoped to the diff, and bounded by tools that know
+what the map already says.
 
-## Lifecycle — three steps, two documents
+## Lifecycle — one verb, seven steps, two documents
 
-| Step | Action | Writes | Committed? |
+| Step | Action | Tool | Writes |
 |---|---|---|---|
-| **1 Build** | map the repo | `.coyomap/project-map.json` (+ the generated `project-map.md` view + `preindex.json`; the diagram is served, never written) | yes — pinned to the code commit it describes |
-| **2 Analyze** | diff the code against the baseline | `.coyomap/analysis-changes/<date>.md` (the report) | **no** — written to disk, uncommitted |
-| **3 Accept** | fold the report into the baseline | patches `project-map.json`, regenerates the markdown view + pre-index | yes — all committed |
+| **0 Gate** | the worktree must be clean; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old`; deleted at step 7, never committed) |
+| **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json` | the impact file, beside the log (deleted at step 7, never committed) |
+| **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit |
+| **3 Read and write** | read the diff and the touched boxes; write the log | you | `.coyomap/changes/<from>-<to>.json` |
+| **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
+| **5 Apply** | the entries land in the map, the pin moves | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
+| **6 Check** | the gate: the log explains every change the map's own diff shows | `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | nothing |
+| **7 Close** | the invariant, the rendering, the commit | validate → audit → render; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; delete the `.before.json` and `.impact.json` scratch files | the markdown view, the rendered log, the pre-index; **one commit** of map + log + views |
 
-The change-impact report is a **file from the moment it's generated** (step 2) — just
-uncommitted. This mirrors git's own model: the report is a *working-tree change*, accept is
-the *commit*. So it survives a lost session, you can open / review / share it (essential for
-PR review), and you can accept later.
+- **`update`** is the whole sequence. **`analyze`** is steps 0–4: the log written and linted, the
+  map's meaning untouched — its code links have moved (step 2), which is a change of no meaning —
+  for a reader who wants the log before it lands. **`accept`** is steps 5–7 on a log that already
+  exists; it finds the `.before.json` copy step 0 left beside the log.
+- **From and to are commits.** `from` is the map's pin, `to` is `HEAD`. A dirty tree cannot be
+  named, so step 0 refuses it: commit first, or stash. (The old rule analyzed the working tree so an
+  edit could be read before its commit; that preview is `git stash` away, and a log that names a
+  commit is worth more than one that names a moment.)
+- **`.coyomap/changes/` must be tracked.** A repo whose `.gitignore` covers the whole `.coyomap/`
+  folder cannot commit the log; say so at step 0 and fix the ignore rule with the user before going on.
+- **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
+  agree, and the next update starts from there.
 
-- report (step 2) = working-tree change → on disk, **uncommitted**
-- accepted baseline-diff (step 3) = commit → on disk, **committed**
+## Where the map lags, and how far
 
-There is no third artifact: the draft report and the accepted baseline-diff are the **same
-file in two states**.
-
-## When does the baseline update?
-
-Only at **accept** — never during analysis. The baseline always describes one past commit:
-its **pin**. A diff is always measured from the pin to the current code.
-
-```
-baseline pinned @ C0  ───────────────────────────▶ (unchanged)
-   edit code → C1
-   step 2: git diff C0..C1 → report               baseline STILL @ C0
-   step 3 accept: patch baseline → C1, bump pin    baseline NOW @ C1
-   edit code → C2
-   step 2: git diff C1..C2 ...
-```
-
-- The **pin = the last accepted point.** Diff left endpoint = pin, right endpoint = **now = the
-  current working tree** (includes uncommitted edits and new files, so analysis runs on a dirty tree).
-- Between edits and accept the baseline lags the code on purpose; that lag is exactly what
-  the diff describes. Accept zeroes it.
-- **Cadence is yours:** several code commits then one accept → a cumulative `pin..now` diff;
-  accept after each change → small diffs. Either works.
+The map always describes one past commit, its **pin**. Between updates it lags the code on purpose,
+and that lag is exactly what the next log describes. Cadence is yours: one update per commit gives
+small logs; one per week gives one log with more entries. Either way every entry names the commits.
 
 ## Principles
 
-- **Driven by BOTH.** The **diff drives** (bottom-up — what changed, what it reaches; this
-  catches ADDED code that maps to no existing element). The **baseline guides** (anti-drift
-  + consistent names; catches MODIFIED/DELETED). Walking only the baseline's elements would
-  miss purely-additive changes, so the diff must be a driver, not just the guide.
-- **Cheaper direction.** Start from the change set and trace OUTWARD to the elements it
-  reaches. Do NOT walk every baseline element asking "is it affected?" (that's O(all
-  elements) and forces proving a negative for each).
-- **Baseline pin.** The diff is `git diff <baseline-commit>` — pin **to the current working tree**,
-  not commit-to-commit, so it captures committed changes *and* uncommitted edits (use `-M` so renames
-  are renames). A plain `git diff` omits **untracked** new files, so also list them
-  (`git ls-files --others --exclude-standard`) and treat them as added. git is ground truth for
-  added/deleted/renamed. (Analysis runs fine on a dirty tree; *accepting* still needs committed code
-  — the pin gate in `method.md`.)
-- **Per change.** Classify modified / added / deleted; **ripple** by following the changed
-  element's relationships (edge list) to downstream elements and Happy Path steps. Verify by
-  reading the changed code; a pure refactor/move with no behavior change = "no analysis
-  impact" (keep noise down).
-- **Resolution honesty.** Always place a change at least at **component** level (which file →
-  which component — always available). Sharpen to entity / HP step where reading allows.
-  **State the resolution reached per change**; don't fake HP-step precision. For a
-  widely-used helper, the honest answer is often "load-bearing, high blast radius — reaches
-  HP-a/b/c", which is itself useful.
+- **Driven by BOTH.** The **diff drives** (bottom-up — what changed, what it reaches; this catches
+  ADDED code that maps to no existing box). The **baseline guides** (anti-drift, consistent names;
+  catches MODIFIED and REMOVED). Walking only the baseline would miss purely-additive changes, so
+  the diff must be a driver, not just the guide.
+- **Bounded, not blind.** `coyomap impact` is the list of boxes whose code links fall in the changed
+  files, with the resolution each was found at. Read those first, and the changed files they are
+  not in. A box it names that no entry names or waives is a warning at step 6; a box it does not
+  name that an entry claims is your own finding, and says so in the entry's evidence.
+- **Line moves are not changes.** `coyomap reanchor` moves every link whose line only shifted, and
+  lists the links into lines the code changed or files that are gone — those are yours to read. The
+  log never carries a line move, and `check` ignores link-only changes.
+- **Per change.** Classify a box as modified / added / removed; **ripple** by following its
+  relations (arrows, flows, Happy Path steps). Verify by reading the changed code; a pure refactor
+  or move with no behaviour change is a **waiver**, not an entry (keep noise down).
+- **Resolution honesty.** Place a change at least at **component** level (which file → which
+  component — always available). Sharpen to a record, a rule or a step where reading allows, and
+  say the resolution reached in the entry's `confidence`; never fake step precision. For a
+  widely-used helper the honest entry is "load-bearing, reaches these use cases", which is useful.
 - **Seam caveat.** Tracing callers statically breaks at interface / dependency-injection
-  boundaries (callers hit a port, not the impl). Resolve the binding by reading the wiring
-  (a `Dependencies` / storage-factory), and note where reachability is incomplete rather than
-  claim a clean closure.
+  boundaries (callers hit a port, not the impl). Resolve the binding by reading the wiring, and put
+  where reachability is incomplete in the log's `notes` rather than claim a clean closure.
 
-## The report is patch-complete; accept is mechanical
+## The log
 
-All the code reasoning happens in **step 2**. **Accept does no new inference and re-reads no
-code** — it transcribes the report into the baseline, bumps the pin, and commits. What you
-reviewed is exactly what lands; that's the whole point of review-then-accept.
+One JSON file per update, `.coyomap/changes/<from>-<to>.json` (`from` and `to` are the two commits'
+short shas), written by you at step 3 and read by four tools. Its shape:
 
-For that to hold, the report must be **patch-complete**: for every element it touches it
-carries the exact **was → now** text, not just a description of impact.
+```json
+{
+  "format": "coyomap-changes", "version": 1,
+  "from_commit": "3a9e901", "to_commit": "1b77f52", "date": "2026-09-15",
+  "entries": [
+    {
+      "id": "e1",
+      "headline": "Removing or demoting the last admin is refused",
+      "sentence": "A team can no longer be left with nobody who can manage it. The refusal happens in the store, inside the write lock, so two parallel calls cannot each see a surviving admin.",
+      "elements": ["BR209", "BR168", "C19", "UC6", "UC7"],
+      "edits": [{"id": "BR168", "key": "risk", "was": "…the old sentence…", "now": "…the new one…"}],
+      "added": [{"kind": "rules", "row": {"id": "BR209", "name": "The last admin cannot be removed", "…": "…"}}],
+      "removed": [],
+      "evidence": ["backend/src/mcpolis/adapters/repositories/file_config_store.py"],
+      "confidence": "verified"
+    }
+  ],
+  "waived": [{"id": "C66", "why": "the screens gained a failure message; the map does not describe per-screen error display"}],
+  "notes": "Resolution reached per change, gaps, seams — the honesty footer."
+}
+```
 
-| Change | The report must already contain | Accept does |
-|---|---|---|
-| Modified | the new row/step text | replace the old text |
-| Added | the new row + which table/section + where | insert |
-| Deleted | which row to remove + every reference to scrub | delete + clean refs |
-| Ripple | the **new text** of each rippled element (e.g. UC4's new flow steps, a HP step's new `why`), not just "UC4 affected" | apply it |
-| Promotion (drill deeper) | the retired component id, the new subsystem + its child components, and every old `C — verb → X` edge **re-pointed** to a specific new component | retire the component, insert the subsystem + children, re-point the edges, scrub refs to the old id (a subsystem can't be an edge endpoint, so any leftover edge to it fails validation) |
+**The two-way rule.** Every entry names at least one box in `elements`, and every box an entry
+edits, adds or removes is among its `elements`. Every box the map's own diff says changed (wording
+or structure) is named by an entry or covered by a waiver. `lint` enforces the first half against
+the map the log is written for — and runs the whole apply on a copy through the loader and the
+validator's blocking checks, so a row of an older shape is refused before any write; `check`
+enforces the second half against the map before and after `apply`. A gap at `check` sends you back
+to step 3: write the entry, or waive with a `why`.
 
-**If accept finds itself inferring or re-reading code, the report was incomplete** —
-regenerate the report, don't invent at accept time. The draft `analysis-changes/<date>.md`
-*is* the patch; its `was → now` blocks are the edits. (The agent still performs the
-find-and-replace edits — markdown isn't a `git apply`-able patch — but adds no new
-understanding.)
+**What counts as a box for the rule.** Every row with an id; a keyed row under a synthetic id
+(`glossary:<term>`, `run:<action>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
+`net:<name>`); the map's own header under `map` (its `title`, `goal` and the other header fields —
+an edit on `map` takes one such field as its key); an arrow, credited to the box it starts from.
+Outside the rule, because they carry no identity: `tests` and `extras` rows (added as whole rows,
+never edited), and the code-link moves.
 
-## Structure of the report / annotated baseline-diff
+**What an entry says.** The `headline` is one line in product words, the words a card wears on the
+Changes tab. The `sentence` says what a user can now do or no longer do — or, for a box under the
+hood, what the machine now does differently. Both face the map's readability check (under 20 words
+a sentence, no code words). `elements` are ids; the viewer draws them by name, under Product or
+Under the hood by their kind, so the two views are derived from this list and nothing else is
+authored for them.
 
-1. **Header** — baseline-commit → new-commit, files changed.
-2. **Narrative summary** — functional (delta to the Happy Path / use cases) + technical
-   (architectural shape). Lives here, at the top, never in the baseline.
-3. **Happy Path / flow impact** — which use cases entered/left the happy path, and whose T6 flow changed.
-4. **Per-element annotated diff** — `was → now`, classification (modified/added/deleted), why,
-   code link, confidence. *This section is also the patch applied at accept* (see above).
-5. **New / removed elements.**
-6. **Honesty footer** — resolution reached, gaps, DI seams.
+**Addressing an edit.** `id` names the box; `key` is a path inside its row: `risk`, `sites[0].where`,
+`fields[name=size].type`, `steps[n=4].phrase`. A use case's flow is the row `flow:<UC id>` (an edit
+on it is an edit on the use case, which the entry names); a shared sub-flow's steps are on its own
+row. `was` must equal what the map holds — `lint` refuses a stale `was`, since applying it would
+overwrite a change someone else made; one field is edited by one entry, and the log's
+`from_commit` must be the map's pin. `now: null` removes the field or the list item; an entry's
+removals land after its other edits, from the highest index down, so removing `sites[0]` never
+shifts what `sites[1].why` names. A row this log adds is written whole — never added and then
+edited; a row an entry removes is edited by no other. The new words face the map's readability
+check at `lint` (under 20 words a sentence, no em dash, no code word), as advice. Never a JSON
+pointer with an array index into the whole map: those break the moment a row above moves.
 
-## Why the diff is clean
-
-The new baseline is the **patched** old one (surgical edits), not a fresh regeneration. So
-`prev → new` shows only real semantic deltas — `git diff` of the baseline plus an annotation
-layer, with no wording-drift noise.
-
-**Deletions need no tombstone/marker:** a diff naturally shows added/changed/removed blocks;
-the removed block IS the deletion record. Do not add per-element "changed" markers to the
-clean baseline.
-
-## Accept — the four actions
-
-1. Apply the report's `was → now` blocks to the MODEL, `.coyomap/project-map.json` (mechanical —
-   surgical field/array edits; the report's `was → now` text names the fields).
-2. Bump its commit pin (the model's `commit` and `committed` fields) to the code commit it now
-   describes — the same
-   **pin gate** as Build applies (`method.md`): the *code* must be committed (the `.coyomap/` report
-   and map you are accepting are expected to be dirty — that's what this step commits), else give the
-   user the A/B choice and record the pin `-dirty` only if they pick B.
-3. Regenerate the committed derived artifacts at the new pin — deterministic, no new inference:
-   (a) re-render the markdown view (`.venv/bin/coyomap render .coyomap/project-map.json
-   .coyomap/project-map.md`); (b) **if the map has a pre-index** (`.coyomap/preindex.json` exists),
-   rebuild it at the now-current commit (`.venv/bin/coyomap preindex --root <repo>`) so its
-   `file:line` anchors match the re-pinned map — the viewer's symbol search reads it, so a pin bump
-   without this leaves the committed index stale (wrong lines for the files the change touched). (The
-   interactive diagram is served live from the model; there is no `.html` file to re-render.)
-4. The draft `.coyomap/analysis-changes/<date>.md` becomes the committed record (no rewrite).
-5. git-commit all (map + markdown view + pre-index + report) — so baseline-commit stays aligned with
-   code-commit. The commit IS the acceptance.
-6. **Finish by reporting the URL to open the diagram** in the coyomap map server (where the file
-   browser + code viewer work): if the server isn't already running, start it from the coyomap clone
-   with `make start` (or `.venv/bin/coyomap serve`), then open
-   `http://127.0.0.1:8765/coyomap/<repo-folder-name>/` — or the landing page `http://127.0.0.1:8765/` and
-   click this project. For the address of ONE element (a use case the report names, say),
-   `.venv/bin/coyomap url <ID> --repo <repo>` prints it, port included.
+**A new box** goes in `added` as its whole row, id included, in the array it belongs to, in the
+shape the map holds today (`coyomap dump --id <a sibling>` shows it); a new use case brings its
+flow as a second added row (`kind: flows`, keyed by `uc`); a keyed row brings its key. A box that
+is gone goes in `removed` by id. **A box the code touched without changing its meaning** goes in
+`waived` with its `why`; the code-link moves `reanchor` made need no mention at all. Two dates:
+the log's `date` is the day it was written; `committed` in the map is the to-commit's date, which
+`apply --date` sets.
 
 ## Deliberately out of scope (for now)
 
-No precomputed index is used FOR THIS ANALYSIS — re-walk the diff against the baseline each time.
-(The committed `preindex.json` and the call-graph ripple engine exist, but they serve the viewer's
-symbol search and its diff overlay, not the CLI's change impact.)
-Revisit only if scale/frequency makes re-reading the bottleneck. When that day comes, the
-structured source already exists (`project-map.json`), so a viewer/tool reads it directly rather
-than introducing a second maintained model.
+- **Cross-map linking.** Each repo keeps its own baseline; a repo of repos is a later step.
+- **Automatic updates.** The update is asked for, never run by a hook: a log is a reading, and a
+  reading has a reader.
+- **Re-running tests.** An update reads code; it does not run it. A green run is a claim the log can
+  quote from the repo's own record, never one it makes.

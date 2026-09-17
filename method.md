@@ -1530,6 +1530,9 @@ from memory:
 | a corrected anchor | `coyomap fix apply-drift --to-reconcile` |
 | a duplicate edge or relation resolved | `coyomap fix dedup-edge` / `dedup-relation --to-reconcile` |
 | a before/after comparison of two maps | `coyomap diff <old> <new>` |
+| **which boxes a code change touches** | `coyomap impact --map <map> [--base <ref>] [--target <ref>] [--json]` — the map's code links projected on the diff, never a hand-walk of the files |
+| **code links whose lines only shifted** | `coyomap reanchor --map <map> [--to <ref>] --write` — git's line mapping; a hand-written appendix of 242 moves was the measured case |
+| **the change log of an update** | `coyomap changes lint / render / apply / check` — see `method/change-impact.md`; `apply` is the one writer, `check` the gate |
 
 A hand script over `project-map.json` is also how a build ends up reading a field the schema
 renamed, and how it ends up editing the ASSEMBLED map — which the next `assemble` rebuilds from the
@@ -3285,8 +3288,8 @@ self-contradiction — e.g. a re-ordered Happy Path step now reads before it cre
 the markdown view** (`coyomap render … project-map.md`, so it tracks the patched model; the diagram
 is served live) and, when the map has a pre-index, **regenerate it at the new pin**
 (`coyomap preindex --root <repo>`, so the viewer's symbol search stays aligned with the re-pinned
-map), save the annotated diff under `.coyomap/analysis-changes/<date>.md`, and commit the
-model + markdown view + pre-index + `provenance.json` with the code.
+map), keep the change log under `.coyomap/changes/<from>-<to>.json` with its rendered
+`.md` beside it, and commit the model + markdown view + pre-index + `provenance.json` + log with the code.
 
 **Drilling deeper (refine altitude in place — never a second map file).** When a subsystem is too big
 to detail at its altitude (e.g. a `plugins` area holding dozens of feature units), go finer **inside the

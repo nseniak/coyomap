@@ -115,7 +115,7 @@ KINDS: list[KindSpec] = [
     KindSpec("config", "config key", "config keys", "hood", ("key",), ("key",), ("purpose",)),
     KindSpec("observability", "signal", "signals", "hood", ("signal",), ("signal",), ()),
     KindSpec("non_entity_types", "other type", "other types", "hood", ("name",), ("name",), ("why",)),
-    KindSpec("run_commands", "run command", "run commands", "hood", ("command",), ("command",), ("action",)),
+    KindSpec("run_commands", "run command", "run commands", "hood", ("command",), ("action", "command"), ("command",)),
     KindSpec("tests", "test group", "test groups", "hood", (), ("label",), ()),
     KindSpec("extras", "extra section", "extra sections", "hood", (), ("heading",), ()),
 ]
@@ -401,13 +401,22 @@ _ITEM_NAME_KEYS = ("name", "term", "label", "key", "unit", "signal", "command", 
 
 
 def _item_text(item: Any) -> str:
-    """One list item as a short reader string — the text a list delta names it by."""
+    """One list item as a short reader string — the text a list delta names it by. An item that
+    carries a code link is named by its file, never its line: a moved line is then the same item
+    (a link move), and only a new file or a new reason is an item that came or went."""
+    if isinstance(item, str):
+        return _anchor_path(item) or item
     if isinstance(item, dict):
         if "verb" in item and "target" in item:                       # a record's relation
             return f"{item.get('verb')} {item.get('target')}"
-        if "where" in item and "why" in item:                         # a rule's enforcement site
-            path = _anchor_path(item.get("where")) or ""
-            return f"{item.get('why')} ({path})" if path else str(item.get("why"))
+        for anchor_key in ("where", "file"):                          # a site, an evidence row
+            if anchor_key in item:
+                path = _anchor_path(item.get(anchor_key)) or ""
+                why = item.get("why")
+                if why:
+                    return f"{why} ({path})" if path else str(why)
+                if path:
+                    return path
         for k in _ITEM_NAME_KEYS:
             if item.get(k):
                 text = str(item[k])
@@ -633,6 +642,11 @@ def field_deltas(old: dict[str, Any], new: dict[str, Any], idmap: dict[str, str]
             ib = [_item_text(x) for x in db] if isinstance(db, list) else []
             d.added = [x for x in ib if x not in ia]
             d.removed = [x for x in ia if x not in ib]
+            # An item that came or went is a change of STRUCTURE whatever the field's class: a new
+            # enforcement site, a rewritten site reason, a file a component now covers. Only the
+            # same items with moved lines (below) stay a code-link move.
+            if (d.added or d.removed) and d.cls == "link":
+                d.cls = "structure"
             if not d.added and not d.removed:
                 raw_a = sorted(json.dumps(x, sort_keys=True) for x in (a if isinstance(a, list) else []))
                 raw_b = sorted(json.dumps(x, sort_keys=True) for x in (b if isinstance(b, list) else []))

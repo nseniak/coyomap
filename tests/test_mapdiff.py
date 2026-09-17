@@ -30,11 +30,12 @@ FORMAT = "coyomap-map"
 def make_map(**overrides) -> dict:
     doc = {
         "format": FORMAT, "title": "t", "goal": "g",
-        "roles": [{"id": "R1", "name": "Reader", "wants": "a map"}],
+        "roles": [{"id": "R1", "name": "Reader", "wants": "a map", "kind": "human"}],
         "use_cases": [{"id": "UC1", "name": "Open the map", "actors": ["R1"],
                        "trigger_outcome": "The reader opens the map and sees the overview."}],
         "flows": [{"uc": "UC1", "title": "Open the map", "steps": make_steps(3)}],
-        "components": [{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map"}],
+        "components": [{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map",
+                        "files": ["srv.py"]}],
         "entities": [{"id": "E1", "name": "Thing", "meaning": "one thing", "source": "m.py:3",
                       "fields": [{"name": "id", "type": "str"}, {"name": "size", "type": "int"}]}],
         "edges": [],
@@ -204,6 +205,25 @@ def test_enforcement_sites_whose_lines_moved_are_a_link_change_with_no_items():
     assert f.key == "sites" and f.cls == "link" and not f.added and not f.removed
 
 
+def test_an_evidence_row_whose_line_moved_is_a_link_move_not_a_new_row():
+    """A dependency's evidence is keyed by its file, never its line: on the real mcpolis update the
+    re-anchor moved one evidence line and the gate read it as a row that came and went."""
+    before = make_map(deps=[{"id": "D1", "name": "Store", "evidence": [{"file": "a.py:42", "why": "w"}, {"file": "b.py:9", "why": "w"}]}])
+    after = make_map(deps=[{"id": "D1", "name": "Store", "evidence": [{"file": "a.py:45", "why": "w"}, {"file": "b.py:9", "why": "w"}]}])
+    (e,) = rows(diff_maps(before, after), "deps")
+    assert e.classes == ["link"] and e.fields[0].added == [] and e.fields[0].removed == []
+    after["deps"][0]["evidence"].append({"file": "c.py:1", "why": "a third place"})
+    (e,) = rows(diff_maps(before, after), "deps")
+    assert e.classes == ["structure"] and e.fields[0].added == ["a third place (c.py)"]
+
+
+def test_a_file_list_whose_lines_moved_is_a_link_move():
+    before = make_map(components=[{"id": "C1", "name": "A", "files": ["a.py:10", "b.py"]}])
+    after = make_map(components=[{"id": "C1", "name": "A", "files": ["a.py:14", "b.py"]}])
+    (e,) = rows(diff_maps(before, after), "components")
+    assert e.classes == ["link"]
+
+
 def test_a_new_enforcement_site_is_a_structural_item():
     before = make_map(rules=[make_rule("BR1", "x")])
     after = make_map(rules=[{**make_rule("BR1", "x"), "sites": [{"where": "a.py:1", "why": "guards"},
@@ -211,6 +231,7 @@ def test_a_new_enforcement_site_is_a_structural_item():
     (e,) = rows(diff_maps(before, after), "rules")
     (f,) = e.fields
     assert f.added == ["checks (b.py)"] and f.removed == []
+    assert f.cls == "structure" and e.classes == ["structure"], "a new enforcement point is structure, not a moved link"
 
 
 # --- words and lists ------------------------------------------------------------------------

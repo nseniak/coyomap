@@ -68,9 +68,11 @@ about what it decided is the thing Step 0 exists to prevent.
 
 ## Step 1 — did the user name a mode?
 
-If the invocation explicitly names a mode — **`build`**, **`analyze`**, or **`accept`** (the verbs
-the README teaches, e.g. `/coyomap analyze`) — do that mode directly: Build → `method.md`, Analyze /
-Accept → `method/change-impact.md`. (Bare `/coyomap` names nothing, so fall through to Step 2.)
+If the invocation explicitly names a mode — **`build`**, **`update`**, **`analyze`**, or
+**`accept`** (the verbs the README teaches, e.g. `/coyomap update`) — do that mode directly: Build →
+`method.md`; Update / Analyze / Accept → `method/change-impact.md` (update is the whole sequence,
+analyze its first half — the log written, the map untouched — and accept its second half on a log
+that exists). (Bare `/coyomap` names nothing, so fall through to Step 2.)
 
 A **request to see one thing in the map** ("show me the use case about rate limiting in the map",
 "link to the component that sends invoices", "open the map on this rule") is a **Link**: no build,
@@ -181,10 +183,13 @@ the model's `commit` / `committed` fields, then:
      (If only the committed `.coyomap/project-map.md` view is stale, just re-render it with
      `coyomap render … project-map.md` — that is a render, not a rebuild.)
    - **Otherwise — the source differs** (a later commit, uncommitted edits, or new files) →
-     **Analyze**: read `method/change-impact.md` and follow it. The diff it computes is
-     `git diff <pin>` (pin → working tree) plus any untracked files.
+     **Update**: read `method/change-impact.md` and follow it. Its step 0 refuses a dirty tree — an
+     update names two commits — so uncommitted edits mean: tell the user, and stop until they
+     commit or stash. A user who wants to read the log before it lands asks for **Analyze**, the
+     first half of the same sequence.
 
-2. **Accept** — when the user says the report looks right, read `method/change-impact.md` (Accept).
+2. **Accept** — when a log already exists (an earlier Analyze), read `method/change-impact.md`
+   (steps 5–7).
 
 3. **Direct map change** — the user asks, in plain language, to change the *map itself* (not driven
    by a code diff): "move component X into subsystem Y", "rename the API subsystem", "split this

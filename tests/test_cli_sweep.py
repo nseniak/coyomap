@@ -100,6 +100,40 @@ def _with_coyomap_dir(tmp: Path) -> Path:
     return tmp / "prov"
 
 
+def _changes_log(tmp: Path, map_path: Path) -> Path:
+    """A one-entry change log naming the map's first use case — the smallest log `changes lint`
+    can read against this map."""
+    doc = json.loads(map_path.read_text(encoding="utf-8"))
+    uc = doc["use_cases"][0]["id"]
+    log = {"format": "coyomap-changes", "version": 1, "from_commit": "a" * 7, "to_commit": "b" * 7,
+           "date": "2026-09-17", "entries": [{"id": "e1", "headline": "The sweep names one use case",
+           "sentence": "A use case is named so the lint has a box to check.", "elements": [uc]}]}
+    path = tmp / "changes.json"
+    path.write_text(json.dumps(log), encoding="utf-8")
+    return path
+
+
+def _git_map(tmp: Path, map_path: Path) -> Path:
+    """The assembled map inside a real git repo, pinned to that repo's one commit — what `impact`
+    and `reanchor` need to resolve a range. Nothing registers this repo anywhere."""
+    repo = tmp / "gitrepo"
+    (repo / ".coyomap").mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, env=env)
+    (repo / "README.md").write_text("sweep\n", encoding="utf-8")
+    run("init", "-q")
+    run("add", "-A")
+    run("commit", "-q", "-m", "pin")
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True,
+                         text=True, env=env).stdout.strip()
+    doc = json.loads(map_path.read_text(encoding="utf-8"))
+    doc["commit"] = sha
+    out = repo / ".coyomap" / "project-map.json"
+    out.write_text(json.dumps(doc), encoding="utf-8")
+    return out
+
+
 #: command -> (argv builder, allowed exit codes). The builder gets (tmp_dir, assembled_map_path).
 #: What a recipe IS: given a scratch directory and a map path, the argv to hand `cli`. Typed,
 #: because `dict[str, object]` made every `RECIPES[verb](...)` an uncallable `object`.
@@ -123,6 +157,10 @@ RECIPES: dict[str, tuple] = {
     "assemble":      (lambda t, m: ["assemble", *[str(p) for p in FRAGMENTS],
                                     "--out", str(t / "asm")], OK),
     "diff":          (lambda t, m: ["diff", str(MAP), str(m)], OK),
+    "changes":       (lambda t, m: ["changes", "lint", str(_changes_log(t, m)), "--map", str(m)], OK),
+    # Both need a git range to resolve, so the map is staged in a scratch repo pinned to its one commit.
+    "impact":        (lambda t, m: ["impact", "--map", str(_git_map(t, m)), "--target", "HEAD"], OK),
+    "reanchor":      (lambda t, m: ["reanchor", "--map", str(_git_map(t, m))], OK),
     "dump":          (lambda t, m: ["dump", str(m), "--counts"], OK),
     # Read-only: the address of one element. With no server running it prints the path alone and
     # says so on stderr, still exit 0 — the link is what it could give.

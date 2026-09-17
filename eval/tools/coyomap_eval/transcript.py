@@ -484,8 +484,8 @@ def bash_commands(turns: Sequence[Turn]) -> tuple[tuple[int, str], ...]:
 #: loose enough to read `$SP files` or `--map x` as subcommands — the first cut of this reported
 #: `files`, `loc`, `map` and `runs`.
 _COYOMAP_SUBCOMMANDS = frozenset({
-    "anchor-drift", "archive", "arrows", "assemble", "audit", "balance", "bless", "claims",
-    "compare",
+    "anchor-drift", "archive", "arrows", "assemble", "audit", "balance", "bless", "changes", "claims",
+    "compare", "impact", "reanchor",
     "contract", "cost", "diff", "dump", "finalize", "fix", "grounding", "hash", "judge",
     "ledger", "lint-fragment", "live-numbers",
     "mutate", "preindex",

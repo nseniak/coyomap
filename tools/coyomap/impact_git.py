@@ -118,6 +118,13 @@ def blob_exists(repo: Path, sha: str, path: str) -> bool:
         return False
 
 
+def tree_paths(repo: Path, sha: str) -> set[str]:
+    """Every file path in the tree at `sha` — one listing, for a caller that would otherwise ask
+    `blob_exists` once per file (17 s on a 300-file map, 8 of them in the calls)."""
+    out = _git(repo, "ls-tree", "-r", "--name-only", "-z", sha).decode(errors="replace")
+    return {p for p in out.split("\0") if p}
+
+
 def show_lines(repo: Path, sha: str, path: str) -> list[str]:
     return _git(repo, "show", f"{sha}:{path}").decode(errors="replace").splitlines()
 
