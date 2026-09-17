@@ -206,6 +206,11 @@ def record_of(m: ProjectModel, eid: str) -> dict[str, object] | None:
     if ":" in eid:
         hit = _address_target(m, eid)
         return None if hit is None else asdict(hit[4])  # type: ignore[call-overload]
+    if eid.startswith("EP"):
+        # Minted by `assemble`, outside `ID_ARRAYS` (see `resolve_id`): the method tells an agent
+        # adding a way in to read a sibling's record, and this answered "not defined in the map".
+        ep = next((ep for ep in m.entry_points if ep.id == eid), None)
+        return None if ep is None else asdict(ep)
     el = all_elements(m).get(eid)
     return None if el is None else asdict(el)  # type: ignore[call-overload]
 

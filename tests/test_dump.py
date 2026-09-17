@@ -327,6 +327,8 @@ def test_id_resolves_the_change_log_s_own_addresses():
     assert run is not None and run["kind"] == "run_command" and resolved_members(run)[0]["command"] == "make serve"
     for missing in ("flow:UC9", "step:UC1:9", "step:SF9:1", "rule:BR1:1", "rule:BR9:0", "glossary:nope", "run:nope", "bogus:x"):
         assert resolve_id(m, missing) is None and record_of(m, missing) is None, missing
+    ep = record_of(m, "EP1")
+    assert ep is not None and ep["id"] == "EP1" and ep["source"] == "backend/routes.py:5", "a way in's record, the shape a new one is written in"
     rec = record_of(m, "flow:UC1")
     assert rec is not None and rec["uc"] == "UC1" and [s["n"] for s in rec["steps"]] == [1, 2], "the row, verbatim"
     assert record_of(m, "rule:BR1:0") == {"where": "backend/auth.py:50", "why": "refuses a stranger", "no_call_site": False}

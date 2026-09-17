@@ -26,7 +26,8 @@ def make_changed_repo(td: str) -> tuple[Path, str, str]:
     (root / ".coyomap" / "project-map.json").write_text(json.dumps(doc), encoding="utf-8")
     lines = GUILD_V1.splitlines()
     lines[7] = lines[7] + "  # changed"
-    head = commit(root, {"svc/guild.py": "\n".join(["# one", "# two", *lines]) + "\n"}, msg="edit")
+    head = commit(root, {"svc/guild.py": "\n".join(["# one", "# two", *lines]) + "\n",
+                         ".coyodex/old-map.json": "{}\n"}, msg="edit")
     return root, pin, head
 
 
@@ -37,8 +38,9 @@ def test_the_text_names_the_boxes_the_change_touched(capsys):
         out = capsys.readouterr().out
         head_line = out.splitlines()[0]
         assert head_line.startswith(f"impact — {pin[:10]} → {head[:10]}: 1 file(s) changed, 5 box(es) hit, "
-                                    "1 of them at the gate (*)"), head_line
-        assert head_line.endswith("; 1 file(s) under .coyomap/ not counted"), "the map file itself is counted apart"
+                                    "1 hit(s) on 1 box(es) count at the gate (*)"), head_line
+        assert head_line.endswith("; 2 file(s) under .coyomap/ and .coyodex/ not counted"), \
+            "the map's own folder, under its name today and its former one, is counted apart"
         assert "Arrows:" in out and "* edge:C1>uses>D1" in out and "Svc uses Store" in out, \
             "an arrow reads by its ends, and the one hit the gate counts is marked"
         assert "at line resolution" in out

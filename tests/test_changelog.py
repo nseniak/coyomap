@@ -16,8 +16,8 @@ import pytest
 
 from coyomap import changelog
 from coyomap.changelog import (
-    Addition, ChangeLog, Entry, FieldEdit, Waiver, apply, check, check_before_write, dump_log, get_field,
-    lint, load_log, render, set_field, touched_ids,
+    Addition, ChangeLog, Entry, FieldEdit, Waiver, _prose_warnings, apply, check, check_before_write, dump_log,
+    get_field, lint, load_log, render, set_field, touched_ids,
 )
 from coyomap.model import load_model
 
@@ -527,6 +527,79 @@ def test_a_log_may_append_several_items_to_one_list_and_removals_never_shift_ano
     inside = make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[1]", {"where": "srv.py:2", "why": "B"}, None)]),
                       make_entry("e2", edits=[FieldEdit("BR1", "sites[1].why", "B", "B2")]))
     assert lint(inside, doc).errors == ["entry e2: edits BR1.sites[1].why, inside sites[1], which entry e1 removes"]
+
+
+def test_two_edits_whose_targets_nest_are_refused_whatever_their_spelling_and_the_rest_land_by_identity():
+    """The review's F1: a whole list and one of its items, an item removed by index and edited by
+    selector, a dict removed and a field in it edited — each pair used to lint clean and lose one
+    edit, or crash lint out of apply with a message naming the wrong cause. Now every pair is
+    refused at lint, and edits that do not nest land on the item they named even after another
+    edit renumbered it."""
+    doc = make_doc(entities=[make_entity("E1", "Thing")])
+    doc["rules"][0]["sites"] = [{"where": "srv.py:1", "why": "A"}, {"where": "srv.py:2", "why": "B"}]
+    doc["entities"][0]["store"] = {"notes": "kept in a file"}
+    whole = [{"where": "srv.py:9", "why": "Z"}]
+    cases = [
+        (make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites[1].why", "B", "B2")]),
+                  make_entry("e2", edits=[FieldEdit("BR1", "sites", doc["rules"][0]["sites"], whole)])),
+         "entry e1: edits BR1.sites[1].why, inside sites, which entry e2 edits"),
+        (make_log(make_entry("e1", elements=["E1"], edits=[FieldEdit("E1", "fields[0]", {"name": "id", "type": "str"}, None)]),
+                  make_entry("e2", elements=["E1"], edits=[FieldEdit("E1", "fields[name=id].type", "str", "int")])),
+         "entry e2: edits E1.fields[name=id].type, inside fields[0], which entry e1 removes"),
+        (make_log(make_entry("e1", elements=["E1"], edits=[FieldEdit("E1", "store", {"notes": "kept in a file"}, None)]),
+                  make_entry("e2", elements=["E1"], edits=[FieldEdit("E1", "store.notes", "kept in a file", "kept in memory")])),
+         "entry e2: edits E1.store.notes, inside store, which entry e1 removes"),
+        (make_log(make_entry("e1", elements=["E1"], edits=[FieldEdit("E1", "fields[0].type", "str", "int")]),
+                  make_entry("e2", elements=["E1"], edits=[FieldEdit("E1", "fields[name=id].type", "str", "text")])),
+         "entry e2: E1.fields[name=id].type names the same field or item as entry e1's fields[0].type"),
+        (make_log(make_entry("e1", edits=[FieldEdit("BR1", "sites", doc["rules"][0]["sites"], whole)]),
+                  make_entry("e2", edits=[FieldEdit("BR1", "sites[2]", None, {"where": "srv.py:3", "why": "C"})])),
+         "entry e2: edits BR1.sites[2], inside sites, which entry e1 edits"),
+    ]
+    for log, message in cases:
+        assert lint(log, doc).errors == [message], (lint(log, doc).errors, message)
+    # A renumbered step is still found by the selector: targets are resolved before anything lands.
+    renumber = make_log(make_entry("e1", elements=["UC1"], edits=[FieldEdit("flow:UC1", "steps[n=2].n", 2, 5)]),
+                        make_entry("e2", elements=["UC1"], edits=[FieldEdit("flow:UC1", "steps[n=2].phrase", "does thing 2", "does the fifth")]))
+    p = lint(renumber, doc)
+    assert not any("cannot be applied" in e for e in p.errors), p.errors
+    new = apply(renumber, doc)[0] if p.ok else None
+    if new is not None:
+        assert new["flows"][0]["steps"][1] == {"n": 5, "src": "R1", "dst": "C1", "phrase": "does the fifth", "where": "srv.py:21"}
+    # A whole-list replacement and a nested edit, through the command: JSON with ok false, exit 1.
+    with tempfile.TemporaryDirectory() as td:
+        old = write(td, "old.json", json.dumps(doc))
+        bad = write(td, "bad.json", dump_log(cases[0][0]))
+        import io, contextlib
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = changelog.main(["check", bad, "--map", old, "--json"])
+        payload = json.loads(out.getvalue())
+        assert code == 1 and payload["ok"] is False and payload["errors"][0].startswith("lint: entry e1: edits BR1.sites[1].why")
+        with contextlib.redirect_stdout(out):
+            assert changelog.main(["check", bad, "--map", old]) == 1
+        assert "check: the log does not fit the map; lint's errors come first" in out.getvalue()
+
+
+def test_the_review_s_nits_each_pinned():
+    """F6 a glossary term with an apostrophe keeps its whole name in the box label; F8 a map that
+    does not load before the log still gets only the log's own boxes judged; F9 a row removed
+    twice and an index into a list the row does not have are plain errors."""
+    doc = make_doc(glossary=[{"term": "o'brien", "meaning": "a kind of team", "source": "m.py:1"}])
+    long = " ".join(["word"] * 24) + "."
+    log = make_log(make_entry(elements=["glossary:o'brien"], edits=[FieldEdit("glossary:o'brien", "meaning", "a kind of team", long)]))
+    p = lint(log, doc)
+    assert p.ok and sum("long sentence" in w for w in p.warnings) == 1, p.warnings
+    assert any(w.startswith("entry e1 glossary 'o'brien': long sentence") for w in p.warnings), p.warnings
+    after = load_model(json.dumps(apply(log, doc)[0]))
+    warns = _prose_warnings(log, {"nonsense": 1}, after, [])
+    assert warns and all("o'brien" in w for w in warns), warns
+    twice = make_log(make_entry("e1", elements=["E1"], removed=["E1"]), make_entry("e2", elements=["E1"], removed=["E1"]))
+    assert "entry e2: removes E1, which entry e1 also removes" in lint(twice, doc).errors
+    nolist = make_log(make_entry(edits=[FieldEdit("BR1", "sites[0]", None, {"where": "srv.py:9", "why": "w"})]))
+    doc2 = make_doc()
+    del doc2["rules"][0]["sites"]
+    assert lint(nolist, doc2).errors == ["entry e1: BR1.sites[0] — BR1 has no `sites` list; add it whole, as `sites` with `was: null`"]
 
 
 def test_a_useless_waiver_warns_whatever_the_flags():

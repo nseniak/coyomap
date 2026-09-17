@@ -322,6 +322,23 @@ def get_field(row: dict[str, Any], key: str) -> Any:
     return container.get(at)
 
 
+def _put(container: Any, at: str | int, value: Any) -> None:
+    """Write one resolved target: set it, append it (a list position at or past the end), or with
+    `None` remove it."""
+    if isinstance(container, list):
+        pos = int(at)
+        if value is None:
+            del container[pos]
+        elif pos >= len(container):
+            container.append(value)
+        else:
+            container[pos] = value
+    elif value is None:
+        container.pop(at, None)
+    else:
+        container[at] = value
+
+
 def set_field(row: dict[str, Any], key: str, value: Any) -> None:
     """Set a path to `value`; `None` removes the field (a list item is removed too). A positional
     index one past the end of a list appends the item — the one way to add a site, a step or a
@@ -330,19 +347,55 @@ def set_field(row: dict[str, Any], key: str, value: Any) -> None:
     hit = _walk(row, key, create=value is not None)
     if hit is None:
         raise ValueError(f"{key}: no such field or item")
-    container, at = hit
-    if isinstance(container, list):
-        pos = int(at)
-        if value is None:
-            del container[pos]
-        elif pos == len(container):
-            container.append(value)
+    _put(hit[0], hit[1], value)
+
+
+def _chain(row: dict[str, Any], key: str, ahead: int = 0) -> list[tuple[int, str | int]] | None:
+    """The containers a key passes through, by identity, down to the field or item it names:
+    `sites[1].why` → [(id(row), "sites"), (id(sites), 1), (id(site), "why")]. Two edits whose
+    chains nest — one a prefix of the other — write into each other, whatever their spelling:
+    `fields[1]` and `fields[name=size]` reach one item, a whole `sites` and `sites[1].why` the same
+    words. A field not there yet continues with placeholders, so `store` and `store.notes` still
+    nest; an append one past the end (`ahead` earlier appends counted) ends at the list and its
+    position. None when the path cannot be resolved."""
+    node: Any = row
+    out: list[tuple[int, str | int]] = []
+    parts = key.split(".")
+    for i, part in enumerate(parts):
+        m = _STEP.match(part)
+        if not m:
+            raise ValueError(f"bad key path: {key!r}")
+        name, idx, sel_key, sel_val = m.group(1), m.group(2), m.group(3), m.group(4)
+        last = i == len(parts) - 1
+        if not isinstance(node, dict):
+            return None
+        out.append((id(node), name))
+        if idx is None and sel_key is None:
+            if last:
+                return out
+            if name not in node:
+                out.extend((0, rest) for rest in parts[i + 1:])
+                return out
+            node = node[name]
+            continue
+        items = node.get(name)
+        if not isinstance(items, list):
+            return None
+        if idx is not None:
+            pos = int(idx)
         else:
-            container[pos] = value
-    elif value is None:
-        container.pop(at, None)
-    else:
-        container[at] = value
+            pos = next((k for k, it in enumerate(items)
+                        if isinstance(it, dict) and str(it.get(sel_key)) == sel_val), -1)
+        if pos < 0 or pos >= len(items):
+            if last and idx is not None and pos == len(items) + ahead:
+                out.append((id(items), pos))
+                return out
+            return None
+        out.append((id(items), pos))
+        if last:
+            return out
+        node = items[pos]
+    return None
 
 
 # ── lint: is the log well formed against this map? ───────────────────────────────────────────────
@@ -403,7 +456,8 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     removed_ids = {r for e in log.entries for r in e.removed}
     prose: list[tuple[str, str, str]] = []   # (label, box, text) of every edit a reader will meet as words
     appends: dict[tuple[str, str], int] = {}  # (box, list path) → items this log has already appended
-    dropped: dict[tuple[str, str], str] = {}  # (box, item key) → the entry whose `now: null` removes it
+    chains: list[tuple[Entry, FieldEdit, list[tuple[int, str | int]]]] = []   # every edit's target, by identity
+    removed_by: dict[str, str] = {}           # row id → the entry that removes it
     pin = doc.get("commit")
     if isinstance(pin, str) and pin and not _commit_matches(log.from_commit, pin):
         p.errors.append(f"the log starts from {log.from_commit}, the map is pinned to {pin}")
@@ -456,6 +510,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             if found is None and ed.was is not None:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — no such field or item in the map")
                 continue
+            ahead = 0
             if found is None:
                 slot = _append_slot(hit[1], ed.key)
                 if slot is not None:
@@ -468,11 +523,17 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
                         continue
                     appends[(ed.id, path)] = ahead + 1
                 elif _walk(json.loads(json.dumps(hit[1])), ed.key, create=True) is None:
-                    p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; a new item goes at the "
-                                    f"index one past the end of its list, which appends it")
+                    indexed = _INDEXED.match(ed.key)
+                    if indexed and not isinstance(get_field(hit[1], indexed.group(1)), list):
+                        p.errors.append(f"{where}: {ed.id}.{ed.key} — {ed.id} has no `{indexed.group(1)}` list; "
+                                        f"add it whole, as `{indexed.group(1)}` with `was: null`")
+                    else:
+                        p.errors.append(f"{where}: {ed.id}.{ed.key} — no such item in the map; a new item goes at "
+                                        f"the index one past the end of its list, which appends it")
                     continue
-            elif ed.now is None and isinstance(found[0], list):
-                dropped[(ed.id, ed.key)] = e.id
+            chain = _chain(hit[1], ed.key, ahead)
+            if chain is not None:
+                chains.append((e, ed, chain))
             if current != ed.was:
                 p.errors.append(f"{where}: {ed.id}.{ed.key} — the map holds {json.dumps(current, ensure_ascii=False)[:80]}, "
                                 f"the log says was {json.dumps(ed.was, ensure_ascii=False)[:80]}")
@@ -490,14 +551,28 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
         for rid in e.removed:
             if rid not in index:
                 p.errors.append(f"{where}: removes {rid}, which is not in the map")
+            elif rid in removed_by:
+                p.errors.append(f"{where}: removes {rid}, which entry {removed_by[rid]} also removes")
+            removed_by.setdefault(rid, e.id)
         for f in field_findings(f"{where} sentence", e.sentence):
             p.warnings.append(_finding_line(f))
-    # An edit inside an item another edit removes would land and then vanish with the item.
-    for e in log.entries:
-        for ed in e.edits:
-            for (box, item), by in dropped.items():
-                if ed.id == box and ed.key != item and ed.key.startswith(item) and ed.key[len(item)] in ".[":
-                    p.errors.append(f"entry {e.id}: edits {ed.id}.{ed.key}, inside {item}, which entry {by} removes")
+    # Two edits whose targets nest write into each other: a whole list and one of its items, a
+    # dict and a field in it, one item under two spellings (`fields[1]`, `fields[name=size]`), an
+    # item and the removal that takes it out. One would land and vanish, or land on the wrong
+    # words; both are refused, whatever the spelling and whatever `now` is.
+    for i, (ea, eda, cha) in enumerate(chains):
+        for eb, edb, chb in chains[i + 1:]:
+            if eda.id != edb.id or eda.key == edb.key:
+                continue
+            if cha == chb:
+                p.errors.append(f"entry {eb.id}: {edb.id}.{edb.key} names the same field or item as "
+                                f"entry {ea.id}'s {eda.key}")
+            elif chb[:len(cha)] == cha:
+                p.errors.append(f"entry {eb.id}: edits {edb.id}.{edb.key}, inside {eda.key}, which entry "
+                                f"{ea.id} {'removes' if eda.now is None else 'edits'}")
+            elif cha[:len(chb)] == chb:
+                p.errors.append(f"entry {ea.id}: edits {eda.id}.{eda.key}, inside {edb.key}, which entry "
+                                f"{eb.id} {'removes' if edb.now is None else 'edits'}")
     for w in log.waived:
         if w.id not in index:
             p.warnings.append(f"waived {w.id} is not in the map")
@@ -508,12 +583,16 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     # `where`, is refused here with the field named, not by the close step after the write.
     model: ProjectModel | None = None
     if p.ok:
-        new = _applied(log, doc)
         try:
-            model = load_model(json.dumps(new))
+            new = _applied(log, doc)
+        except ValueError as exc:
+            p.errors.append(f"the log cannot be applied: {exc}")
+            new = None
+        try:
+            model = load_model(json.dumps(new)) if new is not None else None
         except ModelError as exc:
             p.errors.append(f"the map would not load after apply: {exc}")
-        else:
+        if model is not None:
             problems, _warnings = validate_model(model, None, disclose_records=False)
             for problem in problems:
                 p.errors.append(f"the map would not validate after apply: {problem}")
@@ -528,8 +607,8 @@ def _finding_line(f: Finding) -> str:
 def _walk_box(where: str) -> str:
     """The box a label of the validator's field walk is about: its first word (`BR1 risk`,
     `UC1 step 2 phrase`), or the synthetic id of a glossary term (`glossary 'guild'`)."""
-    if where.startswith("glossary '"):
-        return "glossary:" + where[len("glossary '"):].split("'", 1)[0]
+    if where.startswith("glossary '") and where.endswith("'"):
+        return "glossary:" + where[len("glossary '"):-1]
     return where.split(" ", 1)[0]
 
 
@@ -547,9 +626,9 @@ def _prose_warnings(log: ChangeLog, doc: dict[str, Any], after: ProjectModel | N
     walked: set[tuple[str, str]] = set()
     if after is not None:
         try:
-            held = set(iter_prose_fields(load_model(json.dumps(doc))))
+            held: set[tuple[str, str]] | None = set(iter_prose_fields(load_model(json.dumps(doc))))
         except ModelError:
-            held = set()
+            held = None          # the map before the log does not load: judge the log's own boxes only
         owner: dict[str, str] = {}
         for e in log.entries:
             for i in set(e.elements) | e.ids_edited():
@@ -558,7 +637,7 @@ def _prose_warnings(log: ChangeLog, doc: dict[str, Any], after: ProjectModel | N
         for where, text in iter_prose_fields(after):
             box = _walk_box(where)
             walked.add((box, text))
-            if (where, text) in held:
+            if (held is not None and (where, text) in held) or (held is None and box not in owner):
                 continue
             label = f"entry {owner[box]} {where}" if box in owner else where
             out.extend(_finding_line(f) for f in field_findings(label, text, terms=terms))
@@ -578,30 +657,36 @@ class Applied:
     removed: int = 0
 
 
-def _removal_index(key: str) -> int:
-    m = re.search(r"\[(\d+)\]$", key)
-    return int(m.group(1)) if m else -1
-
-
 def _applied(log: ChangeLog, doc: dict[str, Any], done: Applied | None = None) -> dict[str, Any]:
     """A copy of the map with every entry written in — no checks; `apply` and `lint` both run it.
-    Every address in the log is read in the frame of the map as it was: the field edits land
-    first, in log order (so a second append on one list goes after the first), and the removals
-    (`now: null`) last, across the WHOLE log, positional ones from the highest index down. Removing
-    `sites[0]` in one entry never shifts what `sites[1].why` names in another — the first version
-    ordered removals last within each entry only, and an edit in a later entry landed on the
-    shifted list."""
+    Every address in the log is read in the frame of the map as it was: each edit's target is
+    resolved on the copy, by object identity, BEFORE anything is written, so the order edits land
+    in cannot change what a later one names — a selector (`steps[n=2]`) still finds its step after
+    another edit renumbered it, and a removal in one entry never shifts what an index in another
+    names (the first version ordered removals last within each entry only, and an edit in a later
+    entry landed on the shifted list). Then the sets land in log order (a second append on one
+    list after the first) and the removals (`now: null`) last, each list's from the highest index
+    down. Lint refuses the pairs that would still collide: nested targets. Raises ValueError for a
+    path the map does not have."""
     new = json.loads(json.dumps(doc))
     index = index_map(new)
     done = done or Applied()
-    drops: list[FieldEdit] = []
+    sets: list[tuple[Any, str | int, Any]] = []
+    drops: list[tuple[Any, str | int]] = []
     for e in log.entries:
         for ed in e.edits:
-            if ed.now is None:
-                drops.append(ed)
+            row = index[ed.id][1]
+            slot = _append_slot(row, ed.key) if ed.now is not None else None
+            if slot is not None and slot[2] >= len(slot[1]):
+                sets.append((slot[1], slot[2], ed.now))      # an append: the end of the list, in log order
                 continue
-            set_field(index[ed.id][1], ed.key, ed.now)
-            done.edits += 1
+            hit = _walk(row, ed.key, create=ed.now is not None)
+            if hit is None:
+                raise ValueError(f"{ed.id}.{ed.key}: no such field or item")
+            if ed.now is None:
+                drops.append(hit)
+            else:
+                sets.append((hit[0], hit[1], ed.now))
         for a in e.added:
             rows = new.setdefault(a.kind, [])
             rows.append(json.loads(json.dumps(a.row)))
@@ -610,8 +695,11 @@ def _applied(log: ChangeLog, doc: dict[str, Any], done: Applied | None = None) -
             array, row = index[rid]
             new[array] = [r for r in new[array] if r is not row]
             done.removed += 1
-    for ed in sorted(drops, key=lambda ed: -_removal_index(ed.key)):
-        set_field(index[ed.id][1], ed.key, None)
+    for container, at, value in sets:
+        _put(container, at, value)
+        done.edits += 1
+    for container, at in sorted(drops, key=lambda d: -(d[1] if isinstance(d[1], int) else -1)):
+        _put(container, at, None)
         done.edits += 1
     new["commit"] = log.to_commit
     return new
@@ -957,8 +1045,12 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"warning: {w}")
                 for e in p.errors:
                     print(f"error: {e}")
-                print("check: the log explains every change in the map" if p.ok
-                      else f"check: {len(p.errors)} gap(s) between the log and the map")
+                if p.ok:
+                    print("check: the log explains every change in the map")
+                elif any(e.startswith("lint: ") for e in p.errors):
+                    print("check: the log does not fit the map; lint's errors come first")
+                else:
+                    print(f"check: {len(p.errors)} gap(s) between the log and the map")
             return 0 if p.ok else 1
         if not map_opt:
             print(f"ERROR: {verb} needs --map <map>", file=sys.stderr)

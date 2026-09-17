@@ -17,7 +17,7 @@ what the map already says.
 | **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
 | **6 Apply** | the entries land in the map, the pin moves; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
-| **7 Close** | the invariant, the rendering, the commit | render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; delete the `.before.json` and `.impact.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index; **one commit** of map + log + views, with a plain `git add` — never `git add -f` |
+| **7 Close** | the invariant, the rendering, the record, the commit | render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json` and `.impact.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index, `provenance.json`; **one commit** of map + log + views + pre-index + provenance, with a plain `git add` — never `git add -f` |
 
 - **`update`** is the whole sequence. **`analyze`** is steps 0–5: the log written, linted and gated,
   the map's meaning untouched — its code links have moved (step 2), which is a change of no meaning
@@ -138,9 +138,11 @@ the log's own addresses resolve the same way: `dump --id flow:UC6`, `dump --id s
 `dump --id rule:BR168:0` (that rule's first site), `dump --id glossary:<term>`. `was` must equal
 what the map holds — `lint` refuses a stale `was`, since applying it would overwrite a change
 someone else made; one field is edited by one entry, and the log's `from_commit` must be the map's
-pin. `now: null` removes the field or the list item; the log's removals land after every other
-edit, from the highest index down, so removing `sites[0]` in one entry never shifts what
-`sites[1].why` names in another — and an edit inside an item a removal takes out is refused. To
+pin. `now: null` removes the field or the list item. Every address is read in the frame of the
+map as it was, whatever order the entries come in: removing `sites[0]` in one entry never shifts
+what `sites[1].why` names in another. Two edits whose targets nest — a whole list and one of its
+items, a dict and a field in it, one item under two spellings, an item and the removal that takes
+it out — are refused at `lint`, since one would land and vanish or land on the wrong words. To
 add a list item, address the position one past the end with `was: null` and the whole item as
 `now`: `sites[2]` on a rule with two sites appends a third, `sites[3]` after it a fourth, and
 `sites[5]` on it is refused. A row

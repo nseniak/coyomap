@@ -27,7 +27,7 @@ from coyomap.changelog import gated_box
 from coyomap.dump import resolve_id
 from coyomap.impact_git import WORKTREE, ImpactError, compute_impact, load_map_extents
 from coyomap.impact_ripple import RippleOptions, build_impact_result
-from coyomap.model import ModelError, ProjectModel, load_model_path
+from coyomap.model import OLD_MAP_FOLDER, ModelError, ProjectModel, load_model_path
 
 USAGE = """usage: coyomap impact --map <project-map.json> [--repo <root>] [--base <ref>] [--target <ref>|WORKTREE]
                       [--reads] [--entity-graph] [--callgraph] [--json]
@@ -88,13 +88,19 @@ def format_result(m: ProjectModel, result: dict[str, Any], map_dir: str | None =
     impacts = result.get("impacts") or {}
     short = (lambda r: "working tree" if r == WORKTREE else str(r or "")[:10])
     files = result.get("files") or []
-    own = [f for f in files if map_dir and any(str(f.get(side) or "").startswith(map_dir + "/")
-                                               for side in ("path", "p_path"))]
-    gated = sum(1 for eid, imp in impacts.items() if gated_box(str(eid), imp))
+    # The map's own folder, under its name today and its former one (a rename of the folder is a
+    # change to every file in it, and none of them is code).
+    own_dirs = [d for d in (map_dir, OLD_MAP_FOLDER) if d]
+    own = [f for f in files if any(str(f.get(side) or "").startswith(d + "/")
+                                   for d in own_dirs for side in ("path", "p_path"))]
+    skipped = [d for d in own_dirs if any(str(f.get(side) or "").startswith(d + "/")
+                                          for f in own for side in ("path", "p_path"))]
+    gated = {str(eid): box for eid, imp in impacts.items() if (box := gated_box(str(eid), imp))}
     lines = [f"impact — {short(spec.get('base'))} → {short(spec.get('target'))}: "
              f"{len(files) - len(own)} file(s) changed, {counts.get('direct', 0)} box(es) hit, "
-             f"{gated} of them at the gate (*), {counts.get('ripple', 0)} reached through the map"
-             + (f"; {len(own)} file(s) under {map_dir}/ not counted" if own else "")]
+             f"{len(gated)} hit(s) on {len(set(gated.values()))} box(es) count at the gate (*), "
+             f"{counts.get('ripple', 0)} reached through the map"
+             + (f"; {len(own)} file(s) under {' and '.join(d + '/' for d in skipped)} not counted" if own else "")]
     for w in result.get("warnings") or []:
         lines.append(f"  ! {w}")
     ep_ids = {f"ep:{ep.source}": ep.id for ep in m.entry_points if ep.id}

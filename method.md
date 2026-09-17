@@ -3279,17 +3279,16 @@ coyomap clone, like the validator above.) For the address of ONE element — a u
 about, a rule — `.venv/bin/coyomap url <ID> --repo <repo>` prints it, port included.
 
 **Maintaining the map.** When code changes after a baseline exists, follow
-[change-impact](method/change-impact.md): report the impact against the map (modified /
-added / deleted), then accept: patch the MODEL (`.coyomap/project-map.json` — surgical field
-edits), bump the baseline pin, re-stamp provenance
-(`.venv/bin/python tools/map_backup.py stamp <repo> --mode accept --built-at '<YYYY-MM-DD HH:MM>'`,
-which appends this session), **re-run validate → audit** (a patch can introduce a fresh
-self-contradiction — e.g. a re-ordered Happy Path step now reads before it creates), **re-render
-the markdown view** (`coyomap render … project-map.md`, so it tracks the patched model; the diagram
-is served live) and, when the map has a pre-index, **regenerate it at the new pin**
-(`coyomap preindex --root <repo>`, so the viewer's symbol search stays aligned with the re-pinned
-map), keep the change log under `.coyomap/changes/<from>-<to>.json` with its rendered
-`.md` beside it, and commit the model + markdown view + pre-index + `provenance.json` + log with the code.
+[change-impact](method/change-impact.md), which is the whole procedure: `coyomap impact` says
+which boxes the diff touches, `coyomap reanchor` moves the code links whose lines only shifted,
+you write the change log (`.coyomap/changes/<from>-<to>.json`), and `coyomap changes apply`
+writes its entries into the model and bumps the pin — never a hand patch of
+`.coyomap/project-map.json`. Its close step re-renders the markdown view, **re-runs validate →
+audit** (a change can introduce a fresh self-contradiction — e.g. a re-ordered Happy Path step now
+reads before it creates), regenerates the pre-index at the new pin, re-stamps provenance
+(`coyomap provenance stamp <repo> --mode accept`, which appends this session), renders the log
+beside itself as `.md`, and commits the model + markdown view + pre-index + `provenance.json` + log
+with the code.
 
 **Drilling deeper (refine altitude in place — never a second map file).** When a subsystem is too big
 to detail at its altitude (e.g. a `plugins` area holding dozens of feature units), go finer **inside the
