@@ -427,16 +427,11 @@ let impactTh = 6;      // strength threshold: 0 direct-only · 4 +structural · 
 // plus the reader's three filters; `CMP_INDEX` finds a box's row by its id on either side. While
 // armed, DIFF_STATE is projected from it, so the badges, the feature cards' marks and the use-case
 // state read one table whichever overlay filled it. The ref rides every link as `cmp=`.
-// WITH A STORY: a ref `log:<from>-<to>` names one of the map's update logs (api/changes). `CMP.log`
-// is then the log with its boxes resolved, the change document under it is the map's own diff
-// since the version the log was written against, and the badges come from the log's entries.
-// A map that carries a log shows its newest one on the Changes tabs without anyone arming
-// anything: `CMP.implicit` is that state — tabs on, no badges, no `cmp=` in the address — and
-// `IMPLICIT_CMP` keeps it built, so "Stop comparing" can fall back to it.
+// The documents themselves — one per version of the map's own history, an update's story with its
+// step — live with the Timeline (the Change log group); `CMP` is the one the reader MARKED on the
+// map, whose `log`, when it carries one, is what the badges read.
 let CMP = null;
 let CMP_INDEX = null;
-let LOGS = [];             // the map's update logs (api/changes), newest first; empty for a map with none
-let IMPLICIT_CMP = null;   // the newest log's comparison, built once at boot
 const CMP_FILTERS_DEFAULT = { wording: true, structure: true, link: false };
 function hasDiff() { return !!(LIVE_DIFF || CMP); }  // any diff overlay armed for this render
 let mainPz = null;     // svg-pan-zoom for the current diagram
@@ -4258,6 +4253,10 @@ const VIEW_GROUPS = [
   // when three of them are one idea.
   ['hood', 'Under the hood',
    'How is the code arranged, where does its data live, what does it pull in, how well is it tested, and what runs it?'],
+  // TIME. One timeline of the map's committed versions; an update log is a version with a story.
+  // Not a product view and not a machine view, so a group of its own; a static export, which has
+  // no git to read the history from, drops it (the gating loop hides its one view).
+  ['changelog', 'Change log', 'What changed in this map, version by version, and why?'],
 ];
 const GROUP_OF_VIEW = {};   // view id -> its group id, filled from the buttons at boot (one source)
 const GROUP_LABEL = {};     // group id -> its label, from VIEW_GROUPS
@@ -4287,8 +4286,7 @@ const VIEW_Q = {
   // does not, so the question is fixed for the view the way every question but Features' is.
   rules: 'Which rules does this product apply?',
   interfaces: 'Where does this product meet the outside world?',
-  changes: 'What changed in the product since the old map?',
-  hoodchanges: 'What changed under the hood since the old map?',
+  timeline: 'What changed in this map, version by version, and why?',
 };
 // The hexagon outline as polygon points for a box — ONE definition for the sequence-diagram
 // service-actor figure, so nothing can drift into drawing a different hexagon for the same meaning. The notch is a fifth of the width (capped at half the height, so a squat box stays a
@@ -4355,10 +4353,6 @@ function viewNotes(view) {
 // answer inline beside it ("What can each role do?"), which put view questions in two places; this is
 // the one place they live.
 function viewQuestion(view) {
-  // The Changes tabs ask about the update when they show one, and about the old map otherwise.
-  if (cmpLog() && (view === 'changes' || view === 'hoodchanges')) {
-    return view === 'changes' ? 'What changed in the product in this update?' : 'What changed under the hood in this update?';
-  }
   return VIEW_Q[view] || '';
 }
 function viewIntroHtml(view) {
@@ -5117,6 +5111,10 @@ const tabLast = {};
 // silently dropped a field every time the two lists were maintained by hand.
 const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 'entity', 'blk', 'br',
                       'bkid', 'cap', 'act', 'gid', 'sys', 'epk', 'iface', 'id', 'sec',
+                      // `at` is WHICH version of the map a Timeline page is about: a commit's sha,
+                      // `disk` for the uncommitted edits, `file` for a map file being compared, or
+                      // `log:<from>-<to>` for an update whose commit this folder does not hold.
+                      'at',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
                       // maps, and looked up by scanning rather than by position, so a flow whose numbers
@@ -5139,6 +5137,7 @@ function stateKey(s) {
     + (s.iface ? ':' + s.iface : '')  // …and one SURFACE inside the Interfaces list
     + (s.sys ? ':' + s.sys : '')   // one System collection, the drill out of its cards
     + (s.id ? ':' + s.id : '')     // …and one element's own details page
+    + (s.at ? '@' + s.at : '')     // …and WHICH VERSION a Timeline page, or a removed box's page, is about
     + (s.sec ? ':' + s.sec : '')   // …and WHICH PART of a feature's page: its use cases, or one of
                                    // the three lists beside them. The parts SWITCH, so each is a
                                    // screen of its own and has to be one the address can name.
@@ -5218,7 +5217,7 @@ function liveSelKeys() {
 // is a large change for a small one. ONE table maps the two directions instead.
 // The INTERNAL name is not a link word: `v=usecases` names no screen, and lands where any other
 // unknown word does. There is one word per screen, so a link cannot be read two ways.
-const URL_WORD = { usecases: 'features', hoodchanges: 'hood-changes' };
+const URL_WORD = { usecases: 'features' };
 const URL_KIND = Object.fromEntries(Object.entries(URL_WORD).map(([k, w]) => [w, k]));
 function kindFromWord(w) { return URL_KIND[w] || (URL_WORD[w] ? null : w); }
 function urlFromState(s, live) {
@@ -5238,7 +5237,7 @@ function urlFromState(s, live) {
   // The comparison is not part of the screen (it is not in STATE_FIELDS, so two screens are not two
   // different screens for wearing it), but it IS part of the address: reload, Back and a pasted link
   // keep the old map they were made against.
-  if (CMP && !CMP.implicit) q.set('cmp', CMP.ref);   // the newest log on its own is not a choice to carry
+  if (CMP) q.set('cmp', CMP.ref);
   return q.toString();
 }
 // A fragment is text a reader can type, so a value in it is not automatically an id this map holds.
@@ -5459,7 +5458,7 @@ window.addEventListener('hashchange', () => {
 function adoptUrlState(from) {
   const s = stateFromUrl(location.hash) || { kind: LANDING };
   const want = cmpFromHash(location.hash);   // a pasted link names its old map; arm it, then draw
-  if (want && (!CMP || CMP.ref !== want || CMP.implicit) && !EXPORTED) armCompare(want, { navigate: false });
+  if (want && (!CMP || CMP.ref !== want) && !EXPORTED) armCompare(want, {});
   history = [s];
   hi = 0;
   urlStarted = true;
@@ -7440,8 +7439,7 @@ const LANDING_COUNT = {
   context: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'dep').length, 'dependency'],
   deployment: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'process').length, 'process'],
   glossary: () => [(GRAPH.glossary || []).length, 'term'],
-  changes: () => [cmpTabCount('product'), cmpLog() ? 'entry' : 'change'],
-  hoodchanges: () => [cmpTabCount('hood'), cmpLog() ? 'entry' : 'change'],
+  timeline: () => [[VERSIONS.length, 'version'], [LOGS.length, 'update']],
 };
 // A VIEW'S LANDING SCREEN WEARS ITS NAME AND ITS QUESTION AS THE HEAD OF ITS FIRST BLOCK — the same
 // grey strip every section of an item page is headed by: the view's name, how many of its things the
@@ -8107,8 +8105,7 @@ function elementHomeView(id) {
 }
 function topView(kind, id) {  // which top-level button a state lives under (container/subsystem/edge → Subsystems)
   if (kind === 'element') return id ? elementHomeView(id) : 'container';
-  if (kind === 'changes' || kind === 'hoodchanges') return kind;
-  if (kind === 'removed') return cmpTabOf(id);   // a removed box's page hangs under the Changes tab of its group
+  if (kind === 'timeline' || kind === 'removed') return 'timeline';   // a removed box's page hangs under the version it was read on
   if (kind === 'overview' || kind === 'context' || kind === 'component' || kind === 'domain' || kind === 'glossary' || kind === 'system' || kind === 'data' || kind === 'tests' || kind === 'rules' || kind === 'interfaces') return kind;
   if (kind === 'sysSection') return 'system';  // one System collection lives under the System tab
   if (kind === 'domsub' || kind === 'domedge') return 'domain';  // subdomain card + edge pair live under the Domain button
@@ -8205,11 +8202,8 @@ function stateTitle(s) {
   if (s.kind === 'rule') return ruleCrumbTitle(s.br);
   if (s.kind === 'overview') return 'Overview';
   if (s.kind === 'glossary') return 'Glossary';
-  if (s.kind === 'changes' || s.kind === 'hoodchanges') return 'Changes';
-  if (s.kind === 'removed') {
-    const e = cmpRemoved(s.id), lb = e ? null : cmpLogBox(s.id);
-    return e ? (e.name_old || 'Removed') : lb ? (lb.name || 'a removed ' + (lb.word || 'box')) : 'Removed';
-  }
+  if (s.kind === 'timeline') return s.at ? versionTitle(timelineRow(s.at), s.at) : 'Timeline';
+  if (s.kind === 'removed') return removedTitle(s);
   if (s.kind === 'system') return 'System';
   if (s.kind === 'sysSection') {
     if (s.epk) return s.epk;   // one entry-point kind, named by the kind itself
@@ -8366,8 +8360,8 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   }
   if (s.kind === 'overview') return [{ kind: 'overview' }];
   if (s.kind === 'glossary') return [{ kind: 'glossary' }];
-  if (s.kind === 'changes' || s.kind === 'hoodchanges') return [{ kind: s.kind }];
-  if (s.kind === 'removed') return [{ kind: cmpTabOf(s.id) }, { kind: 'removed', id: s.id }];
+  if (s.kind === 'timeline') return s.at ? [{ kind: 'timeline' }, { kind: 'timeline', at: s.at }] : [{ kind: 'timeline' }];
+  if (s.kind === 'removed') return [{ kind: 'timeline' }, { kind: 'timeline', at: s.at }, { kind: 'removed', id: s.id, at: s.at }];
   if (s.kind === 'system') return [{ kind: 'system' }];
   if (s.kind === 'data') return [{ kind: 'data' }];
   if (s.kind === 'tests') return [{ kind: 'tests' }];
@@ -13933,9 +13927,9 @@ async function renderView(sArg, transient, seq) {
   if (s.kind === 'data') { renderData(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
   // The Tests tab is the test-completeness gap table (HTML) — same shape as the System/Glossary tabs.
   if (s.kind === 'tests') { renderTests(); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
-  // The two Changes tabs and a removed box's page: HTML lists, the same shape as Rules.
-  if (s.kind === 'changes' || s.kind === 'hoodchanges') {
-    renderChanges(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
+  // The Timeline, a version's page and a removed box's page: HTML lists, the same shape as Rules.
+  if (s.kind === 'timeline') {
+    renderTimeline(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
   }
   if (s.kind === 'removed') {
     renderRemoved(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
@@ -16446,6 +16440,7 @@ viewsw.querySelectorAll('button').forEach((b) => {
   if (b.dataset.view === 'tests' && !HAS_TESTS) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'rules' && !HAS_RULES) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'interfaces' && !HAS_INTERFACES) { b.style.display = 'none'; return; }
+  if (b.dataset.view === 'timeline' && EXPORTED) { b.style.display = 'none'; return; }   // needs git: a static copy has none
   b.addEventListener('click', () => goTab(b.dataset.view));
 });
 // Build the GROUP row, now that the per-map gating above has decided which views this map has at all.
@@ -16489,7 +16484,6 @@ function clearLiveDiff() {
   LIVE_DIFF = null;
   DIFF_STATE = {};
   mode = 'base';
-  if (!CMP && IMPLICIT_CMP) installCmp(IMPLICIT_CMP, true);   // the newest log's tabs come back
   syncTreeDiff();                                       // clear the file-browser badges + hide the filter
   if (cvPath && cvDiffMode) loadCode(cvPath, cvLine);   // revert an open diff back to the plain file
   captureViewState();
@@ -16502,141 +16496,228 @@ if (treeDiffOnlyBtn) treeDiffOnlyBtn.addEventListener('click', () => {
   applyDiffFilterAll();
 });
 
-// --- change mode: compare with an old map --------------------------------------------------------
-// The engine (mapdiff.py) did the comparing; this side draws it. Three places read the change
-// document: the badges on every box (through DIFF_STATE), the Changes tab under each group (a grouped
-// card list, one section per kind, each card's sentence the change summary), and the "What changed"
-// block on a changed box's page (old words struck, new words marked, steps aligned).
+// --- the Change log: the map's timeline, and change mode ----------------------------------------
+// THE ENGINE (mapdiff.py) did the comparing; this side draws it. A CHANGE DOCUMENT is one comparison
+// of two maps: the rows that changed, by kind, with the old words and the new. It is read in four
+// places: the Timeline's page about one version (the map's own diff for that step, under the update's
+// story when the version carries a log), a removed box's page, the badges on every box (through
+// DIFF_STATE, once the reader MARKS a version on the map), and the "What changed" block on a marked
+// box's page.
+//
+// ONE TIMELINE, NEWEST FIRST. Every committed version of the map file is a row (api/mapcommits); a
+// version that carries an update log — the commit that moved the map's pin to the log's to-commit —
+// tells the log's story: every entry in full, the waivers, the notes, and its own step's diff as the
+// evidence. A version with no log shows the step's diff alone. The map on disk, when it differs from
+// the last commit, is the top row: what an accept changed, before its commit. A map file elsewhere
+// on disk (a backup, another checkout) is compared through the field at the foot of the list.
+//
+// A REF names a document, and rides a link as `cmp=` once the document is marked on the map:
+//   log:<from>-<to>   an update: its story, and the step from its from-version to its to-version
+//   at:<sha>          one committed version's step: the version before it → that version
+//   disk              the last committed version → the map on disk
+//   <sha>             since that version → the map on disk (older links keep working)
+//   path:<file>       a map file on disk → the map on disk
 const CMP_BADGE_WORD = { added: 'new', modified: 'modified', deleted: 'removed', named: 'in this update' };
 const CMP_CLASS_LABEL = { wording: 'wording', structure: 'structure', link: 'code links' };
 const LOG_REF = /^log:[0-9a-f]{7,40}-[0-9a-f]{7,40}$/;
+const AT_REF = /^at:[0-9a-f]{7,40}$/;
+const SHA_REF = /^[0-9a-f]{7,40}$/;
+function isRef(v) { return !!v && (SHA_REF.test(v) || v.startsWith('path:') || LOG_REF.test(v) || AT_REF.test(v) || v === 'disk'); }
 function cmpFromHash(hash) {
   const v = new URLSearchParams(String(hash || '').replace(/^#/, '')).get('cmp');
-  return v && (/^[0-9a-f]{7,40}$/.test(v) || v.startsWith('path:') || LOG_REF.test(v)) ? v : null;
+  return isRef(v) ? v : null;
 }
-function cmpKindSpec(array) { return ((CMP && CMP.kinds) || []).find((k) => k.array === array) || null; }
-function cmpTabOf(idOrKind) {
-  const e = CMP_INDEX ? (CMP_INDEX.byId[idOrKind] || CMP_INDEX.removed[idOrKind]) : null;
-  const lb = e ? null : cmpLogBox(idOrKind);
-  if (lb) return lb.group === 'hood' ? 'hoodchanges' : 'changes';
-  const spec = cmpKindSpec(e ? e.kind : idOrKind);
-  return spec && spec.group === 'hood' ? 'hoodchanges' : 'changes';
+// ── what the map's history holds ──────────────────────────────────────────────────────────────
+let VERSIONS = [];         // api/mapcommits: the committed versions, newest first, each with its own pin
+let VERSIONS_DIRTY = false; // the file on disk differs from the last commit
+let LOGS = [];             // api/changes: the update logs, newest first
+let LOG_PROBLEMS = [];     // log files beside the map that could not be read, as the server words them
+let SERVED_PIN = '';       // the served map's own pin, as api/changes reports it
+let HISTORY_LOADED = false;
+async function loadVersions() {
+  if (EXPORTED) { VERSIONS = []; VERSIONS_DIRTY = false; return; }
+  const data = await cmpFetch('mapcommits', null, 'read the map’s history');
+  VERSIONS = (data && data.versions) || [];
+  VERSIONS_DIRTY = !!(data && data.dirty);
 }
-function cmpRemoved(id) { return CMP_INDEX ? CMP_INDEX.removed[id] || null : null; }
-// The old map's label, short enough for a heading: a commit's date and the start of its message.
-function cmpOldShort() {
-  const l = (CMP && CMP.old && CMP.old.label) || '';
-  return l.length > 72 ? l.slice(0, 70).replace(/\s+\S*$/, '') + '…' : l;
+async function loadLogs() {
+  if (EXPORTED) { LOGS = []; LOG_PROBLEMS = []; return; }
+  const data = await cmpFetch('changes', null, 'list the updates');
+  LOGS = (data && data.logs) || [];
+  LOG_PROBLEMS = (data && data.problems) || [];
+  SERVED_PIN = (data && data.pin) || '';
 }
+async function loadHistory() { await Promise.all([loadVersions(), loadLogs()]); HISTORY_LOADED = true; }
+function commitMatches(a, b) { return !!a && !!b && (a.startsWith(b) || b.startsWith(a)); }
+// The rows of the timeline. A log is attached to the OLDEST version whose pin is its to-commit —
+// the commit that landed it — or to the disk row while it sits uncommitted; a log that no version
+// carries (its commit is not in this folder's history) is a row of its own.
+function timelineRows() {
+  const rows = [];
+  if (VERSIONS_DIRTY || (!VERSIONS.length && LOGS.length)) {
+    rows.push({ at: 'disk', date: '', subject: 'Uncommitted edits', pin: SERVED_PIN, log: null });
+  }
+  for (const v of VERSIONS) rows.push({ at: v.sha, date: v.date, subject: v.subject, pin: v.pin, log: null });
+  for (const l of LOGS) {
+    let home = null;
+    for (const r of rows) if (r.at !== 'disk' && commitMatches(r.pin, l.to)) home = r;   // the last match is the oldest
+    if (!home && rows.length && rows[0].at === 'disk' && commitMatches(rows[0].pin, l.to)) home = rows[0];
+    if (home && !home.log) home.log = l;
+    else if (!home) rows.push({ at: 'log:' + l.name, date: l.date, subject: 'An update whose commit is not in this folder’s history', pin: l.to, log: l });
+  }
+  return rows;
+}
+function timelineRow(at) { return timelineRows().find((r) => r.at === at) || null; }
+// The document a timeline page draws: the update's, when the version carries one.
+function timelineRef(at) {
+  if (at === 'file') return CMP && CMP.ref.startsWith('path:') ? CMP.ref : null;
+  const row = timelineRow(at);
+  if (!row) return null;
+  if (row.log) return 'log:' + row.log.name;
+  return at === 'disk' ? 'disk' : 'at:' + at;
+}
+function versionTitle(row, at) {
+  if (!row) return at === 'file' ? 'A map file' : 'A version';
+  if (row.log) return `Update ${row.log.from} → ${row.log.to}`;
+  if (row.at === 'disk') return 'Uncommitted edits';
+  return `${row.date} · ${row.subject}`;
+}
+// ── the documents ─────────────────────────────────────────────────────────────────────────────
+// A step between two committed versions never changes, so it is kept; a document with the map on
+// disk on its new side is read again each time it is asked for, since that map may have moved.
+const DOCS = {};
+let FILTERS = { wording: true, structure: true, link: false };   // the three filters, one setting for every page
+const EVIDENCE_OPEN = {};                                         // ref → the fold's state on that page
+function docIsFixed(doc) { return !!(doc && doc.to && (AT_REF.test(doc.ref) || LOG_REF.test(doc.ref))); }
+function docFor(ref) { return ref ? (DOCS[ref] || (CMP && CMP.ref === ref ? CMP : null)) : null; }
+// One answer from the server as JSON, or null with the message set to what went wrong.
+async function cmpFetch(path, msg, what) {
+  try {
+    const res = await fetch(API_BASE + path, { cache: 'no-store' });
+    const body = await res.text();
+    if (!res.ok) { if (msg) msg.textContent = body || (what + ' failed (' + res.status + ')'); return null; }
+    return JSON.parse(body);
+  } catch (_) { if (msg) msg.textContent = 'Could not reach the server to ' + what + '.'; return null; }
+}
+function emptyDoc(ref, note) {
+  return { ref, log: null, elements: [], arrows: [], counts: [], warnings: note ? [note] : [], kinds: [], old: null, new: null };
+}
+// The document a ref names, fetched. Never installed here: a page draws it, or `markDoc` badges it.
+async function fetchDoc(ref, msg) {
+  let doc = null;
+  if (LOG_REF.test(ref)) {
+    const log = await cmpFetch('changes/' + encodeURIComponent(ref.slice(4)), msg, 'read the update');
+    if (!log) return null;
+    if (log.from_version && log.from_version.sha) {
+      const q = 'compare?ref=' + encodeURIComponent(log.from_version.sha)
+        + (log.to_version && log.to_version.sha ? '&to=' + encodeURIComponent(log.to_version.sha) : '');
+      doc = await cmpFetch(q, msg, 'compare the maps');
+      if (!doc) return null;
+    } else {
+      doc = emptyDoc(ref);
+      doc.kinds = log.kinds || [];
+    }
+    doc.log = log;
+  } else if (AT_REF.test(ref)) {
+    const sha = ref.slice(3);
+    const i = VERSIONS.findIndex((v) => v.sha === sha);
+    const prev = i >= 0 ? VERSIONS[i + 1] : null;
+    if (i < 0) { if (msg) msg.textContent = 'This version is not in the map’s history.'; return null; }
+    if (!prev) doc = Object.assign(emptyDoc(ref), { first: true, new: VERSIONS[i] });
+    else {
+      doc = await cmpFetch('compare?ref=' + encodeURIComponent(prev.sha) + '&to=' + encodeURIComponent(sha), msg, 'compare the maps');
+      if (!doc) return null;
+    }
+  } else if (ref === 'disk') {
+    if (!VERSIONS.length) doc = emptyDoc(ref, 'No committed version of this map yet: nothing to compare the map on disk with.');
+    else {
+      doc = await cmpFetch('compare?ref=' + encodeURIComponent(VERSIONS[0].sha), msg, 'compare the maps');
+      if (!doc) return null;
+    }
+  } else {
+    doc = await cmpFetch('compare?ref=' + encodeURIComponent(ref), msg, 'compare the maps');
+    if (!doc) return null;
+  }
+  doc.ref = ref;
+  if (!('log' in doc)) doc.log = null;
+  if (docIsFixed(doc)) DOCS[ref] = doc;
+  return doc;
+}
+// A page that needs a document it does not hold yet: fetch it, then draw the page again if the
+// reader is still on it.
+function loadDocThen(ref, s) {
+  if (!ref || loadDocThen.pending[ref]) return;
+  loadDocThen.pending[ref] = true;
+  fetchDoc(ref, null).then((doc) => {
+    delete loadDocThen.pending[ref];
+    if (doc && !docIsFixed(doc)) DOCS[ref] = doc;   // kept for this page; the next visit reads it afresh
+    if (history[hi] === s) { captureViewState(); render(); }
+  });
+}
+loadDocThen.pending = {};
+// ── reading one document ──────────────────────────────────────────────────────────────────────
+function docKindSpec(doc, array) { return ((doc && doc.kinds) || []).find((k) => k.array === array) || null; }
 // An actor's row is keyed by its role id in the map, but its node — the card, the page — by the name.
 function cmpCardId(e) {
   if (e.kind === 'roles') return actorNodeId(e.name_new || e.name_old || '') || null;
   return e.id_new || e.id_old || null;
 }
-function buildCmpIndex() {
+function docIndex(doc) {
+  if (doc._index) return doc._index;
   const idx = { byId: {}, removed: {}, byKind: {} };
-  for (const e of CMP.elements || []) {
+  for (const e of doc.elements || []) {
     const id = cmpCardId(e);
     if (e.change === 'removed') { if (e.id_old) idx.removed[e.id_old] = e; if (id) idx.removed[id] = e; }
     else if (id) idx.byId[id] = e;
     if (e.id_new) idx.byId[e.id_new] = idx.byId[e.id_new] || e;
     (idx.byKind[e.kind] = idx.byKind[e.kind] || []).push(e);
   }
-  CMP_INDEX = idx;
+  doc._index = idx;
+  return idx;
+}
+function docRemoved(doc, id) { return doc ? docIndex(doc).removed[id] || null : null; }
+// The old side's label, short enough for a heading: a commit's date and the start of its message.
+function docOldShort(doc) {
+  const l = (doc && doc.old && doc.old.label) || '';
+  return l.length > 72 ? l.slice(0, 70).replace(/\s+\S*$/, '') + '…' : l;
 }
 // A row passes the filters when it is an addition or a removal, or when one of its change classes is
 // switched on — so "code links" off hides the boxes that only moved in the code, and says how many.
-function cmpShown(row) {
+function docShown(row) {
   if (row.change !== 'modified') return true;
-  return (row.classes || []).some((c) => CMP.filters[c]);
+  return (row.classes || []).some((c) => FILTERS[c]);
 }
-function cmpProjection() {
-  const out = {};
-  if (!CMP) return out;
-  // With a story the badges are the log's: what an entry adds, removes, edits or only names. The
-  // implicit newest log marks nothing — the tabs are there, the map is not painted until asked.
-  if (CMP.log) return CMP.implicit ? out : cmpLogProjection();
-  for (const e of CMP.elements || []) {
-    const id = cmpCardId(e);
-    if (!id || !cmpShown(e)) continue;
-    out[id] = e.change === 'added' ? 'added' : e.change === 'removed' ? 'deleted' : 'modified';
-  }
-  return out;
-}
-function cmpRows(group) {
+function docRows(doc, group) {
   const out = [];
-  for (const k of (CMP && CMP.kinds) || []) {
-    if (k.group !== group) continue;
-    const rows = k.array === 'edges' ? (CMP.arrows || []) : ((CMP_INDEX && CMP_INDEX.byKind[k.array]) || []);
-    for (const r of rows) if (cmpShown(r)) out.push([k, r]);
+  for (const k of (doc && doc.kinds) || []) {
+    if (group && k.group !== group) continue;
+    const rows = k.array === 'edges' ? (doc.arrows || []) : (docIndex(doc).byKind[k.array] || []);
+    for (const r of rows) if (docShown(r)) out.push([k, r]);
   }
   return out;
-}
-function cmpCount(group) { return CMP ? cmpRows(group).length : 0; }
-// What the tab's pill counts: the entries of the update that reach this group, or, with no story,
-// the rows of the map's own diff.
-function cmpTabCount(group) { return cmpLog() ? cmpLogEntriesIn(group).length : cmpCount(group); }
-function cmpBadgeHtml(id) {
-  const st = CMP && id && DIFF_STATE[id];
-  return st && CMP_BADGE_WORD[st] ? `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>` : '';
 }
 function cmpBadgeOf(row) {
   const st = row.change === 'added' ? 'added' : row.change === 'removed' ? 'deleted' : 'modified';
   return `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>`;
 }
-// ── the two tabs ──────────────────────────────────────────────────────────────────────────────
-function syncCompareUi() {
-  for (const [view, group] of [['changes', 'product'], ['hoodchanges', 'hood']]) {
-    const b = viewsw.querySelector(`button[data-view="${view}"]`);
-    if (!b) continue;
-    b.style.display = CMP ? '' : 'none';
-    b.innerHTML = 'Changes' + (CMP ? countPillOf(String(cmpTabCount(group))) : '');
-  }
-  // The newest log shown on its own is not an armed comparison: the button stays quiet and there is
-  // nothing to stop.
-  const btn = document.getElementById('comparebtn');
-  if (btn) btn.classList.toggle('armed', !!CMP && !CMP.implicit);
-  const clear = document.getElementById('cmpClear');
-  if (clear) clear.hidden = !CMP || !!CMP.implicit;
-}
-function cmpCountsText(group) {
-  const rows = cmpRows(group).map(([, r]) => r);
+function docCountsText(doc, group) {
+  const rows = docRows(doc, group).map(([, r]) => r);
   const n = (pred) => rows.filter(pred).length;
   const parts = [[n((r) => r.change === 'added'), 'new'], [n((r) => r.change === 'removed'), 'removed'],
                  [n((r) => r.change === 'modified' && (r.classes || []).some((c) => c !== 'link')), 'modified'],
                  [n((r) => r.change === 'modified' && (r.classes || []).every((c) => c === 'link')), 'moved in the code only']];
   return parts.filter(([k]) => k).map(([k, w]) => `${k} ${w}`).join(' · ') || 'nothing';
 }
-function cmpFiltersHtml() {
+function docFiltersHtml(doc) {
   // What is hidden is COUNTED where it is hidden: the boxes that only moved in the code are named on
   // the code-links filter itself, so switching it off never makes them vanish without a trace.
-  const all = ((CMP_INDEX && CMP_INDEX.byKind) ? Object.values(CMP_INDEX.byKind).flat() : []).concat(CMP.arrows || []);
+  const all = Object.values(docIndex(doc).byKind).flat().concat(doc.arrows || []);
   const linkOnly = all.filter((r) => r.change === 'modified' && (r.classes || []).every((c) => c === 'link')).length;
   const filters = ['wording', 'structure', 'link'].map((c) =>
-    `<button type="button" class="cmp-filter${CMP.filters[c] ? ' on' : ''}" data-cls="${c}">`
+    `<button type="button" class="cmp-filter${FILTERS[c] ? ' on' : ''}" data-cls="${c}">`
     + esc(CMP_CLASS_LABEL[c]) + (c === 'link' && linkOnly ? ` <span class="muted">${linkOnly}</span>` : '')
     + '</button>').join('');
   return `<div class="cmp-filters"><span>Show</span>${filters}</div>`;
-}
-function cmpHeadHtml(group) {
-  const warns = (CMP.warnings || []).map((w) => `<p class="cmp-warn">${esc(w)}</p>`).join('');
-  const log = cmpLog();
-  if (log) {
-    // The update names itself by its two commits, as its file does; the date is the day it was
-    // written. An update that is not the map's latest says so, because the diff under it runs to
-    // the map as it is now and holds what came after as well.
-    const later = log.latest ? '' : ' <span class="cmp-later">· not the latest update: the map moved on since, and the diff below holds that too</span>';
-    const control = CMP.implicit
-      ? '<button type="button" class="cmp-mark" title="Badge every box this update names, on every screen">Mark this update on the map</button>'
-      : '<button type="button" class="cmp-stop">Stop comparing</button>';
-    return `<div class="cmp-head">`
-      + `<p class="cmp-since"><b>Update ${esc(log.from)} → ${esc(log.to)}</b> · ${esc(log.date)} · ${esc(countLabel((log.entries || []).length, 'entry'))}${later}</p>`
-      + control + warns + '</div>';
-  }
-  return `<div class="cmp-head">`
-    + `<p class="cmp-since">Compared with <b>${esc(CMP.old.label)}</b> · ${esc(cmpCountsText(group))}</p>`
-    + cmpFiltersHtml()
-    + `<button type="button" class="cmp-stop">Stop comparing</button>${warns}</div>`;
 }
 function cmpArrowCardHtml(a) {
   const nm = (id) => (GRAPH.nodes[id] ? GRAPH.nodes[id].name : id);
@@ -16657,10 +16738,12 @@ function cmpElementCardHtml(k, e) {
   return plainCardHtml({ key, name: e.name_new || e.name_old || k.word, desc,
                          pill: cmpBadgeOf(e) + `<span class="ecard-type ecard-type-plain">${esc(k.word)}</span>` });
 }
-function cmpOpenKey(key) {
+// What a card or a pill opens. A removed box's page belongs to the timeline page it was read on
+// (`at`), so the page can find the document that still holds the box.
+function cmpOpenKey(key, at) {
   const i = key.indexOf(':');
   const kind = i > 0 ? key.slice(0, i) : key, id = i > 0 ? key.slice(i + 1) : '';
-  if (kind === 'removed') go({ kind: 'removed', id });
+  if (kind === 'removed') go({ kind: 'removed', id, at });
   else if (kind === 'uc') go({ kind: 'usecase', uc: id });
   else if (kind === 'sf') go({ kind: 'subflow', sf: id });
   else if (kind === 'hp') go({ kind: 'hp' });
@@ -16668,92 +16751,43 @@ function cmpOpenKey(key) {
   else if (kind === 'overview') go({ kind: 'overview' });
   else if (kind === 'arrow' && GRAPH.nodes[id]) showInContext(id);
 }
-// The map's own diff, cut by kind: a section per kind that changed, in the reader's order.
-function cmpMechanicalHtml(group) {
+// The map's own diff, cut by kind in the reader's order — product kinds first, then the machine's —
+// one section per kind that changed.
+function docMechanicalHtml(doc, group) {
   const groups = [];
-  for (const k of CMP.kinds || []) {
-    if (k.group !== group) continue;
-    const rows = cmpRows(group).filter(([kk]) => kk.array === k.array).map(([, r]) => r);
+  for (const k of (doc && doc.kinds) || []) {
+    if (group && k.group !== group) continue;
+    const rows = docRows(doc, group).filter(([kk]) => kk.array === k.array).map(([, r]) => r);
     if (!rows.length) continue;
     const cards = rows.map((r) => (k.array === 'edges' ? cmpArrowCardHtml(r) : cmpElementCardHtml(k, r))).join('');
     groups.push({ title: sentenceCase(k.plural), count: countLabel(rows.length, 'change'), cards: `<div class="ecard-list">${cards}</div>` });
   }
-  return elementCardGroupsHtml(groups) || '<p class="empty">Nothing changed here since the old map.</p>';
+  return elementCardGroupsHtml(groups) || '<p class="empty">No box changed in this step.</p>';
 }
-// Under a story the diff is EVIDENCE: folded under the entries, with the three filters inside the
-// fold, since they read the diff and never the entries. A log whose from-version the folder's
-// history does not hold has no evidence to show, and says so.
-function cmpEvidenceHtml(group) {
-  if (!CMP.old) {
-    return '<p class="cmp-noevidence">No committed version of the map from before this update is in the '
-      + 'folder\u2019s history, so the map\u2019s own diff cannot be shown under it.</p>';
-  }
-  return `<details class="cmp-evidence"${CMP.evidenceOpen ? ' open' : ''}>`
-    + `<summary>The map\u2019s own diff <span class="muted">since the map as last committed before this update, ${esc(cmpOldShort())} · ${esc(cmpCountsText(group))}</span></summary>`
-    + cmpFiltersHtml() + cmpMechanicalHtml(group) + '</details>';
-}
-function renderChanges(s) {
-  const group = s.kind === 'hoodchanges' ? 'hood' : 'product';
-  let body;
-  if (cmpLog()) {
-    const cards = cmpLogEntriesIn(group).map(([e, here, full]) => cmpEntryCardHtml(e, here, full)).join('');
-    body = (cards ? `<div class="ecard-list">${cards}</div>` : '<p class="empty">No entry of this update names a box in this group.</p>')
-      + cmpEvidenceHtml(group);
-  } else {
-    body = cmpMechanicalHtml(group);
-  }
-  diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Changes') + cmpHeadHtml(group) + body + '</div>';
-  bindElementCards(diagram);
-  bindPlainCards(diagram, cmpOpenKey);
-  bindCmpHead(diagram);
-}
-function bindCmpHead(root) {
-  root.querySelectorAll('button.cmp-filter').forEach((b) => b.addEventListener('click', () => {
-    const c = b.getAttribute('data-cls');
-    CMP.filters[c] = !CMP.filters[c];
-    DIFF_STATE = cmpProjection();
-    syncCompareUi();
-    captureViewState(); render();
-  }));
-  root.querySelectorAll('button.cmp-stop').forEach((b) => b.addEventListener('click', clearCompare));
-  // The newest log, marked on the map on request: the same comparison, no longer implicit.
-  root.querySelectorAll('button.cmp-mark').forEach((b) => b.addEventListener('click', () => {
-    installCmp(CMP, false, true);
-    captureViewState(); render();
-  }));
-  root.querySelectorAll('details.cmp-evidence').forEach((d) => d.addEventListener('toggle', () => { CMP.evidenceOpen = d.open; }));
-  // A pill on an entry card that opens something the item pills cannot: a removed box's page as it
-  // was, a shared sub-flow, the glossary, the map's own overview.
-  root.querySelectorAll('.cmp-log-pill[data-key]').forEach((b) => b.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    cmpOpenKey(b.getAttribute('data-key'));
-  }));
-}
-// ── the story: an update log as the comparison ────────────────────────────────────────────────
-function cmpLog() { return CMP && CMP.log ? CMP.log : null; }
+// ── the story: an update log ──────────────────────────────────────────────────────────────────
 // A box as the log names it, keyed the way the viewer keys it: an actor by its node, not its role id.
-function cmpLogBoxKey(b) { return b.kind === 'roles' && b.name ? (actorNodeId(b.name) || b.id) : b.id; }
+function logBoxKey(b) { return b.kind === 'roles' && b.name ? (actorNodeId(b.name) || b.id) : b.id; }
 // Every entry naming a box, each with the box as that entry names it (an entry adds it, another
 // only names it).
-function cmpLogEntriesOf(id) {
+function logEntriesOf(log, id) {
   const out = [];
-  if (!id) return out;
-  for (const e of (cmpLog() || {}).entries || []) {
-    const b = (e.boxes || []).find((x) => x.id === id || cmpLogBoxKey(x) === id);
+  if (!log || !id) return out;
+  for (const e of log.entries || []) {
+    const b = (e.boxes || []).find((x) => x.id === id || logBoxKey(x) === id);
     if (b) out.push([e, b]);
   }
   return out;
 }
-function cmpLogBox(id) { const hit = cmpLogEntriesOf(id)[0]; return hit ? hit[1] : null; }
+function logBox(log, id) { const hit = logEntriesOf(log, id)[0]; return hit ? hit[1] : null; }
 // The log's word for what happened to a box, as a badge state; the strongest wins when two entries
 // name one box.
 const LOG_STATE = { added: 'added', removed: 'deleted', modified: 'modified', named: 'named' };
 const LOG_STATE_RANK = { added: 3, deleted: 2, modified: 1, named: 0 };
-function cmpLogProjection() {
+function logProjection(log) {
   const out = {};
-  for (const e of (cmpLog() || {}).entries || []) {
+  for (const e of (log || {}).entries || []) {
     for (const b of e.boxes || []) {
-      const id = cmpLogBoxKey(b), st = LOG_STATE[b.state] || 'named';
+      const id = logBoxKey(b), st = LOG_STATE[b.state] || 'named';
       if (!out[id] || LOG_STATE_RANK[st] > LOG_STATE_RANK[out[id]]) out[id] = st;
     }
   }
@@ -16765,19 +16799,6 @@ function cmpLogProjection() {
   }
   return out;
 }
-// The entries that reach a group: [entry, its boxes in this group, told in full here]. An entry is
-// told in full under the FIRST group it touches — Product before Under the hood — and under the
-// other only as "also here" with that group's boxes, so a reader of either tab sees it once whole.
-function cmpLogEntriesIn(group) {
-  const out = [];
-  for (const e of (cmpLog() || {}).entries || []) {
-    const here = (e.boxes || []).filter((b) => (b.group === 'hood' ? 'hood' : 'product') === group);
-    if (!here.length) continue;
-    const full = group === 'product' || !(e.boxes || []).some((b) => b.group !== 'hood');
-    out.push([e, here, full]);
-  }
-  return out;
-}
 // A box's pill on an entry card. A box the map holds is the item pill every screen draws, and it
 // opens the box. A removed box opens its page as it was; a shared sub-flow, a glossary term and the
 // map itself have pages the item pill does not know. A way in, a config key, a signal: named, not
@@ -16785,8 +16806,8 @@ function cmpLogEntriesIn(group) {
 const LOG_PILL_KIND = { capabilities: 'capability', use_cases: 'usecase', roles: 'human', components: 'component',
                         subsystems: 'subsystem', deps: 'dep', rules: 'rule', blocks: 'block', interfaces: 'interface',
                         entities: 'entity', subdomains: 'subdomain', subflows: 'subflow' };
-function cmpLogPillHtml(b) {
-  const id = cmpLogBoxKey(b);
+function logPillHtml(b) {
+  const id = logBoxKey(b);
   // A way in is named by its trigger, which the map writes with code quotes; a pill is plain words.
   const name = (b.name || ('a removed ' + (b.word || 'box'))).replace(/`/g, '');
   const kind = (GRAPH.nodes[id] || {}).kind || LOG_PILL_KIND[b.kind] || '';
@@ -16799,59 +16820,56 @@ function cmpLogPillHtml(b) {
   }
   return itemPillHtml(id, { name });
 }
-function cmpEntryFootHtml(e) {
+function entryFootHtml(e) {
   const files = (e.evidence || []).map((f) => srcCell(f)).join(' ');
   const conf = e.confidence || 'verified';
   return `<p class="ecard-extra"><span class="ecard-lbl">Evidence</span> ${files || '<span class="muted">none named</span>'}`
     + `<span class="cmp-conf cmp-conf-${esc(conf)}">${esc(conf)}</span></p>`;
 }
-// One entry as a card: the headline as its name, the sentence as its text, its boxes as pills, its
-// evidence and confidence as the foot line. Told in full once; "also here" on the other tab.
-function cmpEntryCardHtml(e, here, full) {
-  const pills = (full ? e.boxes || [] : here).map(cmpLogPillHtml).join('');
-  const foot = `<p class="ecard-extra cmp-entry-boxes">${full ? '' : '<span class="ecard-lbl">Also here</span>'}${pills}</p>`
-    + (full ? cmpEntryFootHtml(e) : '');
-  return itemBoxHtml({ k: '', name: e.headline, what: full ? e.sentence : '', pills: [], facts: [], band: [], chips: [] },
+// One entry as a card: the headline as its name, the sentence as its text, every box it names as a
+// pill, its evidence and confidence as the foot line.
+function entryCardHtml(e) {
+  const pills = (e.boxes || []).map(logPillHtml).join('');
+  const foot = `<p class="ecard-extra cmp-entry-boxes">${pills}</p>` + entryFootHtml(e);
+  return itemBoxHtml({ k: '', name: e.headline, what: e.sentence, pills: [], facts: [], band: [], chips: [] },
                      'card', { nameLink: false, glyph: false, wordHtml: '', cls: 'ecard ecard-entry', foot,
                                attrs: ` data-entry="${esc(e.id)}"` });
 }
+// The rest of the log, under the entries: the boxes the code touched without a change of meaning,
+// each with its reason, and the notes — how far each reading reached, the gaps, the seams.
+function logFootHtml(log) {
+  let html = '';
+  const waived = log.waived || [];
+  if (waived.length) {
+    html += '<section class="csec"><div class="csec-head"><h3 class="csec-title">Touched by the code, no change of meaning</h3>'
+      + countPillOf(countLabel(waived.length, 'box')) + '</div><ul class="cmp-waived">'
+      + waived.map((w) => `<li><b>${esc(w.name || ('a ' + (w.word || 'box')))}</b> — ${mdInline(w.why || '')}</li>`).join('') + '</ul></section>';
+  }
+  if (log.notes && log.notes.trim()) {
+    html += '<section class="csec"><div class="csec-head"><h3 class="csec-title">Notes</h3></div>'
+      + `<p class="cmp-notes">${mdInline(log.notes)}</p></section>`;
+  }
+  return html;
+}
 // One edit of the log on a box's page. The server hands it over in the shape of the map diff's own
 // field row, so the one renderer draws both: the story's edit and the evidence under it.
-function cmpLogEditHtml(x) {
+function logEditHtml(x) {
   if (x.reordered) return '<span class="muted">reordered</span>';   // the same items, in another order
   return cmpFieldHtml(x);   // a code-link row with no words on either side reads "code links moved" here
 }
 // The story of one box: each entry naming it — why it changed, in the entry's words — and the
-// edits that entry made to it, by field.
-// A box the entry only NAMES did not change: it is part of the story, and says so in those words.
+// edits that entry made to it, by field. A box the entry only NAMES did not change: it is part of
+// the story, and says so in those words.
 const LOG_BECAUSE = { added: 'Added because', removed: 'Removed because', modified: 'Changed because', named: 'Named in' };
-function cmpStoryHtml(id) {
+function storyHtml(log, id) {
   let html = '';
-  for (const [e, b] of cmpLogEntriesOf(id)) {
+  for (const [e, b] of logEntriesOf(log, id)) {
     html += `<p class="cmp-story"><span class="cmp-because">${esc(LOG_BECAUSE[b.state] || 'Changed because')}</span>`
       + `<b>${esc(e.headline)}</b> ${mdInline(e.sentence)}</p>`;
     const edits = (e.edits || []).filter((x) => x.box === b.id);
-    if (edits.length) html += '<dl>' + edits.map((x) => `<dt>${esc(x.label)}</dt><dd>${cmpLogEditHtml(x)}</dd>`).join('') + '</dl>';
+    if (edits.length) html += '<dl>' + edits.map((x) => `<dt>${esc(x.label)}</dt><dd>${logEditHtml(x)}</dd>`).join('') + '</dl>';
   }
   return html;
-}
-// ── a removed box's page: as it was in the old map ────────────────────────────────────────────
-function renderRemoved(s) {
-  const e = cmpRemoved(s.id);
-  const lb = cmpLogBox(s.id);
-  const told = lb && lb.state === 'removed' ? lb : null;   // the log says it went, even with no old map to show
-  if (!e && !told) { diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>'; return; }
-  const k = e ? (cmpKindSpec(e.kind) || { word: 'box' }) : { word: told.word || 'box' };
-  const hero = pageHeroHtml({ name: (e ? e.name_old : told.name) || ('a removed ' + k.word), type: k.word,
-                              pills: '<span class="badge deleted">removed</span>',
-                              desc: e && e.sentence_old ? mdInline(e.sentence_old) : '', noDesc: false,
-                              meta: e && e.source_old ? heroSourceLine(e.source_old) : '' });
-  // The block IS this page's body, so it wears `cmpsec-page`: the placement pass that removes a
-  // stale block from a previous screen leaves it alone, and the next render's rewrite of the page
-  // takes it away.
-  diagram.innerHTML = '<div class="usecases-wrap glossary-wrap">' + hero
-    + cmpSectionHtml(e, { all: true, id: s.id, story: true }).replace('class="cmpsec"', 'class="cmpsec cmpsec-page"') + '</div>';
-  bindElementCards(diagram);
 }
 // ── the "What changed" block ──────────────────────────────────────────────────────────────────
 function cmpSpansHtml(spans) {
@@ -16882,30 +16900,27 @@ function cmpStepHtml(st) {
   const extra = (st.fields || []).map((f) => `${esc(f.label.toLowerCase())}: ${cmpFieldHtml(f)}`).join(' · ');
   return `<li>${n(st.n_new)}${body}${extra ? ` <span class="muted">(${extra})</span>` : ''}</li>`;
 }
-// `e` is the box's row in the map's own diff, or null when only the story names it; `o.id` is the
-// box, for the story. With a story the row is the evidence and sits under it.
-function cmpSectionHtml(e, opts) {
+// `doc` is the document the block reads; `e` is the box's row in the map's own diff, or null when
+// only the story names it; `o.id` is the box, for the story. With a story the row is the evidence
+// and sits under it. A box the log names is told "in the update"; a box only the map's own diff
+// holds is told "since <the old side>", never credited to the update.
+function cmpSectionHtml(doc, e, opts) {
   const o = opts || {};
-  // The story is told when the update is marked on the map, and on a removed box's page always:
-  // that page exists for the story, and the map holds nothing else about the box.
-  const story = o.id && (!CMP.implicit || o.story) ? cmpStoryHtml(o.id) : '';
-  const log = cmpLog();
-  // A box the log names is told "in the update"; a box only the map's own diff holds changed since
-  // the version the log started from, and an older log's evidence holds later updates too — so it
-  // is told "since <that version>", never credited to this update.
-  const st = story ? cmpLogProjection()[o.id] : null;
+  const log = doc.log;
+  const story = o.id ? storyHtml(log, o.id) : '';
+  const st = story ? logProjection(log)[o.id] : null;
   const badge = story ? (st && st !== 'named' ? `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>` : '')
     : (e ? cmpBadgeOf(e) : '');
-  const since = story && log ? `in the update ${esc(log.from)} → ${esc(log.to)}` : `since ${esc(cmpOldShort())}`;
+  const since = story && log ? `in the update ${esc(log.from)} → ${esc(log.to)}` : `since ${esc(docOldShort(doc))}`;
   let html = `<section class="cmpsec"><h3>What changed ${badge} <span class="muted">${since}</span></h3>` + story;
   if (!e) return html + '</section>';
-  const body = cmpEvidenceFieldsHtml(e, o);
-  return html + (story ? `<div class="cmp-evidence-page"><h4>The map\u2019s own diff</h4>${body}</div>` : body) + '</section>';
+  const body = cmpEvidenceFieldsHtml(doc, e, o);
+  return html + (story ? `<div class="cmp-evidence-page"><h4>The map’s own diff</h4>${body}</div>` : body) + '</section>';
 }
-function cmpEvidenceFieldsHtml(e, o) {
-  const k = cmpKindSpec(e.kind) || { word: 'box' };
-  const fields = (e.fields || []).filter((f) => o.all || CMP.filters[f.cls]);
-  const hiddenLinks = (e.fields || []).filter((f) => !o.all && !CMP.filters[f.cls] && f.cls === 'link').length;
+function cmpEvidenceFieldsHtml(doc, e, o) {
+  const k = docKindSpec(doc, e.kind) || { word: 'box' };
+  const fields = (e.fields || []).filter((f) => o.all || FILTERS[f.cls]);
+  const hiddenLinks = (e.fields || []).filter((f) => !o.all && !FILTERS[f.cls] && f.cls === 'link').length;
   let html = '';
   if (e.change === 'added') html += '<p>New in this map.</p>';
   else if (e.change === 'removed') html += '<p>Not in the current map. Below is what the old map said about it.</p>';
@@ -16919,7 +16934,7 @@ function cmpEvidenceFieldsHtml(e, o) {
   // and a renumbered one is never listed, only counted — a number is not a change to read.
   const steps = e.steps || [];
   if (steps.length) {
-    const passes = (st) => o.all || (st.classes || []).some((c) => CMP.filters[c]);
+    const passes = (st) => o.all || (st.classes || []).some((c) => FILTERS[c]);
     const renum = steps.filter((st) => st.state === 'renumbered').length;
     const listed = steps.filter((st) => st.state !== 'renumbered' && passes(st));
     const hiddenSteps = steps.filter((st) => st.state !== 'renumbered' && !passes(st)).length;
@@ -16932,7 +16947,7 @@ function cmpEvidenceFieldsHtml(e, o) {
     }
   }
   if (dl) html += `<dl>${dl}</dl>`;
-  if (hiddenLinks) html += `<p class="cmp-link">${countLabel(hiddenLinks, 'code link')} moved — switch on “code links” on the Changes tab to see them.</p>`;
+  if (hiddenLinks) html += `<p class="cmp-link">${countLabel(hiddenLinks, 'code link')} moved — switch on “code links” on the Timeline to see them.</p>`;
   if (e.change === 'modified' && !dl && !hiddenLinks) html += '<p class="muted">Changed in a way the filters hide.</p>';
   return html;
 }
@@ -16944,19 +16959,15 @@ function cmpSubjectId(s) {
   if (s.kind === 'subflow' && s.sf) return s.sf;
   return pageElementId(s);
 }
-function cmpSubjectRow(s) {
-  if (!CMP || !CMP_INDEX || !s) return null;
-  const id = cmpSubjectId(s);
-  return id ? CMP_INDEX.byId[id] || null : null;
-}
+// The block on a box's page, drawn from the MARKED document only: a page says what changed once the
+// reader has marked a version on the map.
 function placeCompareSection(s) {
   document.querySelectorAll('.cmpsec:not(.cmpsec-page)').forEach((el) => el.remove());
-  // The implicit newest log paints nothing on a page; a page says what changed only when asked.
-  if (!CMP || CMP.implicit || !s || s.kind === 'changes' || s.kind === 'hoodchanges' || s.kind === 'removed') return;
-  const e = cmpSubjectRow(s);
+  if (!CMP || !s || s.kind === 'timeline' || s.kind === 'removed') return;
   const id = cmpSubjectId(s);
-  if (!e && !cmpLogEntriesOf(id).length) return;
-  const html = cmpSectionHtml(e, { id });
+  const e = id ? docIndex(CMP).byId[id] || null : null;
+  if (!e && !logEntriesOf(CMP.log, id).length) return;
+  const html = cmpSectionHtml(CMP, e, { id });
   const column = diagram.querySelector('.usecases-wrap, .glossary-wrap');
   if (column) {
     const hero = column.querySelector('.page-hero');
@@ -16969,154 +16980,194 @@ function placeCompareSection(s) {
   if (hero) hero.insertAdjacentHTML('afterend', html); else diaghead.insertAdjacentHTML('afterbegin', html);
   diaghead.hidden = false;
 }
-// ── arming and clearing ───────────────────────────────────────────────────────────────────────
-// One answer from the server as JSON, or null with the picker's message set to what went wrong.
-async function cmpFetch(path, msg, what) {
-  try {
-    const res = await fetch(API_BASE + path, { cache: 'no-store' });
-    const body = await res.text();
-    if (!res.ok) { if (msg) msg.textContent = body || (what + ' failed (' + res.status + ')'); return null; }
-    return JSON.parse(body);
-  } catch (_) { if (msg) msg.textContent = 'Could not reach the server to ' + what + '.'; return null; }
+// ── the mark: badges on every box ─────────────────────────────────────────────────────────────
+// `CMP` is the document marked on the map, or null. While one is marked, DIFF_STATE is projected
+// from it — the log's boxes when it carries a story, the diff's rows otherwise — so the badges, the
+// feature cards' marks and the use-case state read one table whichever overlay filled it.
+function cmpBadgeHtml(id) {
+  const st = CMP && id && DIFF_STATE[id];
+  return st && CMP_BADGE_WORD[st] ? `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>` : '';
 }
-// The comparison a ref names, fetched and not yet installed: the change document, and for a
-// `log:` ref the log as the story with the map's own diff since the log's from-version as the
-// evidence. A log the folder's history holds no from-version for is a story with no evidence.
-async function cmpFetchRef(ref, msg) {
-  if (!LOG_REF.test(ref)) {
-    const data = await cmpFetch('compare?ref=' + encodeURIComponent(ref), msg, 'compare the maps');
-    return data ? Object.assign(data, { ref, log: null }) : null;
+function cmpProjection() {
+  const out = {};
+  if (!CMP) return out;
+  if (CMP.log) return logProjection(CMP.log);
+  for (const e of CMP.elements || []) {
+    const id = cmpCardId(e);
+    if (!id || !docShown(e)) continue;
+    out[id] = e.change === 'added' ? 'added' : e.change === 'removed' ? 'deleted' : 'modified';
   }
-  const log = await cmpFetch('changes/' + encodeURIComponent(ref.slice(4)), msg, 'read the update');
-  if (!log) return null;
-  let data = null;
-  if (log.from_version && log.from_version.sha) {
-    data = await cmpFetch('compare?ref=' + encodeURIComponent(log.from_version.sha), msg, 'compare the maps');
-    if (!data) return null;
-  }
-  return Object.assign(data || { elements: [], arrows: [], counts: [], warnings: [], kinds: log.kinds || [], old: null, new: null },
-                       { ref, log });
+  return out;
 }
-// Make a fetched comparison the one in force. Implicit: the newest log on the tabs, nothing marked.
-function installCmp(base, implicit, keep) {
-  // `keep`: the same comparison re-installed (the newest log marked on request) keeps the reader's
-  // filters and the fold they opened; a new one starts from the defaults.
-  CMP = Object.assign({}, base, { implicit: !!implicit,
-                                  filters: keep && base.filters ? base.filters : Object.assign({}, CMP_FILTERS_DEFAULT),
-                                  evidenceOpen: keep ? !!base.evidenceOpen : false });
-  buildCmpIndex();
+function isMarked(ref) { return !!(CMP && ref && CMP.ref === ref); }
+function markDoc(doc) {
+  if (IMPACT) { IMPACT = null; LIVE_DIFF = null; impactbtn.classList.remove('armed'); syncTreeDiff(); }  // one overlay at a time
+  CMP = doc;
+  CMP_INDEX = docIndex(doc);
   DIFF_STATE = cmpProjection();
-  mode = implicit ? 'base' : 'diff';
-  syncCompareUi();
+  mode = 'diff';
 }
 async function armCompare(ref, opts) {
   const o = opts || {};
-  const msg = document.getElementById('cmppopmsg');
-  if (msg) msg.textContent = '';
-  const base = await cmpFetchRef(ref, msg);
-  if (!base) return false;
-  if (IMPACT) { IMPACT = null; LIVE_DIFF = null; impactbtn.classList.remove('armed'); syncTreeDiff(); }  // one overlay at a time
-  installCmp(base, o.implicit);
-  closeComparePop();
+  const doc = await fetchDoc(ref, null);
+  if (!doc) return false;
+  markDoc(doc);
   if (o.render === false) return true;
-  const cur = history[hi];
-  if (o.navigate === false || (cur && cur.kind === 'changes')) { captureViewState(); render(); }
-  else go({ kind: 'changes' });
+  captureViewState(); render();
   return true;
 }
 function clearCompare() {
-  const cur = history[hi];
-  // A screen that exists only while comparing — a Changes tab, a removed box's page — hands over to
-  // its group's own landing. Decided before the comparison is dropped, since a removed box's group
-  // is read off the change document.
-  const gone = cur && (cur.kind === 'changes' || cur.kind === 'hoodchanges' || cur.kind === 'removed');
-  const hood = gone && (cur.kind === 'hoodchanges' || (cur.kind === 'removed' && cmpTabOf(cur.id) === 'hoodchanges'));
-  closeComparePop();
-  if (IMPLICIT_CMP) {
-    // A map with an update log keeps its Changes tabs: stopping goes back to the newest log's story
-    // with nothing marked. A removed box's page belongs to the comparison that held it, so it hands
-    // over to the tab of its group.
-    installCmp(IMPLICIT_CMP, true);
-    if (cur && cur.kind === 'removed') go({ kind: hood ? 'hoodchanges' : 'changes' });
-    else { captureViewState(); render(); }
-    return;
-  }
   CMP = null; CMP_INDEX = null;
   DIFF_STATE = {};
   mode = 'base';
-  syncCompareUi();
-  if (gone) go({ kind: hood ? (HAS_GROUPING ? 'container' : 'context') : LANDING });
-  else { captureViewState(); render(); }
+  captureViewState(); render();
 }
-// ── the picker ────────────────────────────────────────────────────────────────────────────────
-const comparectl = document.getElementById('comparectl');
-const comparebtn = document.getElementById('comparebtn');
-const comparepop = document.getElementById('comparepop');
-function closeComparePop() { if (comparepop) comparepop.hidden = true; }
-// The map's update logs, newest first (api/changes). Read at boot and again when the picker opens.
-let LOG_PROBLEMS = [];   // log files beside the map that could not be read, as the server words them
-async function loadLogs() {
-  if (EXPORTED) { LOGS = []; LOG_PROBLEMS = []; return; }
-  const data = await cmpFetch('changes', null, 'list the updates');
-  LOGS = (data && data.logs) || [];
-  LOG_PROBLEMS = (data && data.problems) || [];
+// ── the Timeline ──────────────────────────────────────────────────────────────────────────────
+function timelineRowCardHtml(r) {
+  const key = 'at:' + r.at;
+  if (r.log) {
+    const l = r.log;
+    const desc = (l.headlines || []).join(' · ');
+    const foot = `<p class="ecard-extra"><span class="ecard-lbl">Update</span> ${esc(l.from)} → ${esc(l.to)}`
+      + (r.at === 'disk' ? ' <span class="muted">· not committed yet</span>' : r.date ? ` <span class="muted">· ${esc(r.date)}</span>` : '') + '</p>';
+    return plainCardHtml({ key, name: r.subject, desc,
+                           pill: `<span class="badge update">update</span>${countPillOf(countLabel(l.entries, 'entry'))}`, foot });
+  }
+  if (r.at === 'disk') {
+    return plainCardHtml({ key, name: r.subject, desc: 'What the map on disk holds that its last commit does not.',
+                           pill: '<span class="ecard-type ecard-type-plain">on disk</span>' });
+  }
+  return plainCardHtml({ key, name: r.subject, desc: 'No story: the map’s own diff for this step.',
+                         pill: '<span class="ecard-type ecard-type-plain">version</span>',
+                         foot: `<p class="ecard-extra"><span class="ecard-lbl">Committed</span> ${esc(r.date)}</p>` });
 }
-function renderLogRows() {
-  const wrap = document.getElementById('cmpupdates');
-  const host = document.getElementById('cmplogs');
-  if (!wrap || !host) return;
-  wrap.hidden = !LOGS.length && !LOG_PROBLEMS.length;
-  const broken = LOG_PROBLEMS.map((t) => `<div class="diffpop-loading">A log could not be read: ${esc(t)}</div>`).join('');
-  host.innerHTML = broken + LOGS.map((l) =>
-    `<button type="button" class="diffcommit${CMP && !CMP.implicit && CMP.ref === 'log:' + l.name ? ' on' : ''}" data-log="${esc(l.name)}" `
-    + `title="${esc('Update ' + l.from + ' → ' + l.to)}">`
-    + `<span class="dc-date">${esc(l.date)}</span>` + (l.latest ? '<span class="dc-tag">latest</span>' : '')
-    + `<span class="dc-subj">${esc(l.from)} → ${esc(l.to)} · ${esc(countLabel(l.entries, 'entry'))}</span></button>`).join('');
-  host.querySelectorAll('.diffcommit').forEach((b) =>
-    b.addEventListener('click', () => armCompare('log:' + b.getAttribute('data-log'), {})));
+function timelineListHtml() {
+  const rows = timelineRows();
+  const broken = LOG_PROBLEMS.map((t) => `<p class="cmp-warn">A log could not be read: ${esc(t)}</p>`).join('');
+  const list = rows.length ? `<div class="ecard-list">${rows.map(timelineRowCardHtml).join('')}</div>`
+    : '<p class="empty">No committed version of this map yet, and no update log beside it.</p>';
+  const foot = '<div class="tl-foot"><span class="tl-foot-lbl">Compare with a map file on disk</span>'
+    + '<input id="tlPath" type="text" placeholder="path to a project-map.json" spellcheck="false" autocomplete="off">'
+    + '<button type="button" id="tlGo">Compare</button><span id="tlMsg" class="diffpop-msg"></span></div>';
+  return broken + list + foot;
 }
-async function loadMapCommits() {
-  const host = document.getElementById('cmpcommits');
-  if (!host) return;
-  await loadLogs();
-  renderLogRows();
-  host.innerHTML = '<div class="diffpop-loading">Loading the map’s history…</div>';
-  let data;
-  try {
-    const r = await fetch(API_BASE + 'mapcommits', { cache: 'no-store' });
-    if (!r.ok) throw new Error('mapcommits ' + r.status);
-    data = await r.json();
-  } catch (_) { host.innerHTML = '<div class="diffpop-loading">The map’s history is not available.</div>'; return; }
-  const versions = data.versions || [];
-  if (!versions.length) { host.innerHTML = '<div class="diffpop-loading">No committed version of this map yet.</div>'; return; }
-  host.innerHTML = versions.map((v, i) =>
-    `<button type="button" class="diffcommit${CMP && CMP.ref === v.sha ? ' on' : ''}" data-sha="${esc(v.sha)}" title="${esc(v.subject)}">`
-    + `<span class="dc-date">${esc(v.date)}</span>`
-    + (i === 0 && data.dirty ? '<span class="dc-tag">last committed</span>' : '')
-    + `<span class="dc-subj">${esc(v.subject)}</span></button>`).join('');
-  host.querySelectorAll('.diffcommit').forEach((b) =>
-    b.addEventListener('click', () => armCompare(b.getAttribute('data-sha'), {})));
+function timelineHeadHtml(row, at, doc) {
+  const ref = doc ? doc.ref : null;
+  const marked = isMarked(ref);
+  let line;
+  if (row && row.log) {
+    const l = row.log;
+    line = `<b>Update ${esc(l.from)} → ${esc(l.to)}</b> · ${esc(l.date)} · ${esc(countLabel(l.entries, 'entry'))}`
+      + (row.at === 'disk' ? ' · <span class="cmp-later">not committed yet</span>' : '');
+  } else if (at === 'disk') line = '<b>Uncommitted edits</b> · the map on disk against its last commit';
+  else if (at === 'file') line = doc && doc.old ? `<b>Compared with</b> ${esc(doc.old.label)}` : '<b>A map file on disk</b>';
+  else if (row) line = `<b>${esc(row.date)}</b> · ${esc(row.subject)}`;
+  else line = '<b>A version</b>';
+  const what = row && row.log ? 'this update' : at === 'disk' ? 'these edits' : at === 'file' ? 'this comparison' : 'this step';
+  const control = !doc ? '' : marked
+    ? '<button type="button" class="cmp-stop">Stop marking</button>'
+    : `<button type="button" class="cmp-mark" title="Badge every box ${esc(what)} touches, on every screen">Mark ${esc(what)} on the map</button>`;
+  const warns = doc ? (doc.warnings || []).map((w) => `<p class="cmp-warn">${esc(w)}</p>`).join('') : '';
+  return `<div class="cmp-head"><p class="cmp-since">${line}</p>${control}${warns}</div>`;
 }
-function openComparePop() {
-  if (!comparepop) return;
-  comparepop.hidden = false;
-  const msg = document.getElementById('cmppopmsg');
-  if (msg) msg.textContent = '';
-  loadMapCommits();
+// Under a story the diff is EVIDENCE: folded under the entries, with the three filters inside the
+// fold, since they read the diff and never the entries. Without a story the diff is the page.
+function evidenceHtml(doc) {
+  if (doc.first) return '<p class="cmp-noevidence">The first version of this map: nothing before it to compare with.</p>';
+  if (!doc.old) {
+    return '<p class="cmp-noevidence">No committed version of the map from before this update is in the '
+      + 'folder’s history, so the map’s own diff cannot be shown under it.</p>';
+  }
+  const body = docFiltersHtml(doc) + docMechanicalHtml(doc, null);
+  if (!doc.log) return `<div class="cmp-evidence-open">${body}</div>`;
+  const sinceWhat = doc.to ? 'from the version before this update to the version it made' : 'since the map as last committed before this update';
+  return `<details class="cmp-evidence"${EVIDENCE_OPEN[doc.ref] ? ' open' : ''}>`
+    + `<summary>The map’s own diff <span class="muted">${esc(sinceWhat)} · ${esc(docCountsText(doc, null))}</span></summary>`
+    + body + '</details>';
 }
-if (EXPORTED && comparectl) comparectl.hidden = true;   // needs git and the disk: a static copy has neither
-if (comparebtn && !EXPORTED) {
-  comparebtn.addEventListener('click', (e) => { e.stopPropagation(); comparepop.hidden ? openComparePop() : closeComparePop(); });
-  document.addEventListener('click', (e) => { if (!comparepop.hidden && !comparectl.contains(e.target)) closeComparePop(); });
-  const goPath = () => {
-    const v = document.getElementById('cmpPath').value.trim();
-    if (!v) { document.getElementById('cmppopmsg').textContent = 'Type the path of a map file, or pick a version above.'; return; }
-    armCompare('path:' + v, {});
-  };
-  document.getElementById('cmpGo').addEventListener('click', goPath);
-  document.getElementById('cmpPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') goPath(); });
-  document.getElementById('cmpClear').addEventListener('click', clearCompare);
+function renderTimeline(s) {
+  if (!s.at) {
+    diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Timeline') + timelineListHtml() + '</div>';
+    bindPlainCards(diagram, (key) => go({ kind: 'timeline', at: key.slice(3) }));
+    const goPath = () => {
+      const v = document.getElementById('tlPath').value.trim();
+      if (!v) { document.getElementById('tlMsg').textContent = 'Type the path of a map file.'; return; }
+      armCompare('path:' + v, { render: false }).then((ok) => { if (ok) go({ kind: 'timeline', at: 'file' }); });
+    };
+    document.getElementById('tlGo').addEventListener('click', goPath);
+    document.getElementById('tlPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') goPath(); });
+    if (!HISTORY_LOADED) loadHistory().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
+    return;
+  }
+  const row = timelineRow(s.at);
+  const ref = timelineRef(s.at);
+  const doc = docFor(ref);
+  let body;
+  if (s.at === 'file' && !ref) {
+    body = '<p class="empty">No map file is being compared. Type its path on the Timeline.</p>';
+  } else if (!doc) {
+    body = '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
+    loadDocThen(ref, s);
+  } else if (doc.log) {
+    const cards = (doc.log.entries || []).map(entryCardHtml).join('');
+    body = (cards ? `<div class="ecard-list">${cards}</div>` : '<p class="empty">This update has no entry.</p>')
+      + logFootHtml(doc.log) + evidenceHtml(doc);
+  } else body = evidenceHtml(doc);
+  diagram.innerHTML = '<div class="usecases-wrap">' + timelineHeadHtml(row, s.at, doc) + body + '</div>';
+  bindElementCards(diagram);
+  bindPlainCards(diagram, (key) => cmpOpenKey(key, s.at));
+  bindTimelinePage(diagram, s, doc);
 }
+function bindTimelinePage(root, s, doc) {
+  root.querySelectorAll('button.cmp-filter').forEach((b) => b.addEventListener('click', () => {
+    const c = b.getAttribute('data-cls');
+    FILTERS[c] = !FILTERS[c];
+    if (CMP) DIFF_STATE = cmpProjection();
+    captureViewState(); render();
+  }));
+  root.querySelectorAll('button.cmp-stop').forEach((b) => b.addEventListener('click', clearCompare));
+  root.querySelectorAll('button.cmp-mark').forEach((b) => b.addEventListener('click', () => {
+    if (doc) { markDoc(doc); captureViewState(); render(); }
+  }));
+  root.querySelectorAll('details.cmp-evidence').forEach((d) => d.addEventListener('toggle', () => { if (doc) EVIDENCE_OPEN[doc.ref] = d.open; }));
+  // A pill on an entry card that opens something the item pills cannot: a removed box's page as it
+  // was, a shared sub-flow, the glossary, the map's own overview.
+  root.querySelectorAll('.cmp-log-pill[data-key]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    cmpOpenKey(b.getAttribute('data-key'), s.at);
+  }));
+}
+// ── a removed box's page: as it was in the old map ────────────────────────────────────────────
+function renderRemoved(s) {
+  const ref = timelineRef(s.at);
+  const doc = docFor(ref);
+  if (!doc) {
+    diagram.innerHTML = '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
+    if (ref) loadDocThen(ref, s); else diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>';
+    return;
+  }
+  const e = docRemoved(doc, s.id);
+  const lb = logBox(doc.log, s.id);
+  const told = lb && lb.state === 'removed' ? lb : null;   // the log says it went, even with no old map to show
+  if (!e && !told) { diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>'; return; }
+  const k = e ? (docKindSpec(doc, e.kind) || { word: 'box' }) : { word: told.word || 'box' };
+  const hero = pageHeroHtml({ name: (e ? e.name_old : told.name) || ('a removed ' + k.word), type: k.word,
+                              pills: '<span class="badge deleted">removed</span>',
+                              desc: e && e.sentence_old ? mdInline(e.sentence_old) : '', noDesc: false,
+                              meta: e && e.source_old ? heroSourceLine(e.source_old) : '' });
+  // The block IS this page's body, so it wears `cmpsec-page`: the placement pass that removes a
+  // stale block from a previous screen leaves it alone, and the next render's rewrite of the page
+  // takes it away.
+  diagram.innerHTML = '<div class="usecases-wrap glossary-wrap">' + hero
+    + cmpSectionHtml(doc, e, { all: true, id: s.id }).replace('class="cmpsec"', 'class="cmpsec cmpsec-page"') + '</div>';
+  bindElementCards(diagram);
+}
+function removedTitle(s) {
+  const doc = docFor(timelineRef(s.at));
+  const e = docRemoved(doc, s.id), lb = e ? null : logBox(doc ? doc.log : null, s.id);
+  return e ? (e.name_old || 'Removed') : lb ? (lb.name || 'a removed ' + (lb.word || 'box')) : 'Removed';
+}
+
 
 // --- impact explorer ---------------------------------------------------------------
 // Projects an ARBITRARY diff (any base/target, incl. ranges that don't touch the map's commit) onto
@@ -17275,7 +17326,7 @@ async function loadImpact(base, target) {
     if (!res.ok) { if (msg) msg.textContent = body || ('impact failed (' + res.status + ')'); return; }
     data = JSON.parse(body);
   } catch (_) { if (msg) msg.textContent = 'Could not reach the server for the impact.'; return; }
-  if (CMP) { CMP = null; CMP_INDEX = null; syncCompareUi(); }   // one overlay at a time
+  if (CMP) { CMP = null; CMP_INDEX = null; }   // one overlay at a time
   IMPACT = data;
   LIVE_DIFF = { impact: true, base: data.spec.base, target: data.spec.target,
                 changes: (data.files || []).map((f) => ({ status: f.status, path: f.path,
@@ -17375,19 +17426,14 @@ const LANDING = HAS_OVERVIEW ? 'overview'
 // be one more thing to keep in step with the map's own kinds.
 // A link that names an old map arms the comparison BEFORE the first screen is drawn, so the badges
 // and the Changes tabs are there when it lands rather than one repaint later.
-// A map that carries an update log opens with its newest one on the Changes tabs — built once here,
-// kept as the fallback "Stop comparing" returns to — unless the link names a comparison of its own.
+// The map's history — its committed versions and its update logs — is read once at boot, so the
+// Timeline and every version's page can be drawn from it. A link that names a marked version arms
+// the badges BEFORE the first screen is drawn, so they are there when it lands.
 {
-  await loadLogs();
-  if (LOGS.length) {
-    const base = await cmpFetchRef('log:' + LOGS[0].name, null);
-    IMPLICIT_CMP = base ? Object.assign(base, { implicit: true }) : null;
-  }
+  if (!EXPORTED) await loadHistory();
   const bootCmp = URL_SYNC && !EXPORTED ? cmpFromHash(location.hash) : null;
-  if (bootCmp) await armCompare(bootCmp, { navigate: false, render: false });
-  else if (IMPLICIT_CMP) installCmp(IMPLICIT_CMP, true);
+  if (bootCmp) await armCompare(bootCmp, { render: false });
 }
-syncCompareUi();
 go((URL_SYNC && stateFromUrl(location.hash)) || { kind: LANDING });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

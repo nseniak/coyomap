@@ -3643,13 +3643,15 @@ def test_code_and_operations_read_as_one_question() -> None:
     js = (VIEWER_DIR / "viewer.js").read_text()
     html = (VIEWER_DIR / "viewer.html").read_text()
     table = js[js.index("const VIEW_GROUPS = ["): js.index("\n];", js.index("const VIEW_GROUPS = ["))]
-    assert [g for g in re.findall(r"\['([a-z]+)', '", table)] == ["product", "hood"], \
-        "two groups: Data and Glossary sit under Product now, Storage under the hood"
-    assert "'Under the hood'" in table
+    # Product and Under the hood, then TIME: the Change log is one timeline of the map's versions,
+    # neither a product view nor a machine view, so it is a group of its own (2026-09-18).
+    assert [g for g in re.findall(r"\['([a-z]+)', '", table)] == ["product", "hood", "changelog"], \
+        "three groups: Data and Glossary sit under Product now, Storage under the hood, the timeline under Change log"
+    assert "'Under the hood'" in table and "'Change log'" in table
     hood = re.findall(r'<button data-view="(\w+)" data-group="hood">', html)
     # Storage is a machine fact — where the data physically lives — so it sits under the hood too.
-    # …plus the Changes tab, shown only while a comparison with an old map is armed (syncCompareUi).
-    assert set(hood) == {"container", "data", "context", "tests", "deployment", "system", "hoodchanges"}, hood
+    assert set(hood) == {"container", "data", "context", "tests", "deployment", "system"}, hood
+    assert re.findall(r'<button data-view="(\w+)" data-group="changelog">', html) == ["timeline"]
 
 
 def test_a_component_says_how_many_features_it_serves() -> None:

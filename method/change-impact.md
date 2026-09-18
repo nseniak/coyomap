@@ -127,8 +127,8 @@ never edited), and the code-link moves.
 a card wears on the Changes tab (`lint` counts them). The `sentence` says what a user can now do or
 no longer do — or, for a box under the hood, what the machine now does differently. Both face the
 map's readability check (under 20 words a sentence, no code words). `elements` are ids; the viewer
-draws them by name, under Product or Under the hood by their kind, so the two views are derived
-from this list and nothing else is authored for them.
+draws them by name, as the pills of the entry's card on the map's timeline, so nothing else is
+authored for the screen.
 
 **The map is a snapshot; its history is the log.** The words an entry writes INTO the map — an
 edit's `now`, an added row — describe the product as it is, as if it had always been so. "Now",

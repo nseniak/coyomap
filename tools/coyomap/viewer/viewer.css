@@ -1358,6 +1358,7 @@ body.panel-dragging { user-select: none; }
 .badge.deleted { background: #ffebe9; color: #cf222e; }
 .badge.rippled { background: #ffedd5; color: #b45309; }  /* the change-impact summary's "ripples to" group */
 .badge.named { background: #eef2ff; color: #3730a3; }    /* an update log names the box without editing it */
+.badge.update { background: #eef2ff; color: #3730a3; }   /* a timeline row that carries an update log */
 .badge.role { background: #dcfce7; color: #166534; }     /* a dep's DERIVED role (bus/store/…), read off its incoming edge verbs */
 #panel dl { margin: 0; }
 #panel dt { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin-top: 10px; }
@@ -1925,6 +1926,20 @@ details.cmp-evidence .cmp-filters { margin: 0 0 10px; }
 .cmp-evidence-page { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
 .cmp-evidence-page h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
                         letter-spacing: .05em; color: #6b7280; }
+/* THE TIMELINE: one row per version of the map, the foot for a map file elsewhere on disk, and a
+   version's page where the diff is the page itself when the version carries no story. */
+.cmp-evidence-open { margin-top: 12px; }
+.tl-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; padding: 10px 12px;
+           border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; font-size: 12.5px; color: #374151; }
+.tl-foot .tl-foot-lbl { font-weight: 600; }
+.tl-foot input { flex: 1 1 260px; min-width: 160px; font: inherit; font-size: 12.5px; padding: 4px 8px;
+                 border: 1px solid #d1d5db; border-radius: 7px; }
+.tl-foot button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+                  background: #fff; color: #374151; border: 1px solid #d1d5db; }
+.tl-foot button:hover { background: #eef2ff; border-color: #c7d2fe; }
+.cmp-waived { margin: 0; padding-left: 18px; font-size: 13px; }
+.cmp-waived li { margin: 3px 0; }
+.cmp-notes { margin: 0; font-size: 13px; color: #374151; white-space: pre-line; }
 /* THE "WHAT CHANGED" BLOCK on a page about one box: the same framed section every item page uses,
    with the old words struck and the new words marked, and a list's items as came / went. */
 .cmpsec { margin: 12px 0 16px; padding: 10px 14px 12px; border: 1px solid #e5e7eb; border-radius: 10px;

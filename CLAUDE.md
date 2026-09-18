@@ -50,11 +50,19 @@ the code's names.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
   Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Subsystems,
-  Storage, Dependencies, Tests, Deployment, System.
-- **group** — the two tabs above the views: Product, Under the hood. A group is a
-  set of tabs, never a page you can be on. Data (the entities) and Glossary moved
-  under Product on 2026-09-08, Storage under the hood, and the two groups they
-  made up went.
+  Storage, Dependencies, Tests, Deployment, System, Timeline.
+- **group** — the three tabs above the views: Product, Under the hood, Change
+  log. A group is a set of tabs, never a page you can be on. Data (the entities)
+  and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
+  two groups they made up went. Change log arrived on 2026-09-18: time is neither
+  a product view nor a machine view.
+- **timeline** — the Change log's one view: every committed version of the map,
+  newest first, and the uncommitted edits on top when there are any. A version
+  that carries an update log is an **update** and tells the log's story (every
+  entry once, in full, with its waivers and notes); any other version shows the
+  map's own diff for that step. **Mark on the map** badges every box a version
+  touches on every screen and puts the choice in the address; it replaced the
+  Compare… button and its picker.
 - **box** — one thing drawn on a view. **arrow** — a relation between two boxes.
 - **code link** — the `file:line` a box points at. A box without one is
   ungrounded, which is a defect.
@@ -219,8 +227,8 @@ design principles these come from)
   the box. On a card list, scroll to the card and briefly ring it.
 - **view question** — the one sentence a view answers. It belongs to the view,
   not to any page, so it leads the content and never changes as you drill.
-- **group tab row** — the strip of group tabs: Product, Under the hood. The
-  first strip under the title bar.
+- **group tab row** — the strip of group tabs: Product, Under the hood, Change
+  log. The first strip under the title bar.
 - **view tab row** — the strip of view tabs, under the group tab row. With
   Product open it holds Overview, Features, Happy Path, Interfaces, Rules, Data,
   Glossary.

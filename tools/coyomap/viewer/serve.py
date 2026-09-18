@@ -487,14 +487,22 @@ def _pin_at(proj: Project, sha: str, path: str) -> str | None:
     return proj.pin_cache[sha]
 
 
-def version_for_pin(proj: Project, commit: str) -> dict[str, Any] | None:
-    """The newest committed version of the map whose own pin is `commit`: the map an update log
-    starting from that commit was written against, and so the old side of the log's evidence. Read
-    newest first and stopped at the first match, so the usual answer costs one git read."""
+def version_for_pin(proj: Project, commit: str, oldest: bool = False) -> dict[str, Any] | None:
+    """A committed version of the map whose own pin is `commit`. The NEWEST such version is the map
+    an update log starting from that commit was written against — the old side of the log's step;
+    read newest first and stopped at the first match, so the usual answer costs one git read. The
+    OLDEST is the commit that moved the pin there — the update's own commit, the new side of its
+    step — and costs a pin read per version down to it."""
+    found: dict[str, Any] | None = None
     for row in map_history(proj)["versions"]:
-        if commit_matches(_pin_at(proj, str(row["sha"]), str(row["path"])), commit):
-            return {**row, "pin": _pin_at(proj, str(row["sha"]), str(row["path"]))}
-    return None
+        pin = _pin_at(proj, str(row["sha"]), str(row["path"]))
+        if commit_matches(pin, commit):
+            found = {**row, "pin": pin}
+            if not oldest:
+                return found
+        elif found is not None:
+            break                                     # the run of versions with this pin has ended
+    return found
 
 
 def _old_map_at(proj: Project, sha: str) -> OldMap:
@@ -540,22 +548,33 @@ def _old_map_from_path(proj: Project, raw: str) -> OldMap:
     return OldMap(doc, {"label": raw, "sha": None, "short": None, "date": "", "subject": "", "path": raw})
 
 
-def compare_with(proj: Project, ref: str) -> dict[str, Any]:
-    """`api/compare?ref=`: the change document between the old map `ref` names and the served map.
-    Commit refs are cached per map version; a path ref is read every time, since the file may move."""
+def compare_with(proj: Project, ref: str, to: str | None = None) -> dict[str, Any]:
+    """`api/compare?ref=[&to=]`: the change document between the old map `ref` names and the served
+    map — or, with `to`, the committed version `to` names: one step of the map's own history, which
+    the timeline draws. Commit refs are cached per map version; a path ref is read every time, since
+    the file may move."""
     parsed = parse_ref(ref)
     if parsed is None:
         raise ValueError("ref must be a commit sha or path:<file>")
+    if to is not None and parse_ref(to) != ("commit", to):
+        raise ValueError("to must be a commit sha")
     kind, value = parsed
-    if kind == "commit" and ref in proj.compare_cache:
-        return proj.compare_cache[ref]
+    key = f"{ref}..{to}" if to else ref
+    if kind == "commit" and key in proj.compare_cache:
+        return proj.compare_cache[key]
     old = _old_map_at(proj, value) if kind == "commit" else _old_map_from_path(proj, value)
-    new_doc = load_map_doc(proj.map_json.read_text(encoding="utf-8"), "the served map")
-    new = {"label": "the current map", "sha": proj.commit or None,
-           "short": (proj.commit or "")[:7] or None, "date": "", "subject": "", "path": None}
+    if to:
+        newer = _old_map_at(proj, to)
+        new_doc, new = newer.doc, newer.side
+    else:
+        new_doc = load_map_doc(proj.map_json.read_text(encoding="utf-8"), "the served map")
+        new = {"label": "the current map", "sha": proj.commit or None,
+               "short": (proj.commit or "")[:7] or None, "date": "", "subject": "", "path": None}
     payload = compare_payload(new_doc, old.doc, ref, old.side, new)
+    if to:
+        payload["to"] = to
     if kind == "commit":
-        proj.compare_cache[ref] = payload
+        proj.compare_cache[key] = payload
     return payload
 
 
@@ -574,6 +593,7 @@ def list_changes(proj: Project) -> dict[str, Any]:
     """`api/changes`: the map's update logs, newest first, and the files in the folder that should
     have been logs and could not be read."""
     heads: list[LogHead] = []
+    headlines: dict[str, list[str]] = {}
     problems: list[str] = []
     folder = changes_dir(proj)
     if folder.is_dir():
@@ -587,9 +607,11 @@ def list_changes(proj: Project) -> dict[str, Any]:
                 problems.append(f"{path.name}: {e}")
                 continue
             heads.append(LogHead(name, log.from_commit, log.to_commit, log.date, len(log.entries)))
+            headlines[name] = [e.headline for e in log.entries]
     ordered = order_logs(heads, proj.commit or None)
     return {"logs": [{"name": h.name, "from": h.from_commit, "to": h.to_commit, "date": h.date,
-                      "entries": h.entries, "latest": i == 0 and commit_matches(h.to_commit, proj.commit)}
+                      "entries": h.entries, "headlines": headlines.get(h.name, []),
+                      "latest": i == 0 and commit_matches(h.to_commit, proj.commit)}
                      for i, h in enumerate(ordered)],
             "pin": proj.commit or None, "problems": problems}
 
@@ -617,8 +639,11 @@ def change_log_view(proj: Project, name: str) -> dict[str, Any]:
         except ValueError:
             version = None
     payload = to_view(log, new_doc, old_doc)
+    # The step's new side: the commit that moved the pin to the log's to-commit. None while the update
+    # sits uncommitted on disk; the served map is then the new side.
+    to_version = version_for_pin(proj, log.to_commit, oldest=True)
     payload.update({"name": name, "latest": commit_matches(log.to_commit, proj.commit),
-                    "from_version": version, "kinds": kinds_json()})
+                    "from_version": version, "to_version": to_version, "kinds": kinds_json()})
     return payload
 
 
@@ -1086,8 +1111,9 @@ class Handler(BaseHTTPRequestHandler):
             # The change document between an old map (?ref=<sha> or ?ref=path:<file>) and the served
             # map. A ref the reader typed wrong is their input → 400; a git or disk fault → 500.
             ref = (query.get("ref") or [""])[0]
+            to = (query.get("to") or [None])[0]
             try:
-                return self._json(compare_with(proj, ref))
+                return self._json(compare_with(proj, ref, to))
             except ValueError as e:
                 return self._send(400, "text/plain; charset=utf-8", str(e).encode("utf-8"))
             except (OSError, KeyError, IndexError, TypeError) as e:

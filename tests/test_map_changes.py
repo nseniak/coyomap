@@ -160,6 +160,23 @@ def test_the_map_versions_carry_their_own_pin_and_a_log_s_from_commit_finds_its_
         assert proj.pin_cache == {first: pin1}
 
 
+def test_the_oldest_version_with_a_pin_is_the_commit_that_moved_it_there():
+    """Three map commits carry one pin (an update, then two rename-only commits). The newest is the
+    map a later log starts from; the oldest is the commit that landed the update — the new side of
+    its own step."""
+    with tempfile.TemporaryDirectory() as td:
+        root, first, pin1, pin2 = make_update_repo(td)
+        second = commit(root, {".coyomap/project-map.json": make_map_text(pin1, purpose="serves guilds (renamed)")},
+                        msg="a rename-only commit")
+        third = commit(root, {".coyomap/project-map.json": make_map_text(pin1, purpose="serves guilds (renamed twice)")},
+                       msg="another")
+        proj = build_projects([str(root)])[root.name]
+        assert version_for_pin(proj, pin1)["sha"] == third
+        assert version_for_pin(proj, pin1, oldest=True)["sha"] == first
+        assert version_for_pin(proj, "0000000", oldest=True) is None
+        assert second != first
+
+
 def test_the_logs_are_listed_with_the_latest_marked_and_a_broken_one_reported():
     with tempfile.TemporaryDirectory() as td:
         root, _first, pin1, pin2 = make_update_repo(td)
@@ -170,6 +187,7 @@ def test_the_logs_are_listed_with_the_latest_marked_and_a_broken_one_reported():
         got = list_changes(proj)
         assert [(l["name"], l["from"], l["to"], l["entries"], l["latest"]) for l in got["logs"]] == \
             [(f"{pin1[:7]}-{pin2[:7]}", pin1[:7], pin2[:7], 1, True)]
+        assert got["logs"][0]["headlines"] == ["A guild keeps its founder"]
         assert got["pin"] == pin2
         assert got["problems"] and got["problems"][0].startswith("0000000-1111111.json:")
 
@@ -189,6 +207,7 @@ def test_one_log_comes_with_its_boxes_by_name_and_the_map_it_was_written_against
         proj = build_projects([str(root)])[root.name]
         got = change_log_view(proj, f"{pin1[:7]}-{pin2[:7]}")
         assert got["latest"] is True and got["from_version"]["sha"] == first and got["from_version"]["pin"] == pin1
+        assert got["to_version"] is None, "the update sits on disk, uncommitted: the served map is the step's new side"
         assert [k["array"] for k in got["kinds"]][:2] == ["capabilities", "use_cases"]
         (e,) = got["entries"]
         assert e["headline"] == "A guild keeps its founder"

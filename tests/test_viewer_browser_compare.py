@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Change mode in a real browser: the viewer compared with an old map.
+"""Change mode in a real browser: the viewer compared with a map file on disk, through the Timeline.
 
 The served map is the NEW side; the OLD side is a file on disk named by a `path:` ref, which is what
 a temp folder with no git history can offer. The old copy holds one use case the new map lost, and
@@ -83,13 +83,12 @@ def _served_pair() -> Iterator[tuple[str, str]]:
             httpd.server_close()
 
 
-def _cmp(url: str, old_path: str, screen: str) -> str:
+def _file_page(url: str, old_path: str) -> str:
+    return f"{url}#v=timeline&at=file&cmp=path:{old_path}"
+
+
+def _marked(url: str, old_path: str, screen: str) -> str:
     return f"{url}#{screen}&cmp=path:{old_path}"
-
-
-def _visible_tabs(page: Any) -> list[str]:
-    return list(page.evaluate("() => [...document.querySelectorAll('#viewsw button[data-view]')]"
-                              ".filter((b) => b.style.display !== 'none' && !b.hidden).map((b) => b.dataset.view)"))
 
 
 def _text(page: Any, selector: str) -> str:
@@ -105,22 +104,23 @@ def _screen_text(page: Any) -> str:
     return str(page.evaluate("() => document.getElementById('diagram').innerText"))
 
 
-def test_a_link_naming_an_old_map_arms_change_mode_and_keeps_the_old_map_in_the_address() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=features")) as page:
+def _hash(page: Any) -> str:
+    return str(page.evaluate("() => decodeURIComponent(location.hash)"))
+
+
+def test_a_link_naming_a_map_file_opens_its_comparison_on_the_timeline_and_keeps_the_file_in_the_address() -> None:
+    with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
-        assert _crumb(page) == "Features"
-        assert page.evaluate("() => document.getElementById('comparebtn').classList.contains('armed')")
-        assert "changes" in _visible_tabs(page), "the Changes tab shows only while a comparison is armed"
-        assert _text(page, '#viewsw button[data-view="changes"] .count-pill') == "2", \
-            "the renamed use case and the removed one"
-        assert f"cmp=path:{old}" in str(page.evaluate("() => decodeURIComponent(location.hash)"))
+        assert _crumb(page) == "A map file"
+        assert "Compared with" in _text(page, ".cmp-head") and old in _text(page, ".cmp-head")
+        assert "Stop marking" in _text(page, ".cmp-head"), "a comparison named by the link is marked on the map"
+        assert f"cmp=path:{old}" in _hash(page)
         assert not page.js_errors, page.js_errors
 
 
-def test_the_changes_tab_lists_each_change_with_its_summary_and_opens_the_box() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=changes")) as page:
+def test_the_file_page_lists_each_change_with_its_summary_and_opens_the_box() -> None:
+    with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
-        assert _crumb(page) == "Changes"
         card = _text(page, '.ecard[data-id="UC1"]')
         assert NEW_NAME in card and "1 added" in card and f"renamed from {OLD_NAME}" in card
         assert "modified" in card, "the card wears the change badge"
@@ -135,7 +135,7 @@ def test_the_changes_tab_lists_each_change_with_its_summary_and_opens_the_box() 
 
 
 def test_a_removed_box_opens_as_it_was_in_the_old_map_and_shows_no_id() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=changes")) as page:
+    with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
         card = _text(page, '.ecard[data-key="removed:UC99"]')
         assert OLD_UC in card and "removed" in card
@@ -147,30 +147,27 @@ def test_a_removed_box_opens_as_it_was_in_the_old_map_and_shows_no_id() -> None:
         assert "Org admin" in text and "marks the organization archived" in text
         for internal in ("UC99", "R2", "C15", "CAP1"):
             assert internal not in text, f"an id on screen: {internal}"
-        assert "cmp=path:" in str(page.evaluate("() => decodeURIComponent(location.hash)"))
+        assert "at=file" in _hash(page) and "cmp=path:" in _hash(page)
         assert not page.js_errors, page.js_errors
 
 
 def test_a_moved_code_line_hides_behind_its_filter_and_the_count_follows() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=hood-changes")) as page:
+    with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
-        assert _crumb(page) == "Changes"
-        assert _text(page, '#viewsw button[data-view="hoodchanges"] .count-pill') == "1", "the reworded purpose only"
         assert not page.query_selector('.ecard[data-id="C2"]'), "a moved line is hidden while code links are off"
         assert _text(page, 'button.cmp-filter[data-cls="link"]') == "code links 1", "what is hidden is counted where it is hidden"
         page.click('button.cmp-filter[data-cls="link"]')
         _settle(page)
-        assert _text(page, '#viewsw button[data-view="hoodchanges"] .count-pill') == "2"
         assert "code link moved" in _text(page, '.ecard[data-id="C2"]')
         assert not page.js_errors, page.js_errors
 
 
-def test_every_changed_box_wears_a_badge_on_a_diagram_and_in_a_list() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=container")) as page:
+def test_every_changed_box_wears_a_badge_on_a_diagram_and_in_a_list_once_marked() -> None:
+    with _served_pair() as (url, old), _page(_marked(url, old, "v=container")) as page:
         _settle(page)
         assert page.evaluate("() => document.querySelectorAll('#diagram .diff-badge').length") >= 1, \
             "the subsystem holding the reworded component is badged on the overview"
-        page.goto(_cmp(url, old, "v=features"))
+        page.goto(_marked(url, old, "v=features"))
         _settle(page)
         assert _crumb(page) == "Features"
         assert page.evaluate("() => document.querySelectorAll('#diagram .badge.modified').length") >= 1, \
@@ -178,32 +175,30 @@ def test_every_changed_box_wears_a_badge_on_a_diagram_and_in_a_list() -> None:
         assert not page.js_errors, page.js_errors
 
 
-def test_stop_comparing_drops_the_tabs_the_badges_and_the_link() -> None:
-    with _served_pair() as (url, old), _page(_cmp(url, old, "v=changes")) as page:
+def test_stop_marking_drops_the_badges_and_the_link_and_the_file_page_says_so() -> None:
+    with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
         page.click("button.cmp-stop")
         _settle(page)
-        tabs = _visible_tabs(page)
-        assert "changes" not in tabs and "hoodchanges" not in tabs
-        assert "cmp=" not in str(page.evaluate("() => location.hash"))
-        assert not page.evaluate("() => document.getElementById('comparebtn').classList.contains('armed')")
-        assert _crumb(page) != "Changes", "a screen that exists only while comparing hands over to the landing"
+        assert "cmp=" not in _hash(page)
+        assert "No map file is being compared" in _screen_text(page)
+        page.goto(url + "#v=features")
+        _settle(page)
+        assert not page.evaluate("() => document.querySelectorAll('#diagram .badge.modified').length")
         assert not page.js_errors, page.js_errors
 
 
-def test_the_picker_says_when_the_map_has_no_history_and_takes_a_path_instead() -> None:
-    with _served_pair() as (url, old), _page(url + "#v=features") as page:
+def test_the_timeline_says_when_the_map_has_no_history_and_the_foot_takes_a_file() -> None:
+    with _served_pair() as (url, old), _page(url + "#v=timeline") as page:
         _settle(page)
-        assert "changes" not in _visible_tabs(page)
-        page.click("#comparebtn")
-        page.wait_for_selector("#cmpcommits .diffpop-loading", state="attached")
+        assert _crumb(page) == "Timeline"
+        assert "No committed version" in _screen_text(page), "a folder with no git says so"
+        page.fill("#tlPath", old)
+        page.press("#tlPath", "Enter")
         _settle(page)
-        assert "No committed version" in _text(page, "#cmpcommits"), "a folder with no git says so"
-        page.fill("#cmpPath", old)
-        page.press("#cmpPath", "Enter")
-        _settle(page)
-        assert _crumb(page) == "Changes"
-        assert "changes" in _visible_tabs(page)
+        assert _crumb(page) == "A map file"
+        assert f"cmp=path:{old}" in _hash(page) and "at=file" in _hash(page)
+        assert page.query_selector('.ecard[data-id="UC1"]')
         assert not page.js_errors, page.js_errors
 
 

@@ -170,6 +170,28 @@ def test_a_commit_ref_is_cached_until_the_map_changes_on_disk():
         assert c1["fields"][0]["new"] == "serves guilds slowly"
 
 
+def test_a_step_of_the_map_s_own_history_compares_two_committed_versions():
+    """`to=` names the new side: one step of the timeline, never the file on disk. Cached under its
+    own key, so the step and the plain since-comparison do not answer for each other."""
+    with tempfile.TemporaryDirectory() as td:
+        root, first, second = make_history_repo(td)
+        proj = build_projects([str(root)])[root.name]
+        step = compare_with(proj, first, to=second)
+        assert step["old"]["sha"] == first and step["new"]["sha"] == second and step["to"] == second
+        assert step["new"]["label"].endswith("· coyodex is now coyomap")
+        assert [(e["change"], e["id_new"]) for e in step["elements"]] == [("modified", "C1")], "the disk-only C2 is not in the step"
+        since = compare_with(proj, first)
+        assert {e["id_new"] for e in since["elements"]} == {"C1", "C2"} and "to" not in since
+        assert compare_with(proj, first, to=second) is step
+        for bad in ("HEAD", "path:x", "0123456789abcdef0123456789abcdef01234567"):
+            try:
+                compare_with(proj, first, to=bad)
+            except ValueError as e:
+                assert "to must be a commit sha" in str(e) or "not a commit" in str(e), (bad, str(e))
+            else:
+                raise AssertionError(f"{bad} was accepted as a step end")
+
+
 def test_a_map_file_on_disk_compares_too_and_a_bad_path_is_the_reader_s_fault():
     with tempfile.TemporaryDirectory() as td:
         root, _first, _second = make_history_repo(td)
@@ -202,6 +224,8 @@ def test_the_two_endpoints_answer_over_http_and_a_bad_ref_is_a_400():
             assert status == 200 and json.loads(body)["ref"] == first
             status, body = get(port, f"/coyomap/{slug}/api/compare?ref=HEAD")
             assert status == 400 and b"commit sha or path" in body
+            status, body = get(port, f"/coyomap/{slug}/api/compare?ref={first}&to=nope")
+            assert status == 400 and b"to must be a commit sha" in body
         finally:
             httpd.shutdown()
             httpd.server_close()
