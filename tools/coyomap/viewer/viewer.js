@@ -17241,8 +17241,15 @@ function timelineHeadHtml(row, doc) {
   const control = !doc ? '' : isMarked(ref)
     ? '<button type="button" class="cmp-stop">Stop marking</button>'
     : '<button type="button" class="cmp-mark" title="Badge every box this update touches, on every screen">Mark this update on the map</button>';
+  // THE MARKS ARE ON TODAY'S MAP. The badges say which boxes this update touched; the boxes wear
+  // their current words, which a later update may have changed again. Said here, because the map
+  // as this update left it is not what the viewer draws — a past version may not even load in
+  // today's code — and a mark that silently mixed two times would read as one.
+  const marked = doc && isMarked(ref)
+    ? '<p class="cmp-marked-note">Marks of this update on today\u2019s map: the badges say which boxes it touched, and each box wears its current words. What this update did to a box is on that box\u2019s page.</p>'
+    : '';
   const warns = doc ? (doc.warnings || []).map((w) => `<p class="cmp-warn">${esc(w)}</p>`).join('') : '';
-  return `<div class="cmp-head"><p class="cmp-since">${line}</p>${control}${warns}</div>`;
+  return `<div class="cmp-head"><p class="cmp-since">${line}</p>${control}${marked}${warns}</div>`;
 }
 // The diff is EVIDENCE: folded under the entries, with the three filters inside the fold, since
 // they read the diff and never the entries.

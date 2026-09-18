@@ -251,6 +251,7 @@ def test_marking_the_update_badges_every_box_it_names_and_a_box_s_page_says_why(
         page.click("button.cmp-mark")
         _ready(page)
         assert f"cmp=log:{LOG}" in _hash(page) and "Stop marking" in _text(page, ".cmp-head")
+        assert "on today’s map" in _text(page, ".cmp-head"), "the marks are on today's map, and the head says so"
         page.goto(f"{url}#v=features&cmp=log:{LOG}")
         _ready(page)
         assert page.evaluate("() => document.querySelectorAll('#diagram .badge.modified').length") >= 1, \
