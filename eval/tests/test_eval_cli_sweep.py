@@ -152,7 +152,18 @@ RECIPES: dict[str, tuple] = {
     "live-numbers":   (lambda t: ["live-numbers", "--repo", str(REPO)], (0, 1)),
     # A map against ITSELF with an empty gold: every path runs, nothing can be wrong.
     "walk-score":     (lambda t: ["walk-score", str(MAP), str(MAP), "--gold", str(_gold_file(t))], OK),
+    # THE FIXTURE MAP'S OWN use cases, fed back as a run: every one states both halves, so the whole
+    # path runs (load, per-field rules, the pair as one box, the validator's advisory) and exits 0.
+    "field-score":    (lambda t: ["field-score", str(_rows_file(t))], OK),
 }
+
+
+def _rows_file(t: Path) -> Path:
+    """The fixture map's use cases, in the shape a partial run returns them."""
+    rows = json.loads(MAP.read_text(encoding="utf-8"))["use_cases"]
+    f = t / "rows.json"
+    f.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    return f
 
 
 def test_every_advertised_eval_command_has_a_sweep_recipe():

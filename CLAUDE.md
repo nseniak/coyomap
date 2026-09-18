@@ -66,6 +66,11 @@ the code's names.
   from the version before the update to the version it made, folded. **Mark on
   the map** badges every box a version touches on every screen and puts the
   choice in the address; it replaced the Compare… button and its picker.
+- **outside face** (of a use case) — the two sentences saying what the use case
+  is, from outside: its **trigger**, what the actor does to start it, and its
+  **outcome**, the result. They are two fields the map keeps apart, because a
+  reader judges them apart. A card joins them with an arrow; a details page
+  gives each its own labelled row. The inside face is the flow.
 - **owner** (of a data area) — the feature the area's data exists FOR: the one
   that creates its records and runs their lifecycle. Authored, never derived.
 - **owner with no evidence** — the map says an area exists for a feature, but no
@@ -233,10 +238,11 @@ design principles these come from)
 - **box** (on a timeline) — one block of the timeline. On a feature's page each
   box is one actor. On an actor's page each box is one feature. A second
   meaning of *box*: on a view it is one drawn thing (see above).
-- **station** — a dot on the timeline's line, carrying the title of one happy
-  path step.
+- **station** — a dot on the timeline's line, carrying one happy path step: the
+  name of the use case behind it, and under that the use case's own sentence.
 - **side stop** — a circle under the timeline's line: something this feature or
-  this actor can do that the happy path never reaches.
+  this actor can do that the happy path never reaches. It carries the same name
+  and the same sentence a station does.
 - **lane** — one of the timeline's two bands. The happy path is the upper lane,
   everything else is the lower one.
 - **gutter** — the strip on the left of the timeline that names the two lanes.

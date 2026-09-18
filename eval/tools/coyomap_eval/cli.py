@@ -49,6 +49,11 @@ Commands:
   walk-score  Score a PARTIAL RUN of the front-door walk: two maps (before, after) against a
            gold table written BEFORE the agent ran — which way in became a use case, was named
            on one, was recorded, or was left untouched. Exit 1 on any way in outside its gold.
+  field-score  Score a partial run that WROTE map fields, against the writing rules and the map's
+           own advisories — one sentence each, the word cap, no arrow an author never types, and the
+           pair read as one box. Two runs before this were scored by throwaway scratchpad scripts. It
+           clears the mechanical floor only; the run's "where I had to guess" section is where every
+           wording defect has actually come from. Exit 1 on any failure.
   retro-precheck  Refuse to retrospect a build that has not finished. Exit 1 when another
            session is still writing a transcript — provenance is stamped near the END of a
            build, so mid-run it still names the PREVIOUS one and a retro reads the wrong run.
@@ -112,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "walk-score":
         from coyomap_eval import walk_score
         return walk_score.main(rest)
+    if cmd == "field-score":
+        from coyomap_eval import field_score
+        return field_score.main(rest)
     if cmd == "retro-precheck":
         from coyomap_eval import retro_precheck
         return retro_precheck.main(rest)
