@@ -605,6 +605,13 @@ KNOWN_NO_ESCAPE: dict[str, str] = {
     # entry-surface coverage check — an unrecordable state, not a recordable decision.
     "entry_points[{}] [{}] {}: externally activated but owned by no component":
         "name the owning C id; the row is incomplete, not adjudicable",
+    # ROW-COMPLETENESS, on the pair that IS a use case's outside face. A trigger with no outcome is
+    # not a judgement an operator can accept: the card drops the empty half and shows a sentence that
+    # looks finished, so an escape here would be a switch for making half a claim look whole. The
+    # remedy is one sentence, and writing it is the only honest answer.
+    "{} use case(s) {}":
+        "write the missing half; the pair IS the use case's outside face, and half of it reads as "
+        "finished on every box",
     # An element with nothing behind it — the same class as 'Subsystems with no members' below:
     # back it or delete it, and DELETING IT is the record.
     "{} ({}) has no T6 flow":

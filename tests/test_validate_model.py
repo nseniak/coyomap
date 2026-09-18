@@ -2607,6 +2607,31 @@ def test_coverage_exception_drops_recorded_domain_dir_from_denominator():
         assert not any("T0" in w for w in msg)          # folded types dropped from denominator + list
 
 
+def test_a_use_case_that_states_half_its_outside_face_is_named() -> None:
+    """`trigger` and `outcome` are two fields and one statement, and NOTHING else catches a missing
+    half. The loader takes either alone, and the card drops the empty side rather than print a
+    one-sided arrow — so the gap is invisible exactly where a reader meets it.
+
+    Measured before this check existed: a map whose 25 outcomes were all blank loaded clean and
+    validated silent. One line per SHAPE, because the remedy is the same sentence per row and a line
+    each is the wall this file pays for elsewhere."""
+    from coyomap.validate_model import _outside_face_warnings
+    m = make_valid_model()
+    m.use_cases = [UseCase(id="UC1", name="Open it", trigger="A person opens it.", outcome="It opens."),
+                   UseCase(id="UC2", name="Half a", trigger="A person asks.", outcome=""),
+                   UseCase(id="UC3", name="Half b", trigger="", outcome="The row is returned."),
+                   UseCase(id="UC4", name="Nothing", trigger="", outcome="")]
+    said = _outside_face_warnings(m)
+    assert len(said) == 3, said                      # one line per shape, never one per use case
+    assert any("UC2" in w and "no outcome" in w for w in said), said
+    assert any("UC3" in w and "no trigger" in w for w in said), said
+    assert any("UC4" in w and "neither" in w for w in said), said
+    assert not any("UC1" in w for w in said), "the whole one is not named"
+    # …and a map whose use cases all state both halves says nothing at all.
+    m.use_cases = [m.use_cases[0]]
+    assert _outside_face_warnings(m) == []
+
+
 def test_coverage_exception_silences_unclaimed_surface_by_dir():
     from coyomap.validate_model import _completeness_warnings
     m = make_valid_model()

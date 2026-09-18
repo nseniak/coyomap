@@ -1681,7 +1681,8 @@ def rule_row_problems(m: ProjectModel) -> list[str]:
     for r in m.rules:
         if not (r.name or "").strip():
             problems.append(f"{r.id} has no `name` — a rule needs a SHORT title beside its "
-                            "statement, the way a use case has one beside its trigger→outcome. "
+                            "statement, the way a use case has one beside its trigger and its "
+                            "outcome. "
                             "Without it every list of rules is a wall of sentences and every "
                             "breadcrumb truncates one mid-word")
         if not (r.statement or "").strip():
@@ -2239,6 +2240,41 @@ def _under_recorded(path: str, dirs: frozenset[str] | set[str]) -> bool:
     return any(path == d or path.startswith(d + "/") for d in dirs)
 
 
+def _outside_face_warnings(m: ProjectModel) -> list[str]:
+    """A use case that states only HALF its outside face, or none of it.
+
+    `trigger` and `outcome` are two fields and one statement: what starts the use case, and what the
+    actor comes away with. Nothing else catches a missing half. The loader takes either one alone
+    without a word, and the card DROPS the empty side rather than print a one-sided arrow — so the
+    gap is invisible exactly where a reader meets it. Measured when the pair was split out of the old
+    single cell: a map whose 25 outcomes were all blank loaded clean and validated silent.
+
+    ONE LINE PER SHAPE, not per use case. The remedy is the same sentence written once per row, and a
+    line each is the wall this file has already paid for elsewhere.
+
+    Silent on all 247 use cases across the twelve maps this repo can reach, which is what a new
+    advisory should be on the day it lands."""
+    warnings: list[str] = []
+    def said(u: UseCase) -> tuple[str, str]:
+        return (u.trigger or "").strip(), (u.outcome or "").strip()
+
+    shapes = [
+        ([u.id for u in m.use_cases if said(u)[0] and not said(u)[1]],
+         "state a trigger and no outcome", "what the actor comes away with"),
+        ([u.id for u in m.use_cases if said(u)[1] and not said(u)[0]],
+         "state an outcome and no trigger", "what starts it"),
+        ([u.id for u in m.use_cases if not any(said(u))],
+         "state neither a trigger nor an outcome", "both halves of what it is for"),
+    ]
+    for ids, shape, missing in shapes:
+        if ids:
+            warnings.append(
+                f"{len(ids)} use case(s) {shape}: {_shown(sorted(ids), 10, unit='use case(s)')}. "
+                f"Write {missing} as a plain sentence — the pair is the one line a reader takes away, "
+                "and a box showing half of it reads as finished")
+    return warnings
+
+
 def _completeness_warnings(m: ProjectModel) -> list[str]:
     """Advisory use-case & Happy-Path completeness signals (see the family comment above):
 
@@ -2247,6 +2283,7 @@ def _completeness_warnings(m: ProjectModel) -> list[str]:
         escape = the C id recorded under an **'Unclaimed surfaces'** extras heading;
       * an external entry point owned by no component at all (unclaimable by construction);
       * a use case with no T6 flow — a phantom capability (stale docs) or a missing trace;
+      * a use case stating only half its outside face — a trigger with no outcome, or the reverse;
       * NO entity in any flow step (map-wide canary): the domain model then has zero flow-derived
         'Used in UC' traceability — the method prescribes authoring each flow's CENTRAL entity
         touches as C→E steps; escape = the literal `entity-flows` under 'Balance exceptions';
@@ -2262,6 +2299,7 @@ def _completeness_warnings(m: ProjectModel) -> list[str]:
     phase the surviving warnings drain as traces land."""
     warnings: list[str] = []
     warnings.extend(_trigger_arm_warnings(m))
+    warnings.extend(_outside_face_warnings(m))
     if m.entry_points and m.interfaces:
         # THE WALK, CHECKED ONCE PER SURFACE. Per way in, because the component arm above cannot
         # see a skipped walk; per surface, because a line per way in is the wall the method
