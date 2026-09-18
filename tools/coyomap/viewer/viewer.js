@@ -16644,17 +16644,28 @@ async function fetchDoc(ref, msg) {
   return doc;
 }
 // A page that needs a document it does not hold yet: fetch it, then draw the page again if the
-// reader is still on it.
+// reader is still on it. A read that fails is SAID, with a way to try again: the page used to keep
+// its "Reading…" line for ever when the server was away for a moment.
+const DOC_ERRORS = {};
 function loadDocThen(ref, s) {
-  if (!ref || loadDocThen.pending[ref]) return;
+  if (!ref || loadDocThen.pending[ref] || DOC_ERRORS[ref]) return;
   loadDocThen.pending[ref] = true;
-  fetchDoc(ref, null).then((doc) => {
+  const msg = { textContent: '' };
+  fetchDoc(ref, msg).then((doc) => {
     delete loadDocThen.pending[ref];
     if (doc && !docIsFixed(doc)) DOCS[ref] = doc;   // kept for this page; the next visit reads it afresh
+    if (!doc) DOC_ERRORS[ref] = msg.textContent || 'The map’s own diff could not be read.';
     if (history[hi] === s) { captureViewState(); render(); }
   });
 }
 loadDocThen.pending = {};
+function docWaitHtml(ref) {
+  if (DOC_ERRORS[ref]) {
+    return `<p class="cmp-noevidence cmp-doc-error">${esc(DOC_ERRORS[ref])} `
+      + `<button type="button" class="cmp-retry" data-ref="${esc(ref)}">Try again</button></p>`;
+  }
+  return '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
+}
 // ── reading one document ──────────────────────────────────────────────────────────────────────
 function docKindSpec(doc, array) { return ((doc && doc.kinds) || []).find((k) => k.array === array) || null; }
 // An actor's row is keyed by its role id in the map, but its node — the card, the page — by the name.
@@ -17219,9 +17230,13 @@ function renderTimeline(s) {
   const doc = docFor(ref);
   let body;
   if (s.at === 'file' && !ref) {
-    body = '<p class="empty">No map file is being compared. Type its path on the Timeline.</p>';
+    body = '<p class="empty">No map file is being compared. Type its path on the Updates list.</p>';
+  } else if (!ref) {
+    // A link can name a version this folder's history does not hold — a mistyped id, another
+    // clone's commit. Said at once, never waited for.
+    body = '<p class="empty">This version is not in the map’s history.</p>';
   } else if (!doc) {
-    body = '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
+    body = docWaitHtml(ref);
     loadDocThen(ref, s);
   } else if (doc.log) {
     body = updateByFeatureHtml(doc.log) + logFootHtml(doc.log) + evidenceHtml(doc);
@@ -17253,14 +17268,18 @@ function bindTimelinePage(root, s, doc) {
     ev.stopPropagation();
     go({ kind: 'capability', cap: b.getAttribute('data-gofeat') });
   }));
+  root.querySelectorAll('button.cmp-retry').forEach((b) => b.addEventListener('click', () => {
+    delete DOC_ERRORS[b.getAttribute('data-ref')];
+    captureViewState(); render();
+  }));
 }
 // ── a removed box's page: as it was in the old map ────────────────────────────────────────────
 function renderRemoved(s) {
   const ref = timelineRef(s.at);
   const doc = docFor(ref);
   if (!doc) {
-    diagram.innerHTML = '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
-    if (ref) loadDocThen(ref, s); else diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>';
+    diagram.innerHTML = ref ? docWaitHtml(ref) : '<p class="empty">This box is not in the comparison.</p>';
+    if (ref) { loadDocThen(ref, s); bindTimelinePage(diagram, s, null); }
     return;
   }
   const e = docRemoved(doc, s.id);

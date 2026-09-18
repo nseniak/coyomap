@@ -1942,6 +1942,9 @@ details.tl-others > summary { cursor: pointer; font-size: 12.5px; color: #374151
 details.tl-others > summary .muted { font-weight: 400; }
 details.tl-others[open] > summary { margin-bottom: 8px; }
 .cmp-features-line { margin: 0 0 10px; font-size: 12px; }
+.cmp-doc-error { color: #92400e; }
+button.cmp-retry { font: inherit; font-size: 11.5px; padding: 1px 8px; border-radius: 8px; cursor: pointer;
+                   background: #fff; color: #374151; border: 1px solid #d1d5db; margin-left: 6px; }
 .cmp-waived { margin: 0; padding-left: 18px; font-size: 13px; }
 .cmp-waived li { margin: 3px 0; }
 .cmp-notes { margin: 0; font-size: 13px; color: #374151; white-space: pre-line; }
