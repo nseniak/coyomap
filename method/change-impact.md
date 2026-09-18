@@ -124,7 +124,7 @@ Outside the rule, because they carry no identity: `tests` and `extras` rows (add
 never edited), and the code-link moves.
 
 **What an entry says.** The `headline` is one line of at most 14 words, in product words: the words
-a card wears on the Changes tab (`lint` counts them). The `sentence` says what a user can now do or
+a card wears on the Update log (`lint` counts them). The `sentence` says what a user can now do or
 no longer do — or, for a box under the hood, what the machine now does differently. Both face the
 map's readability check (under 20 words a sentence, no code words). `elements` are ids; the viewer
 draws them by name, as the pills of the entry's card on the update's page, under each feature the

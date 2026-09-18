@@ -173,8 +173,14 @@ def test_the_oldest_version_with_a_pin_is_the_commit_that_moved_it_there():
         proj = build_projects([str(root)])[root.name]
         assert version_for_pin(proj, pin1)["sha"] == third
         assert version_for_pin(proj, pin1, oldest=True)["sha"] == first
-        # The log's to-commit is pin2, which no committed map carries: the list says it has not landed.
-        assert [l["landed"] for l in list_changes(proj)["logs"]] == [None]
+        # `landed` is the commit that ADDED the log file — here the rename commit swept it in — never a
+        # guess from the pins, which a rebuild or a later commit sharing the pin would get wrong.
+        (row,) = list_changes(proj)["logs"]
+        assert row["landed"]["sha"] == second and row["landed"]["subject"] == "a rename-only commit"
+        view = change_log_view(proj, f"{pin1[:7]}-{pin2[:7]}")
+        assert view["to_version"]["sha"] == second, "the step's new side is the map at the update's own commit"
+        assert view["from_version"]["sha"] == first, "the old side is the map's version in force just before that commit"
+        assert view["from_version"]["subject"] == "Map the codebase"
         assert version_for_pin(proj, "0000000", oldest=True) is None
         assert second != first
 
@@ -225,7 +231,23 @@ def test_one_log_comes_with_its_boxes_by_name_and_the_map_it_was_written_against
         assert [sp["op"] for sp in ed["spans"]] == ["eq", "ins"]
 
 
-def test_a_bad_name_a_missing_log_and_a_broken_log_each_answer_in_words():
+def test_a_later_commit_sharing_the_pin_does_not_claim_the_update():
+    """After the update's commit, two more map commits keep the same pin. The update still lands at
+    its own commit, and its step runs from the map before it to the map it made."""
+    with tempfile.TemporaryDirectory() as td:
+        root, first, pin1, pin2 = make_update_repo(td)
+        own = commit(root, {".coyomap/changes/keep.txt": "x"}, msg="Map update: a guild keeps its founder")
+        commit(root, {".coyomap/project-map.json": make_map_text(pin2, purpose="serves guilds fast (tidied)")}, msg="a repair")
+        commit(root, {".coyomap/project-map.json": make_map_text(pin2, purpose="serves guilds fast (tidied twice)")}, msg="another repair")
+        proj = build_projects([str(root)])[root.name]
+        (row,) = list_changes(proj)["logs"]
+        assert row["landed"]["sha"] == own and row["landed"]["subject"].startswith("Map update")
+        view = change_log_view(proj, f"{pin1[:7]}-{pin2[:7]}")
+        assert view["to_version"]["sha"] == own and view["from_version"]["sha"] == first
+        assert view["from_version"]["subject"] == "Map the codebase", "the parent is a known version, so it keeps its own label"
+
+
+
     with tempfile.TemporaryDirectory() as td:
         root, _first, pin1, pin2 = make_update_repo(td)
         proj = build_projects([str(root)])[root.name]

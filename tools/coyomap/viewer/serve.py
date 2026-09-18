@@ -487,14 +487,18 @@ def _pin_at(proj: Project, sha: str, path: str) -> str | None:
     return proj.pin_cache[sha]
 
 
+#: How far back the pin walks look. Sixty versions was the picker's page; a map's history is longer.
+PIN_WALK_LIMIT = 500
+
+
 def version_for_pin(proj: Project, commit: str, oldest: bool = False) -> dict[str, Any] | None:
     """A committed version of the map whose own pin is `commit`. The NEWEST such version is the map
-    an update log starting from that commit was written against — the old side of the log's step;
-    read newest first and stopped at the first match, so the usual answer costs one git read. The
-    OLDEST is the commit that moved the pin there — the update's own commit, the new side of its
-    step — and costs a pin read per version down to it."""
+    an update log starting from that commit was written against — the old side of the log's step
+    while the update sits uncommitted; read newest first and stopped at the first match, so the
+    usual answer costs one git read. The OLDEST is the commit that moved the pin there, and costs a
+    pin read per version down to it."""
     found: dict[str, Any] | None = None
-    for row in map_history(proj)["versions"]:
+    for row in map_history(proj, limit=PIN_WALK_LIMIT)["versions"]:
         pin = _pin_at(proj, str(row["sha"]), str(row["path"]))
         if commit_matches(pin, commit):
             found = {**row, "pin": pin}
@@ -589,6 +593,48 @@ def changes_dir(proj: Project) -> Path:
     return proj.map_json.parent / "changes"
 
 
+def _changes_rel(proj: Project, name: str) -> str:
+    try:
+        return (changes_dir(proj) / f"{name}.json").resolve().relative_to(proj.repo_root.resolve()).as_posix()
+    except ValueError:
+        return f".coyomap/changes/{name}.json"
+
+
+def log_commit(proj: Project, name: str) -> dict[str, Any] | None:
+    """The commit that ADDED the log file: the update's own commit, which also carries the map the
+    update made. Read off the file's history rather than off the map's pin, since a pin can be
+    shared by later commits, moved by a rebuild committed together with the log, or sit beyond the
+    version walk's window. None while the log is uncommitted."""
+    code, out = _git(proj.repo_root, ["log", "-n1", "--diff-filter=A", f"--format={LOG_FORMAT}",
+                                      "--name-only", "--", _changes_rel(proj, name)])
+    rows = parse_history(out.decode("utf-8", "replace")) if code == 0 else []
+    if not rows:
+        return None
+    v = rows[0]
+    return {"sha": v.sha, "short": v.short, "date": v.date, "subject": v.subject, "path": v.path,
+            "label": version_label(v)}
+
+
+def _parent_sha(proj: Project, sha: str) -> str | None:
+    code, out = _git(proj.repo_root, ["rev-parse", "--verify", "--quiet", f"{sha}^"])
+    parent = out.decode("utf-8", "replace").strip()
+    return parent if code == 0 and _valid_commit(parent) else None
+
+
+def map_version_at(proj: Project, commit: str) -> dict[str, Any] | None:
+    """The map's version in force at `commit`: the last commit at or before it that changed the map
+    file, with its labels — the row the picker used to show for it."""
+    rel = _map_rel(proj)
+    code, out = _git(proj.repo_root, ["log", "-n1", "--follow", f"--format={LOG_FORMAT}", "--name-only",
+                                      commit, "--", rel])
+    rows = parse_history(out.decode("utf-8", "replace")) if code == 0 else []
+    if not rows:
+        return None
+    v = rows[0]
+    return {"sha": v.sha, "short": v.short, "date": v.date, "subject": v.subject, "path": v.path,
+            "label": version_label(v), "pin": _pin_at(proj, v.sha, v.path)}
+
+
 def list_changes(proj: Project) -> dict[str, Any]:
     """`api/changes`: the map's update logs, newest first, and the files in the folder that should
     have been logs and could not be read."""
@@ -609,12 +655,12 @@ def list_changes(proj: Project) -> dict[str, Any]:
             heads.append(LogHead(name, log.from_commit, log.to_commit, log.date, len(log.entries)))
             headlines[name] = [e.headline for e in log.entries]
     ordered = order_logs(heads, proj.commit or None)
-    # `landed`: the commit that put the update's map in the folder's history — the oldest version
-    # whose pin is the log's to-commit — or null while the update sits uncommitted on disk.
+    # `landed`: the commit that added the log file, which is the update's own commit — or null while
+    # the update sits uncommitted on disk.
     return {"logs": [{"name": h.name, "from": h.from_commit, "to": h.to_commit, "date": h.date,
                       "entries": h.entries, "headlines": headlines.get(h.name, []),
                       "latest": i == 0 and commit_matches(h.to_commit, proj.commit),
-                      "landed": version_for_pin(proj, h.to_commit, oldest=True)}
+                      "landed": log_commit(proj, h.name)}
                      for i, h in enumerate(ordered)],
             "pin": proj.commit or None, "problems": problems}
 
@@ -634,7 +680,17 @@ def change_log_view(proj: Project, name: str) -> dict[str, Any]:
     except (OSError, ValueError) as e:
         raise RuntimeError(f"the update log {name} could not be read: {e}") from None
     new_doc = load_map_doc(proj.map_json.read_text(encoding="utf-8"), "the served map")
-    version = version_for_pin(proj, log.from_commit)
+    # THE STEP'S TWO SIDES. The new side is the map at the update's own commit — the one that added
+    # the log — and the old side the map at that commit's parent: the map as the update found it.
+    # An uncommitted update has no commit yet: its new side is the served map, and its old side the
+    # newest committed version whose pin is the log's from-commit.
+    landed = log_commit(proj, name)
+    version: dict[str, Any] | None = None
+    if landed is not None:
+        parent = _parent_sha(proj, str(landed["sha"]))
+        version = map_version_at(proj, parent) if parent else None   # the map's version in force just before
+    else:
+        version = version_for_pin(proj, log.from_commit)
     old_doc: dict[str, Any] | None = None
     if version is not None:
         try:
@@ -642,11 +698,8 @@ def change_log_view(proj: Project, name: str) -> dict[str, Any]:
         except ValueError:
             version = None
     payload = to_view(log, new_doc, old_doc)
-    # The step's new side: the commit that moved the pin to the log's to-commit. None while the update
-    # sits uncommitted on disk; the served map is then the new side.
-    to_version = version_for_pin(proj, log.to_commit, oldest=True)
     payload.update({"name": name, "latest": commit_matches(log.to_commit, proj.commit),
-                    "from_version": version, "to_version": to_version, "kinds": kinds_json()})
+                    "from_version": version, "to_version": landed, "kinds": kinds_json()})
     return payload
 
 

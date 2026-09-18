@@ -150,6 +150,19 @@ def test_the_export_answers_every_address_the_page_asks_for() -> None:
             assert (out / addr).is_file(), f"{addr} not written"
 
 
+def test_a_shared_copy_has_no_update_log_tab_and_a_direct_link_says_why() -> None:
+    """A static copy has no server to read the update logs from, so the Update log group is not
+    drawn, and a link pasted from the live map (`#v=updates`) says the copy carries no log rather
+    than "No update yet" with instructions to run one."""
+    with make_export() as out, plain_file_server(out) as url, _page(url + "#v=updates") as page:
+        page.wait_for_timeout(900)
+        groups = page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")
+        assert "Update log" not in groups, groups
+        text = str(page.evaluate("() => document.getElementById('diagram').textContent"))
+        assert "shared copy carries no update log" in text and "No update yet" not in text
+        assert not page.js_errors, page.js_errors
+
+
 def test_the_shell_asks_for_its_script_and_style_relatively() -> None:
     """An absolute /static/ path works on a server rooted at / and nowhere else — a map published
     under https://host/repo/map/ would load no script and no stylesheet at all."""

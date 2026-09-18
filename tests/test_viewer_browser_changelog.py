@@ -75,7 +75,7 @@ def make_log(doc: dict[str, Any]) -> dict[str, Any]:
     c1 = next(c for c in doc["components"] if c["id"] == "C1")
     return {"format": "coyomap-changes", "version": 1, "from_commit": OLD_PIN, "to_commit": NEW_PIN, "date": "2026-09-17",
             "entries": [
-                {"id": "e1", "headline": HEADLINE_1, "sentence": SENTENCE_1, "elements": ["UC1", "C1", "BR1", "UC2"],
+                {"id": "e1", "headline": HEADLINE_1, "sentence": SENTENCE_1, "elements": ["UC1", "C1", "BR1", "UC2", "R1", "E1"],
                  "edits": [{"id": "UC1", "key": "name", "was": OLD_NAME, "now": NEW_NAME},
                            {"id": "C1", "key": "purpose", "was": c1["purpose"], "now": c1["purpose"] + " Fast."},
                            {"id": "BR1", "key": "risk", "was": RULE["risk"], "now": "a team is locked"}],
@@ -420,6 +420,85 @@ def test_a_map_with_no_update_shows_the_tab_with_what_it_is_for_and_how_to_get_o
             httpd.server_close()
 
 
+def test_every_kind_of_box_is_filed_under_its_own_feature() -> None:
+    """The review found actors never filed (their join is a table of counts, not a list) and sub-flows
+    never filed (a narrated step names its sub-flow under `sf`). Each kind the fixture holds is now
+    pinned: an actor under the features they drive, a record under its owner, a rule under its
+    area's authored features, a use case under its own."""
+    with _served_update() as url, _page(url + "#v=updates") as page:
+        _ready(page)
+        doc = json.loads((Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json").read_text())
+        _open_update(page)
+        placed = page.evaluate("""() => {
+          const out = {};
+          for (const sec of document.querySelectorAll('.item-sec')) {
+            const title = sec.querySelector('.item-sec-strip').textContent.trim().replace(/\s+/g, ' ');
+            for (const pill of sec.querySelectorAll('.item-pill')) (out[pill.textContent.trim()] = out[pill.textContent.trim()] || []).push(title.slice(0, 30));
+          }
+          return out;
+        }""")
+        cap = {c["id"]: c["name"] for c in doc["capabilities"]}
+        uc1 = next(u for u in doc["use_cases"] if u["id"] == "UC1")["capability"]
+        uc2 = next(u for u in doc["use_cases"] if u["id"] == "UC2")["capability"]
+        assert any(t.startswith(cap[uc1][:30]) for t in placed[NEW_NAME]), placed
+        uc2_name = next(u for u in doc["use_cases"] if u["id"] == "UC2")["name"]
+        assert any(t.startswith(cap[uc2][:30]) for t in placed[uc2_name]), placed
+        assert "Org creator" in placed and not any(t.startswith("Across the product") for t in placed["Org creator"]), \
+            f"an actor is filed under the features they drive: {placed.get('Org creator')}"
+        assert "Organization" in placed and not any(t.startswith("Across the product") for t in placed["Organization"]), \
+            f"a record is filed under its owner feature: {placed.get('Organization')}"
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_box_the_update_only_names_is_not_a_change_on_its_feature_card() -> None:
+    """A use case the update names without editing it did not change, so its feature's card does
+    not say "changed" — the fixture's second use case sits in another feature than the renamed one."""
+    with _served_update() as url, _page(f"{url}#v=features&cmp=log:{LOG}") as page:
+        _ready(page)
+        doc = json.loads((Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json").read_text())
+        uc2_cap = next(u for u in doc["use_cases"] if u["id"] == "UC2")["capability"]
+        uc1_cap = next(u for u in doc["use_cases"] if u["id"] == "UC1")["capability"]
+        assert uc2_cap != uc1_cap
+        badged = page.evaluate("() => [...document.querySelectorAll('#diagram .ecard')].filter((c) => c.querySelector('.badge.modified')).map((c) => c.getAttribute('data-id'))")
+        assert uc1_cap in badged and uc2_cap not in badged, badged
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_failed_list_is_said_on_the_tab_and_can_be_tried_again() -> None:
+    """The list is asked for at boot. A failed answer used to leave an empty list, which the tab
+    told as "No update yet" with instructions to run one: a wrong statement. It says the failure now,
+    and reads again on request."""
+    with _served_update() as url, _page(url + "#v=features") as page:
+        _ready(page)
+        broken = {"on": True}
+        page.route("**/api/changes", lambda route: route.fulfill(status=500, body="git is away") if broken["on"] else route.continue_())
+        page.goto(url + "?again=1#v=updates")   # a fresh load, so the list is asked for behind the broken route
+        page.wait_for_selector("#crumb h1", state="attached")
+        _ready(page)
+        text = _screen_text(page)
+        assert "could not be read" in text and "git is away" in text and "No update yet" not in text
+        broken["on"] = False
+        page.click("button.cmp-retry-logs")
+        _ready(page)
+        assert HEADLINE_1 in _screen_text(page)
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_page_opened_while_its_document_is_still_on_its_way_draws_when_it_arrives() -> None:
+    """The review's race: a removed box's page opened while the update's diff was being read stayed
+    on "Reading…" for ever, since only the page that asked was redrawn. Whatever page now reads that
+    document is redrawn when it arrives."""
+    with _served_update() as url, _page(url + "#v=features") as page:
+        _ready(page)
+        page.route("**/api/compare*", lambda route: (page.wait_for_timeout(2500), route.continue_()))
+        page.goto(f"{url}#v=updates&at={LOG}")
+        page.wait_for_timeout(300)
+        page.goto(f"{url}#v=removed&id=UC99&at={LOG}")
+        page.wait_for_function("() => !document.getElementById('diagram').textContent.includes('Reading the map')", timeout=15000)
+        assert _crumb(page) == OLD_UC and "Removed because" in _screen_text(page)
+        assert not page.js_errors, page.js_errors
+
+
 def test_the_rules_landing_marks_the_area_of_an_edited_rule() -> None:
     with _served_update() as url, _page(f"{url}#v=rules&cmp=log:{LOG}") as page:
         _ready(page)
@@ -440,11 +519,14 @@ def test_after_stop_marking_the_address_never_carries_a_comparison_the_screen_do
         page.click("button.cmp-stop")
         _ready(page)
         assert not _marked(page)
-        for step in ("back", "forward"):
-            getattr(page, f"go_{step}")()
-            _ready(page)
-            badged = bool(page.evaluate("() => document.querySelector('button.cmp-stop, #diagram .badge.modified, #diagram .badge.named')"))
-            assert badged == _marked(page), (step, _hash(page))
+        # The mark is the session's: once stopped, Back lands unmarked, and the address it lands on
+        # says so too (the viewer restates it), so no screen wears badges its address does not carry.
+        page.go_back()
+        _ready(page)
+        assert not _marked(page) and not page.query_selector("button.cmp-stop, #diagram .badge.modified, #diagram .badge.named"), _hash(page)
+        page.go_forward()
+        _ready(page)
+        assert not _marked(page), _hash(page)
         assert not page.js_errors, page.js_errors
 
 

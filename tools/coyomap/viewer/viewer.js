@@ -1464,7 +1464,7 @@ const COUNT_PLURALS = {
   process: 'processes',
   // The plural is on the FIRST word, so the default `+ 's'` produced "10 way ins".
   'way in': 'ways in', 'use case': 'use cases',
-  entry: 'entries',
+  entry: 'entries', box: 'boxes',
 };
 function countNoun(n, noun) {
   return n === 1 ? noun : (COUNT_PLURALS[noun] || noun + 's');
@@ -4276,7 +4276,7 @@ const VIEW_GROUPS = [
   // when three of them are one idea.
   ['hood', 'Under the hood',
    'How is the code arranged, where does its data live, what does it pull in, how well is it tested, and what runs it?'],
-  // TIME. The product's update log, one row per run of `coyomap update`. Not a product view and
+  // TIME. The product's update log, one row per update of the map. Not a product view and
   // not a machine view, so a group of its own; a static export, which has no server to read the
   // logs from, drops it (the gating loop hides its one view).
   ['changelog', 'Update log', 'What changed in this product, update by update, and why?'],
@@ -4441,7 +4441,7 @@ function applyDiffOverlay(s) {
 // A use case "contains changes" when any element its T6 flow touches is changed (FLOWS_NARR × DIFF_STATE)
 // — the behavioural layer of the diff, DERIVED from the element changes, not a separate source.
 function usecaseDiffState(uc) {
-  if (CMP) return DIFF_STATE[uc] ? 'modified' : null;   // change mode marks the use case itself
+  if (CMP) return DIFF_STATE[uc] && DIFF_STATE[uc] !== 'named' ? 'modified' : null;   // an update that only names it did not change it
   for (const st of flowStepsDeep(uc)) {
     for (const id of [st.srcId, st.dstId]) {
       if (id && DIFF_STATE[id] && DIFF_STATE[id] !== 'rippled') return 'modified';
@@ -5134,9 +5134,8 @@ const tabLast = {};
 // silently dropped a field every time the two lists were maintained by hand.
 const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 'entity', 'blk', 'br',
                       'bkid', 'cap', 'act', 'gid', 'sys', 'epk', 'iface', 'id', 'sec',
-                      // `at` is WHICH version of the map a Timeline page is about: a commit's sha,
-                      // `disk` for the uncommitted edits, `file` for a map file being compared, or
-                      // `log:<from>-<to>` for an update whose commit this folder does not hold.
+                      // `at` is WHICH update an Updates page, or a removed box's page, is about:
+                      // the log's name, `<from>-<to>`.
                       'at',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
@@ -5257,9 +5256,10 @@ function urlFromState(s, live) {
     ? liveSelKeys()
     : ((s.sels && s.sels.length) ? s.sels : (s.sel ? [s.sel] : []));
   for (const k of sels) if (k) q.append('sel', k);
-  // The comparison is not part of the screen (it is not in STATE_FIELDS, so two screens are not two
-  // different screens for wearing it), but it IS part of the address: reload, Back and a pasted link
-  // keep the old map they were made against.
+  // The mark is not part of the screen (it is not in STATE_FIELDS, so two screens are not two
+  // different screens for wearing it), but it IS part of the address: a reload and a pasted link
+  // keep the update they were made with. Back and Forward do not re-read it: the mark is the
+  // session's, and the address of the screen they land on is restated with the mark as it stands.
   if (CMP) q.set('cmp', CMP.ref);
   return q.toString();
 }
@@ -16633,13 +16633,22 @@ function cmpFromHash(hash) {
 // ── what the map's history holds ──────────────────────────────────────────────────────────────
 let LOGS = [];             // api/changes: the update logs, newest first, each with the commit that landed it
 let LOG_PROBLEMS = [];     // log files beside the map that could not be read, as the server words them
+let LOGS_ERROR = '';       // why the list itself could not be read — said on the tab, never mistaken for "no update"
 let HISTORY_LOADED = false;
-async function loadLogs() {
-  if (EXPORTED) { LOGS = []; LOG_PROBLEMS = []; HISTORY_LOADED = true; return; }
-  const data = await cmpFetch('changes', null, 'list the updates');
-  LOGS = (data && data.logs) || [];
-  LOG_PROBLEMS = (data && data.problems) || [];
-  HISTORY_LOADED = true;
+let LOGS_PENDING = null;
+function loadLogs() {
+  if (LOGS_PENDING) return LOGS_PENDING;
+  if (EXPORTED) { LOGS = []; LOG_PROBLEMS = []; HISTORY_LOADED = true; return Promise.resolve(); }
+  const msg = { textContent: '' };
+  LOGS_PENDING = cmpFetch('changes', msg, 'list the updates').then((data) => {
+    LOGS_PENDING = null;
+    if (!data) { LOGS_ERROR = msg.textContent || 'the server did not answer'; HISTORY_LOADED = false; return; }
+    LOGS = data.logs || [];
+    LOG_PROBLEMS = data.problems || [];
+    LOGS_ERROR = '';
+    HISTORY_LOADED = true;
+  });
+  return LOGS_PENDING;
 }
 // The rows of the Update log: one per update, keyed by the log's name (`<from>-<to>`).
 function timelineRows() { return LOGS.map((l) => ({ at: l.name, log: l })); }
@@ -16696,9 +16705,13 @@ function loadDocThen(ref, s) {
   const msg = { textContent: '' };
   fetchDoc(ref, msg).then((doc) => {
     delete loadDocThen.pending[ref];
-    if (doc && !docIsFixed(doc)) DOCS[ref] = doc;   // kept for this page; the next visit reads it afresh
+    // An uncommitted update's document has the map on disk on its new side, so it is kept only
+    // until the reader passes through the Updates list again (`renderTimeline` drops it), and a
+    // reload always reads it afresh.
+    if (doc && !docIsFixed(doc)) DOCS[ref] = doc;
     if (!doc) DOC_ERRORS[ref] = msg.textContent || 'The map’s own diff could not be read.';
-    if (history[hi] === s) { captureViewState(); render(); }
+    const cur = history[hi];
+    if (cur && (cur.kind === 'updates' || cur.kind === 'removed') && timelineRef(cur.at) === ref) { captureViewState(); render(); }
   });
 }
 loadDocThen.pending = {};
@@ -16849,7 +16862,7 @@ function logProjection(log) {
   // draws the areas: one whose rule the update touched says so, or the change hides behind a click.
   for (const id of Object.keys(out)) {
     const n = GRAPH.nodes[id];
-    if (n && n.kind === 'rule' && n.parent && !out[n.parent]) out[n.parent] = 'modified';
+    if (out[id] !== 'named' && n && n.kind === 'rule' && n.parent && !out[n.parent]) out[n.parent] = 'modified';
   }
   return out;
 }
@@ -16907,12 +16920,19 @@ function boxFeatureIds(b) {
   switch (b.kind) {
     case 'capabilities': return has(b.id) ? [b.id] : [];
     case 'use_cases': return CAP_OF_UC[b.id] ? list(CAP_OF_UC[b.id].id) : [];
-    case 'rules': return list((FEATURES.ruleFeatures || {})[b.id]);
+    case 'rules': {
+      // The authored join first — the decision area's "specified under", which the feature page's
+      // "What it decides" and the Rules landing draw by — then the step join, for a rule in no area.
+      const rule = GRAPH.nodes[b.id];
+      const area = rule && rule.parent ? (((RULES_VIEW || {}).blocks || []).find((x) => x.id === rule.parent) || {}) : {};
+      const authored = list(area.specified_under);
+      return authored.length ? authored : list((FEATURES.ruleFeatures || {})[b.id]);
+    }
     case 'blocks': return list((((RULES_VIEW || {}).blocks || []).find((x) => x.id === b.id) || {}).specified_under);
     case 'interfaces': return list(((FEATURES.interfaces || []).find((i) => i.id === b.id) || {}).features);
     case 'entities': return list((FEATURES.entityOwners || {})[b.id]);
     case 'subdomains': return list(((FEATURES.areas || []).find((a) => a.id === b.id) || {}).owners);
-    case 'roles': return list((FEATURES.roleFeatures || {})[b.id]);
+    case 'roles': return list(Object.keys((FEATURES.roleFeatures || {})[b.id] || {}));   // {role: {feature: count}}
     case 'entry_points': {
       if (!EP_FEATURES) {
         EP_FEATURES = {};
@@ -16923,7 +16943,8 @@ function boxFeatureIds(b) {
     case 'subflows': {
       const out = [];
       for (const uc in FLOWS_NARR || {}) {
-        if ((FLOWS_NARR[uc] || []).some((st) => st.subflow === b.id) && CAP_OF_UC[uc] && has(CAP_OF_UC[uc].id)) out.push(CAP_OF_UC[uc].id);
+        const f = CAP_OF_UC[uc] ? CAP_OF_UC[uc].id : null;
+        if (f && has(f) && !out.includes(f) && (FLOWS_NARR[uc] || []).some((st) => st.sf === b.id)) out.push(f);   // two runners in one feature file it once
       }
       return out;
     }
@@ -17188,11 +17209,19 @@ function timelineRowCardHtml(r) {
   const landed = l.landed
     ? `<p class="ecard-extra"><span class="ecard-lbl">Landed</span> ${esc(l.landed.date)} \u00b7 ${esc(l.landed.subject)}</p>`
     : '<p class="ecard-extra"><span class="ecard-lbl">Landed</span> <span class="cmp-later">not committed yet</span></p>';
-  return plainCardHtml({ key: 'at:' + r.at, name: versionTitle(r), desc: (l.headlines || []).join(' \u00b7 '),
+  // Three headlines say what the update is about; a long one is counted, not listed, on its row.
+  const heads = l.headlines || [];
+  const desc = heads.slice(0, 3).join(' \u00b7 ') + (heads.length > 3 ? ` \u00b7 and ${heads.length - 3} more` : '');
+  return plainCardHtml({ key: 'at:' + r.at, name: versionTitle(r), desc,
                          pill: countPillOf(countLabel(l.entries, 'entry')),
                          foot: `<p class="ecard-extra"><span class="ecard-lbl">Written</span> ${esc(l.date)}</p>` + landed });
 }
 function timelineListHtml() {
+  if (EXPORTED) return '<p class="empty">This shared copy carries no update log. Open the map with <code>coyomap serve</code> to read its updates.</p>';
+  if (LOGS_ERROR) {
+    return `<p class="cmp-noevidence cmp-doc-error">The updates could not be read: ${esc(LOGS_ERROR)} `
+      + '<button type="button" class="cmp-retry-logs">Try again</button></p>';
+  }
   const rows = timelineRows();
   const broken = LOG_PROBLEMS.map((t) => `<p class="cmp-warn">A log could not be read: ${esc(t)}</p>`).join('');
   const list = rows.length ? `<div class="ecard-list">${rows.map(timelineRowCardHtml).join('')}</div>`
@@ -17200,8 +17229,8 @@ function timelineListHtml() {
       + '<p>This tab is the product\u2019s update log. After the code changes, each update says what the product now does '
       + 'differently, in plain words, feature by feature, with the boxes it touched and the map\u2019s own diff as evidence.</p>'
       + '<p>To get one: once the code change is committed, ask your coding agent to update the map with the '
-      + '<code>/coyomap</code> skill (say <code>/coyomap update</code>), or run <code>coyomap update</code> in the project. '
-      + 'The update writes its log beside the map, under <code>.coyomap/changes/</code>, commits both, and is told here.</p></div>'
+      + '<code>/coyomap</code> skill (say <code>/coyomap update</code>). The update writes its log beside the map, '
+      + 'under <code>.coyomap/changes/</code>, commits both, and is told here.</p></div>'
   return broken + list;
 }
 function timelineHeadHtml(row, doc) {
@@ -17229,9 +17258,21 @@ function evidenceHtml(doc) {
 }
 function renderTimeline(s) {
   if (!s.at) {
-    diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Updates') + timelineListHtml() + '</div>';
+    for (const ref of Object.keys(DOCS)) if (!docIsFixed(DOCS[ref])) delete DOCS[ref];
+    diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Updates') + (HISTORY_LOADED || LOGS_ERROR || EXPORTED ? timelineListHtml() : '<p class="cmp-noevidence">Reading the updates…</p>') + '</div>';
     bindPlainCards(diagram, (key) => go({ kind: 'updates', at: key.slice(3) }));
-    if (!HISTORY_LOADED) loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
+    diagram.querySelectorAll('button.cmp-retry-logs').forEach((b) => b.addEventListener('click', () => {
+      LOGS_ERROR = '';
+      loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
+      captureViewState(); render();
+    }));
+    if (!HISTORY_LOADED && !LOGS_ERROR && !EXPORTED) loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
+    return;
+  }
+  if (!HISTORY_LOADED && !EXPORTED) {
+    // The list is still on its way (a link opened an update's page directly): wait for it, then draw.
+    diagram.innerHTML = '<div class="usecases-wrap"><p class="cmp-noevidence">Reading the updates…</p></div>';
+    loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
     return;
   }
   const row = timelineRow(s.at);
@@ -17282,6 +17323,11 @@ function bindTimelinePage(root, s, doc) {
 }
 // ── a removed box's page: as it was in the old map ────────────────────────────────────────────
 function renderRemoved(s) {
+  if (!HISTORY_LOADED && !EXPORTED) {
+    diagram.innerHTML = '<p class="cmp-noevidence">Reading the updates…</p>';
+    loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
+    return;
+  }
   const ref = timelineRef(s.at);
   const doc = docFor(ref);
   if (!doc) {
@@ -17569,11 +17615,11 @@ const LANDING = HAS_OVERVIEW ? 'overview'
 // be one more thing to keep in step with the map's own kinds.
 // A link that names an old map arms the comparison BEFORE the first screen is drawn, so the badges
 // and the Changes tabs are there when it lands rather than one repaint later.
-// The map's history — its committed versions and its update logs — is read once at boot, so the
-// Timeline and every version's page can be drawn from it. A link that names a marked version arms
-// the badges BEFORE the first screen is drawn, so they are there when it lands.
+// The map's update logs are asked for at boot and not waited for: the Updates screens draw a
+// waiting line until they arrive, and every other screen needs nothing of them. A link that names
+// a marked update arms the badges BEFORE the first screen is drawn, so they are there when it lands.
 {
-  if (!EXPORTED) await loadLogs();
+  if (!EXPORTED) loadLogs();
   const bootCmp = URL_SYNC && !EXPORTED ? cmpFromHash(location.hash) : null;
   if (bootCmp) await armCompare(bootCmp, { render: false });
 }

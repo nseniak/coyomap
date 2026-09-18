@@ -42,7 +42,7 @@ where data is stored, how it is deployed.
 
 <img src="assets/viewer-hood.png" alt="The coyomap viewer on a project's Components page: the map of one subsystem with one component selected and explained in a sentence, and that component's source code open on the right at the line the map points to." width="100%">
 
-**Update log** shows how the product changed, one entry per run of `coyomap update`, newest first.
+**Update log** shows how the product changed, one entry per update of the map (`/coyomap update`), newest first.
 An update's page tells its story by feature, in plain words: what the product now does differently,
 which boxes it touched, the evidence, with the map's own diff for that step underneath.
 

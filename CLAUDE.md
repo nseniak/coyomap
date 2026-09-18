@@ -56,8 +56,8 @@ the code's names.
   and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
   two groups they made up went. Update log arrived on 2026-09-18: time is neither
   a product view nor a machine view.
-- **updates** — the Update log's one view: one row per run of `coyomap update`,
-  newest first, and nothing else. A rebuild, a repair or a rename is an event in
+- **updates** — the Update log's one view: one row per update of the map (the
+  `/coyomap update` skill), newest first, and nothing else. A rebuild, a repair or a rename is an event in
   the map file's life, not in the product's, and the diff between two map files
   is a developer's question, answered by `coyomap diff` on the command line. An
   **update's page** tells the log by feature: a section per feature its use cases

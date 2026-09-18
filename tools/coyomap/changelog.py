@@ -1002,7 +1002,10 @@ def to_view(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None 
                 "evidence": list(e.evidence), "boxes": [box(i, e) for i in e.elements],
                 "edits": [edit(ed) for ed in e.edits]} for e in log.entries]
     return {"from": log.from_commit, "to": log.to_commit, "date": log.date, "entries": entries,
-            "waived": [{"id": w.id, "name": names.get(w.id), "why": w.why} for w in log.waived],
+            "waived": [{"id": w.id, "name": names.get(w.id), "why": w.why,
+                        "word": (lambda a: KIND_OF[a].word if a in KIND_OF else "box")(
+                            index[w.id][0] if w.id in index else old_index[w.id][0] if w.id in old_index else array_of_id(w.id) or "")}
+                       for w in log.waived],
             "notes": log.notes}
 
 
