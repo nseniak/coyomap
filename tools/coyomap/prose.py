@@ -57,6 +57,16 @@ _PITCH = re.compile(r"\b(?:%s)\b" % "|".join(re.escape(w) for w in _PITCH_WORDS)
 # second-person goal talks to a reader who may not be the user. "us" is left out on purpose — it
 # is also a country.
 _SECOND_PERSON = re.compile(r"\b(?:you|your|yours|we|our|ours)\b", re.IGNORECASE)
+# THE MAP IS A SNAPSHOT (method/change-impact.md, "What an entry says"): a sentence in it describes
+# the product as it is, as if it had always been so; the story of a change — what it was before,
+# what it now does instead — is the log's. The words below narrate a change, so they are judged
+# only where a change is being written: the new words an update log puts into the map. Map-wide
+# they would mostly be false alarms (the product's own "right now", "a new server", "no longer in
+# the settings"), which is why "new", "used to" and plain "before" are not here, and "right now" is
+# let through.
+_HISTORY = re.compile(r"(?<!right )\bnow\b|\bno longer\b|\bany ?more\b|\bpreviously\b|\bformerly\b"
+                      r"|\buntil now\b|\bfrom now on\b|\bsince the\b|\bbefore,|^before\b|\bthe old\b",
+                      re.IGNORECASE)
 
 _BACKTICKED = re.compile(r"`[^`]*`")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -316,6 +326,21 @@ def second_person_words(text: str) -> list[str]:
     return [m.group(0) for m in _SECOND_PERSON.finditer(strip_literals(text))]
 
 
+def history_words(text: str) -> list[str]:
+    """The words a text uses to narrate a change, in order, as written. Whole words, outside
+    backticks; "right now" is the product's own present and passes."""
+    return [m.group(0) for m in _HISTORY.finditer(strip_literals(text))]
+
+
+def history_findings(where: str, text: str) -> list[Finding]:
+    """One finding when a sentence written INTO the map tells its history. Judged only on the words
+    an update writes, never on the map as a whole (see `_HISTORY`)."""
+    words = history_words(text or "")
+    if not words:
+        return []
+    return [Finding("history word", where, f"says {shown(words, 3)}: \"{clip((text or '').strip())}\"")]
+
+
 def goal_person_findings(goal: str) -> list[Finding]:
     """One finding when the goal talks to "you" or speaks as "we" instead of naming the roles."""
     words = second_person_words(goal or "")
@@ -351,6 +376,8 @@ _REMEDY = {
                   "in plain words, and drop the word",
     "second person": "third person, naming the people by role — the reader of the map is not "
                      "always the user",
+    "history word": "the map is a snapshot — say what the product does as if it had always been so; "
+                    "what it did before, and that it changed, is the log entry's sentence",
 }
 
 

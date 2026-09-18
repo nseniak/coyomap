@@ -130,6 +130,14 @@ map's readability check (under 20 words a sentence, no code words). `elements` a
 draws them by name, under Product or Under the hood by their kind, so the two views are derived
 from this list and nothing else is authored for them.
 
+**The map is a snapshot; its history is the log.** The words an entry writes INTO the map — an
+edit's `now`, an added row — describe the product as it is, as if it had always been so. "Now",
+"no longer", "since the last-admin rule", "before", "previously", "any more" belong to the entry's
+`sentence`, never to the map: a reader of the map a year on must not meet the story of one change
+in a box's own words. Write the box as a stranger to the change would read it: *Only the screens
+hold this back, so a direct call still gets through; the store refuses the call that would leave
+the team without an admin.* `lint` warns on those words in the new text.
+
 **Addressing an edit.** `id` names the box; `key` is a path inside its row: `risk`,
 `sites[0].where`, `fields[name=size].type`, `steps[n=4].phrase`. A use case's flow is the row
 `flow:<UC id>` (an edit on it is an edit on the use case, which the entry names); a shared sub-flow's

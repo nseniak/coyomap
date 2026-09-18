@@ -38,7 +38,7 @@ from typing import Any, Literal
 from coyomap import subverb_help
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
-from coyomap.prose import Finding, field_findings, iter_prose_fields
+from coyomap.prose import Finding, field_findings, history_findings, iter_prose_fields
 from coyomap.validate_model import validate_model
 
 FORMAT = "coyomap-changes"
@@ -58,7 +58,8 @@ USAGE = """usage: coyomap changes <verb> [options]
   lint <log> --map <map>
         is the log well formed against this map? Every id exists, every `was` matches, and the
         whole apply runs on a copy through the loader and the validator's blocking checks; every
-        sentence the log changes or adds faces the readability check, as a warning
+        sentence the log changes or adds faces the readability check and the snapshot check (no
+        "now", "no longer", "since the…" in the map's own words), as a warning
   render <log> --map <map> [--out <file.md>]
         the log as markdown for people: entries under Product / Under the hood, boxes by name
   apply <log> --map <map> [--out <map>] [--date <YYYY-MM-DD>]
@@ -640,11 +641,11 @@ def _prose_warnings(log: ChangeLog, doc: dict[str, Any], after: ProjectModel | N
             if (held is not None and (where, text) in held) or (held is None and box not in owner):
                 continue
             label = f"entry {owner[box]} {where}" if box in owner else where
-            out.extend(_finding_line(f) for f in field_findings(label, text, terms=terms))
+            out.extend(_finding_line(f) for f in field_findings(label, text, terms=terms) + history_findings(label, text))
     for label, box, text in edits:
         if (box, text) in walked:
             continue
-        out.extend(_finding_line(f) for f in field_findings(label, text))
+        out.extend(_finding_line(f) for f in field_findings(label, text) + history_findings(label, text))
     return out
 
 

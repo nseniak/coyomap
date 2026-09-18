@@ -522,6 +522,24 @@ def test_an_added_way_in_renders_by_its_trigger():
     assert "EP2" not in md
 
 
+def test_the_new_words_of_an_edit_must_not_tell_the_map_s_history():
+    """The map is a snapshot: "since the last-admin rule … no longer" in a rule's risk was the story
+    of one update, written where a reader a year on meets it as the product. Lint warns on the new
+    words — an edit's `now` and an added row alike — and never on words the map already held."""
+    doc = make_doc()
+    story = "Only the screens hold this back. Since the last-admin rule, such a call can no longer leave the team."
+    log = make_log(make_entry(edits=[FieldEdit("BR1", "risk", "a team is left open", story)],
+                              elements=["BR1", "BR2"],
+                              added=[Addition("rules", make_rule("BR2", "A token expires", risk="a session now outlives its owner"))]))
+    p = lint(log, doc)
+    assert p.ok
+    assert any(w.startswith("entry e1 BR1 risk: history word — says Since the, no longer") for w in p.warnings), p.warnings
+    assert any(w.startswith("entry e1 BR2 risk: history word — says now") for w in p.warnings), p.warnings
+    plain = make_log(make_entry(edits=[FieldEdit("BR1", "risk", "a team is left open",
+                                                 "the store refuses the call that would leave the team without an admin")]))
+    assert not any("history word" in w for w in lint(plain, doc).warnings)
+
+
 def test_the_new_words_of_an_edit_face_the_readability_check():
     """F15: the reader meets the `now` text on the box's page, so a long one warns at lint — once,
     though two checks read it; and a rule's risk warns too, though the diff engine files `risk` as

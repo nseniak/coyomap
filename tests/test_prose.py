@@ -562,6 +562,26 @@ def test_the_method_states_the_shape_the_tool_counts() -> None:
     assert f"under {prose.GOAL_WORD_LIMIT} words in all" in rule
 
 
+# --- the map is a snapshot: the words an update writes into it tell no history -------------------
+
+def test_a_sentence_written_into_the_map_that_narrates_its_change_is_one_finding_naming_the_words() -> None:
+    text = ("Only the screens hold this back, so a direct call still gets through. Since the last-admin "
+            "rule, such a call can no longer leave the team without an admin.")
+    found = prose.history_findings("entry e1 BR168 risk", text)
+    assert [(f.kind, f.where) for f in found] == [("history word", "entry e1 BR168 risk")]
+    assert found[0].detail.startswith("says Since the, no longer: ")
+    assert prose.history_words("Before, a refused click looked as if it had worked. Now it shows the reason.") == ["Before,", "Now"]
+    assert "history word" in prose._REMEDY and "snapshot" in prose._REMEDY["history word"]
+
+
+def test_the_product_s_own_present_is_not_history() -> None:
+    for text in ("An admin asks which MCP servers are connected right now.",
+                 "The `now` flag is a quoted literal.",
+                 "Nowhere in the settings; the page knows nothing of it.",
+                 "An admin removes a member from the team."):
+        assert prose.history_words(text) == [], text
+
+
 # --- the goal describes, it does not sell -----------------------------------------------------
 
 def test_a_marketing_word_in_the_goal_is_one_finding_naming_the_words() -> None:
