@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Change mode in a real browser: the viewer compared with a map file on disk, through the Timeline.
+"""Change mode in a real browser: the viewer compared with a map file on disk, through the Updates list.
 
 The served map is the NEW side; the OLD side is a file on disk named by a `path:` ref, which is what
 a temp folder with no git history can offer. The old copy holds one use case the new map lost, and
@@ -84,7 +84,7 @@ def _served_pair() -> Iterator[tuple[str, str]]:
 
 
 def _file_page(url: str, old_path: str) -> str:
-    return f"{url}#v=timeline&at=file&cmp=path:{old_path}"
+    return f"{url}#v=updates&at=file&cmp=path:{old_path}"
 
 
 def _marked(url: str, old_path: str, screen: str) -> str:
@@ -108,7 +108,7 @@ def _hash(page: Any) -> str:
     return str(page.evaluate("() => decodeURIComponent(location.hash)"))
 
 
-def test_a_link_naming_a_map_file_opens_its_comparison_on_the_timeline_and_keeps_the_file_in_the_address() -> None:
+def test_a_link_naming_a_map_file_opens_its_comparison_under_updates_and_keeps_the_file_in_the_address() -> None:
     with _served_pair() as (url, old), _page(_file_page(url, old)) as page:
         _settle(page)
         assert _crumb(page) == "A map file"
@@ -188,11 +188,12 @@ def test_stop_marking_drops_the_badges_and_the_link_and_the_file_page_says_so() 
         assert not page.js_errors, page.js_errors
 
 
-def test_the_timeline_says_when_the_map_has_no_history_and_the_foot_takes_a_file() -> None:
-    with _served_pair() as (url, old), _page(url + "#v=timeline") as page:
+def test_the_updates_list_says_when_the_map_has_no_history_and_the_foot_takes_a_file() -> None:
+    with _served_pair() as (url, old), _page(url + "#v=updates") as page:
         _settle(page)
-        assert _crumb(page) == "Timeline"
-        assert "No committed version" in _screen_text(page), "a folder with no git says so"
+        assert _crumb(page) == "Updates"
+        text = _screen_text(page)
+        assert "No update yet" in text and "No committed version" in text, "a folder with no git and no log says so"
         page.fill("#tlPath", old)
         page.press("#tlPath", "Enter")
         _settle(page)

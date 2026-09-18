@@ -4256,7 +4256,7 @@ const VIEW_GROUPS = [
   // TIME. One timeline of the map's committed versions; an update log is a version with a story.
   // Not a product view and not a machine view, so a group of its own; a static export, which has
   // no git to read the history from, drops it (the gating loop hides its one view).
-  ['changelog', 'Change log', 'What changed in this map, version by version, and why?'],
+  ['changelog', 'Change log', 'What changed in this product, update by update, and why?'],
 ];
 const GROUP_OF_VIEW = {};   // view id -> its group id, filled from the buttons at boot (one source)
 const GROUP_LABEL = {};     // group id -> its label, from VIEW_GROUPS
@@ -4286,7 +4286,7 @@ const VIEW_Q = {
   // does not, so the question is fixed for the view the way every question but Features' is.
   rules: 'Which rules does this product apply?',
   interfaces: 'Where does this product meet the outside world?',
-  timeline: 'What changed in this map, version by version, and why?',
+  updates: 'What changed in this product, update by update, and why?',
 };
 // The hexagon outline as polygon points for a box — ONE definition for the sequence-diagram
 // service-actor figure, so nothing can drift into drawing a different hexagon for the same meaning. The notch is a fifth of the width (capped at half the height, so a squat box stays a
@@ -7439,7 +7439,7 @@ const LANDING_COUNT = {
   context: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'dep').length, 'dependency'],
   deployment: () => [Object.values(GRAPH.nodes).filter((n) => n.kind === 'process').length, 'process'],
   glossary: () => [(GRAPH.glossary || []).length, 'term'],
-  timeline: () => [[VERSIONS.length, 'version'], [LOGS.length, 'update']],
+  updates: () => [[LOGS.length, 'update'], [VERSIONS.length, 'version']],
 };
 // A VIEW'S LANDING SCREEN WEARS ITS NAME AND ITS QUESTION AS THE HEAD OF ITS FIRST BLOCK — the same
 // grey strip every section of an item page is headed by: the view's name, how many of its things the
@@ -8105,7 +8105,7 @@ function elementHomeView(id) {
 }
 function topView(kind, id) {  // which top-level button a state lives under (container/subsystem/edge → Subsystems)
   if (kind === 'element') return id ? elementHomeView(id) : 'container';
-  if (kind === 'timeline' || kind === 'removed') return 'timeline';   // a removed box's page hangs under the version it was read on
+  if (kind === 'updates' || kind === 'removed') return 'updates';   // a removed box's page hangs under the version it was read on
   if (kind === 'overview' || kind === 'context' || kind === 'component' || kind === 'domain' || kind === 'glossary' || kind === 'system' || kind === 'data' || kind === 'tests' || kind === 'rules' || kind === 'interfaces') return kind;
   if (kind === 'sysSection') return 'system';  // one System collection lives under the System tab
   if (kind === 'domsub' || kind === 'domedge') return 'domain';  // subdomain card + edge pair live under the Domain button
@@ -8202,7 +8202,7 @@ function stateTitle(s) {
   if (s.kind === 'rule') return ruleCrumbTitle(s.br);
   if (s.kind === 'overview') return 'Overview';
   if (s.kind === 'glossary') return 'Glossary';
-  if (s.kind === 'timeline') return s.at ? versionTitle(timelineRow(s.at), s.at) : 'Timeline';
+  if (s.kind === 'updates') return s.at ? versionTitle(timelineRow(s.at), s.at) : 'Updates';
   if (s.kind === 'removed') return removedTitle(s);
   if (s.kind === 'system') return 'System';
   if (s.kind === 'sysSection') {
@@ -8360,8 +8360,8 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   }
   if (s.kind === 'overview') return [{ kind: 'overview' }];
   if (s.kind === 'glossary') return [{ kind: 'glossary' }];
-  if (s.kind === 'timeline') return s.at ? [{ kind: 'timeline' }, { kind: 'timeline', at: s.at }] : [{ kind: 'timeline' }];
-  if (s.kind === 'removed') return [{ kind: 'timeline' }, { kind: 'timeline', at: s.at }, { kind: 'removed', id: s.id, at: s.at }];
+  if (s.kind === 'updates') return s.at ? [{ kind: 'updates' }, { kind: 'updates', at: s.at }] : [{ kind: 'updates' }];
+  if (s.kind === 'removed') return [{ kind: 'updates' }, { kind: 'updates', at: s.at }, { kind: 'removed', id: s.id, at: s.at }];
   if (s.kind === 'system') return [{ kind: 'system' }];
   if (s.kind === 'data') return [{ kind: 'data' }];
   if (s.kind === 'tests') return [{ kind: 'tests' }];
@@ -13927,8 +13927,8 @@ async function renderView(sArg, transient, seq) {
   if (s.kind === 'data') { renderData(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
   // The Tests tab is the test-completeness gap table (HTML) — same shape as the System/Glossary tabs.
   if (s.kind === 'tests') { renderTests(); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return; }
-  // The Timeline, a version's page and a removed box's page: HTML lists, the same shape as Rules.
-  if (s.kind === 'timeline') {
+  // The Updates list, an update's page and a removed box's page: HTML lists, the same shape as Rules.
+  if (s.kind === 'updates') {
     renderTimeline(s); mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
   }
   if (s.kind === 'removed') {
@@ -16440,7 +16440,7 @@ viewsw.querySelectorAll('button').forEach((b) => {
   if (b.dataset.view === 'tests' && !HAS_TESTS) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'rules' && !HAS_RULES) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'interfaces' && !HAS_INTERFACES) { b.style.display = 'none'; return; }
-  if (b.dataset.view === 'timeline' && EXPORTED) { b.style.display = 'none'; return; }   // needs git: a static copy has none
+  if (b.dataset.view === 'updates' && EXPORTED) { b.style.display = 'none'; return; }   // needs git: a static copy has none
   b.addEventListener('click', () => goTab(b.dataset.view));
 });
 // Build the GROUP row, now that the per-map gating above has decided which views this map has at all.
@@ -16826,14 +16826,120 @@ function entryFootHtml(e) {
   return `<p class="ecard-extra"><span class="ecard-lbl">Evidence</span> ${files || '<span class="muted">none named</span>'}`
     + `<span class="cmp-conf cmp-conf-${esc(conf)}">${esc(conf)}</span></p>`;
 }
-// One entry as a card: the headline as its name, the sentence as its text, every box it names as a
-// pill, its evidence and confidence as the foot line.
-function entryCardHtml(e) {
-  const pills = (e.boxes || []).map(logPillHtml).join('');
-  const foot = `<p class="ecard-extra cmp-entry-boxes">${pills}</p>` + entryFootHtml(e);
-  return itemBoxHtml({ k: '', name: e.headline, what: e.sentence, pills: [], facts: [], band: [], chips: [] },
+// One entry as a card: the headline as its name, the sentence as its text, the boxes it names as
+// pills, its evidence and confidence as the foot line. `o.boxes` narrows the pills to the boxes a
+// section is about; `o.also` names the other features the entry is told under; `o.brief` draws the
+// headline and the pills alone, for an entry already told in full higher on the page.
+function entryCardHtml(e, opts) {
+  const o = opts || {};
+  const full = !o.brief;
+  const pills = (o.boxes || e.boxes || []).map(logPillHtml).join('');
+  const also = (o.also || []).filter((f) => FEAT_BY_ID[f]);
+  const foot = `<p class="ecard-extra cmp-entry-boxes">${full ? '' : '<span class="ecard-lbl">Also here</span>'}${pills}</p>`
+    + (also.length ? `<p class="ecard-extra"><span class="ecard-lbl">Also under</span> ${also.map((f) => featurePillHtml(f)).join('')}</p>` : '')
+    + (full ? entryFootHtml(e) : '');
+  return itemBoxHtml({ k: '', name: e.headline, what: full ? e.sentence : '', pills: [], facts: [], band: [], chips: [] },
                      'card', { nameLink: false, glyph: false, wordHtml: '', cls: 'ecard ecard-entry', foot,
                                attrs: ` data-entry="${esc(e.id)}"` });
+}
+// WHICH FEATURES A BOX BELONGS TO, read off the joins the Features page already has: a use case's
+// feature, a rule's features, the features that reach through an interface, a record's owner, a
+// way in's feature, a decision area's "specified under", a data area's owners, the use cases that
+// run a shared sub-flow. A machine box belongs to none: it serves features, it is not part of one.
+let EP_FEATURES = null;
+function boxFeatureIds(b) {
+  const has = (f) => !!FEAT_BY_ID[f];
+  const list = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter(has);
+  switch (b.kind) {
+    case 'capabilities': return has(b.id) ? [b.id] : [];
+    case 'use_cases': return CAP_OF_UC[b.id] ? list(CAP_OF_UC[b.id].id) : [];
+    case 'rules': return list((FEATURES.ruleFeatures || {})[b.id]);
+    case 'blocks': return list((((RULES_VIEW || {}).blocks || []).find((x) => x.id === b.id) || {}).specified_under);
+    case 'interfaces': return list(((FEATURES.interfaces || []).find((i) => i.id === b.id) || {}).features);
+    case 'entities': return list((FEATURES.entityOwners || {})[b.id]);
+    case 'subdomains': return list(((FEATURES.areas || []).find((a) => a.id === b.id) || {}).owners);
+    case 'roles': return list((FEATURES.roleFeatures || {})[b.id]);
+    case 'entry_points': {
+      if (!EP_FEATURES) {
+        EP_FEATURES = {};
+        for (const f of FEATURES.features || []) for (const ep of f.entryPoints || []) (EP_FEATURES[ep] = EP_FEATURES[ep] || []).push(f.id);
+      }
+      return list(EP_FEATURES[b.id]);
+    }
+    case 'subflows': {
+      const out = [];
+      for (const uc in FLOWS_NARR || {}) {
+        if ((FLOWS_NARR[uc] || []).some((st) => st.subflow === b.id) && CAP_OF_UC[uc] && has(CAP_OF_UC[uc].id)) out.push(CAP_OF_UC[uc].id);
+      }
+      return out;
+    }
+    default: return [];
+  }
+}
+// THE UPDATE, BY FEATURE. A section per feature the update touches, in the Features page's order,
+// each holding the entries that touch it, told in full with that feature's boxes as pills and the
+// other features they are also under. Then the product boxes no feature claims, then the machine
+// boxes under the hood — an entry already told above comes back there as its headline and its
+// machine pills alone. One page: nothing an entry says is left off it.
+//
+// WHICH FEATURES AN ENTRY IS TOLD UNDER: its use cases' features. A use case is where a feature
+// is done, so that is the reading a person wants; an interface or a way in the entry also names
+// is reached by many features and would file the entry under all of them (nine sections for one
+// entry on the rehearsal map, eight of them a repeat). Only an entry naming no use case falls back
+// to the features its other product boxes belong to. Every product box of the entry is then a pill
+// under the feature it belongs to, and one belonging to none of the entry's features rides the
+// first card, so no box is left off the page.
+function entryPlacement(e) {
+  const product = (e.boxes || []).filter((b) => b.group !== 'hood');
+  const feats = (boxes) => { const out = []; for (const b of boxes) for (const f of boxFeatureIds(b)) if (!out.includes(f)) out.push(f); return out; };
+  const anchors = product.filter((b) => b.kind === 'use_cases' || b.kind === 'capabilities');
+  const secs = feats(anchors.length ? anchors : product);
+  const per = new Map(secs.map((f) => [f, []]));
+  const leftovers = [];
+  for (const b of product) {
+    const mine = boxFeatureIds(b).filter((f) => per.has(f));
+    if (mine.length) for (const f of mine) per.get(f).push(b); else leftovers.push(b);
+  }
+  if (secs.length && leftovers.length) per.get(secs[0]).push(...leftovers);
+  return { secs, per, loose: secs.length ? [] : leftovers };
+}
+function updateByFeatureHtml(log) {
+  const entries = log.entries || [];
+  const byFeature = new Map();          // feature id → [[entry, boxes told under it, the entry's other features]]
+  const loose = [];                     // [entry, product boxes, []] for an entry no feature claims
+  const told = new Set();
+  for (const e of entries) {
+    const place = entryPlacement(e);
+    for (const f of place.secs) { if (!byFeature.has(f)) byFeature.set(f, []); byFeature.get(f).push([e, place.per.get(f), place.secs.filter((x) => x !== f)]); }
+    if (place.loose.length) loose.push([e, place.loose, []]);
+  }
+  const secs = [];
+  let html = '';
+  const order = (FEATURES.features || []).map((f) => f.id).filter((f) => byFeature.has(f));
+  for (const fid of order) {
+    const items = byFeature.get(fid);
+    const cards = items.map(([e, boxes, also]) => entryCardHtml(e, { boxes, also })).join('');
+    items.forEach(([e]) => told.add(e.id));
+    const door = `<button type="button" class="item-sec-door" data-gofeat="${esc(fid)}" title="Everything this feature can do">${esc(featureName(fid))}</button>`;
+    html += itemSectionHtml(secs, 'upd-feat-' + fid, featureName(fid), countLabel(items.length, 'entry'), '',
+                            `<div class="ecard-list">${cards}</div>`, storyFeatureGlyphSvg(), door);
+  }
+  if (loose.length) {
+    const cards = loose.map(([e, boxes, also]) => entryCardHtml(e, { boxes, also })).join('');
+    loose.forEach(([e]) => told.add(e.id));
+    html += itemSectionHtml(secs, 'upd-product', 'Across the product', countLabel(loose.length, 'entry'),
+                            'Boxes that belong to no one feature: the product\u2019s own words, an interface no feature reaches.',
+                            `<div class="ecard-list">${cards}</div>`, '', '');
+  }
+  const hood = entries.map((e) => [e, (e.boxes || []).filter((b) => b.group === 'hood')]).filter(([, boxes]) => boxes.length);
+  if (hood.length) {
+    const cards = hood.map(([e, boxes]) => entryCardHtml(e, { boxes, brief: told.has(e.id) })).join('');
+    html += itemSectionHtml(secs, 'upd-hood', 'Under the hood', countLabel(hood.length, 'entry'),
+                            'The machine boxes the update touched: components, dependencies, arrows, settings.',
+                            `<div class="ecard-list">${cards}</div>`, '', '');
+  }
+  if (!html) html = '<p class="empty">This update has no entry.</p>';
+  return `<p class="cmp-features-line muted">${esc(countLabel(order.length, 'feature'))} touched</p>` + html;
 }
 // The rest of the log, under the entries: the boxes the code touched without a change of meaning,
 // each with its reason, and the notes — how far each reading reached, the gaps, the seams.
@@ -16963,7 +17069,7 @@ function cmpSubjectId(s) {
 // reader has marked a version on the map.
 function placeCompareSection(s) {
   document.querySelectorAll('.cmpsec:not(.cmpsec-page)').forEach((el) => el.remove());
-  if (!CMP || !s || s.kind === 'timeline' || s.kind === 'removed') return;
+  if (!CMP || !s || s.kind === 'updates' || s.kind === 'removed') return;
   const id = cmpSubjectId(s);
   const e = id ? docIndex(CMP).byId[id] || null : null;
   if (!e && !logEntriesOf(CMP.log, id).length) return;
@@ -17041,15 +17147,24 @@ function timelineRowCardHtml(r) {
                          pill: '<span class="ecard-type ecard-type-plain">version</span>',
                          foot: `<p class="ecard-extra"><span class="ecard-lbl">Committed</span> ${esc(r.date)}</p>` });
 }
+// ONE ROW PER RUN OF `coyomap update`. The map's other committed versions — a rebuild, a repair, a
+// rename — are the same kind of row, but nobody wrote a story for them, so they sit folded under
+// the updates: the Change log is organised by update, and the commits are there for whoever asks.
 function timelineListHtml() {
   const rows = timelineRows();
+  const updates = rows.filter((r) => r.log);
+  const others = rows.filter((r) => !r.log);
   const broken = LOG_PROBLEMS.map((t) => `<p class="cmp-warn">A log could not be read: ${esc(t)}</p>`).join('');
-  const list = rows.length ? `<div class="ecard-list">${rows.map(timelineRowCardHtml).join('')}</div>`
-    : '<p class="empty">No committed version of this map yet, and no update log beside it.</p>';
+  const list = updates.length ? `<div class="ecard-list">${updates.map(timelineRowCardHtml).join('')}</div>`
+    : '<p class="empty">No update yet: after the code changes, <code>coyomap update</code> writes one, and it is told here.</p>';
+  const rest = others.length
+    ? `<details class="tl-others"><summary>Other versions of the map <span class="muted">${esc(countLabel(others.length, 'version'))} with no story: rebuilds, repairs, renames, uncommitted edits</span></summary>`
+      + `<div class="ecard-list">${others.map(timelineRowCardHtml).join('')}</div></details>`
+    : (VERSIONS.length ? '' : '<p class="cmp-noevidence">No committed version of this map yet.</p>');
   const foot = '<div class="tl-foot"><span class="tl-foot-lbl">Compare with a map file on disk</span>'
     + '<input id="tlPath" type="text" placeholder="path to a project-map.json" spellcheck="false" autocomplete="off">'
     + '<button type="button" id="tlGo">Compare</button><span id="tlMsg" class="diffpop-msg"></span></div>';
-  return broken + list + foot;
+  return broken + list + rest + foot;
 }
 function timelineHeadHtml(row, at, doc) {
   const ref = doc ? doc.ref : null;
@@ -17088,11 +17203,11 @@ function evidenceHtml(doc) {
 function renderTimeline(s) {
   if (!s.at) {
     diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Timeline') + timelineListHtml() + '</div>';
-    bindPlainCards(diagram, (key) => go({ kind: 'timeline', at: key.slice(3) }));
+    bindPlainCards(diagram, (key) => go({ kind: 'updates', at: key.slice(3) }));
     const goPath = () => {
       const v = document.getElementById('tlPath').value.trim();
       if (!v) { document.getElementById('tlMsg').textContent = 'Type the path of a map file.'; return; }
-      armCompare('path:' + v, { render: false }).then((ok) => { if (ok) go({ kind: 'timeline', at: 'file' }); });
+      armCompare('path:' + v, { render: false }).then((ok) => { if (ok) go({ kind: 'updates', at: 'file' }); });
     };
     document.getElementById('tlGo').addEventListener('click', goPath);
     document.getElementById('tlPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') goPath(); });
@@ -17109,9 +17224,7 @@ function renderTimeline(s) {
     body = '<p class="cmp-noevidence">Reading the map’s own diff…</p>';
     loadDocThen(ref, s);
   } else if (doc.log) {
-    const cards = (doc.log.entries || []).map(entryCardHtml).join('');
-    body = (cards ? `<div class="ecard-list">${cards}</div>` : '<p class="empty">This update has no entry.</p>')
-      + logFootHtml(doc.log) + evidenceHtml(doc);
+    body = updateByFeatureHtml(doc.log) + logFootHtml(doc.log) + evidenceHtml(doc);
   } else body = evidenceHtml(doc);
   diagram.innerHTML = '<div class="usecases-wrap">' + timelineHeadHtml(row, s.at, doc) + body + '</div>';
   bindElementCards(diagram);
@@ -17135,6 +17248,10 @@ function bindTimelinePage(root, s, doc) {
   root.querySelectorAll('.cmp-log-pill[data-key]').forEach((b) => b.addEventListener('click', (ev) => {
     ev.stopPropagation();
     cmpOpenKey(b.getAttribute('data-key'), s.at);
+  }));
+  root.querySelectorAll('[data-gofeat]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    go({ kind: 'capability', cap: b.getAttribute('data-gofeat') });
   }));
 }
 // ── a removed box's page: as it was in the old map ────────────────────────────────────────────

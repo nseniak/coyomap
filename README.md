@@ -42,9 +42,9 @@ where data is stored, how it is deployed.
 
 <img src="assets/viewer-hood.png" alt="The coyomap viewer on a project's Components page: the map of one subsystem with one component selected and explained in a sentence, and that component's source code open on the right at the line the map points to." width="100%">
 
-**Change log** shows how the map changed over time: every committed version of it, newest first, and
-for each update the story in plain words (what the product now does differently, which boxes it
-touched, the evidence) with the map's own diff for that step underneath.
+**Change log** shows how the product changed, one entry per run of `coyomap update`, newest first.
+An update's page tells its story by feature, in plain words: what the product now does differently,
+which boxes it touched, the evidence, with the map's own diff for that step underneath.
 
 <img src="assets/viewer-changelog.png" alt="The coyomap viewer on a project's Change log: one update's page, with its three entries told in full, the boxes each one names as pills, the evidence files, and the boxes the code touched without a change of meaning." width="100%">
 

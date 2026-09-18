@@ -1937,6 +1937,11 @@ details.cmp-evidence .cmp-filters { margin: 0 0 10px; }
 .tl-foot button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
                   background: #fff; color: #374151; border: 1px solid #d1d5db; }
 .tl-foot button:hover { background: #eef2ff; border-color: #c7d2fe; }
+details.tl-others { margin: 16px 0 0; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; }
+details.tl-others > summary { cursor: pointer; font-size: 12.5px; color: #374151; font-weight: 600; }
+details.tl-others > summary .muted { font-weight: 400; }
+details.tl-others[open] > summary { margin-bottom: 8px; }
+.cmp-features-line { margin: 0 0 10px; font-size: 12px; }
 .cmp-waived { margin: 0; padding-left: 18px; font-size: 13px; }
 .cmp-waived li { margin: 3px 0; }
 .cmp-notes { margin: 0; font-size: 13px; color: #374151; white-space: pre-line; }

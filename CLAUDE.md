@@ -50,42 +50,22 @@ the code's names.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
   Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Subsystems,
-  Storage, Dependencies, Tests, Deployment, System, Timeline.
+  Storage, Dependencies, Tests, Deployment, System, Updates.
 - **group** — the three tabs above the views: Product, Under the hood, Change
   log. A group is a set of tabs, never a page you can be on. Data (the entities)
   and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
   two groups they made up went. Change log arrived on 2026-09-18: time is neither
   a product view nor a machine view.
-- **timeline** — the Change log's one view: every committed version of the map,
-  newest first, and the uncommitted edits on top when there are any. A version
-  that carries an update log is an **update** and tells the log's story (every
-  entry once, in full, with its waivers and notes); any other version shows the
-  map's own diff for that step. **Mark on the map** badges every box a version
-  touches on every screen and puts the choice in the address; it replaced the
-  Compare… button and its picker.
-- **box** — one thing drawn on a view. **arrow** — a relation between two boxes.
-- **code link** — the `file:line` a box points at. A box without one is
-  ungrounded, which is a defect.
-- **flow** — the numbered steps of one use case: each step says who or what
-  acts, on what, in one phrase. The use case is the GOAL; its flow is how it
-  happens. Exactly one per use case (argus 31 and 31, mcpolis 47 and 47).
-  THE WORD IS THE MAP'S OWN. The file has called this `flows` all along, so
-  saying anything else meant translating at every sentence. It was *use case
-  walk* for a while, and *walk* alone before that, which read as a stroll through
-  the map; *journey* and *story* were used for the same thing in other entries,
-  so one idea had four names. The rename ended that, and it is also why an
-  interface's derived direction field is called `directions`: `flow` there was
-  one word for two ideas, and it sent a reader looking for a `flow` property on
-  an authored interface, which has never had one.
-  NOT the happy path. That is the product's ONE successful run, across several
-  use cases; a flow is one use case's own steps. The two were both called "the
-  walk" and that is the confusion this rename exists to remove.
-  A **shared sub-flow** is a run of steps that several flows RUN (argus 10,
-  mcpolis 14). It is not spliced in: a flow's numbers are its own, and running
-  one of these is one of them. On a use case map it is one dashed box wearing its
-  chips; it has a screen of its own, where its steps are numbered from 1 and
-  belong to it. The map calls these `subflows`. It was a *shared walk*, then a
-  *shared sub-flow*; one word, one thing.
+- **updates** — the Change log's one view: one row per run of `coyomap update`,
+  newest first; the map's other committed versions (rebuilds, repairs, renames,
+  uncommitted edits) sit folded under them with the map's own diff for each
+  step. An **update's page** tells the log by feature: a section per feature it
+  touches, in the Features page's order, each entry told in full under it with
+  that feature's boxes as pills; then the product boxes no feature claims, then
+  the machine boxes under the hood; then the waivers, the notes, and the diff
+  from the version before the update to the version it made, folded. **Mark on
+  the map** badges every box a version touches on every screen and puts the
+  choice in the address; it replaced the Compare… button and its picker.
 - **owner** (of a data area) — the feature the area's data exists FOR: the one
   that creates its records and runs their lifecycle. Authored, never derived.
 - **owner with no evidence** — the map says an area exists for a feature, but no

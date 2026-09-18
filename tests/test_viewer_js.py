@@ -3646,12 +3646,12 @@ def test_code_and_operations_read_as_one_question() -> None:
     # Product and Under the hood, then TIME: the Change log is one timeline of the map's versions,
     # neither a product view nor a machine view, so it is a group of its own (2026-09-18).
     assert [g for g in re.findall(r"\['([a-z]+)', '", table)] == ["product", "hood", "changelog"], \
-        "three groups: Data and Glossary sit under Product now, Storage under the hood, the timeline under Change log"
+        "three groups: Data and Glossary sit under Product now, Storage under the hood, the updates under Change log"
     assert "'Under the hood'" in table and "'Change log'" in table
     hood = re.findall(r'<button data-view="(\w+)" data-group="hood">', html)
     # Storage is a machine fact — where the data physically lives — so it sits under the hood too.
     assert set(hood) == {"container", "data", "context", "tests", "deployment", "system"}, hood
-    assert re.findall(r'<button data-view="(\w+)" data-group="changelog">', html) == ["timeline"]
+    assert re.findall(r'<button data-view="(\w+)" data-group="changelog">', html) == ["updates"]
 
 
 def test_a_component_says_how_many_features_it_serves() -> None:

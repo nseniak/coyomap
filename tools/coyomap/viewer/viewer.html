@@ -140,10 +140,11 @@
             <button data-view="deployment" data-group="hood">Deployment</button>  <!-- processes/threads ↔ subsystems (hidden when no deployment[] units) -->
             <button data-view="system" data-group="hood">System</button>  <!-- operational reference tables: run/observability/security/config/entry-points (hidden when empty) -->
 
-            <!-- CHANGE LOG — time. One timeline of the map's committed versions, newest first; a version
-                 that carries an update log tells its story, every other one shows the map's own diff
-                 for that step. Needs git, so a static export hides it (the gating loop in viewer.js). -->
-            <button data-view="timeline" data-group="changelog">Timeline</button>
+            <!-- CHANGE LOG — time. One row per run of `coyomap update`, newest first, each telling its
+                 story by feature; the map's other committed versions sit folded under them with the
+                 map's own diff for each step. Needs git, so a static export hides it (the gating loop
+                 in viewer.js). -->
+            <button data-view="updates" data-group="changelog">Updates</button>
 
             <!-- Components tab intentionally removed: the flat whole-repo component map is too heavy to be a
                  landing view. Its generators (gen_mermaid / MERMAID_BASE) and the viewer's

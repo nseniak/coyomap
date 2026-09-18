@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The update log on screen, in a real browser: the Change log's Timeline reads the log, and the
+"""The update log on screen, in a real browser: the Change log's Updates list reads the log, and the
 map's own diff for that step sits under it as evidence.
 
 The served folder is a git repo whose one commit holds the map as it was (pinned to `aaaaaaa`); on
@@ -131,49 +131,71 @@ def _cards(page: Any, selector: str = ".ecard") -> list[str]:
 
 
 def _open_update(page: Any) -> None:
-    """From the Timeline, open the row that carries the newest update."""
+    """From the Updates list, open the row that carries the newest update."""
     page.click('#diagram .ecard:has(.badge.update)')
     _settle(page)
 
 
-def test_the_timeline_lists_the_map_s_versions_and_the_update_among_them() -> None:
-    with _served_update() as url, _page(url + "#v=timeline") as page:
+def test_the_updates_list_leads_with_the_update_and_folds_the_other_versions_away() -> None:
+    with _served_update() as url, _page(url + "#v=updates") as page:
         _settle(page)
-        assert _crumb(page) == "Timeline"
+        assert _crumb(page) == "Updates"
         assert [b for b in page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")] \
             == ["Product", "Under the hood", "Change log"]
         rows = _cards(page)
-        assert len(rows) == 2, "the uncommitted edits, then the one committed version"
+        assert len(rows) == 2, "the update, then the one committed version folded away"
         assert "Uncommitted edits" in rows[0] and "not committed yet" in rows[0] and HEADLINE_1 in rows[0] and HEADLINE_2 in rows[0], \
             "the update sits on disk, so its story rides the top row"
         assert "Map the codebase" in rows[1] and "No story" in rows[1]
+        assert page.query_selector("details.tl-others .ecard") and not page.evaluate("() => document.querySelector('details.tl-others').open"), \
+            "a version with no story sits under the fold"
         assert "1 update" in _text(page, ".landing-head") and "1 version" in _text(page, ".landing-head")
         assert not _marked(page)
         assert not page.js_errors, page.js_errors
 
 
-def test_an_update_s_page_tells_every_entry_once_in_full_with_its_waivers_and_notes() -> None:
-    with _served_update() as url, _page(url + "#v=timeline") as page:
+def _feature_of(doc: dict[str, Any], uc: str) -> str:
+    cap = next(u for u in doc["use_cases"] if u["id"] == uc)["capability"]
+    return next(c for c in doc["capabilities"] if c["id"] == cap)["name"]
+
+
+def test_an_update_s_page_tells_the_log_by_feature_with_its_waivers_and_notes() -> None:
+    """The reader asks "what changed in feature X": a section per feature the update touches, each
+    entry told in full under it with that feature's boxes; the boxes no feature claims under "Across
+    the product"; the machine boxes under the hood, where an entry already told comes back as its
+    headline and pills; then the waivers and the notes, and the fold with the map's own diff."""
+    with _served_update() as url, _page(url + "#v=updates") as page:
         _settle(page)
+        doc = json.loads((Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json").read_text())
+        feature = _feature_of(doc, "UC1")
         _open_update(page)
         assert _crumb(page) == f"Update {OLD_PIN} → {NEW_PIN}"
         head = _text(page, ".cmp-head")
         assert "2026-09-17" in head and "2 entries" in head and "Mark this update on the map" in head
-        cards = _cards(page, ".ecard-entry")
-        assert len(cards) == 2 and HEADLINE_1 in cards[0] and SENTENCE_1 in cards[0] and HEADLINE_2 in cards[1]
-        assert "signup.py" in cards[0] and "verified" in cards[0] and "likely" in cards[1]
-        assert "App factory" in cards[0], "a machine box is a pill on the same card as the product boxes"
+        titles = page.evaluate("() => [...document.querySelectorAll('.item-sec')].map((s) => s.querySelector('.item-sec-strip').textContent.trim())")
+        assert titles[0].startswith(feature), f"the renamed use case's feature leads: {titles}"
+        assert any(t.startswith("Across the product") for t in titles), "the removed use case belongs to no feature the map still has"
+        assert titles[-1].startswith("Under the hood")
+        first = page.evaluate(f"() => document.querySelector('.item-sec[id$=\"upd-feat-{doc['use_cases'][0]['capability']}\"] .ecard-entry').textContent")
+        assert HEADLINE_1 in first and SENTENCE_1 in first and NEW_NAME in first and "signup.py" in first and "verified" in first
+        assert "App factory" not in first, "a machine box is not this feature's pill"
+        hood = page.evaluate("() => [...document.querySelectorAll('.item-sec[id$=\"upd-hood\"] .ecard-entry')].map((c) => c.textContent)")
+        assert len(hood) == 1 and HEADLINE_1 in hood[0] and "Also here" in hood[0] and "App factory" in hood[0] and SENTENCE_1 not in hood[0]
         text = _screen_text(page)
+        assert HEADLINE_2 in text and SENTENCE_2 in text and "likely" in text
         assert "Touched by the code, no change of meaning" in text and "only its tests moved" in text
         assert "Notes" in text and "step precision on both screens" in text
         assert "The map’s own diff" in text and not page.evaluate("() => document.querySelector('details.cmp-evidence').open")
         for internal in ("UC1", "UC99", "C1", "C2", "e1", "e2"):
             assert f" {internal}" not in text, f"an id on screen: {internal}"
+        page.click('.item-sec-door[data-gofeat]')
+        _settle(page)
+        assert _crumb(page) == feature, "the section's name is a door to the feature"
         assert not page.js_errors, page.js_errors
 
 
 def test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story() -> None:
-    with _served_update() as url, _page(url + "#v=timeline&at=disk") as page:
+    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
         _settle(page)
         page.click('.ecard-entry .item-pill[data-item="UC1"]')
         _settle(page)
@@ -183,7 +205,7 @@ def test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story() -> None:
 
 
 def test_marking_the_update_badges_every_box_it_names_and_a_box_s_page_says_why() -> None:
-    with _served_update() as url, _page(url + "#v=timeline&at=disk") as page:
+    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
         _settle(page)
         page.click("button.cmp-mark")
         _settle(page)
@@ -203,7 +225,7 @@ def test_marking_the_update_badges_every_box_it_names_and_a_box_s_page_says_why(
         page.wait_for_selector("#crumb h1", state="attached")
         _settle(page)
         assert f"cmp=log:{LOG}" in _hash(page) and page.query_selector(".cmpsec")
-        page.goto(f"{url}#v=timeline&at=disk&cmp=log:{LOG}")
+        page.goto(f"{url}#v=updates&at=disk&cmp=log:{LOG}")
         _settle(page)
         page.click("button.cmp-stop")
         _settle(page)
@@ -221,7 +243,7 @@ def test_a_box_the_entry_only_names_is_named_in_the_story_not_changed_by_it() ->
 
 
 def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_went() -> None:
-    with _served_update() as url, _page(url + "#v=timeline&at=disk") as page:
+    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
         _settle(page)
         page.click('.cmp-log-pill[data-key="removed:UC99"]')
         _settle(page)
@@ -236,7 +258,7 @@ def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_wen
 
 
 def test_without_git_the_update_still_has_a_page_and_its_removed_box_a_story() -> None:
-    with _served_update(git=False) as url, _page(url + "#v=timeline") as page:
+    with _served_update(git=False) as url, _page(url + "#v=updates") as page:
         _settle(page)
         rows = _cards(page)
         assert len(rows) == 1 and HEADLINE_1 in rows[0]
@@ -254,7 +276,7 @@ def test_an_older_update_s_evidence_is_its_own_step_and_credits_nothing_that_cam
     """Two updates: the first committed, the second on disk. The first update's page shows the diff
     from the version before it to the version it made, so the later update's change is not in it,
     and marked on the map it says nothing on that box's page."""
-    with _served_update(later=True) as url, _page(url + "#v=timeline") as page:
+    with _served_update(later=True) as url, _page(url + "#v=updates") as page:
         _settle(page)
         rows = _cards(page)
         assert len(rows) == 3 and HEADLINE_3 in rows[0] and HEADLINE_1 in rows[1] and "Map the codebase" in rows[2]
