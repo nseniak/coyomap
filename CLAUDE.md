@@ -41,6 +41,10 @@ the code's names.
   plain-language text on every box, and the code links. Lives in `.coyomap/`.
 - **baseline** — the map as currently accepted, pinned to a commit. What a
   change is compared against.
+- **snapshot** — what the map is: it describes the product as it stands at its
+  pin, as if it had always been so. The story of a change, and what was before
+  it, lives only in the log. A box's own words never say "now", "no longer" or
+  "since the …"; `changes lint` warns when an update writes them in.
 - **build** — analyzing a project from scratch and producing a new map. Throws
   away hand edits.
 - **viewer** — the browser page that shows a map. Served live, never committed.
