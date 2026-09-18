@@ -8206,7 +8206,10 @@ function stateTitle(s) {
   if (s.kind === 'overview') return 'Overview';
   if (s.kind === 'glossary') return 'Glossary';
   if (s.kind === 'changes' || s.kind === 'hoodchanges') return 'Changes';
-  if (s.kind === 'removed') { const e = cmpRemoved(s.id); return e ? (e.name_old || 'Removed') : 'Removed'; }
+  if (s.kind === 'removed') {
+    const e = cmpRemoved(s.id), lb = e ? null : cmpLogBox(s.id);
+    return e ? (e.name_old || 'Removed') : lb ? (lb.name || 'a removed ' + (lb.word || 'box')) : 'Removed';
+  }
   if (s.kind === 'system') return 'System';
   if (s.kind === 'sysSection') {
     if (s.epk) return s.epk;   // one entry-point kind, named by the kind itself
@@ -16686,7 +16689,7 @@ function cmpEvidenceHtml(group) {
       + 'folder\u2019s history, so the map\u2019s own diff cannot be shown under it.</p>';
   }
   return `<details class="cmp-evidence"${CMP.evidenceOpen ? ' open' : ''}>`
-    + `<summary>The map\u2019s own diff <span class="muted">since ${esc(cmpOldShort())} · ${esc(cmpCountsText(group))}</span></summary>`
+    + `<summary>The map\u2019s own diff <span class="muted">since the map as last committed before this update, ${esc(cmpOldShort())} · ${esc(cmpCountsText(group))}</span></summary>`
     + cmpFiltersHtml() + cmpMechanicalHtml(group) + '</details>';
 }
 function renderChanges(s) {
@@ -16715,7 +16718,7 @@ function bindCmpHead(root) {
   root.querySelectorAll('button.cmp-stop').forEach((b) => b.addEventListener('click', clearCompare));
   // The newest log, marked on the map on request: the same comparison, no longer implicit.
   root.querySelectorAll('button.cmp-mark').forEach((b) => b.addEventListener('click', () => {
-    installCmp(CMP, false);
+    installCmp(CMP, false, true);
     captureViewState(); render();
   }));
   root.querySelectorAll('details.cmp-evidence').forEach((d) => d.addEventListener('toggle', () => { CMP.evidenceOpen = d.open; }));
@@ -16754,6 +16757,12 @@ function cmpLogProjection() {
       if (!out[id] || LOG_STATE_RANK[st] > LOG_STATE_RANK[out[id]]) out[id] = st;
     }
   }
+  // A DECISION AREA holds its rules the way a feature holds its use cases, and the Rules landing
+  // draws the areas: one whose rule the update touched says so, or the change hides behind a click.
+  for (const id of Object.keys(out)) {
+    const n = GRAPH.nodes[id];
+    if (n && n.kind === 'rule' && n.parent && !out[n.parent]) out[n.parent] = 'modified';
+  }
   return out;
 }
 // The entries that reach a group: [entry, its boxes in this group, told in full here]. An entry is
@@ -16775,10 +16784,11 @@ function cmpLogEntriesIn(group) {
 // opened, since no screen is about one of them.
 const LOG_PILL_KIND = { capabilities: 'capability', use_cases: 'usecase', roles: 'human', components: 'component',
                         subsystems: 'subsystem', deps: 'dep', rules: 'rule', blocks: 'block', interfaces: 'interface',
-                        entities: 'entity', subdomains: 'subdomain' };
+                        entities: 'entity', subdomains: 'subdomain', subflows: 'subflow' };
 function cmpLogPillHtml(b) {
   const id = cmpLogBoxKey(b);
-  const name = b.name || ('a removed ' + b.word);
+  // A way in is named by its trigger, which the map writes with code quotes; a pill is plain words.
+  const name = (b.name || ('a removed ' + (b.word || 'box'))).replace(/`/g, '');
   const kind = (GRAPH.nodes[id] || {}).kind || LOG_PILL_KIND[b.kind] || '';
   if (b.state === 'removed' || !GRAPH.nodes[id]) {
     const key = b.state === 'removed' ? 'removed:' + b.id
@@ -16808,14 +16818,13 @@ function cmpEntryCardHtml(e, here, full) {
 // One edit of the log on a box's page. The server hands it over in the shape of the map diff's own
 // field row, so the one renderer draws both: the story's edit and the evidence under it.
 function cmpLogEditHtml(x) {
-  if (!(x.added || []).length && !(x.removed || []).length && !(x.spans || []).length && x.old == null && x.new == null) {
-    return '<span class="muted">reordered</span>';
-  }
-  return cmpFieldHtml(x);
+  if (x.reordered) return '<span class="muted">reordered</span>';   // the same items, in another order
+  return cmpFieldHtml(x);   // a code-link row with no words on either side reads "code links moved" here
 }
 // The story of one box: each entry naming it — why it changed, in the entry's words — and the
 // edits that entry made to it, by field.
-const LOG_BECAUSE = { added: 'Added because', removed: 'Removed because' };
+// A box the entry only NAMES did not change: it is part of the story, and says so in those words.
+const LOG_BECAUSE = { added: 'Added because', removed: 'Removed because', modified: 'Changed because', named: 'Named in' };
 function cmpStoryHtml(id) {
   let html = '';
   for (const [e, b] of cmpLogEntriesOf(id)) {
@@ -16832,8 +16841,8 @@ function renderRemoved(s) {
   const lb = cmpLogBox(s.id);
   const told = lb && lb.state === 'removed' ? lb : null;   // the log says it went, even with no old map to show
   if (!e && !told) { diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>'; return; }
-  const k = e ? (cmpKindSpec(e.kind) || { word: 'box' }) : { word: told.word };
-  const hero = pageHeroHtml({ name: (e ? e.name_old : told.name) || k.word, type: k.word,
+  const k = e ? (cmpKindSpec(e.kind) || { word: 'box' }) : { word: told.word || 'box' };
+  const hero = pageHeroHtml({ name: (e ? e.name_old : told.name) || ('a removed ' + k.word), type: k.word,
                               pills: '<span class="badge deleted">removed</span>',
                               desc: e && e.sentence_old ? mdInline(e.sentence_old) : '', noDesc: false,
                               meta: e && e.source_old ? heroSourceLine(e.source_old) : '' });
@@ -16841,7 +16850,7 @@ function renderRemoved(s) {
   // stale block from a previous screen leaves it alone, and the next render's rewrite of the page
   // takes it away.
   diagram.innerHTML = '<div class="usecases-wrap glossary-wrap">' + hero
-    + cmpSectionHtml(e, { all: true, id: s.id }).replace('class="cmpsec"', 'class="cmpsec cmpsec-page"') + '</div>';
+    + cmpSectionHtml(e, { all: true, id: s.id, story: true }).replace('class="cmpsec"', 'class="cmpsec cmpsec-page"') + '</div>';
   bindElementCards(diagram);
 }
 // ── the "What changed" block ──────────────────────────────────────────────────────────────────
@@ -16877,10 +16886,17 @@ function cmpStepHtml(st) {
 // box, for the story. With a story the row is the evidence and sits under it.
 function cmpSectionHtml(e, opts) {
   const o = opts || {};
-  const story = o.id && !CMP.implicit ? cmpStoryHtml(o.id) : '';
+  // The story is told when the update is marked on the map, and on a removed box's page always:
+  // that page exists for the story, and the map holds nothing else about the box.
+  const story = o.id && (!CMP.implicit || o.story) ? cmpStoryHtml(o.id) : '';
   const log = cmpLog();
-  const badge = story ? (cmpBadgeHtml(o.id) || (e ? cmpBadgeOf(e) : '')) : (e ? cmpBadgeOf(e) : '');
-  const since = log ? `in the update ${esc(log.from)} → ${esc(log.to)}` : `since ${esc(cmpOldShort())}`;
+  // A box the log names is told "in the update"; a box only the map's own diff holds changed since
+  // the version the log started from, and an older log's evidence holds later updates too — so it
+  // is told "since <that version>", never credited to this update.
+  const st = story ? cmpLogProjection()[o.id] : null;
+  const badge = story ? (st && st !== 'named' ? `<span class="badge ${st}">${CMP_BADGE_WORD[st]}</span>` : '')
+    : (e ? cmpBadgeOf(e) : '');
+  const since = story && log ? `in the update ${esc(log.from)} → ${esc(log.to)}` : `since ${esc(cmpOldShort())}`;
   let html = `<section class="cmpsec"><h3>What changed ${badge} <span class="muted">${since}</span></h3>` + story;
   if (!e) return html + '</section>';
   const body = cmpEvidenceFieldsHtml(e, o);
@@ -16982,8 +16998,12 @@ async function cmpFetchRef(ref, msg) {
                        { ref, log });
 }
 // Make a fetched comparison the one in force. Implicit: the newest log on the tabs, nothing marked.
-function installCmp(base, implicit) {
-  CMP = Object.assign({}, base, { implicit: !!implicit, filters: Object.assign({}, CMP_FILTERS_DEFAULT), evidenceOpen: false });
+function installCmp(base, implicit, keep) {
+  // `keep`: the same comparison re-installed (the newest log marked on request) keeps the reader's
+  // filters and the fold they opened; a new one starts from the defaults.
+  CMP = Object.assign({}, base, { implicit: !!implicit,
+                                  filters: keep && base.filters ? base.filters : Object.assign({}, CMP_FILTERS_DEFAULT),
+                                  evidenceOpen: keep ? !!base.evidenceOpen : false });
   buildCmpIndex();
   DIFF_STATE = cmpProjection();
   mode = implicit ? 'base' : 'diff';
@@ -17034,17 +17054,20 @@ const comparebtn = document.getElementById('comparebtn');
 const comparepop = document.getElementById('comparepop');
 function closeComparePop() { if (comparepop) comparepop.hidden = true; }
 // The map's update logs, newest first (api/changes). Read at boot and again when the picker opens.
+let LOG_PROBLEMS = [];   // log files beside the map that could not be read, as the server words them
 async function loadLogs() {
-  if (EXPORTED) { LOGS = []; return; }
+  if (EXPORTED) { LOGS = []; LOG_PROBLEMS = []; return; }
   const data = await cmpFetch('changes', null, 'list the updates');
   LOGS = (data && data.logs) || [];
+  LOG_PROBLEMS = (data && data.problems) || [];
 }
 function renderLogRows() {
   const wrap = document.getElementById('cmpupdates');
   const host = document.getElementById('cmplogs');
   if (!wrap || !host) return;
-  wrap.hidden = !LOGS.length;
-  host.innerHTML = LOGS.map((l) =>
+  wrap.hidden = !LOGS.length && !LOG_PROBLEMS.length;
+  const broken = LOG_PROBLEMS.map((t) => `<div class="diffpop-loading">A log could not be read: ${esc(t)}</div>`).join('');
+  host.innerHTML = broken + LOGS.map((l) =>
     `<button type="button" class="diffcommit${CMP && !CMP.implicit && CMP.ref === 'log:' + l.name ? ' on' : ''}" data-log="${esc(l.name)}" `
     + `title="${esc('Update ' + l.from + ' → ' + l.to)}">`
     + `<span class="dc-date">${esc(l.date)}</span>` + (l.latest ? '<span class="dc-tag">latest</span>' : '')

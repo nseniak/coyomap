@@ -37,7 +37,7 @@ from typing import Any, Literal
 
 from coyomap import subverb_help
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, looks_like_map
-from coyomap.model import ModelError, ProjectModel, load_model
+from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import Finding, field_findings, iter_prose_fields
 from coyomap.validate_model import validate_model
 
@@ -857,9 +857,13 @@ def _row_name(kind: str, row: dict[str, Any]) -> str | None:
 def _group_of(rid: str, doc_index: dict[str, tuple[str, dict[str, Any]]], added_kind: dict[str, str],
               old_index: dict[str, tuple[str, dict[str, Any]]] | None = None) -> str:
     """Which group tab a box belongs to. A box the map no longer holds is looked up in the map as it
-    was (`old_index`), when the caller has it."""
+    was (`old_index`), when the caller has it, and failing that by the letters its id starts with.
+    The map's own header is a Product box: its page is the Overview."""
+    if rid == MAP_ID:
+        return "product"
     array = added_kind.get(rid) or (doc_index[rid][0] if rid in doc_index
-                                    else (old_index or {})[rid][0] if rid in (old_index or {}) else "")
+                                    else (old_index or {})[rid][0] if rid in (old_index or {})
+                                    else array_of_id(rid) or "")
     if rid.startswith(FLOW_PREFIX):
         array = "use_cases"
     spec = KIND_OF.get(array)
@@ -878,18 +882,26 @@ def edit_view(ed: FieldEdit, names: dict[str, str]) -> dict[str, Any]:
     if "[" in parts[-1] and not isinstance(was, list) and not isinstance(now, list):
         was, now = ([] if was is None else [was]), ([] if now is None else [now])
     rows = field_deltas({leaf: was}, {leaf: now}, {}, frozenset(), names, names)
+    # The engine says nothing for the same words, or the same items in another order: `reordered`
+    # is the one word left. A list whose items only moved in the code is NOT that: the engine hands
+    # it back as a code-link row with no words on either side, and the viewer draws it as one.
     view: dict[str, Any] = asdict(rows[0]) if rows else {
-        "cls": field_spec(leaf).cls, "old": None, "new": None, "spans": [], "added": [], "removed": []}
+        "cls": field_spec(leaf).cls, "old": None, "new": None, "spans": [], "added": [], "removed": [],
+        "reordered": True}
     view.update({"key": ed.key, "label": _edit_label(ed.key)})
     return view
 
 
 def _edit_text(ed: FieldEdit, names: dict[str, str]) -> str:
-    """The same edit on one markdown line: a list by what came and went, anything else as was → now."""
+    """The same edit on one markdown line: a list by what came and went, a list whose items only
+    moved in the code as such, anything else as was → now."""
     view = edit_view(ed, names)
-    if isinstance(ed.was, list) or isinstance(ed.now, list) or "[" in ed.key.split(".")[-1]:
-        bits = [f"+ {x}" for x in view["added"]] + [f"− {x}" for x in view["removed"]]
-        return "; ".join(bits) if bits else "reordered"
+    if view.get("reordered"):
+        return "reordered"
+    if view["added"] or view["removed"]:
+        return "; ".join([f"+ {x}" for x in view["added"]] + [f"− {x}" for x in view["removed"]])
+    if view["cls"] == "link" and view["old"] is None and view["new"] is None:
+        return "code links moved"
     return f"{view['old'] or '—'} → {view['new'] or '—'}"
 
 
@@ -937,6 +949,18 @@ def _log_names(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | No
     return LogNames(names, added_kind)
 
 
+_ID_LETTERS = re.compile(r"^([A-Z]+)\d+$")
+
+
+def array_of_id(rid: str) -> str | None:
+    """The array a box belongs to, read off the letters its id starts with (`BR209` → rules) — for
+    a box that is in no map the caller holds, such as one removed with no old map at hand."""
+    m = _ID_LETTERS.match(rid)
+    if not m:
+        return None
+    return next((array for array, prefix in ID_ARRAYS.items() if prefix == m.group(1)), None)
+
+
 def _box_state(rid: str, e: Entry, added_kind: dict[str, str]) -> str:
     """What the entry does to a box it names: adds it, removes it, edits it, or only names it. A
     use case named by its flow is the use case, as an edit on the flow is an edit on it."""
@@ -958,14 +982,16 @@ def to_view(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None 
     index = index_map(doc)
     old_index = index_map(old_doc) if old_doc is not None else {}
 
-    def box(rid: str, e: Entry) -> dict[str, Any]:
-        array = added_kind.get(rid) or (index[rid][0] if rid in index else old_index[rid][0] if rid in old_index else "")
-        if rid.startswith(FLOW_PREFIX):
-            array = "use_cases"
+    def box(named: str, e: Entry) -> dict[str, Any]:
+        # A use case named by its flow IS the use case: the viewer keys the box, the badge and the
+        # pill by the use case's id.
+        rid = named[len(FLOW_PREFIX):] if named.startswith(FLOW_PREFIX) else named
+        array = added_kind.get(rid) or (index[rid][0] if rid in index else old_index[rid][0] if rid in old_index
+                                        else array_of_id(rid) or "")
         spec = KIND_OF.get(array)
         return {"id": rid, "name": names.get(rid), "kind": array, "group": _group_of(rid, index, added_kind, old_index),
                 "word": spec.word if spec else ("the map" if rid == MAP_ID else "box"),
-                "state": _box_state(rid, e, added_kind)}
+                "state": _box_state(named, e, added_kind)}
 
     def edit(ed: FieldEdit) -> dict[str, Any]:
         box_id = ed.id[len(FLOW_PREFIX):] if ed.id.startswith(FLOW_PREFIX) else ed.id

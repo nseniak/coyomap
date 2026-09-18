@@ -281,6 +281,48 @@ def test_the_viewer_s_form_names_every_box_with_its_kind_group_and_what_the_entr
     assert worker["name"] is None and worker["state"] == "removed"
 
 
+def test_a_list_whose_items_only_moved_in_the_code_is_a_link_move_and_a_step_reads_by_its_phrase():
+    """The review's first finding: a site whose line moved read as "reordered", and an appended step
+    as its file. The engine's own words apply: a code-link row with no words on either side, a step
+    by its phrase, and "reordered" only for the same items in another order."""
+    site = {"where": "a.py:1", "why": "guards"}
+    moved = changelog.edit_view(FieldEdit("BR1", "sites", [site], [{"where": "a.py:9", "why": "guards"}]), {})
+    assert (moved["cls"], moved["old"], moved["new"], moved["added"], moved["removed"]) == ("link", None, None, [], [])
+    assert not moved.get("reordered")
+    assert changelog._edit_text(FieldEdit("BR1", "sites", [site], [{"where": "a.py:9", "why": "guards"}]), {}) == "code links moved"
+    one = FieldEdit("BR1", "sites[0]", site, {"where": "a.py:9", "why": "guards"})
+    assert changelog.edit_view(one, {})["cls"] == "link" and changelog._edit_text(one, {}) == "code links moved"
+    step = FieldEdit("flow:UC1", "steps[3]", None, {"n": 4, "src": "R1", "dst": "C1", "phrase": "confirms the email", "where": "srv.py:30"})
+    assert changelog.edit_view(step, {})["added"] == ["confirms the email"]
+    assert changelog._edit_text(step, {}) == "+ confirms the email"
+    sub = FieldEdit("flow:UC1", "steps[3]", None, {"n": 4, "src": "R1", "dst": "C1", "phrase": None, "subflow": "SF1"})
+    assert changelog.edit_view(sub, {"SF1": "Warn the person"})["added"] == ["runs Warn the person"]
+    other = {"where": "b.py:2", "why": "checks"}
+    swapped = FieldEdit("BR1", "sites", [site, other], [other, site])
+    assert changelog.edit_view(swapped, {})["reordered"] is True and changelog._edit_text(swapped, {}) == "reordered"
+
+
+def test_a_use_case_named_by_its_flow_keys_the_use_case_and_the_map_and_a_role_have_their_place():
+    doc = make_doc()
+    log = make_log(make_entry(elements=["flow:UC1", "map", "R1"],
+                              edits=[FieldEdit("flow:UC1", "steps[n=2].phrase", "does thing 2", "does the second thing"),
+                                     FieldEdit("map", "title", "t", "The map")]))
+    (e,) = changelog.to_view(log, doc)["entries"]
+    assert [(b["id"], b["name"], b["kind"], b["group"], b["state"]) for b in e["boxes"]] == [
+        ("UC1", "Open the map", "use_cases", "product", "modified"),   # the flow IS the use case
+        ("map", "the map", "map", "product", "modified"),             # its page is the Overview
+        ("R1", "Reader", "roles", "product", "named"),
+    ]
+    assert e["boxes"][1]["word"] == "the map"
+
+
+def test_a_removed_box_with_no_old_map_is_told_by_the_letters_of_its_id():
+    log = make_log(make_entry(elements=["UC99"], removed=["UC99"]))
+    (box,) = changelog.to_view(log, make_doc())["entries"][0]["boxes"]
+    assert (box["name"], box["kind"], box["word"], box["group"], box["state"]) == (None, "use_cases", "use case", "product", "removed")
+    assert changelog.array_of_id("BR209") == "rules" and changelog.array_of_id("glossary:term") is None
+
+
 def test_the_rendering_names_boxes_and_puts_each_entry_under_its_group():
     doc = make_doc()
     log = make_log(

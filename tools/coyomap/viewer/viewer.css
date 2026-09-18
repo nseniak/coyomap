@@ -1867,7 +1867,7 @@ tr.cvhunk td { background: #eef2ff; color: #64748b; font-size: 11px; font-style:
 .diffpop-loading { color: #9ca3af; font-size: 11px; padding: 4px 2px; }
 button.diffcommit { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
            background: transparent; color: #111827; border: 0; border-radius: 6px; padding: 4px 7px; }
-button.diffcommit:hover { background: #eef2ff; }
+button.diffcommit:hover, button.diffcommit.on { background: #eef2ff; }
 button.diffcommit .dc-sha { flex: 0 0 auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
            font-size: 11px; color: #6366f1; }
 button.diffcommit .dc-subj { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: #374151;

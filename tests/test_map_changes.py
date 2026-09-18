@@ -113,6 +113,38 @@ def test_logs_are_ordered_by_the_chain_from_the_pin_then_by_date():
     assert [h.name for h in order_logs([a, b], None)] == [b.name, a.name], "no pin: by date"
 
 
+def test_two_logs_ending_at_the_pin_the_newest_by_date_is_the_latest():
+    older = LogHead("bbbbbbb-ccccccc", "bbbbbbb", "ccccccc", "2026-09-02", 1)
+    newer = LogHead("ddddddd-ccccccc", "ddddddd", "ccccccc", "2026-09-05", 1)
+    assert [h.name for h in order_logs([older, newer], "ccccccc")] == [newer.name, older.name]
+    assert [h.name for h in order_logs([older, newer], "ccccccc-dirty")][0] == newer.name
+
+
+def test_the_pin_is_found_past_a_long_header():
+    goal = "x" * 5000
+    text = json.dumps({"format": "coyomap-map", "title": "t", "goal": goal, "commit": "1b77f52", "rules": []}, indent=2)
+    assert '"commit"' not in text[:4096] and pin_of(text) == "1b77f52"
+
+
+def test_a_folder_with_no_git_still_serves_the_log_with_no_evidence():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / ".coyomap" / "changes").mkdir(parents=True)
+        doc = json.loads(make_map_text("bbbbbbb", purpose="serves guilds fast"))
+        doc["rules"] = [RULE]
+        (root / ".coyomap" / "project-map.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        entry = json.loads(make_log_text("aaaaaaa", "bbbbbbb"))["entries"][0]
+        entry["elements"].append("C2")
+        entry["removed"] = ["C2"]
+        (root / ".coyomap" / "changes" / "aaaaaaa-bbbbbbb.json").write_text(make_log_text("aaaaaaa", "bbbbbbb", [entry]), encoding="utf-8")
+        proj = build_projects([str(root)])[root.name]
+        assert [l["latest"] for l in list_changes(proj)["logs"]] == [True]
+        got = change_log_view(proj, "aaaaaaa-bbbbbbb")
+        assert got["from_version"] is None
+        boxes = got["entries"][0]["boxes"]
+        assert (boxes[0]["name"], boxes[2]["name"], boxes[2]["kind"], boxes[2]["word"]) == ("Svc", None, "components", "component")
+
+
 # --- the routes, against a real repo ----------------------------------------------------
 
 def test_the_map_versions_carry_their_own_pin_and_a_log_s_from_commit_finds_its_version():

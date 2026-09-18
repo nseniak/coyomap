@@ -27,8 +27,14 @@ from test_impact import commit
 from test_viewer_browser import _crumb, _page, _settle, make_served_map
 from test_viewer_browser_compare import NEW_NAME, OLD_NAME, OLD_UC, _texts, _visible_tabs, make_new_map, make_old_map
 
-OLD_PIN, NEW_PIN = "aaaaaaa", "bbbbbbb"
+OLD_PIN, NEW_PIN, LATER_PIN = "aaaaaaa", "bbbbbbb", "ccccccc"
 LOG = f"{OLD_PIN}-{NEW_PIN}"
+LOG_2 = f"{NEW_PIN}-{LATER_PIN}"
+HEADLINE_3 = "The gateway answers faster"
+BLOCK = {"id": "BLK1", "name": "Team lifecycle", "purpose": "Who may do what to a team."}
+RULE = {"id": "BR1", "name": "A team keeps its founder", "statement": "A team keeps its founder.",
+        "risk": "a team is left with nobody who can run it", "block": "BLK1",
+        "sites": [{"where": "app/team.py:4", "why": "guards"}]}
 HEADLINE_1 = "Signing up now creates a workspace"
 SENTENCE_1 = "A new person gets a workspace of their own, and the sign-up confirms their email first."
 HEADLINE_2 = "Archiving an organization is gone"
@@ -39,31 +45,54 @@ def make_log(doc: dict[str, Any]) -> dict[str, Any]:
     c1 = next(c for c in doc["components"] if c["id"] == "C1")
     return {"format": "coyomap-changes", "version": 1, "from_commit": OLD_PIN, "to_commit": NEW_PIN, "date": "2026-09-17",
             "entries": [
-                {"id": "e1", "headline": HEADLINE_1, "sentence": SENTENCE_1, "elements": ["UC1", "C1"],
+                {"id": "e1", "headline": HEADLINE_1, "sentence": SENTENCE_1, "elements": ["UC1", "C1", "BR1", "UC2"],
                  "edits": [{"id": "UC1", "key": "name", "was": OLD_NAME, "now": NEW_NAME},
-                           {"id": "C1", "key": "purpose", "was": c1["purpose"], "now": c1["purpose"] + " Fast."}],
+                           {"id": "C1", "key": "purpose", "was": c1["purpose"], "now": c1["purpose"] + " Fast."},
+                           {"id": "BR1", "key": "risk", "was": RULE["risk"], "now": "a team is locked"}],
                  "added": [], "removed": [], "evidence": ["app/signup.py"], "confidence": "verified"},
                 {"id": "e2", "headline": HEADLINE_2, "sentence": SENTENCE_2, "elements": ["UC99"],
                  "edits": [], "added": [], "removed": ["UC99"], "evidence": [], "confidence": "likely"}],
             "waived": [], "notes": ""}
 
 
+def make_later_log(doc: dict[str, Any]) -> dict[str, Any]:
+    """A second update after the first: the gateway component's purpose reworded, nothing else."""
+    c2 = next(c for c in doc["components"] if c["id"] == "C2")
+    return {"format": "coyomap-changes", "version": 1, "from_commit": NEW_PIN, "to_commit": LATER_PIN, "date": "2026-09-18",
+            "entries": [{"id": "e1", "headline": HEADLINE_3, "sentence": "Requests through the gateway now take half the time.",
+                         "elements": ["C2"], "edits": [{"id": "C2", "key": "purpose", "was": c2["purpose"], "now": c2["purpose"] + " Faster."}],
+                         "added": [], "removed": [], "evidence": ["app/gateway.py"], "confidence": "verified"}],
+            "waived": [], "notes": ""}
+
+
 @contextmanager
-def _served_update() -> Iterator[str]:
-    """The server over the updated map, with the map as it was committed behind it and the log beside it."""
+def _served_update(git: bool = True, later: bool = False) -> Iterator[str]:
+    """The server over the updated map, with the map as it was committed behind it and the log beside
+    it. `git=False`: no history at all, so the log has no evidence. `later`: a second update on top,
+    committed map in between, so the first log is no longer the latest."""
     with tempfile.TemporaryDirectory() as td:
         folder = make_served_map(Path(td), "alpha")
         f = folder / ".coyomap" / "project-map.json"
         doc = json.loads(f.read_text())
+        doc["blocks"], doc["rules"] = [BLOCK], [json.loads(json.dumps(RULE))]
         old = make_old_map(doc)
         old["commit"] = OLD_PIN
-        commit(folder, {".coyomap/project-map.json": json.dumps(old, indent=1)}, msg="Map the codebase")
+        if git:
+            commit(folder, {".coyomap/project-map.json": json.dumps(old, indent=1)}, msg="Map the codebase")
         log = make_log(doc)
         make_new_map(doc)
+        doc["rules"][0]["risk"] = "a team is locked"
         doc["commit"] = NEW_PIN
-        f.write_text(json.dumps(doc, indent=1), encoding="utf-8")
         (folder / ".coyomap" / "changes").mkdir()
         (folder / ".coyomap" / "changes" / f"{LOG}.json").write_text(json.dumps(log), encoding="utf-8")
+        if later:
+            commit(folder, {".coyomap/project-map.json": json.dumps(doc, indent=1), f".coyomap/changes/{LOG}.json": json.dumps(log)},
+                   msg="Map update: sign-up creates a workspace")
+            log2 = make_later_log(doc)
+            next(c for c in doc["components"] if c["id"] == "C2")["purpose"] += " Faster."
+            doc["commit"] = LATER_PIN
+            (folder / ".coyomap" / "changes" / f"{LOG_2}.json").write_text(json.dumps(log2), encoding="utf-8")
+        f.write_text(json.dumps(doc, indent=1), encoding="utf-8")
         projects = build_projects([str(folder)])
         slug = next(iter(projects))
         Handler.store = RecentsStore()
@@ -197,6 +226,83 @@ def test_the_picker_lists_the_update_first_and_the_evidence_holds_the_filters() 
         page.wait_for_selector("#cmplogs .diffcommit", state="attached")
         rows = page.evaluate("() => [...document.querySelectorAll('#cmplogs .diffcommit')].map((b) => b.textContent)")
         assert len(rows) == 1 and "latest" in rows[0] and f"{OLD_PIN} → {NEW_PIN}" in rows[0] and "2 entries" in rows[0]
+        assert not page.js_errors, page.js_errors
+
+
+def test_an_older_log_credits_nothing_that_came_after_it() -> None:
+    """The review's third finding: under an older log, a box only a LATER update changed said
+    "in the update A → B". Its block now says "since <the version>", and the tab's head says the
+    update is not the latest."""
+    with _served_update(later=True) as url, _page(url + "#v=hood-changes") as page:
+        _settle(page)
+        cards = page.evaluate("() => [...document.querySelectorAll('.ecard-entry')].map((c) => c.textContent)")
+        assert len(cards) == 1 and HEADLINE_3 in cards[0], "the newest log is the second one"
+        page.goto(f"{url}#v=hood-changes&cmp=log:{LOG}")
+        _settle(page)
+        assert "not the latest update" in _text(page, ".cmp-head")
+        page.click("details.cmp-evidence > summary")
+        _settle(page)
+        page.click('details.cmp-evidence .ecard[data-id="C2"]')
+        _settle(page)
+        block = _text(page, ".cmpsec")
+        assert block.startswith("What changed") and "since" in block and "in the update" not in block, block
+        assert HEADLINE_3 not in block and HEADLINE_1 not in block
+        assert not page.js_errors, page.js_errors
+
+
+def test_the_rules_landing_marks_the_area_of_an_edited_rule() -> None:
+    """The review's sixth finding: a decision area wears its rules' change, as a feature wears its
+    use cases', or the change hides behind a click."""
+    with _served_update() as url, _page(f"{url}#v=rules&cmp=log:{LOG}") as page:
+        _settle(page)
+        assert _crumb(page) == "Rules"
+        assert "modified" in _text(page, '#diagram [data-id="BLK1"] .badge'), "the area of the edited rule is badged"
+        assert not page.js_errors, page.js_errors
+
+
+def test_without_git_the_removed_box_s_page_still_tells_its_story() -> None:
+    """The review's fourth finding: a folder with no history has no evidence, and the removed box's
+    page was empty in the unmarked state. It is the story's page, so the story is told there always,
+    and the box is named by its kind when no old map names it."""
+    with _served_update(git=False) as url, _page(url + "#v=changes") as page:
+        _settle(page)
+        assert "cannot be shown" in _screen_text(page), "no committed version: the fold says so"
+        page.click('.cmp-log-pill[data-key="removed:UC99"]')
+        _settle(page)
+        assert "removed use case" in _crumb(page)
+        text = _screen_text(page)
+        assert "Removed because" in text and HEADLINE_2 in text and SENTENCE_2 in text
+        assert "UC99" not in text
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_box_the_entry_only_names_is_named_in_the_story_not_changed_by_it() -> None:
+    """The review's fifth finding: a box the entry only names read "Changed because", under a head
+    saying "in this update in the update A → B"."""
+    with _served_update() as url, _page(f"{url}#v=changes&cmp=log:{LOG}") as page:
+        _settle(page)
+        page.click('.ecard-entry .item-pill[data-item="UC2"]')
+        _settle(page)
+        block = _text(page, ".cmpsec")
+        assert "Named in" in block and HEADLINE_1 in block and "Changed because" not in block
+        assert block.count("in the update") == 1 and "in this update" not in block
+        assert not page.js_errors, page.js_errors
+
+
+def test_after_stop_comparing_the_button_and_the_address_always_agree() -> None:
+    """Back and Forward walk the browser's own history; whatever screen they land on, the Compare…
+    button is lit exactly when the address carries a comparison."""
+    with _served_update() as url, _page(f"{url}#v=features&cmp=log:{LOG}") as page:
+        _settle(page)
+        page.click('#viewsw button[data-view="changes"]')
+        _settle(page)
+        page.click("button.cmp-stop")
+        _settle(page)
+        assert not _armed(page) and "cmp=" not in _hash(page)
+        for step in ("back", "forward"):
+            getattr(page, f"go_{step}")()
+            _settle(page)
+            assert _armed(page) == ("cmp=" in _hash(page)), (step, _hash(page))
         assert not page.js_errors, page.js_errors
 
 

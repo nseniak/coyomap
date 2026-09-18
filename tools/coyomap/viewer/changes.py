@@ -63,9 +63,12 @@ def order_logs(heads: list[LogHead], pin: str | None) -> list[LogHead]:
     out: list[LogHead] = []
     at = pin
     while at:
-        head = next((h for h in rest if commit_matches(h.to_commit, at)), None)
-        if head is None:
+        # Two logs may end at one commit (a revert cycle, a log rewritten under a new from): the
+        # newest by date is the one that moved the pin there, and a tie on the day goes by name.
+        ending_here = [h for h in rest if commit_matches(h.to_commit, at)]
+        if not ending_here:
             break
+        head = max(ending_here, key=lambda h: (h.date, h.name))
         out.append(head)
         rest.remove(head)
         at = head.from_commit

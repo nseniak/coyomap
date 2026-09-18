@@ -409,6 +409,8 @@ def _item_text(item: Any) -> str:
     if isinstance(item, dict):
         if "verb" in item and "target" in item:                       # a record's relation
             return f"{item.get('verb')} {item.get('target')}"
+        if "n" in item and ("phrase" in item or "subflow" in item):   # a flow step, by its words
+            return str(item.get("phrase") or f"runs {item.get('subflow')}")
         for anchor_key in ("where", "file"):                          # a site, an evidence row
             if anchor_key in item:
                 path = _anchor_path(item.get(anchor_key)) or ""
