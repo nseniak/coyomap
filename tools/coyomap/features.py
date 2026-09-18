@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from coyomap import grammar
 from coyomap.anchors import parse_anchor
 from coyomap.impact_git import Extents
-from coyomap.areas import DataArea, build_areas, sorted_ids
+from coyomap.areas import DataArea, build_areas, build_record_areas, sorted_ids
 from coyomap.model import (ProjectModel, UseCaseReach, entity_owners, expanded_flow_steps,
                            use_case_interfaces)
 from coyomap.validate_model import (
@@ -250,6 +250,10 @@ class FeatureIndex:
     coverage: Coverage = field(default_factory=Coverage)
     story: Story = field(default_factory=Story)
     areas: list[DataArea] = field(default_factory=list)   # in the order the right column draws them
+    areas_are_records: bool = False       # TRUE when the map cut no sub-domain, so each box above is
+                                          # one SAVED RECORD rather than a group of them. The column
+                                          # then draws touches and never an owner, because ownership
+                                          # is authored on a sub-domain and there is none.
     entity_owners: dict[str, list[str]] = field(default_factory=dict)
                                         # record -> its EFFECTIVE owning feature(s): its own
                                         # authored `owners`, else its area's. The entity page's
@@ -616,6 +620,16 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
     audience = capability_audience(m)
     story = build_story(m)
     areas = build_areas(m, story.column)
+    # A map under the sub-domain threshold has no group to draw, and drawing nothing said its
+    # features touch no data — while the same bundle lists what each one reaches. Same walk, same
+    # steps; one box is one record instead of a group of them.
+    # The flag says what the boxes ARE, so it is set from what the fallback actually produced. A map
+    # with no sub-domain AND no saved record has nothing to draw either way, and claiming records
+    # mode there would tell the viewer a box is a record on a column that holds none.
+    areas_are_records = False
+    if not areas:
+        areas = build_record_areas(m, story.column)
+        areas_are_records = bool(areas)
     feat_areas: dict[str, list[str]] = {}
     for a in areas:
         for t in a.touched_by:
@@ -668,6 +682,7 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
         coverage=coverage,
         story=story,
         areas=areas,
+        areas_are_records=areas_are_records,
         entity_owners=entity_owners(m),
         interfaces=interfaces,
         rule_join_uses_extents=bool(extents),
@@ -711,6 +726,7 @@ def as_bundle(ix: FeatureIndex) -> dict[str, object]:
              "touchedBy": [{"feature": t.feature, "touches": t.touches, "entities": t.entities}
                            for t in a.touched_by]}
             for a in ix.areas],
+        "areasAreRecords": ix.areas_are_records,
         "entityOwners": ix.entity_owners,
         "componentFeatures": ix.component_features,
         "ruleFeatures": ix.rule_features,

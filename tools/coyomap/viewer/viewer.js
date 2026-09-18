@@ -11265,9 +11265,14 @@ function storyAreaCardHtml(a) {
       // the half after it: that nothing reaches the data, and what the map says about that.
       ? `<p class="story-gap">${storyGapSentence(own, false)}</p>`
       : '';
-  return itemBoxHtml({ id: a.id, k: 'subdomain', name: a.name || a.id, word: 'data area',
+  // RECORDS MODE: this map cut no sub-domain, so one box is one saved RECORD, not a group of them.
+  // The count pill goes with it — "1 stored entity" on a box that IS the entity says nothing — and
+  // the name opens the record rather than an area that does not exist.
+  const rec = !!FEATURES.areasAreRecords;
+  return itemBoxHtml({ id: a.id, k: rec ? 'entity' : 'subdomain', name: a.name || a.id,
+                       word: rec ? 'record' : 'data area',
                        what: a.purpose || '', pills: [], facts: [],
-                       band: [countLabel(n, 'stored entity')], chips: [] },
+                       band: rec ? [] : [countLabel(n, 'stored entity')], chips: [] },
                      'full',
                      // WHITE, for the reason the cast card gives: the column heading says what this
                      // column is, so a fill here only competes with the feature's own colour.
@@ -11281,7 +11286,7 @@ function storyAreaCardHtml(a) {
                             + (own.gap ? ' story-area-gap' : '')
                             + (own.unanswered ? ' story-area-gap-open' : '')
                             + (owners.length > 1 ? ' story-area-shared' : ''),
-                       nameAttrs: ` data-sd="${esc(a.id)}"`,
+                       nameAttrs: rec ? ` data-srec="${esc(a.id)}"` : ` data-sd="${esc(a.id)}"`,
                        attrs: ` data-sarea="${esc(a.id)}" tabindex="0"` });
 }
 // The label a reference arrow carries: the saved records that feature's walks actually reach in
@@ -11708,8 +11713,10 @@ function bindStoryDiagram(root) {
     ev.stopPropagation();
     const cap = b.getAttribute('data-cap');
     const sd = b.getAttribute('data-sd');
+    const rec = b.getAttribute('data-srec');
     if (cap) go({ kind: 'capability', cap });
     else if (sd) go({ kind: 'domsub', sd });     // a data area's name opens that area
+    else if (rec) drillInto(rec);                // in records mode the box IS the record
     else go({ kind: 'actor', act: b.getAttribute('data-actor') });
   }));
   // The one-shot arrival pin: a search hit or a "show in context" click on a feature or an actor

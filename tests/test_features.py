@@ -477,13 +477,62 @@ def test_the_view_bundle_carries_the_feature_block_in_the_viewers_vocabulary():
     m = load_model(json.dumps(make_map()))
     b = build_view_bundle(model_to_graph(m, EXTENTS), Path("."), model=m, extents=EXTENTS)
     f = b["features"]
-    assert sorted(f) == ["areas", "componentFeatures", "coverage", "entityOwners", "features",
-                         "interfaces", "ownerRecords", "roleFeatures", "ruleFeatures",
-                         "ruleJoinUsesExtents", "story", "unassignedUseCases", "useCaseInterfaces"]
+    assert sorted(f) == ["areas", "areasAreRecords", "componentFeatures", "coverage",
+                         "entityOwners", "features", "interfaces", "ownerRecords", "roleFeatures",
+                         "ruleFeatures", "ruleJoinUsesExtents", "story", "unassignedUseCases",
+                         "useCaseInterfaces"]
     assert f["ownerRecords"] == {}, "a map recording nothing ships an empty answer, never no key"
     assert f["features"][0]["useCases"] == ["UC1"]        # camelCase, not use_cases
     assert f["coverage"]["componentsUnreached"] == ["C3"]
     json.dumps(b)                                          # the bundle is served as JSON
+
+
+def test_a_map_with_no_subdomain_draws_its_saved_records_as_the_data_column():
+    """The data column keyed every box on a sub-domain, so a map that cut none drew nothing at all —
+    while the same bundle listed, one click away, the records each feature reaches. Sub-domains are
+    optional below roughly fifteen records, so the method's own advice produced the empty column.
+
+    The fallback is one box per SAVED record, counted by the same walk over the same steps. `owners`
+    stays empty because ownership is authored on a sub-domain and there is none, so every arrow is a
+    touch and none is an owner. `validate` reads `build_areas` and never this, so its
+    cross-examination of authored ownership is untouched."""
+    doc = make_map()
+    doc["subdomains"] = []
+    for e in doc["entities"]:
+        e["subdomain"] = None
+        e["store"] = {"dep": None, "container": "orders", "mode": "collection", "notes": ""}
+    b = as_bundle(build_index(load_model(json.dumps(doc))))
+    assert b["areasAreRecords"] is True
+    assert [a["id"] for a in b["areas"]] == [e["id"] for e in doc["entities"]
+                                             if (e.get("store") or {}).get("mode")
+                                             in ("collection", "embedded")]
+    assert all(a["owners"] == [] for a in b["areas"]), "no sub-domain means no authored owner"
+
+
+def test_a_map_with_a_subdomain_is_untouched_by_the_record_fallback():
+    """The fallback fires ONLY where there is no group to draw. A map that cut sub-domains keeps
+    exactly the areas it had, so the three live maps this shipped against do not move."""
+    doc = make_map()
+    doc["subdomains"] = [{"id": "SD1", "name": "Orders", "purpose": "what the shop keeps"}]
+    doc["entities"][0]["subdomain"] = "SD1"
+    doc["entities"][0]["store"] = {"dep": None, "container": "orders", "mode": "collection",
+                                   "notes": ""}
+    b = as_bundle(build_index(load_model(json.dumps(doc))))
+    assert b["areasAreRecords"] is False
+    assert [a["id"] for a in b["areas"]] == ["SD1"]
+
+
+def test_a_map_with_neither_a_subdomain_nor_a_saved_record_claims_no_mode():
+    """Nothing to draw either way. The flag must not claim records mode over an empty column, or the
+    viewer is told a box is a record on a column that holds none."""
+    doc = make_map()
+    doc["subdomains"] = []
+    for e in doc["entities"]:
+        e["subdomain"] = None
+        e["store"] = None
+    b = as_bundle(build_index(load_model(json.dumps(doc))))
+    assert b["areas"] == []
+    assert b["areasAreRecords"] is False
 
 
 def make_owner_record_map(body: str) -> dict:

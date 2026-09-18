@@ -133,3 +133,52 @@ def build_areas(m: ProjectModel, column: Sequence[str] = ()) -> list[DataArea]:
         return min((pos[t.feature] for t in a.touched_by if t.feature in pos), default=len(pos))
 
     return sorted(areas, key=lambda a: (introduced(a), sub_pos[a.id]))
+
+
+def build_record_areas(m: ProjectModel, column: Sequence[str] = ()) -> list[DataArea]:
+    """The data column for a map with NO sub-domain: one box per SAVED RECORD.
+
+    NOT a second answer to "which feature touches this data". The touches below are counted by the
+    same walk over the same steps as `build_areas`, with sub-flows expanded the same way; the only
+    thing that changes is what one box stands for. Sub-domains are optional and the method tells a
+    map under roughly fifteen records not to cut any, so on such a map `build_areas` returns nothing
+    and the column drew nothing at all. A reader then sees an empty column and concludes the
+    features touch no data, which is the opposite of what the same bundle says one click away.
+
+    `owners` is ALWAYS empty here, and that is the honest answer rather than a missing one:
+    ownership is authored on a sub-domain (`Group.owners`) and this map cut none, so every arrow
+    landing on these boxes is a touch and none is an owner.
+
+    `validate` does NOT read this. It calls `build_areas`, so the cross-examination of authored
+    ownership sees exactly what it saw before."""
+    saved = [e for e in m.entities if is_saved(e)]
+    if not saved:
+        return []
+    by_id = {e.id: e for e in saved}
+
+    cap_ids = {c.id for c in m.capabilities}
+    uc_cap = {u.id: u.capability for u in m.use_cases if u.capability in cap_ids}
+    counts: dict[tuple[str, str], int] = {}
+    for f in m.flows:
+        cap = uc_cap.get(f.uc)
+        if not cap:
+            continue
+        for st in expanded_flow_steps(m, f):
+            for side in (st.src, st.dst):
+                if side in by_id:
+                    counts[(cap, side)] = counts.get((cap, side), 0) + 1
+
+    pos = {c: i for i, c in enumerate(column)}
+    ent_pos = {e.id: i for i, e in enumerate(saved)}
+    out = []
+    for e in saved:
+        touched = sorted((AreaTouch(feature=cap, area=eid, touches=n, entities=[eid])
+                          for (cap, eid), n in counts.items() if eid == e.id),
+                         key=lambda t: (-t.touches, pos.get(t.feature, len(pos)), t.feature))
+        out.append(DataArea(id=e.id, name=e.name or e.id, purpose=e.meaning or "",
+                            entities=[e.id], owners=[], touched_by=touched))
+
+    def introduced(a: DataArea) -> int:
+        return min((pos[t.feature] for t in a.touched_by if t.feature in pos), default=len(pos))
+
+    return sorted(out, key=lambda a: (introduced(a), ent_pos[a.id]))
