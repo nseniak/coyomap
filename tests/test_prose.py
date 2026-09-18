@@ -242,9 +242,9 @@ def test_each_kind_gets_its_own_line_and_an_absent_kind_gets_none() -> None:
 def test_every_reader_facing_field_is_walked() -> None:
     labels = {where for where, _text in prose.iter_prose_fields(make_model())}
     assert labels == {"goal", "C1 purpose", "CAP1 purpose", "CAP1 stake for R1",
-                      # TWO ENTRIES, one per half: the map holds a use case's trigger and its
-                      # outcome apart, and each is a sentence a reader meets on its own.
-                      "UC1 trigger", "UC1 outcome",
+                      # ONE ENTRY for the pair, although the map holds them apart: the BOX these
+                      # checks read by is the card, and the card shows the two together.
+                      "UC1 trigger and outcome",
                       "BR1 statement", "BR1 risk", "D1 used for", "R1 wants", "HP1 why",
                       "glossary 'basket'", "E1 meaning", "E1 store notes", "tests note",
                       "tests row C1 gap", "record 'Unclaimed surfaces' line 1"}

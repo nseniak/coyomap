@@ -471,10 +471,36 @@ One use case has two faces: **outside** — what the actor does and sees, carrie
 `trigger` and `outcome` — and **inside = T6 flow** (the ordered interactions among
 components/deps/entities), drawn as a flow map and read as a numbered narrative.
 
-**`trigger` and `outcome` are TWO fields, one sentence each.** `trigger` = what starts this use
-case. `outcome` = what the actor comes away with. Write each as a plain sentence and never join
-them into one cell: they are two claims a reader judges apart, the readability check reads each on
-its own, and the viewer is what joins them with an arrow where a card has room for only one line.
+**`trigger` and `outcome` are TWO fields, one sentence each.** Write each as a plain sentence and
+never join them into one cell: they are two claims a reader judges apart, and the viewer is what
+joins them with an arrow where a card has room for only one line.
+
+**`trigger` = WHAT THE ACTOR DOES to start it**, named as an action, never as the state that made the
+action possible: *"An admin picks a different role on a teammate's page"*, not *"A teammate's role is
+wrong"*. Mixing the two shapes inside one map gives a reader two different kinds of claim under one
+label. When nothing human starts it, name what does: *"The nightly sweep runs"*. When the actor is a
+PROGRAM its act and its result read as one fact, so name the act in the trigger and what the product
+then HOLDS in the outcome: *"An assistant finishes a write-up"* → *"the write-up is stored beside the
+page, with the dates it spans"*.
+
+**`outcome` = THE RESULT, not only the driving actor's share of it.** Where the result lands
+somewhere else, say so, whether that is other people (*"each chosen person gets their own dated
+list"*) or what the product now holds (*"the page joins the tracked list"*). Written from the
+driver's seat alone, the fact a reader wants gets demoted to a clause or dropped. Never the steps
+that got there; those are the flow.
+
+**One sentence means ONE RESULT, and a result often has parts.** Parts that land in the same moment
+go in that one sentence, as a list of things (*"a saved activity holding its title, its description
+and its recipients"*) or as a trailing clause (*"the page joins the tracked list, with a first copy
+of its text stored"*). THIS IS THE ONE PLACE the "two clauses are two sentences" rule does not
+apply: the parts are one result, not two ideas. Say it outright, because three separate writers who
+were not told this each invented their own way round it. Two results that land at DIFFERENT moments
+are two use cases, or the second one is a flow step.
+
+**The pair is ONE BOX.** A card shows the two together, so the outcome may point back at what the
+trigger named, and the readability check reads them as one text for that reason. Only within the
+pair: neither half may lean on a word that lives in another use case. The product's own vocabulary
+is not leaning — a word every box uses, or a glossary term, is always available.
 
 ---
 
