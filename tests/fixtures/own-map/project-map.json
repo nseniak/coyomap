@@ -178,7 +178,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A developer clones coyomap and runs `make install` → the skill manifest, with this clone's path baked into it, sits in every coding agent's skills folder, and a repo-local virtualenv holds the `coyomap` command; typing `/coyomap` in any agent now reaches the method.",
+      "trigger": "A developer clones coyomap and runs `make install`",
+      "outcome": "the skill manifest, with this clone's path baked into it, sits in every coding agent's skills folder, and a repo-local virtualenv holds the `coyomap` command; typing `/coyomap` in any agent now reaches the method.",
       "capability": null,
       "entry_points": []
     },
@@ -188,7 +189,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "The developer types `/coyomap` in a repo that has no map → the agent reads the method, sizes the code tree, fans out to read the repo, and leaves a validated, commit-pinned map (the JSON model, its markdown view and the pre-index) committed in `.coyomap/`.",
+      "trigger": "The developer types `/coyomap` in a repo that has no map",
+      "outcome": "the agent reads the method, sizes the code tree, fans out to read the repo, and leaves a validated, commit-pinned map (the JSON model, its markdown view and the pre-index) committed in `.coyomap/`.",
       "capability": null,
       "entry_points": []
     },
@@ -198,7 +200,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The developer runs `make start` in the coyomap clone → a small local server is listening on 127.0.0.1, offering a landing page that lists every project they have mapped.",
+      "trigger": "The developer runs `make start` in the coyomap clone",
+      "outcome": "a small local server is listening on 127.0.0.1, offering a landing page that lists every project they have mapped.",
       "capability": null,
       "entry_points": []
     },
@@ -208,7 +211,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The developer opens a project in the viewer → they read the goal, the Happy Path and the diagrams, and drill from one screen of boxes into the level beneath it, seeing each element's plain-language annotation as they go.",
+      "trigger": "The developer opens a project in the viewer",
+      "outcome": "they read the goal, the Happy Path and the diagrams, and drill from one screen of boxes into the level beneath it, seeing each element's plain-language annotation as they go.",
       "capability": null,
       "entry_points": []
     },
@@ -218,7 +222,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The developer clicks the code anchor on a box, arrow or flow step → the exact file and line that grounds the claim appears in the code viewer, read from git at the commit the map is pinned to, with the option to hand it off to their editor or GitHub.",
+      "trigger": "The developer clicks the code anchor on a box, arrow or flow step",
+      "outcome": "the exact file and line that grounds the claim appears in the code viewer, read from git at the commit the map is pinned to, with the option to hand it off to their editor or GitHub.",
       "capability": null,
       "entry_points": []
     },
@@ -228,7 +233,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "The developer edits code and types `/coyomap analyze` → the agent diffs the working tree against the map's pinned commit and writes an uncommitted report saying which mapped elements the change modifies, adds and deletes, and what those ripple to.",
+      "trigger": "The developer edits code and types `/coyomap analyze`",
+      "outcome": "the agent diffs the working tree against the map's pinned commit and writes an uncommitted report saying which mapped elements the change modifies, adds and deletes, and what those ripple to.",
       "capability": null,
       "entry_points": []
     },
@@ -238,7 +244,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "The developer is satisfied with the report and types `/coyomap accept` → the agent patches the model in place, re-pins it to the new commit, re-runs the gates, regenerates the markdown view and pre-index, and commits the map beside the code.",
+      "trigger": "The developer is satisfied with the report and types `/coyomap accept`",
+      "outcome": "the agent patches the model in place, re-pins it to the new commit, re-runs the gates, regenerates the markdown view and pre-index, and commits the map beside the code.",
       "capability": null,
       "entry_points": []
     },
@@ -248,7 +255,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "The developer asks in plain language for a map change (\"split this component\", \"rename that subsystem\") → the agent edits the stored model surgically, refusing anything the code does not back, passes the same gates as any other write, and commits the result.",
+      "trigger": "The developer asks in plain language for a map change (\"split this component\", \"rename that subsystem\")",
+      "outcome": "the agent edits the stored model surgically, refusing anything the code does not back, passes the same gates as any other write, and commits the result.",
       "capability": null,
       "entry_points": []
     },
@@ -258,7 +266,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "A maintainer runs the eval on a project that already has a map → a fresh map is built with the current method, scored on grounding and a rubric, and compared against the committed baseline, so a method change is reported as an improvement or a regression instead of a hunch.",
+      "trigger": "A maintainer runs the eval on a project that already has a map",
+      "outcome": "a fresh map is built with the current method, scored on grounding and a rubric, and compared against the committed baseline, so a method change is reported as an improvement or a regression instead of a hunch.",
       "capability": null,
       "entry_points": []
     },
@@ -268,7 +277,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The developer runs the backup script against a mapped repo → the map is bundled together with the exact conversation that produced it, found through the session id the build stamped into the map's provenance file.",
+      "trigger": "The developer runs the backup script against a mapped repo",
+      "outcome": "the map is bundled together with the exact conversation that produced it, found through the session id the build stamped into the map's provenance file.",
       "capability": null,
       "entry_points": []
     },
@@ -278,7 +288,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The developer opens the impact explorer and picks two commits → the diagrams light up with what the diff touched and what that reaches through the map's edges and flows, and each changed file can be read as a diff in place.",
+      "trigger": "The developer opens the impact explorer and picks two commits",
+      "outcome": "the diagrams light up with what the diff touched and what that reaches through the map's edges and flows, and each changed file can be read as a diff in place.",
       "capability": null,
       "entry_points": []
     }
@@ -3735,7 +3746,12 @@
           ]
         },
         {
-          "name": "trigger_outcome",
+          "name": "trigger",
+          "type": "string",
+          "markers": []
+        },
+        {
+          "name": "outcome",
           "type": "string",
           "markers": []
         }

@@ -631,7 +631,7 @@ def test_with_behavioural_counts_the_behavioural_surface_in_the_coverage_line():
            "components": [{"id": "C1", "name": "A", "purpose": "checks the token", "source": "a.py:1"},
                           {"id": "C2", "name": "B", "purpose": "keeps rows", "source": "b.py:1"}],
            "use_cases": [{"id": "UC1", "name": "Sign in", "actors": ["R1"],
-                          "trigger_outcome": "signs in → a session exists"}],
+                          "trigger": "signs in", "outcome": "a session exists"}],
            "flows": [{"uc": "UC1", "title": "Sign in", "steps": [
                {"n": 1, "src": "R1", "dst": "C1", "phrase": "send the token", "where": "a.py:1"}]}]}
     m = load_model(json.dumps(doc))

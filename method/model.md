@@ -92,7 +92,9 @@ needs no escaping (the markdown-view generator escapes it when rendering tables)
                                                   // what THAT actor comes to this feature to do,
                                                   // reading correctly after the actor's name. The
                                                   // viewer labels each actor→feature arrow with it.
-  "use_cases":   [ { "id": "UCn", "name", "actors": ["Rn", ...], "trigger_outcome",
+  "use_cases":   [ { "id": "UCn", "name", "actors": ["Rn", ...],
+                     "trigger", "outcome",                    // the two halves of the outside face:
+                                                              // what starts it, what the actor comes away with
                      "capability": "CAPn|null",                 // assigned at synthesis via reconcile
                      "entry_points": ["EPn", …] } ],            // the TRIGGER arm; empty is legitimate
   "happy_path": [ { "id": "HPn", "uc": "UCn", "why": "<prerequisite or null>" } ],   // no text of its own: labelled by UCn's name

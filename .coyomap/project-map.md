@@ -96,39 +96,39 @@ The use-case grouping. `Audience` is DERIVED from the roles driving its use case
 
 ### Mapping a project *(CAP1)*
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC2** | Build a project's first map | Map owner | A person asks their coding agent for a map of a project that has none. A map of that project exists, pinned to the commit it describes. |
-| **UC3** | Leave code off the map | Map owner | A person names committed code the map is not meant to describe. Later maps leave that code out, and every count the tools print says so. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC2** | Build a project's first map | Map owner | A person asks their coding agent for a map of a project that has none. | A map of that project exists, pinned to the commit it describes. |
+| **UC3** | Leave code off the map | Map owner | A person names committed code the map is not meant to describe. | Later maps leave that code out, and every count the tools print says so. |
 
 ### Keeping a map current *(CAP2)*
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC7** | See what a code change did to the map | Map owner | The code has moved on since the map was pinned. A report names the parts of the map the change touched. |
-| **UC8** | Fold a change report into the baseline | Map owner | A person agrees the change report is right. The map is edited to match, re-pinned, and checked again. |
-| **UC9** | Change the map by asking | Map owner | A person asks in plain language for a part of the map to move, split or be renamed. The map is edited in place and passes its checks. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC7** | See what a code change did to the map | Map owner | The code has moved on since the map was pinned. | A report names the parts of the map the change touched. |
+| **UC8** | Fold a change report into the baseline | Map owner | A person agrees the change report is right. | The map is edited to match, re-pinned, and checked again. |
+| **UC9** | Change the map by asking | Map owner | A person asks in plain language for a part of the map to move, split or be renamed. | The map is edited in place and passes its checks. |
 
 ### Reading a map *(CAP3)*
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC4** | Serve the maps on this machine | Map owner | A person starts the local map server. Every project they have mapped is listed on one page in their browser. |
-| **UC5** | Explore a project's map | Map reader | A person opens a project's map. They see what the product does and drill from one feature down to a single box. |
-| **UC6** | Open the code behind a box | Map reader | A reader picks the code link on a box. The file opens beside the map at that line. One more press hands it to their editor or the code host. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC4** | Serve the maps on this machine | Map owner | A person starts the local map server. | Every project they have mapped is listed on one page in their browser. |
+| **UC5** | Explore a project's map | Map reader | A person opens a project's map. | They see what the product does and drill from one feature down to a single box. |
+| **UC6** | Open the code behind a box | Map reader | A reader picks the code link on a box. | The file opens beside the map at that line. One more press hands it to their editor or the code host. |
 
 ### Setting coyomap up *(CAP4)*
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC1** | Install coyomap into a coding agent | Map owner | Someone who has cloned this project asks to install it. Their coding agent gains a new command, and the tools it drives are built and ready. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC1** | Install coyomap into a coding agent | Map owner | Someone who has cloned this project asks to install it. | Their coding agent gains a new command, and the tools it drives are built and ready. |
 
 ### Improving the method *(CAP5)*
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC10** | Score whether the method got better | Method author | Someone changed the instructions and wants to know the cost. Two maps of one project are scored and compared, with a verdict. |
-| **UC11** | Review a finished build | Method author | A build has finished and its chat is on disk. A report names the friction, the bugs and the gaps that run revealed. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC10** | Score whether the method got better | Method author | Someone changed the instructions and wants to know the cost. | Two maps of one project are scored and compared, with a verdict. |
+| **UC11** | Review a finished build | Method author | A build has finished and its chat is on disk. | A report names the friction, the bugs and the gaps that run revealed. |
 
 
 ---
@@ -499,7 +499,7 @@ SOURCE: [model.py](tools/coyomap/model.py:92)
 **E5 — Use case** *(project-map.json — embedded)*
 SUBDOMAIN: SD10
 MEANING: One goal an actor comes to the product for, with what starts it and what results.
-FIELDS: id:string PK · name:string · actors:string FK→E2 [] · trigger_outcome:string · capability:string FK→E9 ? · entry_points:string FK→E15 []
+FIELDS: id:string PK · name:string · actors:string FK→E2 [] · trigger:string · outcome:string · capability:string FK→E9 ? · entry_points:string FK→E15 []
 RELATIONS: drivenBy *→* E2 · groupedBy *→0..1 E9 · startsAt *→* E15
 SOURCE: [model.py](tools/coyomap/model.py:109)
 

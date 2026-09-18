@@ -401,7 +401,7 @@ the spine; built after harvest + at least one full trace.
   label.** With no title to absorb the difference, the split must be real: two actors through
   different doors are two use cases (the door rule), and a use case at two positions is the same
   use case twice, told apart by `HPn` and by each step's `why:`. A post-condition ("the organization
-  exists") is never a step at all — the outcome belongs to the use case's `Trigger → Outcome`, and
+  exists") is never a step at all — it belongs in the use case's `outcome`, and
   state chaining belongs to dependent steps' `why:` lines.
 - **Preconditions: implicit vs explicit.** *Implicit* = environment state no happy-path actor produces by
   using the product (the service is running, the database exists) — never a step, never mentioned.
@@ -468,8 +468,13 @@ Give every use case, every T1/T2 row, and every T5 **card** a stable ID/anchor (
 its `SOURCE` link) so both link directions are clickable. Each touch inherits its flow's confidence.
 
 One use case has two faces: **outside** — what the actor does and sees, carried by the use case's
-`Trigger → Outcome` cell — and **inside = T6 flow** (the ordered interactions among
+`trigger` and `outcome` — and **inside = T6 flow** (the ordered interactions among
 components/deps/entities), drawn as a flow map and read as a numbered narrative.
+
+**`trigger` and `outcome` are TWO fields, one sentence each.** `trigger` = what starts this use
+case. `outcome` = what the actor comes away with. Write each as a plain sentence and never join
+them into one cell: they are two claims a reader judges apart, the readability check reads each on
+its own, and the viewer is what joins them with an arrow where a card has room for only one line.
 
 ---
 
@@ -1264,7 +1269,7 @@ is special about this application?" gets no answer from a well-formed map withou
 A **rule** is ONE decision, in product language, naming no component: *"only the order's owner may
 cancel it"*, *"own connection first, else oldest shared"*. It carries a short `name` beside that
 sentence ("Owner-only cancellation") — the title every list, breadcrumb and cross-link reads, exactly
-as a use case has a name beside its trigger→outcome. A **block** groups rules the way a
+as a use case has a name beside its trigger and its outcome. A **block** groups rules the way a
 capability groups use cases — an area a product person would argue about. Rules are written after
 the trace, one agent per block (see *After the trace*), because sweeping a rule's enforcement sites
 needs the flows.
@@ -1551,9 +1556,9 @@ confidently-wrong purpose.
 **Confidence by layer.** Structure (components, entry points, data) reads reliably from
 source — mostly **verified**. Goal/Roles/intent often are NOT in the code (they live in
 README/docs/the maintainer's head) — infer from naming/structure, mark **inferred**, and
-ask rather than assert a confidently-wrong purpose. A use case's `Trigger → Outcome` sits in
-between: the trigger traces from code, but the "user sees" register sometimes needs the running
-app, not just code.
+ask rather than assert a confidently-wrong purpose. A use case's `trigger` and `outcome` sit in
+between: the trigger traces from code, but the outcome's "user sees" register sometimes needs the
+running app, not just code.
 
 **Build order (internal) ≠ present order.** Build bottom-up so each table's inputs exist
 first: T3 → harvest T4, T2, T5 (a full sweep — also the completeness checklist that
@@ -2319,7 +2324,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   ```
 
   **`name` is the rule's TITLE** — a few words ("Owner-only cancellation"), the way a use case has a
-  name beside its trigger→outcome sentence. It is REQUIRED and schema-enforced: without it a list of
+  name beside its trigger and its outcome. It is REQUIRED and schema-enforced: without it a list of
   rules is a wall of prose with nothing to skim, and every breadcrumb truncates one mid-word. Name
   the DECISION, then state it in full in `statement` — a `name` that is just the statement cut short
   is not a title. `access` is `true` when the rule governs WHO MAY DO WHAT; `confidence` is

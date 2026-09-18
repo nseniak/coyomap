@@ -126,7 +126,9 @@ class UseCase:
     name: str
     actors: list[str] = field(default_factory=list)  # the role ids that drive this use case (was a
                                                      # single free-text `actor` name in the pre-role-id format)
-    trigger_outcome: str = ""
+    trigger: str = ""             # what starts this use case, in one sentence
+    outcome: str = ""             # what the actor comes away with, in one sentence. The pair is
+                                   # the use case's OUTSIDE face; the flow is its inside one.
     capability: str | None = None    # CAPn — the capability this use case belongs to. Symmetric with
                                      # Component.subsystem / Entity.subdomain: authored once, and every
                                      # capability-derived view (the overlay, the Use-cases grouping, the

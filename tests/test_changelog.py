@@ -443,7 +443,7 @@ def test_a_new_use_case_brings_its_flow():
     """F4: the most common product change, a new story, is expressible: the use case row and its
     flow row are both additions of one entry."""
     doc = make_doc()
-    uc = {"id": "UC2", "name": "Close the map", "actors": ["R1"], "trigger_outcome": "The reader closes the map."}
+    uc = {"id": "UC2", "name": "Close the map", "actors": ["R1"], "trigger": "The reader closes the map.", "outcome": ""}
     flow = {"uc": "UC2", "title": "Close the map", "steps": [{"n": 1, "src": "R1", "dst": "C1", "phrase": "closes it", "where": "srv.py:30"}]}
     log = make_log(make_entry("e1", elements=["UC2"], added=[Addition("use_cases", uc), Addition("flows", flow)]))
     p = lint(log, doc)

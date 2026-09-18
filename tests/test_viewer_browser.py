@@ -2586,40 +2586,115 @@ def test_the_third_lane_belongs_to_the_actor_page_alone() -> None:
         assert not page.js_errors, page.js_errors
 
 
-def test_the_chips_line_up_on_the_majority_and_a_longer_title_keeps_its_own() -> None:
-    """The chips start right after the title, and a title is one line or two — so on a board of
-    mostly two-line titles the short station's chips sat a whole line above everyone else's, and the
-    row read as a ragged edge instead of a band.
+def test_every_box_on_a_board_carries_its_use_case_own_sentence() -> None:
+    """A box named a use case and stopped there, so "what do I get out of this" was only answerable
+    by leaving the board. Worse in the lower lane: a side stop HAD carried that sentence on the card
+    the rail replaced, so the rail bought who-drives-what by taking the sentence away.
 
-    THE MAJORITY, not the tallest, which is where this parts company with the Happy Path view's own
-    levelling pass. One long title would otherwise open a blank line under EVERY other station to
-    make room for the exception. A title longer than the majority keeps its own height and its chips
-    follow its own text, which is what falls out of setting a floor rather than a height."""
+    THE SAME SENTENCE the use case's own card shows, read through `cardFacts` — one field chosen in
+    one table, so the words on a box and the words on a card cannot drift. And NOT CLAMPED: a cut
+    sentence loses its end, and the end is the outcome, which is the half the name has not already
+    said."""
+    # THE PUNCTUATION CASES, planted here because the committed fixture happens to write every
+    # trigger as a fragment with no stop at all, so the rule the card applies would go untested.
+    def punctuate(m: dict) -> None:
+        _a_door_for_a_bystander()(m)
+        for u in m["use_cases"]:
+            if u["id"] == "UC1":                       # a stop the arrow would say twice…
+                u["trigger"] = "An invited person opens the link."
+                u["outcome"] = "They land inside the organization."   # …and one nothing follows
+            if u["id"] == "UC13":                      # …and one the arrow cannot say for it
+                u["trigger"] = "Did the admin approve?"
+
+    with _served_map(punctuate) as url, \
+            _page(url + "#v=capability&cap=CAP1") as page:
+        _settle(page)
+        seen = page.evaluate("""() => {
+            const boxes = [...document.querySelectorAll('.journey-track .flow-step, .journey-side')];
+            const read = (b) => {
+                const w = b.querySelector('.flow-step-what');
+                return { uc: b.getAttribute('data-uc'),
+                         text: w ? w.textContent.trim() : null,
+                         // The sentence sits between the name and the chips, never after them.
+                         afterTitle: !!w && w.previousElementSibling
+                                     && w.previousElementSibling.className === 'flow-step-title',
+                         // Nothing hidden: an unclamped run shows everything it holds.
+                         clipped: !!w && w.scrollHeight > w.clientHeight + 1 };
+            };
+            return { boxes: boxes.length, rows: boxes.map(read),
+                     stations: document.querySelectorAll('.journey-track .flow-step').length,
+                     stops: document.querySelectorAll('.journey-side').length };
+        }""")
+        assert seen["stations"] >= 1 and seen["stops"] >= 1, seen
+        # EVERY box, in both lanes.
+        assert all(r["text"] for r in seen["rows"]), seen
+        assert all(r["afterTitle"] for r in seen["rows"]), seen
+        assert not any(r["clipped"] for r in seen["rows"]), seen
+        # …and it is the map's own words for that use case, joined by the arrow, since the map holds
+        # a trigger and an outcome apart. THE ARROW IS THE PUNCTUATION: the trigger's own full stop
+        # would land hard against it and say the stop twice, so the join drops it — and only it. A
+        # "?" survives, because the arrow does not say what a question mark says, and the outcome
+        # keeps its stop, because nothing follows it.
+        said = {r["uc"]: r["text"] for r in seen["rows"]}
+        ucs = {u["id"]: u for u in json.loads(_FIXTURE_MAP.read_text())["use_cases"]}
+        ucs["UC1"]["trigger"] = "An invited person opens the link."
+        ucs["UC1"]["outcome"] = "They land inside the organization."
+        ucs["UC13"]["trigger"] = "Did the admin approve?"
+        wanted = {i: " \u2192 ".join(x for x in (u["trigger"].strip().removesuffix("."),
+                                                u["outcome"].strip()) if x)
+                  for i, u in ucs.items()}
+        assert said and all(said[uc] == wanted[uc] for uc in said), (said, wanted)
+        # The two planted cases, stated outright so a future edit cannot pass by matching itself.
+        assert said["UC1"].startswith("An invited person opens the link \u2192"), said["UC1"]
+        assert said["UC13"].startswith("Did the admin approve? \u2192"), said["UC13"]
+        assert said["UC1"].endswith("."), "the outcome keeps the stop that ends the card"
+        assert not page.js_errors, page.js_errors
+
+
+def test_the_chips_line_up_on_one_band_and_a_longer_title_keeps_its_own_text() -> None:
+    """The chips start after the station's two runs of text — its use case's name, then that use
+    case's own sentence — so on a board where either run varies the chips sat at as many heights as
+    there were stations, and the row read as a ragged edge instead of a band.
+
+    TWO FLOORS, one per run. The TITLE takes the majority, not the tallest: one long title would
+    otherwise open a blank line under every other station to make room for the exception. The
+    SENTENCE then takes whatever is left over, so the pair of runs measures the same in every station
+    and the chips land on one line. That is what lets the long title keep its own text AND stay on
+    the band — it was the one station whose chips hung a line below everyone else's, which is the
+    ragged edge the pass exists to remove rather than a fact worth showing.
+
+    A floor, never a height: no run is ever cut, which is what makes this safe to point at a
+    sentence the box does not clamp."""
     with _served_map(_a_door_for_a_bystander(long_title=True)) as url, \
             _page(url + "#v=actor&act=Org%20admin") as page:
         _settle(page)
         seen = page.evaluate("""() => {
             const st = [...document.querySelectorAll('.journey-track .flow-step')];
             const rows = st.map((s) => {
-                const t = s.querySelector('.flow-step-title'), f = s.querySelector('.journey-ifs');
+                const t = s.querySelector('.flow-step-title'), w = s.querySelector('.flow-step-what');
+                const f = s.querySelector('.journey-ifs');
                 return { floor: t.style.minHeight,
                          h: Math.round(t.getBoundingClientRect().height),
+                         // A floor never cuts: the run is at least as tall as the floor it was given.
+                         whole: w.getBoundingClientRect().height + 1
+                                >= parseFloat(w.style.minHeight || 0),
                          top: f ? Math.round(f.getBoundingClientRect().top) : null };
             });
             const floor = Math.round(parseFloat(rows[0].floor));
-            const at = rows.filter((r) => r.h <= floor + 1 && r.top !== null);
-            const over = rows.filter((r) => r.h > floor + 1 && r.top !== null);
+            const withChips = rows.filter((r) => r.top !== null);
             return { floors: [...new Set(rows.map((r) => r.floor))], floor,
-                     atFloor: at.length, tops: [...new Set(at.map((r) => r.top))],
-                     over: over.map((r) => r.top), overCount: over.length,
-                     lowest: at.length ? Math.max(...at.map((r) => r.top)) : null };
+                     withChips: withChips.length,
+                     tops: [...new Set(withChips.map((r) => r.top))],
+                     overCount: rows.filter((r) => r.h > floor + 1).length,
+                     cut: rows.filter((r) => !r.whole).length };
         }""")
-        # ONE floor for the whole board, so the chips have one line to start on.
+        # ONE title floor for the whole board, and it is the majority: the long title stands over it.
         assert len(seen["floors"]) == 1 and seen["floors"][0], seen
-        assert seen["atFloor"] >= 3 and len(seen["tops"]) == 1, seen
-        # …and the station that outgrew it keeps its own text, with its chips below everyone else's.
         assert seen["overCount"] >= 1, "the long title must actually have outgrown the majority"
-        assert all(t > seen["lowest"] for t in seen["over"]), seen
+        # …and EVERY station's chips land on one line, the long-titled one included.
+        assert seen["withChips"] >= 4 and len(seen["tops"]) == 1, seen
+        # Nothing was cut to get there.
+        assert seen["cut"] == 0, seen
         assert not page.js_errors, page.js_errors
 
 

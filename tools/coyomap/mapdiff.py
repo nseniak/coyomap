@@ -92,7 +92,7 @@ class KindSpec:
 KINDS: list[KindSpec] = [
     # Product — the map's own reading order: the ways in first, then the edge of the product.
     KindSpec("capabilities", "feature", "features", "product", None, ("name",), ("purpose",)),
-    KindSpec("use_cases", "use case", "use cases", "product", None, ("name",), ("trigger_outcome",)),
+    KindSpec("use_cases", "use case", "use cases", "product", None, ("name",), ("trigger", "outcome")),
     KindSpec("happy_path", "happy path step", "happy path steps", "product", None, (), ("why",)),
     KindSpec("subflows", "shared sub-flow", "shared sub-flows", "product", None, ("name",), ()),
     KindSpec("roles", "actor", "actors", "product", None, ("name",), ("wants",)),
@@ -143,7 +143,8 @@ FIELDS: dict[str, FieldSpec] = {
     "meaning": FieldSpec("Meaning", "wording"),
     "statement": FieldSpec("Statement", "wording"),
     "what": FieldSpec("What", "wording"),
-    "trigger_outcome": FieldSpec("Trigger → Outcome", "wording"),
+    "trigger": FieldSpec("Trigger", "wording"),
+    "outcome": FieldSpec("Outcome", "wording"),
     "wants": FieldSpec("Wants", "wording"),
     "story": FieldSpec("Story", "wording"),
     "stakes": FieldSpec("Stakes", "wording"),
@@ -193,7 +194,6 @@ FIELDS: dict[str, FieldSpec] = {
     "uc": FieldSpec("Use case", "structure"),
     "drives": FieldSpec("Drives", "structure"),
     "audience": FieldSpec("Audience", "structure"),
-    "trigger": FieldSpec("Trigger", "structure"),
     "component": FieldSpec("Component", "structure"),
     "activation": FieldSpec("Activation", "structure"),
     "cadence": FieldSpec("Cadence", "structure"),

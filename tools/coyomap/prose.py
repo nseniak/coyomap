@@ -452,8 +452,13 @@ def iter_prose_fields(model: ProjectModel, *, wide: bool = True) -> Iterator[tup
         yield f"{component.id} purpose", component.purpose
     for group in (*model.capabilities, *model.subsystems, *model.subdomains, *model.blocks):
         yield f"{group.id} purpose", group.purpose
+    # ONE ENTRY PER HALF, since the map holds two fields. The sentence checks were always per
+    # sentence, so the words they see are unchanged; what the split adds is a second opening, so a
+    # bare "It" or "This" at the head of an OUTCOME is now caught where it used to hide behind the
+    # trigger in front of it.
     for uc in model.use_cases:
-        yield f"{uc.id} trigger/outcome", uc.trigger_outcome
+        yield f"{uc.id} trigger", uc.trigger
+        yield f"{uc.id} outcome", uc.outcome
     for rule in model.rules:
         yield f"{rule.id} statement", rule.statement
         yield f"{rule.id} risk", rule.risk

@@ -51,7 +51,7 @@
      claims it or the component is recorded as a deliberate ops/debug/infra surface under an
      "Unclaimed surfaces" extras heading (`Cn: <why>`, line-leading). -->
 
-| ID | Use case | Actor | Trigger → Outcome |
+| ID | Use case | Actor | Trigger | Outcome |
 |---|---|---|---|
 | **UC1** | <use case> | <actor> | <trigger → outcome> |
 | **UC2** | <use case> | <actor> | <trigger → outcome> |
@@ -280,7 +280,7 @@ SOURCE: [file](path/sub:1)
 
 ## T6 — Use-case flows
 
-<!-- The INSIDE view of each use case (its outside view is the use case's Trigger → Outcome). ONE BLOCK PER USE CASE:
+<!-- The INSIDE view of each use case (its outside view is the use case's trigger and outcome). ONE BLOCK PER USE CASE:
      a `**UCn — title**` heading + numbered step lines. A step is `from → to`, where each endpoint is
      an element ID (C/D/E) or a Role name. EVERY step carries a short authored phrase after `: ` —
      never lean on the backbone edge's label (one pair appears in several steps meaning different

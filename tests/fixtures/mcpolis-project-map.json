@@ -257,7 +257,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "Google sign-in first time → name the org, land on Upstream MCPs",
+      "trigger": "Google sign-in first time",
+      "outcome": "name the org, land on Upstream MCPs",
       "capability": "CAP1",
       "entry_points": []
     },
@@ -267,7 +268,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Paste URL, pick auth mode → upstream added, tools discovered",
+      "trigger": "Paste URL, pick auth mode",
+      "outcome": "upstream added, tools discovered",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -277,7 +279,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Paste command JSON, fill variables, size sandbox → upstream added",
+      "trigger": "Paste command JSON, fill variables, size sandbox",
+      "outcome": "upstream added",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -287,7 +290,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Click Connect / Start / Authenticate → live session, tools light up",
+      "trigger": "Click Connect / Start / Authenticate",
+      "outcome": "live session, tools light up",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -297,7 +301,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Create role, toggle MCP enabled per role → role scoped to chosen MCPs",
+      "trigger": "Create role, toggle MCP enabled per role",
+      "outcome": "role scoped to chosen MCPs",
       "capability": "CAP3",
       "entry_points": []
     },
@@ -307,7 +312,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Set 3-state tool toggles and regex allow/forbid → tool calls constrained",
+      "trigger": "Set 3-state tool toggles and regex allow/forbid",
+      "outcome": "tool calls constrained",
       "capability": "CAP3",
       "entry_points": []
     },
@@ -317,7 +323,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "Point client at gateway URL, sign in → role's tools usable",
+      "trigger": "Point client at gateway URL, sign in",
+      "outcome": "role's tools usable",
       "capability": "CAP4",
       "entry_points": []
     },
@@ -327,7 +334,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "Click Authenticate, consent in popup → personal upstream tokens stored encrypted",
+      "trigger": "Click Authenticate, consent in popup",
+      "outcome": "personal upstream tokens stored encrypted",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -337,7 +345,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Sign in once on team's behalf → every member's call goes out as admin",
+      "trigger": "Sign in once on team's behalf",
+      "outcome": "every member's call goes out as admin",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -347,7 +356,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "New token, pick name and role → `svct_` value shown once, JSON snippet given",
+      "trigger": "New token, pick name and role",
+      "outcome": "`svct_` value shown once, JSON snippet given",
       "capability": "CAP3",
       "entry_points": []
     },
@@ -357,7 +367,8 @@
       "actors": [
         "R4"
       ],
-      "trigger_outcome": "Send Bearer `svct_` to org gateway URL → tools at token's role, no sign-in",
+      "trigger": "Send Bearer `svct_` to org gateway URL",
+      "outcome": "tools at token's role, no sign-in",
       "capability": "CAP4",
       "entry_points": []
     },
@@ -367,7 +378,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "Ask client to list/call tools → prefixed upstream tools returned and forwarded",
+      "trigger": "Ask client to list/call tools",
+      "outcome": "prefixed upstream tools returned and forwarded",
       "capability": "CAP4",
       "entry_points": []
     },
@@ -377,7 +389,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Add Google email, pick role, share invite link → member joins on sign-in",
+      "trigger": "Add Google email, pick role, share invite link",
+      "outcome": "member joins on sign-in",
       "capability": "CAP1",
       "entry_points": []
     },
@@ -387,7 +400,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Edit member, pick new role → access updates on next request",
+      "trigger": "Edit member, pick new role",
+      "outcome": "access updates on next request",
       "capability": "CAP1",
       "entry_points": []
     },
@@ -397,7 +411,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Remove member → tokens revoked, per-user sessions dropped",
+      "trigger": "Remove member",
+      "outcome": "tokens revoked, per-user sessions dropped",
       "capability": "CAP1",
       "entry_points": []
     },
@@ -407,7 +422,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Revoke / create-new-then-revoke → agent's next request fails",
+      "trigger": "Revoke / create-new-then-revoke",
+      "outcome": "agent's next request fails",
       "capability": "CAP3",
       "entry_points": []
     },
@@ -417,7 +433,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Open Audit, set filters → matching entries, live SSE tail",
+      "trigger": "Open Audit, set filters",
+      "outcome": "matching entries, live SSE tail",
       "capability": "CAP6",
       "entry_points": []
     },
@@ -427,7 +444,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Add NAME values, toggle Treat-as-password → secrets encrypted and redacted",
+      "trigger": "Add NAME values, toggle Treat-as-password",
+      "outcome": "secrets encrypted and redacted",
       "capability": "CAP5",
       "entry_points": []
     },
@@ -437,7 +455,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Upload file, set target path → file written into sandbox at session start",
+      "trigger": "Upload file, set target path",
+      "outcome": "file written into sandbox at session start",
       "capability": "CAP5",
       "entry_points": []
     },
@@ -447,7 +466,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Paste mcpServers JSON, pick entries → upstreams created in one go",
+      "trigger": "Paste mcpServers JSON, pick entries",
+      "outcome": "upstreams created in one go",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -457,7 +477,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Paste JSON with raw token → dialog offers extraction, config rewritten to NAME",
+      "trigger": "Paste JSON with raw token",
+      "outcome": "dialog offers extraction, config rewritten to NAME",
       "capability": "CAP5",
       "entry_points": []
     },
@@ -467,7 +488,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Connect AI client to `/admin-mcp` → conversational management tools usable",
+      "trigger": "Connect AI client to `/admin-mcp`",
+      "outcome": "conversational management tools usable",
       "capability": "CAP7",
       "entry_points": []
     },
@@ -477,7 +499,8 @@
       "actors": [
         "R5"
       ],
-      "trigger_outcome": "Enter org, end sessions or clear stuck connection → recorded, no secrets seen",
+      "trigger": "Enter org, end sessions or clear stuck connection",
+      "outcome": "recorded, no secrets seen",
       "capability": "CAP7",
       "entry_points": []
     },
@@ -487,7 +510,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Edit config or delete → config/variables/files/tools removed, dirty banner on edit",
+      "trigger": "Edit config or delete",
+      "outcome": "config/variables/files/tools removed, dirty banner on edit",
       "capability": "CAP2",
       "entry_points": []
     },
@@ -497,7 +521,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "Delete org → org and all its scoped data purged",
+      "trigger": "Delete org",
+      "outcome": "org and all its scoped data purged",
       "capability": "CAP1",
       "entry_points": []
     }

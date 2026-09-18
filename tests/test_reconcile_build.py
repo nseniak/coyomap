@@ -688,7 +688,7 @@ def make_map_with_entry_points() -> ProjectModel:
     pair from the incident the tool records: an order route and an admin wipe, which traded ids when
     numbering followed argument order."""
     m = make_map()
-    m.use_cases = [UseCase(id="UC1", name="Place an order", trigger_outcome="buyer submits -> recorded")]
+    m.use_cases = [UseCase(id="UC1", name="Place an order", trigger="buyer submits", outcome="recorded")]
     m.entry_points = [
         EntryPoint(id="EP1", kind="http-route", trigger="POST /orders",
                    component="C4", source="web/orders.py:9"),

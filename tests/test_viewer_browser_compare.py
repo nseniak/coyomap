@@ -36,7 +36,7 @@ def make_old_map(doc: dict[str, Any]) -> dict[str, Any]:
     """The fixture plus a use case the new map no longer has, with a two-step flow of its own."""
     old = json.loads(json.dumps(doc))
     old["use_cases"].append({"id": "UC99", "name": OLD_UC, "actors": ["R2"], "capability": "CAP1",
-                             "trigger_outcome": "An org admin archives an organization nobody uses."})
+                             "trigger": "An org admin archives an organization nobody uses.", "outcome": ""})
     old["flows"].append({"uc": "UC99", "title": OLD_UC, "steps": [
         {"n": 1, "src": "R2", "dst": "C15", "phrase": "opens the organization's settings", "where": None},
         {"n": 2, "src": "C15", "dst": "C1", "phrase": "marks the organization archived", "where": None}]})

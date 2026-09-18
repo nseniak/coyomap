@@ -598,7 +598,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -695,7 +695,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -776,7 +776,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -877,7 +877,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -1000,7 +1000,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -1085,7 +1085,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -1177,7 +1177,7 @@ def make_domain_map(cards: str | None = None) -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -1298,13 +1298,13 @@ def make_gp_map() -> str:
       "id": "UC1",
       "name": "Submit",
       "actors": ["R1"],
-      "trigger_outcome": "submits -> stored"
+      "trigger": "submits", "outcome": "stored"
     },
     {
       "id": "UC2",
       "name": "Approve",
       "actors": ["R2"],
-      "trigger_outcome": "approves -> done"
+      "trigger": "approves", "outcome": "done"
     }
   ],
   "happy_path": [
@@ -1455,7 +1455,7 @@ def make_gp_role_actor_map(flow_actor: str = "Org admin") -> str:
       "id": "UC22",
       "name": "Create org",
       "actors": ["R1"],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -2168,7 +2168,7 @@ def make_context_map(cards: str | None = None, contexts: str | None = None) -> s
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -2309,7 +2309,7 @@ def make_context_map(cards: str | None = None, contexts: str | None = None) -> s
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -2447,7 +2447,7 @@ def make_nested_subdomain_map() -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -2889,7 +2889,7 @@ def _two_context_map(cards_extra: str = "") -> str:
       "id": "UC1",
       "name": "Search",
       "actors": [],
-      "trigger_outcome": "types -> list"
+      "trigger": "types", "outcome": "list"
     }
   ],
   "happy_path": [
@@ -3315,19 +3315,19 @@ def test_parser_hp_captures_first_uc_of_multi_tag() -> None:
       "id": "UC1",
       "name": "Sign in",
       "actors": ["R1"],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "Create",
       "actors": ["R1"],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC3",
       "name": "Renew",
       "actors": ["R2"],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -3395,7 +3395,7 @@ def make_gp_two_actor_map() -> str:
                        "wants": "moderate", "drives": "UC22, UC23"})
     m["use_cases"][0]["actors"] = ["R1", "R2"]
     m["use_cases"].append({"id": "UC23", "name": "Ban a user", "actors": ["R2"],
-                           "trigger_outcome": "a -> b"})
+                           "trigger": "a", "outcome": "b"})
     m["happy_path"].append({"id": "HP2", "uc": "UC23", "why": None})
     return json.dumps(m)
 
@@ -3525,7 +3525,7 @@ def make_dep_kinds_map(kind_d1: str = "datastore", with_kind: bool = True) -> st
       "id": "UC1",
       "name": "Use",
       "actors": ["R1"],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [],

@@ -404,7 +404,7 @@ def make_model_touching_every_theme():
     # A flow with a phrased step, so the OPT-IN `behaviour` tier is touched too. The fixture's whole
     # job is to carry one claim of EVERY theme, and a tier it misses becomes a silent exemption.
     doc["use_cases"] = [{"id": "UC1", "name": "Do the thing", "actors": ["R1"],
-                         "trigger_outcome": "asks -> gets", "capability": "CAP1"}]
+                         "trigger": "asks", "outcome": "gets", "capability": "CAP1"}]
     doc["capabilities"] = [{"id": "CAP1", "name": "Doing", "purpose": "The thing gets done."}]
     doc["roles"] = [{"id": "R1", "name": "A person", "wants": "the thing"}]
     doc["flows"] = [{"uc": "UC1", "title": "Do the thing", "steps": [

@@ -145,13 +145,13 @@ def make_precedence_map(bad: bool = True, create_verb: str = "persists") -> str:
       "id": "UC1",
       "name": "View order",
       "actors": [],
-      "trigger_outcome": "opens -> sees"
+      "trigger": "opens", "outcome": "sees"
     }},
     {{
       "id": "UC2",
       "name": "Create order",
       "actors": [],
-      "trigger_outcome": "submits -> stored"
+      "trigger": "submits", "outcome": "stored"
     }}
   ],
   "happy_path": {gp},
@@ -265,7 +265,7 @@ def make_actor_mismatch_map(flow_actor: str = "Zoe") -> str:
   "commit": null, "committed": null, "built": null,
   "roles": [{roles_json}],
   "glossary": [],
-  "use_cases": [{{"id": "UC1", "name": "View order", "actors": ["R1"], "trigger_outcome": "opens -> sees"}}],
+  "use_cases": [{{"id": "UC1", "name": "View order", "actors": ["R1"], "trigger": "opens", "outcome": "sees"}}],
   "happy_path": [{{"id": "HP1", "uc": "UC1", "why": null}}],
   "subsystems": [],
   "components": [{{"id": "C1", "name": "Viewer", "subsystem": null, "purpose": "x", "depends_on": "", "source": null, "confidence": "", "extra": {{}}}}],
@@ -295,19 +295,19 @@ def make_shared_read_map() -> str:
       "id": "UC1",
       "name": "A",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "B",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC3",
       "name": "C",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -470,13 +470,13 @@ def make_cc_routed_read_map() -> str:
       "id": "UC1",
       "name": "Sign in",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "Create org",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -618,13 +618,13 @@ def make_backward_whyref_map() -> str:
       "id": "UC1",
       "name": "A",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "B",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -713,7 +713,7 @@ def make_read_never_created_map() -> str:
       "id": "UC1",
       "name": "Load config",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -803,13 +803,13 @@ def make_whyless_map() -> str:
       "id": "UC1",
       "name": "A",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "B",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -898,7 +898,7 @@ def make_l2_map() -> str:
       "id": "UC1",
       "name": "Call",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [],
@@ -978,7 +978,7 @@ def make_l2_dep_map() -> str:
       "id": "UC1",
       "name": "Call",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [],
@@ -1102,7 +1102,7 @@ def make_duplicated_edge_map() -> str:
       "id": "UC1",
       "name": "Call",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [],
@@ -1723,7 +1723,7 @@ def make_walk(*rows: tuple[str, str, str | None]) -> ProjectModel:
     from coyomap.model import HappyStep, ProjectModel, UseCase
     ucs = sorted({uc for _, uc, _ in rows})
     return ProjectModel(
-        use_cases=[UseCase(id=u, name=u, trigger_outcome="t") for u in ucs],
+        use_cases=[UseCase(id=u, name=u, trigger="t", outcome="") for u in ucs],
         happy_path=[HappyStep(id=hp, uc=uc, why=why)
                     for hp, uc, why in rows],
     )
@@ -1751,7 +1751,7 @@ def test_uc_why_ref_to_an_unknown_use_case_dangles():
 def test_uc_why_ref_to_an_offspine_use_case_is_advisory_not_blocking():
     from coyomap.model import UseCase
     m = make_walk(("HP1", "UC1", None), ("HP2", "UC2", "needs UC3"))
-    m.use_cases.append(UseCase(id="UC3", name="off-spine", trigger_outcome="t"))
+    m.use_cases.append(UseCase(id="UC3", name="off-spine", trigger="t", outcome=""))
     found = audit_model.check_why_refs(m)
     assert [(f.check, f.severity) for f in found] == [("offspine-why-ref", audit_model.ADVISORY)]
 
@@ -1770,7 +1770,7 @@ def test_positional_why_ref_silently_retargets_when_the_walk_is_renumbered():
 
     def walk(rows: list[tuple[str, str, str | None]]) -> ProjectModel:
         return ProjectModel(
-            use_cases=[UseCase(id=u, name=u, trigger_outcome="t")
+            use_cases=[UseCase(id=u, name=u, trigger="t", outcome="")
                        for u in ("UC1", "UC2", "UC9")],
             happy_path=[HappyStep(id=hp, uc=uc, why=why) for hp, uc, why in rows])
 
@@ -2298,7 +2298,7 @@ def _behavioural_map():
     from coyomap.model import (Flow, FlowStep, Interface, ProjectModel, UseCase)
     m = ProjectModel(title="t", goal="g")
     m.use_cases = [UseCase(id="UC1", name="Rename a page",
-                           trigger_outcome="owner submits a new name → the page is renamed")]
+                           trigger="owner submits a new name", outcome="the page is renamed")]
     # What crosses the dashboard is a STEP now, not a sentence on the surface. The step arm of the
     # worklist already challenges it, at its own call site.
     m.flows = [Flow(uc="UC1", title="Rename a page",
@@ -2330,7 +2330,7 @@ def test_who_is_on_the_far_side_is_a_CLAIM_anchored_at_the_evidence_that_made_it
     m = ProjectModel(title="t", goal="g")
     m.roles = [Role(id="R1", name="Admin", kind="human", audience="user", wants="in")]
     m.use_cases = [UseCase(id="UC1", name="Do it", actors=["R1"], entry_points=["EP1"],
-                           trigger_outcome="asks -> gets")]
+                           trigger="asks", outcome="gets")]
     m.flows = [Flow(uc="UC1", title="Do it", steps=[FlowStep(n=1, src="R1", dst="I1", phrase="opens it")])]
     m.entry_points = [EntryPoint(id="EP1", kind="http-route", trigger="GET /x", activation="external",
                                  source="src/routes.py:12", component="C1")]
@@ -2355,7 +2355,7 @@ def test_a_far_side_with_nothing_to_anchor_is_reported_UNANCHORED_not_dropped():
     from coyomap.model import (EvidenceItem, Flow, FlowStep, Interface, ProjectModel, Role, UseCase)
     m = ProjectModel(title="t", goal="g")
     m.roles = [Role(id="R1", name="Reader", kind="human", audience="user", wants="the page")]
-    m.use_cases = [UseCase(id="UC1", name="Open it", actors=["R1"], trigger_outcome="a -> b")]
+    m.use_cases = [UseCase(id="UC1", name="Open it", actors=["R1"], trigger="a", outcome="b")]
     m.flows = [Flow(uc="UC1", title="Open it",
                     steps=[FlowStep(n=1, src="C1", dst="I1", phrase="hands them over",
                                     where="src/v.py:3"),
@@ -2377,7 +2377,7 @@ def test_a_far_side_claim_names_the_way_in_THAT_ROLE_drives_not_the_first_one():
     m = ProjectModel(title="t", goal="g")
     m.roles = [Role(id="R1", name="Admin", kind="human", audience="user", wants="in")]
     m.use_cases = [UseCase(id="UC1", name="Do it", actors=["R1"], entry_points=["EP2"],
-                           trigger_outcome="a -> b")]
+                           trigger="a", outcome="b")]
     m.flows = [Flow(uc="UC1", title="Do it", steps=[FlowStep(n=1, src="R1", dst="I1", phrase="opens it")])]
     m.entry_points = [
         EntryPoint(id="EP1", kind="http-route", trigger="a stub", activation="external",

@@ -1373,13 +1373,17 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
                     theme="behaviour",
                     why_risky=("the walk a reader follows — a step phrase is read as what the code "
                                "does, and nothing else checks it against the line it names.")))
-        # A USE CASE'S OWN SENTENCE. `Trigger → Outcome` is the headline claim of the whole
+        # A USE CASE'S OWN SENTENCE. Its trigger and its outcome are the headline claim of the whole
         # behavioural layer — the one line a reader takes away — and no claim covered it: the step
         # loop above challenges the walk while leaving unchallenged the statement of what the walk
         # is FOR. Anchored at the use case's first anchored step, which is where the trigger fires;
         # a use case carries no `source` of its own.
         for uc in m.use_cases:
-            sentence = (uc.trigger_outcome or "").strip()
+            # ONE claim over the PAIR, joined as the card joins them: the two halves are one
+            # statement about what the use case is for, and challenging them apart would ask a
+            # skeptic to judge "a person opens a map" with the result it leads to taken away.
+            sentence = " → ".join(x for x in ((uc.trigger or "").strip(),
+                                              (uc.outcome or "").strip()) if x)
             if not sentence:
                 continue
             first = next((st.where or "" for f in m.flows if f.uc == uc.id

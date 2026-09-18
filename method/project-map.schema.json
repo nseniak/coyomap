@@ -489,8 +489,13 @@
             "type": "string"
           }
         },
-        "trigger_outcome": {
-          "type": "string"
+        "trigger": {
+          "type": "string",
+          "description": "what STARTS this use case, in one plain sentence."
+        },
+        "outcome": {
+          "type": "string",
+          "description": "what the actor COMES AWAY WITH, in one plain sentence. The pair is the use case's outside face; its flow is the inside one. Never join the two into one cell."
         },
         "capability": {
           "type": [

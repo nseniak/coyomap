@@ -32,7 +32,7 @@ def make_map(**overrides) -> dict:
         "format": FORMAT, "title": "t", "goal": "g",
         "roles": [{"id": "R1", "name": "Reader", "wants": "a map", "kind": "human"}],
         "use_cases": [{"id": "UC1", "name": "Open the map", "actors": ["R1"],
-                       "trigger_outcome": "The reader opens the map and sees the overview."}],
+                       "trigger": "The reader opens the map and sees the overview.", "outcome": ""}],
         "flows": [{"uc": "UC1", "title": "Open the map", "steps": make_steps(3)}],
         "components": [{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map",
                         "files": ["srv.py"]}],
@@ -120,7 +120,8 @@ def test_a_removed_row_carries_every_old_field_and_its_old_steps_for_its_page():
     after = make_map(use_cases=[], flows=[])
     (e,) = rows(diff_maps(before, after), "use_cases")
     assert e.change == "removed" and e.name_old == "Open the map"
-    assert {(f.key, f.new) for f in e.fields} >= {("name", None), ("trigger_outcome", None), ("actors", None)}
+    assert {(f.key, f.new) for f in e.fields} >= {("name", None), ("trigger", None),
+                                                   ("outcome", None), ("actors", None)}
     assert [f.old for f in e.fields if f.key == "actors"] == ["Reader"], "a reader never meets an id"
     assert [s.state for s in e.steps] == ["removed"] * 3 and e.summary == "removed"
 

@@ -45,13 +45,13 @@ Every capability's audience is derived from it.
 
 ## Use cases
 
-| ID | Use case | Actor | Trigger → Outcome |
-|---|---|---|---|
-| **UC1** | Browse a tenant's tickets | Support agent | An agent asks for a tenant's queue, optionally filtered by state -> they get the list of tickets they are allowed to see, each with its state and comment count. |
-| **UC2** | Read one ticket | Support agent | Someone opens a ticket by id -> they see its title, state, assignee and its comment thread, or a 404 when the ticket belongs to another tenant. |
-| **UC3** | Move a ticket along its lifecycle | Support agent | An agent posts a target state -> the transition is checked against the declared table, the ticket is stored in its new state, re-indexed, and a state-change event is published. |
-| **UC4** | Comment on a ticket | Reporter | A reporter posts text on a ticket they may write -> the comment is appended to the ticket document and the thread comes back one longer. |
-| **UC5** | Take an advisory lock | Support agent | An operator claims a named lock before a bulk job -> the lock row records the holder, so a second claim can see who holds it. |
+| ID | Use case | Actor | Trigger | Outcome |
+|---|---|---|---|---|
+| **UC1** | Browse a tenant's tickets | Support agent | An agent asks for a tenant's queue, optionally filtered by state | they get the list of tickets they are allowed to see, each with its state and comment count. |
+| **UC2** | Read one ticket | Support agent | Someone opens a ticket by id | they see its title, state, assignee and its comment thread, or a 404 when the ticket belongs to another tenant. |
+| **UC3** | Move a ticket along its lifecycle | Support agent | An agent posts a target state | the transition is checked against the declared table, the ticket is stored in its new state, re-indexed, and a state-change event is published. |
+| **UC4** | Comment on a ticket | Reporter | A reporter posts text on a ticket they may write | the comment is appended to the ticket document and the thread comes back one longer. |
+| **UC5** | Take an advisory lock | Support agent | An operator claims a named lock before a bulk job | the lock row records the holder, so a second claim can see who holds it. |
 
 ---
 

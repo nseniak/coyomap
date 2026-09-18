@@ -40,13 +40,13 @@ def make_counts_map() -> str:
       "id": "UC1",
       "name": "View order",
       "actors": [],
-      "trigger_outcome": "opens -> sees"
+      "trigger": "opens", "outcome": "sees"
     },
     {
       "id": "UC2",
       "name": "Create order",
       "actors": [],
-      "trigger_outcome": "submits -> stored"
+      "trigger": "submits", "outcome": "stored"
     }
   ],
   "happy_path": [
@@ -263,13 +263,13 @@ def make_roles_then_usecases_map() -> str:
       "id": "UC1",
       "name": "View order",
       "actors": ["R1"],
-      "trigger_outcome": "opens -> sees"
+      "trigger": "opens", "outcome": "sees"
     },
     {
       "id": "UC2",
       "name": "Create order",
       "actors": ["R2"],
-      "trigger_outcome": "submits -> stored"
+      "trigger": "submits", "outcome": "stored"
     }
   ],
   "happy_path": [
@@ -346,7 +346,7 @@ def make_broken_map() -> str:
       "id": "UC1",
       "name": "View",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -418,13 +418,13 @@ def make_backward_whyref_map() -> str:
       "id": "UC1",
       "name": "A",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     },
     {
       "id": "UC2",
       "name": "B",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [
@@ -514,13 +514,13 @@ def make_read_before_create_map() -> str:
       "id": "UC1",
       "name": "View order",
       "actors": [],
-      "trigger_outcome": "opens -> sees"
+      "trigger": "opens", "outcome": "sees"
     },
     {
       "id": "UC2",
       "name": "Create order",
       "actors": [],
-      "trigger_outcome": "submits -> stored"
+      "trigger": "submits", "outcome": "stored"
     }
   ],
   "happy_path": [
@@ -645,7 +645,7 @@ def make_single_use_case_map() -> str:
       "id": "UC1",
       "name": "View",
       "actors": [],
-      "trigger_outcome": "a -> b"
+      "trigger": "a", "outcome": "b"
     }
   ],
   "happy_path": [],

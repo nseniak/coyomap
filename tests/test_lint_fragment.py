@@ -529,8 +529,8 @@ def test_the_duplication_advisory_does_not_fire_at_fragment_lint():
         "format": "coyomap-map", "title": "T", "goal": "g", "commit": "abc1234",
         "components": [{"id": "C70", "name": "G", "purpose": "p"},
                        {"id": "C1", "name": "P", "purpose": "p"}],
-        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger_outcome": "t"},
-                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger_outcome": "t"}],
+        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger": "t", "outcome": ""},
+                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger": "t", "outcome": ""}],
         "flows": [{"uc": "UC13", "title": "A", "steps": steps},
                   {"uc": "UC15", "title": "B", "steps": steps}],
     })
@@ -561,7 +561,7 @@ def test_lint_sees_a_drifted_anchor_and_says_so_in_the_verdict(tmp_path, capsys)
         "format": "coyomap-map", "title": "T", "goal": "g", "commit": "abc1234",
         "components": [{"id": "C1", "name": "A", "purpose": "p"},
                        {"id": "C2", "name": "B", "purpose": "p"}],
-        "use_cases": [{"id": "UC1", "name": "A", "actors": ["Dev"], "trigger_outcome": "t"}],
+        "use_cases": [{"id": "UC1", "name": "A", "actors": ["Dev"], "trigger": "t", "outcome": ""}],
         "flows": [{"uc": "UC1", "title": "A", "steps": [
             {"n": 1, "src": "C1", "dst": "C2", "phrase": "calls act", "where": "a.py:1"}]}],
     }), encoding="utf-8")

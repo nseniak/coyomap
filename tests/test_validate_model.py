@@ -425,9 +425,9 @@ def _walk_model(record: str, keep_step: bool = True):
     # the demo step is deleted, which is the shape the real map ended up in.
     m.use_cases = list(m.use_cases) + [
         UseCase(id="UC33", name="Visit the demo site", actors=["R1"],
-                trigger_outcome="a visitor opens it -> it renders", capability="CAP8"),
+                trigger="a visitor opens it", outcome="it renders", capability="CAP8"),
         UseCase(id="UC34", name="Switch the demo version", actors=["R1"],
-                trigger_outcome="an admin picks one -> it serves that one", capability="CAP8")]
+                trigger="an admin picks one", outcome="it serves that one", capability="CAP8")]
     m.happy_path = ([HappyStep(id="HP1", uc="UC34")] if keep_step
                     else [HappyStep(id="HP1", uc="UC1")])
     m.extras = [ExtraSection(heading="Happy Path coverage", body=record)]
@@ -4362,8 +4362,8 @@ def test_the_duplication_advisory_still_fires_at_validate():
         "format": "coyomap-map", "title": "T", "goal": "g", "commit": "abc1234",
         "components": [{"id": "C70", "name": "G", "purpose": "p"},
                        {"id": "C1", "name": "P", "purpose": "p"}],
-        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger_outcome": "t"},
-                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger_outcome": "t"}],
+        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger": "t", "outcome": ""},
+                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger": "t", "outcome": ""}],
         "flows": [{"uc": "UC13", "title": "A", "steps": steps},
                   {"uc": "UC15", "title": "B", "steps": steps}],
     }
@@ -4391,8 +4391,8 @@ def test_validate_names_the_writer_command_when_an_advisory_asks_for_a_record(ca
         "format": "coyomap-map", "title": "T", "goal": "g", "commit": "abc1234",
         "components": [{"id": "C70", "name": "G", "purpose": "p"},
                        {"id": "C1", "name": "P", "purpose": "p"}],
-        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger_outcome": "t"},
-                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger_outcome": "t"}],
+        "use_cases": [{"id": "UC13", "name": "A", "actors": ["Dev"], "trigger": "t", "outcome": ""},
+                      {"id": "UC15", "name": "B", "actors": ["Dev"], "trigger": "t", "outcome": ""}],
         "flows": [{"uc": "UC13", "title": "A", "steps": steps},
                   {"uc": "UC15", "title": "B", "steps": steps}],
     }
@@ -4677,7 +4677,7 @@ def test_the_steps_are_grouped_by_story_in_happy_path_order():
     """A step means little without the story it sits in: mcpolis's dashboard draws 89 of them from
     20 walks, and read as one list they are noise."""
     m = make_interface_model()
-    m.use_cases.append(UseCase(id="UC2", name="Second", trigger_outcome="asks -> gets",
+    m.use_cases.append(UseCase(id="UC2", name="Second", trigger="asks", outcome="gets",
                                capability=m.use_cases[0].capability))
     m.happy_path.append(HappyStep(id="HP2", uc="UC2"))
     m.flows[0].steps = [FlowStep(n=1, src="R1", dst="I1", phrase="a")]

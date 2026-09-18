@@ -184,6 +184,13 @@ FIELD_META: dict[tuple[str, str], dict] = {
                             "reported as redundant. Absent = inherit, walking up `subdomain` then "
                             "`parent`. Same vocabulary and same rules as `subdomains[].owners`."},
     ("UseCase", "id"): {"pattern": r"^UC\d+$"},
+    # TWO FIELDS, one sentence each. They were one cell called `trigger_outcome`, which read as "the
+    # trigger's outcome" — one thing — while it always held two, and every reader had to find the
+    # seam by guessing at a full stop.
+    ("UseCase", "trigger"): {"description": "what STARTS this use case, in one plain sentence."},
+    ("UseCase", "outcome"): {"description": "what the actor COMES AWAY WITH, in one plain sentence. "
+                                            "The pair is the use case's outside face; its flow is "
+                                            "the inside one. Never join the two into one cell."},
     ("UseCase", "capability"): {"pattern": r"^CAP\d+$", "description": "the capability this use "
                                 "case belongs to, or null. Assigned at synthesis via `reconcile` "
                                 "(a `CAP<n>` does not exist when the behavioral fragment is written)."},

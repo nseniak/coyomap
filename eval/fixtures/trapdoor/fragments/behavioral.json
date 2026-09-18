@@ -44,7 +44,8 @@
    "actors": [
     "R2"
    ],
-   "trigger_outcome": "An agent asks for a tenant's queue, optionally filtered by state -> they get the list of tickets they are allowed to see, each with its state and comment count.",
+   "trigger": "An agent asks for a tenant's queue, optionally filtered by state",
+   "outcome": "they get the list of tickets they are allowed to see, each with its state and comment count.",
    "capability": null,
    "entry_points": []
   },
@@ -54,7 +55,8 @@
    "actors": [
     "R2"
    ],
-   "trigger_outcome": "Someone opens a ticket by id -> they see its title, state, assignee and its comment thread, or a 404 when the ticket belongs to another tenant.",
+   "trigger": "Someone opens a ticket by id",
+   "outcome": "they see its title, state, assignee and its comment thread, or a 404 when the ticket belongs to another tenant.",
    "capability": null,
    "entry_points": []
   },
@@ -64,7 +66,8 @@
    "actors": [
     "R2"
    ],
-   "trigger_outcome": "An agent posts a target state -> the transition is checked against the declared table, the ticket is stored in its new state, re-indexed, and a state-change event is published.",
+   "trigger": "An agent posts a target state",
+   "outcome": "the transition is checked against the declared table, the ticket is stored in its new state, re-indexed, and a state-change event is published.",
    "capability": null,
    "entry_points": []
   },
@@ -74,7 +77,8 @@
    "actors": [
     "R1"
    ],
-   "trigger_outcome": "A reporter posts text on a ticket they may write -> the comment is appended to the ticket document and the thread comes back one longer.",
+   "trigger": "A reporter posts text on a ticket they may write",
+   "outcome": "the comment is appended to the ticket document and the thread comes back one longer.",
    "capability": null,
    "entry_points": []
   },
@@ -84,7 +88,8 @@
    "actors": [
     "R2"
    ],
-   "trigger_outcome": "An operator claims a named lock before a bulk job -> the lock row records the holder, so a second claim can see who holds it.",
+   "trigger": "An operator claims a named lock before a bulk job",
+   "outcome": "the lock row records the holder, so a second claim can see who holds it.",
    "capability": null,
    "entry_points": []
   }

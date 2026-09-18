@@ -374,16 +374,16 @@ def model_to_markdown(m: ProjectModel) -> str:
                 if not members:
                     continue
                 uc_body += [f"### {cname}" + (f" *({cid})*" if cid else ""), ""]
-                uc_body += _table(["ID", "Use case", "Actor", "Trigger → Outcome"],
+                uc_body += _table(["ID", "Use case", "Actor", "Trigger", "Outcome"],
                                   [[f"**{u.id}**", u.name,
                                     and_list([rn.get(a, a) for a in u.actors]),
-                                    u.trigger_outcome] for u in members]) + [""]
+                                    u.trigger, u.outcome] for u in members]) + [""]
             section("Use cases", uc_body)
         else:
             section("Use cases",
-                    _table(["ID", "Use case", "Actor", "Trigger → Outcome"],
+                    _table(["ID", "Use case", "Actor", "Trigger", "Outcome"],
                            [[f"**{u.id}**", u.name, and_list([rn.get(a, a) for a in u.actors]),
-                             u.trigger_outcome] for u in m.use_cases]))
+                             u.trigger, u.outcome] for u in m.use_cases]))
     if m.happy_path:
         body = ["The happy-path ordering of use cases. Each step IS a use case (its `*(UCn)*` tag",
                 "names it); the step's detail lives in that use case's T6 flow. An optional `why:`",
@@ -1075,9 +1075,13 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
         # `parent` = the use case's capability, exactly as a component's parent is its subsystem.
         # Reusing the existing membership channel is what lets the frontend group by capability
         # without a second lookup table travelling beside the nodes.
-        node = _node(u, "usecase", u.name, _first_href(u.trigger_outcome),
+        # TWO ROWS, because the map holds two fields. One row called `Trigger → Outcome` carried
+        # both halves in one cell and left the reader to find the seam. The viewer's CARD is what
+        # joins them again with an arrow, because a card has one sentence's worth of room; a detail
+        # page has room to label each half.
+        node = _node(u, "usecase", u.name, _first_href(u.trigger) or _first_href(u.outcome),
                      {"Use case": u.name, "Actor": and_list(actor_names),
-                      "Trigger → Outcome": u.trigger_outcome,
+                      "Trigger": u.trigger, "Outcome": u.outcome,
                       **({"Capability": capability_names.get(u.capability or "", u.capability or "")}
                          if u.capability else {})},
                      u.capability)

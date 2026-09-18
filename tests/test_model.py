@@ -133,7 +133,7 @@ def make_model(extra_order: tuple[str, ...] = ("Zeta", "Alpha")) -> ProjectModel
     `extra` dict, so determinism tests can prove key order can't wobble the serialization."""
     m = ProjectModel(title="Demo", goal="A demo project.", commit="abc1234",
                      committed="2026-07-01", built="2026-07-02 10:00")
-    m.use_cases = [UseCase(id="UC1", name="View order", actors=[], trigger_outcome="opens → sees")]
+    m.use_cases = [UseCase(id="UC1", name="View order", actors=[], trigger="opens", outcome="sees")]
     m.happy_path = [HappyStep(id="HP1", uc="UC1")]
     m.subsystems = [Group(id="S1", name="Core", purpose="everything")]
     extra: dict[str, object] = {k: k.lower() for k in extra_order}

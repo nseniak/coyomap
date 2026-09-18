@@ -468,7 +468,7 @@ def test_the_disposition_table_keys_an_audit_advisory_on_the_pair_not_the_family
     m = {"format": "coyomap-map", "title": "t", "goal": "g",
          "roles": [{"id": "R2", "name": "Admin", "kind": "human"}],
          "use_cases": [{"id": "UC25", "name": "Rebuild the graph", "actors": ["R2"],
-                        "trigger_outcome": "an admin asks -> it rebuilds"}],
+                        "trigger": "an admin asks", "outcome": "it rebuilds"}],
          "extras": [{"heading": "Audit exceptions",
                      "body": "actor-attribution UC25: the scheduler opens it, deliberate."}]}
     with tempfile.TemporaryDirectory() as d:
@@ -1131,7 +1131,7 @@ def make_two_tier_map(tmp: str) -> Path:
             {"id": "C2", "name": "Store", "purpose": "keeps the rows",
              "files": ["src/s.py"], "source": "src/s.py:1"}],
         "use_cases": [{"id": "UC1", "name": "Sign in", "actors": ["R1"],
-                       "trigger_outcome": "the admin signs in → a session exists"}],
+                       "trigger": "the admin signs in", "outcome": "a session exists"}],
         "flows": [{"uc": "UC1", "title": "Sign in", "steps": [
             {"n": 1, "src": "R1", "dst": "C1", "phrase": "send the token", "where": "src/g.py:1"},
             {"n": 2, "src": "C1", "dst": "C2", "phrase": "store the session", "where": "src/s.py:1"}]}],

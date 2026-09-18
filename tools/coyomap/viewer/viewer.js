@@ -648,11 +648,28 @@ function elementLabel(kind) { return ELEMENT_LABEL[kind] || kind || ''; }
 // field name, and reading the wrong one is the difference between a card that says something and a card
 // that is blank — so the mapping lives here rather than at each call site.
 const CARD_DESC_FIELD = {
-  capability: ['Purpose'], usecase: ['Trigger → Outcome'], human: ['Wants'], service: ['Wants'],
+  capability: ['Purpose'], usecase: ['Trigger', 'Outcome'], human: ['Wants'], service: ['Wants'],
   component: ['Purpose'], subsystem: ['Purpose'], subdomain: ['Purpose'], block: ['Purpose'],
   entity: ['Meaning'], dep: ['Used for', 'Type'], process: ['Runs on'], rule: ['Decision'],
   system: ['Overview'], interface: ['What it is'],
 };
+// A kind whose sentence is SEVERAL fields joined, rather than the first one that has text. Only a
+// use case has one today: the map holds its trigger and its outcome as two fields, because they are
+// two statements a reader can judge apart, and the card has room for one sentence, so it joins them
+// with the arrow that says which leads to which. The detail page keeps them as two labelled rows.
+const CARD_DESC_JOIN = { usecase: ' → ' };
+// THE ARROW IS THE PUNCTUATION. A joined part keeps its own full stop and it lands hard against the
+// arrow — "…pastes a tool server's address and names it. → The server is listed" — which is the same
+// stop said twice, on 148 of the 191 use cases across the six maps this viewer reads.
+//
+// Only the parts BEFORE the last one lose it: nothing follows the last, so its stop still closes a
+// sentence and a card that ended mid-air would read as unfinished beside the cards that do not.
+// "?" and "!" STAY, because the arrow does not say what they say — a question joined to its answer
+// is still a question. And the FIELD is untouched: the trigger is stored as a whole sentence, which
+// is what the detail page shows on a row of its own and what the readability check counts.
+function joinedPart(text, last) {
+  return last ? text : text.replace(/\.$/, '');
+}
 
 // The reader's sentence for what an actor is AFTER, built from the map's `wants`. ONE function, because
 // the same fact was drawn in four places in three different shapes: a bare sentence on the actor's card
@@ -771,7 +788,13 @@ function cardFacts(id) {
   const n = GRAPH.nodes[id];
   if (!n) return null;
   const f = n.fields || {};
-  let desc = (CARD_DESC_FIELD[n.kind] || []).map((k) => f[k]).find((v) => (v || '').trim()) || '';
+  const parts = (CARD_DESC_FIELD[n.kind] || []).map((k) => (f[k] || '').trim());
+  const join = CARD_DESC_JOIN[n.kind];
+  // JOINED, or the first field that has text. A joined kind drops an empty half rather than printing
+  // the arrow with nothing on one side of it, so a use case the map only half-wrote still reads.
+  const said = parts.filter(Boolean);
+  let desc = join ? said.map((p, i) => joinedPart(p, i === said.length - 1)).join(join)
+                  : (parts.find(Boolean) || '');
   // A map that gives a rule no short name of its own uses the whole statement as the title, and the
   // description field then holds the same words. One copy, not two.
   if (desc.trim() === (n.name || '').trim()) desc = '';
@@ -9173,6 +9196,10 @@ function bindFeaturePage(root) {
   // The rail's own clicks, from the one binder both pages share. No actor is passed: a side stop's
   // crumb then runs through the use case's feature, which on this page is the page you are on.
   bindJourney(root, {});
+  // …and the same levelling the other two boards get. This page never called it: with one-line titles
+  // its chips happened to line up, so the gap was invisible until the boxes started carrying a
+  // sentence of two to five lines and the chips under three stations sat at three heights.
+  levelStepTitles(root);
   bindItemPills(root);
   // The decision-area cards, opening the area's own page — the SAME door the Rules board gives them,
   // from the same binder, so an area reached from here and from there lands on one screen.
@@ -9986,6 +10013,26 @@ function journeyDriversHtml(uc) {
     + '</span>';
 }
 
+// THE USE CASE'S OWN SENTENCE, under its name, wherever a box names one. The name says what the goal
+// is; the sentence says what starts it and what the reader comes away with, which is the one thing a
+// box could not say. A station carried a name and its chips, so "what do I get out of this step" was
+// only answerable by leaving the board — and a side stop had carried the sentence on its card until
+// the rail replaced the cards, which is the cost the comment above featureRailHtml records.
+//
+// `cardFacts` is what reads it, so the words on a box and the words on that use case's own card are
+// ONE text: the field is chosen in one table (CARD_DESC_FIELD) and the two can never drift apart.
+// `mdInline`, because the field is authored prose and may carry a link or a code span, exactly as it
+// does on the card.
+//
+// NOT CLAMPED. A cut sentence loses its END, and the end is the outcome — the half the name does not
+// already say. The box grows instead, and the board's levelling passes are what keep the boxes a
+// band rather than a ragged edge (levelHpBoxes, levelStepTitles).
+function ucWhatHtml(ucId) {
+  const c = ucId ? cardFacts(ucId) : null;
+  const what = c && c.desc;
+  return what ? `<span class="flow-step-what">${mdInline(what)}</span>` : '';
+}
+
 // ── ONE STEP, on every board that draws one ─────────────────────────────────────────────────────
 // The Happy Path and the two rails drew the same thing twice: a bullet on a line, a title under it,
 // a door to the use case behind it. Two builders and two class families, whose stylesheets had
@@ -10012,6 +10059,7 @@ function flowStepBoxHtml(st, o) {
     + '<span class="flow-step-dot"></span>'
     + (opt.num ? `<span class="flow-step-num">${esc(String(hpStepPos(st.id)))}</span>` : '')
     + `<span class="flow-step-title">${esc(sentenceCase(hpStepText(st) || st.id))}</span>`
+    + ucWhatHtml(st.uc)
     + (opt.marks ? journeyMarksHtml(st.uc) : '')
     + journeyIfsHtml((opt.ifs || {})[st.uc])
     + '</button>';
@@ -10067,10 +10115,21 @@ function bindPickClear() {
   };
   document.addEventListener('click', pickOutsideClick);
 }
-// ONE HEIGHT FOR THE STEP TITLES on a board, so the chips under them land on one line. Both boards
+// ONE HEIGHT FOR THE TEXT ABOVE THE CHIPS on a board, so the chips land on one line. Both boards
 // need it for the same reason and neither could have it before the chips existed: a title is one
 // line or two, and its chips start right after it, so on a board of mostly two-line titles the short
 // step's chips sat a whole line above everyone else's.
+//
+// TWO PASSES NOW, because two runs of text sit between the bullet and the chips: the title, then the
+// use case's sentence. Levelling the title alone stopped working the day the sentence arrived — a
+// sentence runs three to five lines, so the chips went ragged again one element lower down.
+//
+// The second pass levels the TITLE AND THE SENTENCE TOGETHER, and pads the sentence to make up the
+// difference. Levelling the sentence on its own majority was tried and did not work: on the MCP Hero
+// walk 11 of 22 sentences stand over any majority, so half the board stayed ragged. Levelling the
+// pair is also what lets the title keep the rule below — a station whose title runs long has that
+// line taken out of its sentence's padding, so it still keeps its own text and its chips still land
+// on the band.
 //
 // THE MAJORITY, not the tallest — which is where this parts company with `levelHpBoxes`, the other
 // measure-then-set pass on the walk. One long title would otherwise open a blank line under EVERY
@@ -10082,15 +10141,46 @@ function bindPickClear() {
 // then buy a reader nothing and cost every board without interfaces a line of white.
 function levelStepTitles(root) {
   if (!root.querySelector('.flow-step .journey-ifs')) return;
-  const ts = [...root.querySelectorAll('.flow-step .flow-step-title')];
-  if (!ts.length) return;
-  const cs = getComputedStyle(ts[0]);
+  levelToMajority([...root.querySelectorAll('.flow-step .flow-step-title')]);
+  levelStepBlocks(root);
+}
+// ONE HEIGHT FOR THE WHOLE TEXT BLOCK, so every chip in a band starts on one line. The block is the
+// title plus the sentence; the SENTENCE takes the padding, because it is the lower of the two and
+// padding the title would open a gap in the middle of a box's own words.
+//
+// A BAND IS A ROW OF THE WALK, and the whole board anywhere else. The Happy Path breaks into rows at
+// each hand-over and each row scrolls sideways on its own, so its boxes are the set a reader takes in
+// side by side — levelling across the page instead would pad a short row to the longest sentence four
+// rows away, which on MCP Hero cost 19px of every box for an alignment nobody can see. A rail is one
+// row by construction, so the two rules are the same rule there.
+function levelStepBlocks(root) {
+  const rows = [...root.querySelectorAll('.hp-row')];
+  for (const band of (rows.length ? rows : [root])) {
+    const steps = [...band.querySelectorAll('.flow-step')]
+      .map((s) => ({ t: s.querySelector('.flow-step-title'), w: s.querySelector('.flow-step-what') }))
+      .filter((p) => p.t && p.w);
+    // Cleared first, or a second pass measures the padding the first one set and never shrinks.
+    for (const p of steps) p.w.style.minHeight = '';
+    // One box has nothing to line up with, and its sentence keeps its own height.
+    if (steps.length < 2) continue;
+    const own = steps.map((p) => p.w.getBoundingClientRect().height);
+    const block = steps.map((p, i) => p.t.getBoundingClientRect().height + own[i]);
+    const tallest = Math.max(...block);
+    steps.forEach((p, i) => { p.w.style.minHeight = `${own[i] + (tallest - block[i])}px`; });
+  }
+}
+// ONE RUN OF TEXT, levelled to the line count most of them take. A floor, never a height: an element
+// over the majority keeps its own text whole, which is what makes this safe to point at an unclamped
+// sentence.
+function levelToMajority(els) {
+  if (!els.length) return;
+  const cs = getComputedStyle(els[0]);
   const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.3);
   if (!(lh > 0)) return;
   // Cleared first: a second pass would otherwise measure the floor the first one set and never shrink.
-  for (const t of ts) t.style.minHeight = '';
+  for (const t of els) t.style.minHeight = '';
   const counts = new Map();
-  for (const t of ts) {
+  for (const t of els) {
     const n = Math.max(1, Math.round(t.getBoundingClientRect().height / lh));
     counts.set(n, (counts.get(n) || 0) + 1);
   }
@@ -10099,7 +10189,7 @@ function levelStepTitles(root) {
   // hanging past the line, which is the ragged edge this pass exists to remove.
   let mode = 1, best = 0;
   for (const [n, c] of counts) if (c > best || (c === best && n > mode)) { mode = n; best = c; }
-  for (const t of ts) t.style.minHeight = `${mode * lh}px`;
+  for (const t of els) t.style.minHeight = `${mode * lh}px`;
 }
 
 // THE TWO LANES, for both boards. Everything else about a board differs between the two pages and
@@ -10174,7 +10264,7 @@ function journeyZoneHtml(z, opts) {
     + `data-pick="ucstop:${esc(uc.id)}" `
     + `title="Open ${esc(uc.name)}"><span class="journey-o">○</span>`
     + `<span class="journey-sidet"><span class="flow-step-title">${esc(sentenceCase(uc.name))}</span>`
-    + `${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
+    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
   // THE THIRD LANE, and the same box the lower lane draws — one circle, one text column beside it —
   // with the driver's chip leading that column. It is not a fourth kind of thing to learn: what makes
   // it different is the one chip saying whose use case this is, and the gutter naming the lane.
@@ -10184,7 +10274,7 @@ function journeyZoneHtml(z, opts) {
     + `title="Open ${esc(uc.name)}"><span class="journey-o">○</span>`
     + `<span class="journey-sidet">${journeyDriversHtml(uc)}`
     + `<span class="flow-step-title">${esc(sentenceCase(uc.name))}</span>`
-    + `${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
+    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
   // The zone's own feature decides its colour on the actor rail. The FEATURE rail passes one tint
   // for every zone instead: that whole board is one feature, and a colour changing from zone to zone
   // would claim a difference the zones do not have.
@@ -10713,7 +10803,13 @@ function hpBoxHtml(sg, finalRow, ifs) {
     + `<div class="hp-flabel">${label}</div>`
     + `<div class="hp-line">${steps}</div></div>`;
 }
-const HP_STEP_W = 150;   // one step's column, in px — the width every box is a multiple of
+const HP_STEP_W = 250;   // one step's column, in px — the width every box is a multiple of
+// It is `.flow-step`'s own width plus its 4px side margins, and the stylesheet is where that width
+// is set: change one and the other moves with it, or the bullets come off the pitch the rail draws
+// them on. The column grew from 150 the day the box started carrying the use case's sentence —
+// at 150 the longest sentence on the reference maps ran to eleven lines, and every box on the
+// page was levelled to it. Measured across the two live maps, the knee is here: wider buys no
+// shorter box, and past 270 a row that fits today starts scrolling sideways.
 // The three lengths the line runs past a box's own edge, all taken from the journey rail so the two
 // pictures are drawn in one hand: half the 14px gap between boxes (which bridges them into one
 // line), the left tip, and the right tip where the arrow head's point sits.
@@ -10772,12 +10868,15 @@ function renderHappyPath() {
   // NO COUNT LINE OF ITS OWN. "31 steps through 11 features" led the board; the landing head the page
   // wears now (syncPageHero) says the step count, and the board says the features.
   diagram.innerHTML = `<div class="usecases-wrap"><div class="hp-board">${html}</div></div>`;
-  levelHpBoxes(diagram);
-  // …and the titles inside those boxes, so the chips under them start on one line. Two passes, two
-  // questions: `levelHpBoxes` makes every BOX the page's tallest, this makes every TITLE the
-  // board's most common — the tallest is right for a band of tinted boxes and wrong for a line of
-  // text, where one long title would open a blank line under all the others.
+  // THE TEXT FIRST, THEN THE BOXES. Two passes, two questions: this one lines the chips up inside a
+  // row, and `levelHpBoxes` then makes every box on the page the tallest of them. The order is the
+  // whole point — the text pass PADS a box, so measuring the boxes first read heights that were
+  // about to change, and the two rows whose text grew afterwards stood 8px and 19px proud of a band
+  // that exists to be flat. The rule inside each is its own: the tallest is right for a band of
+  // tinted boxes, and wrong for a line of text, where one long title would open a blank line under
+  // every other step.
   levelStepTitles(diagram);
+  levelHpBoxes(diagram);
   bindHappyPath(diagram);
 }
 // One height for every box on the page, measured once. Each row stretches its boxes to its own

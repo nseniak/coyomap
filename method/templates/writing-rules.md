@@ -1,6 +1,6 @@
 ## Writing the text a person reads
 
-**Every sentence a PERSON READS.** The list of fields used to be closed — `purpose`, trigger→outcome,
+**Every sentence a PERSON READS.** The list of fields used to be closed — `purpose`, `trigger`, `outcome`,
 a rule `statement`, a `risk`, a `used_for`, a `wants`, a glossary meaning — and it was read as
 exhaustive, so an agent authoring 45 `evidence[].why` lines had no idea whether these rules applied
 and guessed. They do. The test is not which field it is: it is whether the sentence reaches a reader

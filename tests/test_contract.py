@@ -850,7 +850,7 @@ def _tiny_map() -> str:
                    "sites": [{"where": "src/gate.py:31", "why": "Rejects the tokenless caller."}]}],
         "roles": [{"id": "R1", "name": "Caller", "kind": "human"}],
         "use_cases": [{"id": "UC1", "name": "Pass the gate", "actors": ["R1"],
-                       "trigger_outcome": "A caller arrives → the row is returned"}],
+                       "trigger": "A caller arrives", "outcome": "the row is returned"}],
         "flows": [{"uc": "UC1", "title": "Pass the gate", "steps": [
             {"n": 1, "src": "R1", "dst": "C1", "phrase": "present the token"},
             {"n": 2, "src": "C1", "dst": "C2", "phrase": "ask for the row",

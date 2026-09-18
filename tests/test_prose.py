@@ -30,7 +30,7 @@ def make_model() -> ProjectModel:
     m = ProjectModel(title="Demo", goal="A demo.")
     m.roles = [Role(id="R1", name="Andy", kind="human", wants="to place an order")]
     m.use_cases = [UseCase(id="UC1", name="Place order",
-                           trigger_outcome="A shopper submits a basket and gets an order.")]
+                           trigger="A shopper submits a basket and gets an order.", outcome="")]
     m.happy_path = [HappyStep(id="HP1", uc="UC1", why="nothing precedes it")]
     m.components = [Component(id="C1", name="Checkout", purpose="Takes a basket and books an order.")]
     m.capabilities = [Group(id="CAP1", name="Ordering", purpose="Everything a shopper buys with.",
@@ -241,7 +241,10 @@ def test_each_kind_gets_its_own_line_and_an_absent_kind_gets_none() -> None:
 
 def test_every_reader_facing_field_is_walked() -> None:
     labels = {where for where, _text in prose.iter_prose_fields(make_model())}
-    assert labels == {"goal", "C1 purpose", "CAP1 purpose", "CAP1 stake for R1", "UC1 trigger/outcome",
+    assert labels == {"goal", "C1 purpose", "CAP1 purpose", "CAP1 stake for R1",
+                      # TWO ENTRIES, one per half: the map holds a use case's trigger and its
+                      # outcome apart, and each is a sentence a reader meets on its own.
+                      "UC1 trigger", "UC1 outcome",
                       "BR1 statement", "BR1 risk", "D1 used for", "R1 wants", "HP1 why",
                       "glossary 'basket'", "E1 meaning", "E1 store notes", "tests note",
                       "tests row C1 gap", "record 'Unclaimed surfaces' line 1"}

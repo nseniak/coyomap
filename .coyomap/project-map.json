@@ -408,7 +408,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "Someone who has cloned this project asks to install it. Their coding agent gains a new command, and the tools it drives are built and ready.",
+      "trigger": "Someone who has cloned this project asks to install it.",
+      "outcome": "Their coding agent gains a new command, and the tools it drives are built and ready.",
       "capability": "CAP4",
       "entry_points": []
     },
@@ -418,7 +419,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A person asks their coding agent for a map of a project that has none. A map of that project exists, pinned to the commit it describes.",
+      "trigger": "A person asks their coding agent for a map of a project that has none.",
+      "outcome": "A map of that project exists, pinned to the commit it describes.",
       "capability": "CAP1",
       "entry_points": [
         "EP20"
@@ -430,7 +432,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A person names committed code the map is not meant to describe. Later maps leave that code out, and every count the tools print says so.",
+      "trigger": "A person names committed code the map is not meant to describe.",
+      "outcome": "Later maps leave that code out, and every count the tools print says so.",
       "capability": "CAP1",
       "entry_points": []
     },
@@ -440,7 +443,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A person starts the local map server. Every project they have mapped is listed on one page in their browser.",
+      "trigger": "A person starts the local map server.",
+      "outcome": "Every project they have mapped is listed on one page in their browser.",
       "capability": "CAP3",
       "entry_points": [
         "EP26"
@@ -452,7 +456,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "A person opens a project's map. They see what the product does and drill from one feature down to a single box.",
+      "trigger": "A person opens a project's map.",
+      "outcome": "They see what the product does and drill from one feature down to a single box.",
       "capability": "CAP3",
       "entry_points": [
         "EP58",
@@ -465,7 +470,8 @@
       "actors": [
         "R2"
       ],
-      "trigger_outcome": "A reader picks the code link on a box. The file opens beside the map at that line. One more press hands it to their editor or the code host.",
+      "trigger": "A reader picks the code link on a box.",
+      "outcome": "The file opens beside the map at that line. One more press hands it to their editor or the code host.",
       "capability": "CAP3",
       "entry_points": [
         "EP91"
@@ -477,7 +483,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "The code has moved on since the map was pinned. A report names the parts of the map the change touched.",
+      "trigger": "The code has moved on since the map was pinned.",
+      "outcome": "A report names the parts of the map the change touched.",
       "capability": "CAP2",
       "entry_points": [
         "EP20"
@@ -489,7 +496,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A person agrees the change report is right. The map is edited to match, re-pinned, and checked again.",
+      "trigger": "A person agrees the change report is right.",
+      "outcome": "The map is edited to match, re-pinned, and checked again.",
       "capability": "CAP2",
       "entry_points": [
         "EP20"
@@ -501,7 +509,8 @@
       "actors": [
         "R1"
       ],
-      "trigger_outcome": "A person asks in plain language for a part of the map to move, split or be renamed. The map is edited in place and passes its checks.",
+      "trigger": "A person asks in plain language for a part of the map to move, split or be renamed.",
+      "outcome": "The map is edited in place and passes its checks.",
       "capability": "CAP2",
       "entry_points": [
         "EP20"
@@ -513,7 +522,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "Someone changed the instructions and wants to know the cost. Two maps of one project are scored and compared, with a verdict.",
+      "trigger": "Someone changed the instructions and wants to know the cost.",
+      "outcome": "Two maps of one project are scored and compared, with a verdict.",
       "capability": "CAP5",
       "entry_points": [
         "EP2",
@@ -526,7 +536,8 @@
       "actors": [
         "R3"
       ],
-      "trigger_outcome": "A build has finished and its chat is on disk. A report names the friction, the bugs and the gaps that run revealed.",
+      "trigger": "A build has finished and its chat is on disk.",
+      "outcome": "A report names the friction, the bugs and the gaps that run revealed.",
       "capability": "CAP5",
       "entry_points": [
         "EP1"
@@ -5090,7 +5101,12 @@
           ]
         },
         {
-          "name": "trigger_outcome",
+          "name": "trigger",
+          "type": "string",
+          "markers": []
+        },
+        {
+          "name": "outcome",
           "type": "string",
           "markers": []
         },

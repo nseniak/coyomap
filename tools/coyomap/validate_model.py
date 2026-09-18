@@ -6407,7 +6407,7 @@ def _anchor_pairs(m: ProjectModel) -> list[tuple[str, str]]:
         if iface.source and not url.match(iface.source):
             out.append((f"{iface.id} `source`", _where_href(iface.source) or iface.source))
     for u in m.use_cases:
-        href = _first_link_of(u, [u.name, u.trigger_outcome])  # actors are role ids now, not a link cell
+        href = _first_link_of(u, [u.name, u.trigger, u.outcome])  # actors are role ids now, not a link cell
         if href and not url.match(href):
             out.append((u.id, href))
     for group in group_forests(m):

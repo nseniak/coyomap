@@ -2433,11 +2433,12 @@ svg.story-wires marker path { fill: context-stroke; stroke: none; opacity: 1; }
 /* A STOP IS A BOX, the same two states a step has (`.pickbox`), so every use case on this board is
    hovered and picked one way. It needs padding of its own for the ring to hug, and the padding comes
    out of the row's own inset — `margin-left: -7px` puts the circle back where it was, so the column
-   of circles still lines up under the step titles above it. `max-width` grows by the same padding so
-   the TEXT column is unchanged at 190px. */
+   of circles still lines up under the step titles above it. `max-width` is set so the TEXT column
+   beside the circle measures what a station's does, because the two lanes now carry the same
+   sentence and a sentence that wraps differently in each lane reads as two different texts. */
 .journey-side { font: inherit; background: none; border: 0; text-align: left;
                 display: flex; gap: 7px; align-items: baseline; font-size: 11px; color: #5a6072;
-                cursor: pointer; max-width: 206px; padding: 4px 7px 5px; margin-left: -7px;
+                cursor: pointer; max-width: 252px; padding: 4px 7px 5px; margin-left: -7px;
                 border-radius: 8px; transition: box-shadow .12s; }
 /* THE USE CASE'S OWN TEXT is `.flow-step-title` here too, so a stop and a step are one size, one colour and
    one hover. The stop set its own 11px grey and the step 11.5px near-black, which put two sizes of
@@ -2654,12 +2655,18 @@ svg.story-wires marker path { fill: context-stroke; stroke: none; opacity: 1; }
    so the board still reads as one line of steps rather than as a wall of boxes, and it is the SAME
    box in all three states: nothing moves when it lights. */
 /* THE BOX IS INSET FROM ITS COLUMN, so two picked steps side by side keep clear air between their
-   rings instead of sharing an edge. The COLUMN is still 150px — 142 of box and 4 either side — so
-   the bullets down a row stay on their pitch and `HP_STEP_W` is unchanged. The bottom margin is
-   what keeps the box off the floor of the band it stands in. */
+   rings instead of sharing an edge. The COLUMN is 250px — 242 of box and 4 either side — and that
+   sum is `HP_STEP_W` in viewer.js, which lays the bullets out on the same pitch: move one number and
+   the other moves with it. The bottom margin keeps the box off the floor of the band it stands in.
+
+   IT WAS 142 IN A 150px COLUMN, until the box started carrying the use case's own sentence. A
+   sentence in a 120px text column ran to eleven lines on the reference maps, and the board levels
+   every box to the tallest, so the whole page paid for the longest one. Measured across both live
+   maps at 1440px: 242 is where the longest sentence settles at five lines and a row that fits today
+   still fits. */
 .flow-step { font: inherit; background: none; border: 0; text-align: left; color: inherit;
              display: flex; flex-direction: column; justify-content: flex-start;
-             width: 142px; margin: 0 4px 6px; flex: none; position: relative;
+             width: 242px; margin: 0 4px 6px; flex: none; position: relative;
              padding: 0 12px 6px 10px; cursor: pointer; border-radius: 8px;
              transition: box-shadow .12s, background .12s; }
 
@@ -2686,6 +2693,13 @@ svg.story-wires marker path { fill: context-stroke; stroke: none; opacity: 1; }
 .flow-step-num { font-size: 10px; font-weight: 700; color: #8a90a4; }
 .flow-step .flow-step-num { display: block; }
 .flow-step-title { display: block; font-size: 11.5px; line-height: 1.3; color: #1e2235; margin-top: 1px; }
+/* THE USE CASE'S OWN SENTENCE, under its name. Quiet and a half-size step down from the name, because
+   the name is what a reader scans a board for and the sentence is what they stop on. Never clamped:
+   a cut sentence loses its end, and the end is the outcome — the half the name has not already said.
+   `text-align: left` is stated because a station sits in a centred lane on one of its boards and a
+   ragged-right paragraph is what prose wants either way. */
+.flow-step-what { display: block; font-size: 11px; line-height: 1.35; color: #5a6072;
+                  text-align: left; margin: 3px 0 5px; }
 /* HOVER UNDERLINES THE TEXT, on every board. It was the step's alone, so a side stop lit its ring
    and said nothing about the words in it — and the words are the door. */
 .pickbox:hover .flow-step-title { color: #4f46e5; text-decoration: underline;

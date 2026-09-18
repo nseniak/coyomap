@@ -759,6 +759,17 @@ def test_a_station_is_a_dot_and_a_title_and_the_actor_s_rail_adds_the_step_numbe
     assert '<span class="flow-step-dot"></span>' in step
     assert step.index('flow-step-dot') < step.index('opt.num ?') < step.index('flow-step-title'), \
         "the number sits between the dot and the title, as on the Happy Path"
+    # THE USE CASE'S SENTENCE, on every box that names one — the station AND the two lower lanes.
+    # Three builders draw a box; one helper writes the sentence, so a fourth cannot be added
+    # without it and the three cannot word the same fact three ways.
+    assert step.index('flow-step-title') < step.index('ucWhatHtml(st.uc)'), \
+        "the sentence sits under the name, not over it"
+    for lane in ("${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}",):
+        assert zone.count(lane) == 2, "the side stop and the takes-part box both carry the sentence"
+    what = js[js.index("function ucWhatHtml(ucId) {"):
+              js.index("\n// ── ONE STEP")]
+    assert "cardFacts(ucId)" in what, "the same field the use case's own card reads, chosen once"
+    assert "mdInline(what)" in what, "authored prose, rendered as the card renders it"
 
 
 def test_the_actor_pages_two_lanes_are_named_once_and_share_one_height() -> None:

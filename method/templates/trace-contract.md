@@ -27,13 +27,13 @@ coyomap contract trace --from-slots <slots-dir> --out-dir <briefs-dir> --append 
 That is also the batch form: one slots file per agent, one process, every file checked before any
 brief is written.
 
-- **«USE_CASES»** — the `UCn` ids this agent owns, with each one's name, `Trigger → Outcome` **and
+- **«USE_CASES»** — the `UCn` ids this agent owns, with each one's name, `trigger`, `outcome` **and
   its declared `actors`**, copied from the map. Always whole use cases: **never split one use case's
   flow across two agents**, because a flow traced by two contexts loses its coherence.
   **The actors are not optional.** The legend prints roles and use cases as two unlinked lists, so
   an agent handed the ids alone cannot tell which role its flow should open with — and eight agents
   on one build each opened with the caller the code showed them, costing 34 endpoint repointings at
-  the barrier. Fill it as `UC12 Rename a tracked page (actors: R1) — Trigger → Outcome`.
+  the barrier. Fill it as `UC12 Rename a tracked page (actors: R1) — <trigger> → <outcome>`.
 - **«SF_RANGE»** — this agent's sub-flow id range (`SF1–9`, `SF10–19`, …), exactly like the harvest
   id ranges. Two agents minting `SF7` is a hard `assemble` failure.
 - **«LEGEND»** — the PATH to the id legend file (the assembled map, or a legend the lead wrote).
