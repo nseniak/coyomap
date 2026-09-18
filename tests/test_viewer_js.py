@@ -3654,11 +3654,11 @@ def test_code_and_operations_read_as_one_question() -> None:
     js = (VIEWER_DIR / "viewer.js").read_text()
     html = (VIEWER_DIR / "viewer.html").read_text()
     table = js[js.index("const VIEW_GROUPS = ["): js.index("\n];", js.index("const VIEW_GROUPS = ["))]
-    # Product and Under the hood, then TIME: the Change log is one timeline of the map's versions,
+    # Product and Under the hood, then TIME: the Update log is one list of the product's updates,
     # neither a product view nor a machine view, so it is a group of its own (2026-09-18).
     assert [g for g in re.findall(r"\['([a-z]+)', '", table)] == ["product", "hood", "changelog"], \
-        "three groups: Data and Glossary sit under Product now, Storage under the hood, the updates under Change log"
-    assert "'Under the hood'" in table and "'Change log'" in table
+        "three groups: Data and Glossary sit under Product now, Storage under the hood, the updates under Update log"
+    assert "'Under the hood'" in table and "'Update log'" in table
     hood = re.findall(r'<button data-view="(\w+)" data-group="hood">', html)
     # Storage is a machine fact — where the data physically lives — so it sits under the hood too.
     assert set(hood) == {"container", "data", "context", "tests", "deployment", "system"}, hood

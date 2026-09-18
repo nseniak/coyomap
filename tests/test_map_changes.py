@@ -173,6 +173,8 @@ def test_the_oldest_version_with_a_pin_is_the_commit_that_moved_it_there():
         proj = build_projects([str(root)])[root.name]
         assert version_for_pin(proj, pin1)["sha"] == third
         assert version_for_pin(proj, pin1, oldest=True)["sha"] == first
+        # The log's to-commit is pin2, which no committed map carries: the list says it has not landed.
+        assert [l["landed"] for l in list_changes(proj)["logs"]] == [None]
         assert version_for_pin(proj, "0000000", oldest=True) is None
         assert second != first
 
@@ -188,6 +190,7 @@ def test_the_logs_are_listed_with_the_latest_marked_and_a_broken_one_reported():
         assert [(l["name"], l["from"], l["to"], l["entries"], l["latest"]) for l in got["logs"]] == \
             [(f"{pin1[:7]}-{pin2[:7]}", pin1[:7], pin2[:7], 1, True)]
         assert got["logs"][0]["headlines"] == ["A guild keeps its founder"]
+        assert got["logs"][0]["landed"] is None, "the update sits on disk, uncommitted"
         assert got["pin"] == pin2
         assert got["problems"] and got["problems"][0].startswith("0000000-1111111.json:")
 

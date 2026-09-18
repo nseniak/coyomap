@@ -51,26 +51,22 @@ the code's names.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
   Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Subsystems,
   Storage, Dependencies, Tests, Deployment, System, Updates.
-- **group** — the three tabs above the views: Product, Under the hood, Change
+- **group** — the three tabs above the views: Product, Under the hood, Update
   log. A group is a set of tabs, never a page you can be on. Data (the entities)
   and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
-  two groups they made up went. Change log arrived on 2026-09-18: time is neither
+  two groups they made up went. Update log arrived on 2026-09-18: time is neither
   a product view nor a machine view.
-- **updates** — the Change log's one view: one row per run of `coyomap update`,
-  newest first; the map's other committed versions (rebuilds, repairs, renames,
-  uncommitted edits) sit folded under them with the map's own diff for each
-  step. An **update's page** tells the log by feature: a section per feature it
-  touches, in the Features page's order, each entry told in full under it with
+- **updates** — the Update log's one view: one row per run of `coyomap update`,
+  newest first, and nothing else. A rebuild, a repair or a rename is an event in
+  the map file's life, not in the product's, and the diff between two map files
+  is a developer's question, answered by `coyomap diff` on the command line. An
+  **update's page** tells the log by feature: a section per feature its use cases
+  belong to, in the Features page's order, each entry told in full under it with
   that feature's boxes as pills; then the product boxes no feature claims, then
   the machine boxes under the hood; then the waivers, the notes, and the diff
-  from the version before the update to the version it made, folded. **Mark on
-  the map** badges every box a version touches on every screen and puts the
-  choice in the address; it replaced the Compare… button and its picker.
-- **outside face** (of a use case) — the two sentences saying what the use case
-  is, from outside: its **trigger**, what the actor does to start it, and its
-  **outcome**, the result. They are two fields the map keeps apart, because a
-  reader judges them apart. A card joins them with an arrow; a details page
-  gives each its own labelled row. The inside face is the flow.
+  from the version before the update to the version its commit made, folded.
+  **Mark on the map** badges every box the update touches on every screen and
+  puts the choice in the address; it replaced the Compare… button and its picker.
 - **owner** (of a data area) — the feature the area's data exists FOR: the one
   that creates its records and runs their lifecycle. Authored, never derived.
 - **owner with no evidence** — the map says an area exists for a feature, but no
@@ -212,7 +208,7 @@ design principles these come from)
   the box. On a card list, scroll to the card and briefly ring it.
 - **view question** — the one sentence a view answers. It belongs to the view,
   not to any page, so it leads the content and never changes as you drill.
-- **group tab row** — the strip of group tabs: Product, Under the hood, Change
+- **group tab row** — the strip of group tabs: Product, Under the hood, Update
   log. The first strip under the title bar.
 - **view tab row** — the strip of view tabs, under the group tab row. With
   Product open it holds Overview, Features, Happy Path, Interfaces, Rules, Data,

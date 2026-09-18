@@ -30,7 +30,7 @@ repo and nothing installed.
 
 ## What coyomap shows
 
-The viewer shows your project in three views: *Product*, *Under the hood* and *Change log*.
+The viewer shows your project in three views: *Product*, *Under the hood* and *Update log*.
 
 **Product** shows the project's functionality: who uses it, its features and use cases, the happy
 path, the rules it enforces, and the data it keeps.
@@ -42,11 +42,11 @@ where data is stored, how it is deployed.
 
 <img src="assets/viewer-hood.png" alt="The coyomap viewer on a project's Components page: the map of one subsystem with one component selected and explained in a sentence, and that component's source code open on the right at the line the map points to." width="100%">
 
-**Change log** shows how the product changed, one entry per run of `coyomap update`, newest first.
+**Update log** shows how the product changed, one entry per run of `coyomap update`, newest first.
 An update's page tells its story by feature, in plain words: what the product now does differently,
 which boxes it touched, the evidence, with the map's own diff for that step underneath.
 
-<img src="assets/viewer-changelog.png" alt="The coyomap viewer on a project's Change log: one update's page, with its three entries told in full, the boxes each one names as pills, the evidence files, and the boxes the code touched without a change of meaning." width="100%">
+<img src="assets/viewer-changelog.png" alt="The coyomap viewer on a project's Update log: one update's page, with its three entries told in full, the boxes each one names as pills, the evidence files, and the boxes the code touched without a change of meaning." width="100%">
 
 You can start from a feature and drill down: the interfaces and data it touches, the components that do the
 work, and the code behind each.

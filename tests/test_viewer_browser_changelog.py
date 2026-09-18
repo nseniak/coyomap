@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The update log on screen, in a real browser: the Change log's Updates list reads the log, and the
+"""The update log on screen, in a real browser: the Update log's Updates list reads the log, and the
 map's own diff for that step sits under it as evidence.
 
 The served folder is a git repo whose one commit holds the map as it was (pinned to `aaaaaaa`); on
@@ -25,8 +25,11 @@ from coyomap.viewer.serve import Handler, build_projects
 
 from test_impact import commit
 from test_viewer_browser import _crumb, _page, _settle, make_served_map
-from test_viewer_browser_compare import NEW_NAME, OLD_NAME, OLD_UC, _texts, make_new_map, make_old_map
 
+OLD_UC = "Archive an organization"
+NEW_NAME = "Sign up and create a workspace"
+OLD_NAME = "Sign up and create an organization"
+NEW_STEP = "confirms the email the browser sent"
 OLD_PIN, NEW_PIN, LATER_PIN = "aaaaaaa", "bbbbbbb", "ccccccc"
 LOG = f"{OLD_PIN}-{NEW_PIN}"
 LOG_2 = f"{NEW_PIN}-{LATER_PIN}"
@@ -39,6 +42,33 @@ HEADLINE_1 = "Signing up now creates a workspace"
 SENTENCE_1 = "A new person gets a workspace of their own, and the sign-up confirms their email first."
 HEADLINE_2 = "Archiving an organization is gone"
 SENTENCE_2 = "Nobody can archive an organization any more; an unused one is simply left alone."
+
+
+def make_old_map(doc: dict[str, Any]) -> dict[str, Any]:
+    """The fixture plus a use case the new map no longer has, with a two-step flow of its own."""
+    old = json.loads(json.dumps(doc))
+    old["use_cases"].append({"id": "UC99", "name": OLD_UC, "actors": ["R2"], "capability": "CAP1",
+                             "trigger": "An org admin archives an organization nobody uses.", "outcome": "The organization is gone from every list."})
+    old["flows"].append({"uc": "UC99", "title": OLD_UC, "steps": [
+        {"n": 1, "src": "R2", "dst": "C15", "phrase": "opens the organization's settings", "where": None},
+        {"n": 2, "src": "C15", "dst": "C1", "phrase": "marks the organization archived", "where": None}]})
+    return old
+
+
+def make_new_map(doc: dict[str, Any]) -> None:
+    """The served map, edited in place: a rename, an inserted step, a reworded purpose, a moved line."""
+    uc = next(u for u in doc["use_cases"] if u["id"] == "UC1")
+    uc["name"] = NEW_NAME
+    flow = next(f for f in doc["flows"] if f["uc"] == "UC1")
+    steps = flow["steps"]
+    steps.insert(1, {"n": 2, "src": "R1", "dst": "C15", "phrase": NEW_STEP, "note": "", "where": None,
+                     "no_call_site": False, "subflow": None})
+    for i, st in enumerate(steps):
+        st["n"] = i + 1
+    c1 = next(c for c in doc["components"] if c["id"] == "C1")
+    c1["purpose"] = c1["purpose"] + " Fast."
+    c2 = next(c for c in doc["components"] if c["id"] == "C2")
+    c2["source"] = (c2.get("source") or "app/gateway.py:1").rsplit(":", 1)[0] + ":999"
 
 
 def make_log(doc: dict[str, Any]) -> dict[str, Any]:
@@ -118,6 +148,11 @@ def _screen_text(page: Any) -> str:
     return str(page.evaluate("() => document.getElementById('diagram').textContent"))
 
 
+def _texts(page: Any, selector: str) -> str:
+    """Every match's text, joined: a reworded sentence is several struck and marked runs."""
+    return str(page.evaluate(f"() => [...document.querySelectorAll({selector!r})].map((e) => e.textContent).join(' ')"))
+
+
 def _hash(page: Any) -> str:
     return str(page.evaluate("() => decodeURIComponent(location.hash)"))
 
@@ -139,25 +174,23 @@ def _ready(page: Any) -> None:
 
 
 def _open_update(page: Any) -> None:
-    """From the Updates list, open the row that carries the newest update."""
-    page.click('#diagram .ecard:has(.badge.update)')
+    """From the Updates list, open the newest update."""
+    page.click('#diagram .ecard[data-key]')
     _ready(page)
 
 
-def test_the_updates_list_leads_with_the_update_and_folds_the_other_versions_away() -> None:
+def test_the_updates_list_holds_the_updates_and_nothing_else() -> None:
     with _served_update() as url, _page(url + "#v=updates") as page:
         _ready(page)
         assert _crumb(page) == "Updates"
         assert [b for b in page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")] \
-            == ["Product", "Under the hood", "Change log"]
+            == ["Product", "Under the hood", "Update log"]
         rows = _cards(page)
-        assert len(rows) == 2, "the update, then the one committed version folded away"
-        assert "Uncommitted edits" in rows[0] and "not committed yet" in rows[0] and HEADLINE_1 in rows[0] and HEADLINE_2 in rows[0], \
-            "the update sits on disk, so its story rides the top row"
-        assert "Map the codebase" in rows[1] and "No story" in rows[1]
-        assert page.query_selector("details.tl-others .ecard") and not page.evaluate("() => document.querySelector('details.tl-others').open"), \
-            "a version with no story sits under the fold"
-        assert "1 update" in _text(page, ".landing-head") and "1 version" in _text(page, ".landing-head")
+        assert len(rows) == 1, "one row per run of coyomap update; the map's committed versions are not rows"
+        assert f"Update {OLD_PIN} → {NEW_PIN}" in rows[0] and HEADLINE_1 in rows[0] and HEADLINE_2 in rows[0]
+        assert "not committed yet" in rows[0], "the update sits on disk"
+        assert "Map the codebase" not in _screen_text(page), "the commit that built the map is not the product's history"
+        assert "1 update" in _text(page, ".landing-head")
         assert not _marked(page)
         assert not page.js_errors, page.js_errors
 
@@ -203,7 +236,7 @@ def test_an_update_s_page_tells_the_log_by_feature_with_its_waivers_and_notes() 
 
 
 def test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story() -> None:
-    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
+    with _served_update() as url, _page(f"{url}#v=updates&at={LOG}") as page:
         _ready(page)
         page.click('.ecard-entry .item-pill[data-item="UC1"]')
         _ready(page)
@@ -213,7 +246,7 @@ def test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story() -> None:
 
 
 def test_marking_the_update_badges_every_box_it_names_and_a_box_s_page_says_why() -> None:
-    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
+    with _served_update() as url, _page(f"{url}#v=updates&at={LOG}") as page:
         _ready(page)
         page.click("button.cmp-mark")
         _ready(page)
@@ -233,7 +266,7 @@ def test_marking_the_update_badges_every_box_it_names_and_a_box_s_page_says_why(
         page.wait_for_selector("#crumb h1", state="attached")
         _ready(page)
         assert f"cmp=log:{LOG}" in _hash(page) and page.query_selector(".cmpsec")
-        page.goto(f"{url}#v=updates&at=disk&cmp=log:{LOG}")
+        page.goto(f"{url}#v=updates&at={LOG}&cmp=log:{LOG}")
         _ready(page)
         page.click("button.cmp-stop")
         _ready(page)
@@ -251,7 +284,7 @@ def test_a_box_the_entry_only_names_is_named_in_the_story_not_changed_by_it() ->
 
 
 def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_went() -> None:
-    with _served_update() as url, _page(url + "#v=updates&at=disk") as page:
+    with _served_update() as url, _page(f"{url}#v=updates&at={LOG}") as page:
         _ready(page)
         page.click('.cmp-log-pill[data-key="removed:UC99"]')
         _ready(page)
@@ -261,7 +294,7 @@ def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_wen
         assert "Not in the current map" in text and "marks the organization archived" in text, "the old map's own words follow"
         for internal in ("UC99", "R2", "C15"):
             assert internal not in text, f"an id on screen: {internal}"
-        assert "at=disk" in _hash(page)
+        assert f"at={LOG}" in _hash(page)
         assert not page.js_errors, page.js_errors
 
 
@@ -287,8 +320,9 @@ def test_an_older_update_s_evidence_is_its_own_step_and_credits_nothing_that_cam
     with _served_update(later=True) as url, _page(url + "#v=updates") as page:
         _ready(page)
         rows = _cards(page)
-        assert len(rows) == 3 and HEADLINE_3 in rows[0] and HEADLINE_1 in rows[1] and "Map the codebase" in rows[2]
-        page.click('#diagram .ecard:nth-of-type(2)')
+        assert len(rows) == 2 and HEADLINE_3 in rows[0] and HEADLINE_1 in rows[1]
+        assert "not committed yet" in rows[0] and "landed" in rows[1].lower()
+        page.click(f'#diagram .ecard[data-key="at:{LOG}"]')
         _ready(page)
         assert _crumb(page) == f"Update {OLD_PIN} → {NEW_PIN}"
         assert "from the version before this update to the version it made" in _text(page, "details.cmp-evidence > summary")
@@ -321,12 +355,69 @@ def test_a_read_that_fails_is_said_on_the_page_and_can_be_tried_again() -> None:
         assert not page.js_errors, page.js_errors
 
 
-def test_a_link_naming_a_version_the_history_does_not_hold_says_so_at_once() -> None:
-    with _served_update() as url, _page(url + "#v=updates&at=" + "deadbeef" * 5) as page:
+def test_a_link_naming_an_update_the_map_does_not_have_says_so_at_once() -> None:
+    with _served_update() as url, _page(url + "#v=updates&at=deadbee-cafe000") as page:
         _ready(page)
         text = _screen_text(page)
-        assert "not in the map’s history" in text and "Reading the map" not in text
+        assert "not beside this map" in text and "Reading the map" not in text
         assert not page.js_errors, page.js_errors
+
+
+def test_the_evidence_fold_lists_each_changed_row_with_its_summary_and_the_filters_read_it() -> None:
+    """The map's own diff under an update: a renamed use case's card says so and opens its page with
+    the old words struck and the new marked; a component whose code line only moved hides behind the
+    code-links filter, and is counted where it hides."""
+    with _served_update() as url, _page(f"{url}#v=updates&at={LOG}&cmp=log:{LOG}") as page:
+        _ready(page)
+        page.click("details.cmp-evidence > summary")
+        _ready(page)
+        card = _text(page, 'details.cmp-evidence .ecard[data-id="UC1"]')
+        assert NEW_NAME in card and "1 added" in card and f"renamed from {OLD_NAME}" in card
+        assert not page.query_selector('details.cmp-evidence .ecard[data-id="C2"]'), "a moved line is hidden while code links are off"
+        assert _text(page, 'button.cmp-filter[data-cls="link"]') == "code links 1", "what is hidden is counted where it is hidden"
+        page.click('button.cmp-filter[data-cls="link"]')
+        _ready(page)
+        assert "code link moved" in _text(page, 'details.cmp-evidence .ecard[data-id="C2"]')
+        page.click('details.cmp-evidence .ecard[data-id="UC1"]')
+        _ready(page)
+        assert _crumb(page) == NEW_NAME
+        block = _text(page, ".cmpsec")
+        assert "organization" in _texts(page, ".cmpsec del") and "workspace" in _texts(page, ".cmpsec ins")
+        assert NEW_STEP in block and "renumbered" in block
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_marked_update_badges_the_subsystem_holding_a_changed_component() -> None:
+    with _served_update() as url, _page(f"{url}#v=container&cmp=log:{LOG}") as page:
+        _ready(page)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .diff-badge').length") >= 1, \
+            "the subsystem holding the reworded component is badged on the overview"
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_map_with_no_update_shows_the_tab_with_what_it_is_for_and_how_to_get_one() -> None:
+    """The tab is always there. A map that has no update yet says what the tab holds and how an
+    update comes to be, in the reader's words, rather than an empty screen."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_served_map(Path(td), "alpha")
+        projects = build_projects([str(folder)])
+        slug = next(iter(projects))
+        Handler.store = RecentsStore()
+        Handler.projects = projects
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            with _page(f"http://127.0.0.1:{httpd.server_address[1]}/coyomap/{slug}/#v=updates") as page:
+                _ready(page)
+                assert _crumb(page) == "Updates"
+                assert "Update log" in page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")
+                text = _screen_text(page)
+                assert "No update yet" in text and "update log" in text and "/coyomap update" in text and "coyomap update" in text
+                assert "0 update" not in _text(page, ".landing-head"), "a count of nothing is not drawn"
+                assert not page.js_errors, page.js_errors
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
 
 def test_the_rules_landing_marks_the_area_of_an_edited_rule() -> None:
@@ -344,7 +435,7 @@ def test_after_stop_marking_the_address_never_carries_a_comparison_the_screen_do
         _ready(page)
         page.click('#groupsw button[data-group="changelog"]')
         _ready(page)
-        page.click('#diagram .ecard:has(.badge.update)')
+        page.click('#diagram .ecard[data-key]')
         _ready(page)
         page.click("button.cmp-stop")
         _ready(page)

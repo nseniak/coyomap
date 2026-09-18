@@ -609,9 +609,12 @@ def list_changes(proj: Project) -> dict[str, Any]:
             heads.append(LogHead(name, log.from_commit, log.to_commit, log.date, len(log.entries)))
             headlines[name] = [e.headline for e in log.entries]
     ordered = order_logs(heads, proj.commit or None)
+    # `landed`: the commit that put the update's map in the folder's history — the oldest version
+    # whose pin is the log's to-commit — or null while the update sits uncommitted on disk.
     return {"logs": [{"name": h.name, "from": h.from_commit, "to": h.to_commit, "date": h.date,
                       "entries": h.entries, "headlines": headlines.get(h.name, []),
-                      "latest": i == 0 and commit_matches(h.to_commit, proj.commit)}
+                      "latest": i == 0 and commit_matches(h.to_commit, proj.commit),
+                      "landed": version_for_pin(proj, h.to_commit, oldest=True)}
                      for i, h in enumerate(ordered)],
             "pin": proj.commit or None, "problems": problems}
 

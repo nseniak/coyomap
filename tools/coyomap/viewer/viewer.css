@@ -1926,22 +1926,9 @@ details.cmp-evidence .cmp-filters { margin: 0 0 10px; }
 .cmp-evidence-page { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
 .cmp-evidence-page h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
                         letter-spacing: .05em; color: #6b7280; }
-/* THE TIMELINE: one row per version of the map, the foot for a map file elsewhere on disk, and a
-   version's page where the diff is the page itself when the version carries no story. */
-.cmp-evidence-open { margin-top: 12px; }
-.tl-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; padding: 10px 12px;
-           border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; font-size: 12.5px; color: #374151; }
-.tl-foot .tl-foot-lbl { font-weight: 600; }
-.tl-foot input { flex: 1 1 260px; min-width: 160px; font: inherit; font-size: 12.5px; padding: 4px 8px;
-                 border: 1px solid #d1d5db; border-radius: 7px; }
-.tl-foot button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
-                  background: #fff; color: #374151; border: 1px solid #d1d5db; }
-.tl-foot button:hover { background: #eef2ff; border-color: #c7d2fe; }
-details.tl-others { margin: 16px 0 0; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; }
-details.tl-others > summary { cursor: pointer; font-size: 12.5px; color: #374151; font-weight: 600; }
-details.tl-others > summary .muted { font-weight: 400; }
-details.tl-others[open] > summary { margin-bottom: 8px; }
 .cmp-features-line { margin: 0 0 10px; font-size: 12px; }
+.upd-empty p { margin: 0 0 8px; font-size: 13px; color: #374151; max-width: 72ch; }
+.upd-empty p.empty { margin-bottom: 10px; }
 .cmp-doc-error { color: #92400e; }
 button.cmp-retry { font: inherit; font-size: 11.5px; padding: 1px 8px; border-radius: 8px; cursor: pointer;
                    background: #fff; color: #374151; border: 1px solid #d1d5db; margin-left: 6px; }
