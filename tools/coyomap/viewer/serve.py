@@ -47,6 +47,9 @@ from coyomap.impact_git import PREINDEX_JSON, compute_impact, load_map_extents
 from coyomap.impact_git import resolve_ref as impact_resolve_ref
 from coyomap.impact_ripple import RippleOptions, build_impact_result
 from coyomap.model import old_map_folder_hint
+from coyomap.changelog import commit_matches, load_log, to_view
+from coyomap.mapdiff import kinds_json
+from coyomap.viewer.changes import LOG_NAME, LogHead, log_name, order_logs, pin_of
 from coyomap.viewer.compare import (
     LOG_FORMAT, MapVersion, compare_payload, history_payload, load_map_doc, parse_history,
     parse_ref, version_label,
@@ -114,6 +117,9 @@ class Project:
     #: `api/compare` answers by commit ref, cached per map version: a commit's map never changes, and
     #: the served side is dropped with the other caches when the map file does.
     compare_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The map's own pin at each committed version, by that commit's sha. Never dropped: a commit's
+    #: map never changes, and reading it is a git call and a header parse per version.
+    pin_cache: dict[str, str | None] = field(default_factory=dict)
 
 
 def _strip_dirty(commit: str) -> str:
@@ -456,15 +462,39 @@ def _map_rel(proj: Project) -> str:
         return f".coyomap/{MAP_JSON}"
 
 
-def map_history(proj: Project, limit: int = 60) -> dict[str, Any]:
+def map_history(proj: Project, limit: int = 60, pins: bool = False) -> dict[str, Any]:
     """The commits that changed the map file, newest first, following the folder rename, and
-    whether the file on disk has edits the last commit does not."""
+    whether the file on disk has edits the last commit does not. With `pins`, each version also
+    says which code commit the map described then — its own pin — which is how an update log's
+    from-commit finds the map it was written against."""
     rel = _map_rel(proj)
     code, out = _git(proj.repo_root, ["log", f"-n{limit}", "--follow", f"--format={LOG_FORMAT}",
                                       "--name-only", "--", rel])
     versions = parse_history(out.decode("utf-8", "replace")) if code == 0 else []
     dirty_code, _ = _git(proj.repo_root, ["diff", "--quiet", "HEAD", "--", rel])
-    return history_payload(versions, dirty=bool(versions) and dirty_code == 1)
+    payload = history_payload(versions, dirty=bool(versions) and dirty_code == 1)
+    if pins:
+        for row in payload["versions"]:
+            row["pin"] = _pin_at(proj, str(row["sha"]), str(row["path"]))
+    return payload
+
+
+def _pin_at(proj: Project, sha: str, path: str) -> str | None:
+    """The map's own pin at one committed version, cached per commit."""
+    if sha not in proj.pin_cache:
+        blob = git_show(proj.repo_root, sha, path)
+        proj.pin_cache[sha] = pin_of(blob.decode("utf-8", "replace")) if blob is not None else None
+    return proj.pin_cache[sha]
+
+
+def version_for_pin(proj: Project, commit: str) -> dict[str, Any] | None:
+    """The newest committed version of the map whose own pin is `commit`: the map an update log
+    starting from that commit was written against, and so the old side of the log's evidence. Read
+    newest first and stopped at the first match, so the usual answer costs one git read."""
+    for row in map_history(proj)["versions"]:
+        if commit_matches(_pin_at(proj, str(row["sha"]), str(row["path"])), commit):
+            return {**row, "pin": _pin_at(proj, str(row["sha"]), str(row["path"]))}
+    return None
 
 
 def _old_map_at(proj: Project, sha: str) -> OldMap:
@@ -526,6 +556,69 @@ def compare_with(proj: Project, ref: str) -> dict[str, Any]:
     payload = compare_payload(new_doc, old.doc, ref, old.side, new)
     if kind == "commit":
         proj.compare_cache[ref] = payload
+    return payload
+
+
+# --- the update logs (api/changes) ----------------------------------------------------------------
+# One file per update beside the map, written by the agent that read the code (method/change-impact.md,
+# "The log"). The viewer's Changes tabs show the newest one without any comparison armed; picking one
+# in the Compare… picker arms change mode with the log as the story and the map version at the log's
+# from-commit as the evidence. The shape of a resolved log is `changelog.to_view`'s; this file only
+# finds the files and the old map.
+
+def changes_dir(proj: Project) -> Path:
+    return proj.map_json.parent / "changes"
+
+
+def list_changes(proj: Project) -> dict[str, Any]:
+    """`api/changes`: the map's update logs, newest first, and the files in the folder that should
+    have been logs and could not be read."""
+    heads: list[LogHead] = []
+    problems: list[str] = []
+    folder = changes_dir(proj)
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            name = log_name(path)
+            if name is None:
+                continue
+            try:
+                log = load_log(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                problems.append(f"{path.name}: {e}")
+                continue
+            heads.append(LogHead(name, log.from_commit, log.to_commit, log.date, len(log.entries)))
+    ordered = order_logs(heads, proj.commit or None)
+    return {"logs": [{"name": h.name, "from": h.from_commit, "to": h.to_commit, "date": h.date,
+                      "entries": h.entries, "latest": i == 0 and commit_matches(h.to_commit, proj.commit)}
+                     for i, h in enumerate(ordered)],
+            "pin": proj.commit or None, "problems": problems}
+
+
+def change_log_view(proj: Project, name: str) -> dict[str, Any]:
+    """`api/changes/<from>-<to>`: one log with its boxes by name, kind and group, plus the map
+    version it was written against (`from_version`, the old side of its evidence) when the folder's
+    history holds one. A name that is not a log's is the reader's input (ValueError); a log the
+    folder does not have is a LookupError; a log file that cannot be read is a RuntimeError."""
+    if not LOG_NAME.match(name):
+        raise ValueError("not the name of an update log (<from>-<to>)")
+    path = changes_dir(proj) / f"{name}.json"
+    if not path.is_file():
+        raise LookupError(f"no update log {name} beside this map")
+    try:
+        log = load_log(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"the update log {name} could not be read: {e}") from None
+    new_doc = load_map_doc(proj.map_json.read_text(encoding="utf-8"), "the served map")
+    version = version_for_pin(proj, log.from_commit)
+    old_doc: dict[str, Any] | None = None
+    if version is not None:
+        try:
+            old_doc = _old_map_at(proj, str(version["sha"])).doc
+        except ValueError:
+            version = None
+    payload = to_view(log, new_doc, old_doc)
+    payload.update({"name": name, "latest": commit_matches(log.to_commit, proj.commit),
+                    "from_version": version, "kinds": kinds_json()})
     return payload
 
 
@@ -973,8 +1066,22 @@ class Handler(BaseHTTPRequestHandler):
             # The impact picker's list: the pin's ancestors AND descendants (M3).
             return self._json(impact_commits(proj))
         if rest == ["mapcommits"]:
-            # The compare picker's list: every commit that changed the map file, newest first.
-            return self._json(map_history(proj))
+            # The compare picker's list: every commit that changed the map file, newest first, each
+            # with the map's own pin at that version.
+            return self._json(map_history(proj, pins=True))
+        if rest and rest[0] == "changes" and len(rest) <= 2:
+            # The map's update logs: the list, or one log with its boxes resolved to names.
+            if len(rest) == 1:
+                return self._json(list_changes(proj))
+            try:
+                return self._json(change_log_view(proj, rest[1]))
+            except ValueError as e:
+                return self._send(400, "text/plain; charset=utf-8", str(e).encode("utf-8"))
+            except LookupError as e:
+                return self._send(404, "text/plain; charset=utf-8", str(e).encode("utf-8"))
+            except (RuntimeError, OSError, KeyError, IndexError, TypeError) as e:
+                return self._send(500, "text/plain; charset=utf-8",
+                                  f"could not read the update log: {e}".encode("utf-8"))
         if rest == ["compare"]:
             # The change document between an old map (?ref=<sha> or ?ref=path:<file>) and the served
             # map. A ref the reader typed wrong is their input → 400; a git or disk fault → 500.

@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from coyomap import subverb_help
-from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_spec, looks_like_map
+from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, looks_like_map
 from coyomap.model import ModelError, ProjectModel, load_model
 from coyomap.prose import Finding, field_findings, iter_prose_fields
 from coyomap.validate_model import validate_model
@@ -400,7 +400,7 @@ def _chain(row: dict[str, Any], key: str, ahead: int = 0) -> list[tuple[int, str
 
 # ── lint: is the log well formed against this map? ───────────────────────────────────────────────
 
-def _commit_matches(a: str | None, b: str | None) -> bool:
+def commit_matches(a: str | None, b: str | None) -> bool:
     """Two commit spellings name one commit when one is a prefix of the other (`-dirty` dropped)."""
     x, y = (a or "").removesuffix("-dirty"), (b or "").removesuffix("-dirty")
     return bool(x) and bool(y) and (x.startswith(y) or y.startswith(x))
@@ -459,7 +459,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     chains: list[tuple[Entry, FieldEdit, list[tuple[int, str | int]]]] = []   # every edit's target, by identity
     removed_by: dict[str, str] = {}           # row id → the entry that removes it
     pin = doc.get("commit")
-    if isinstance(pin, str) and pin and not _commit_matches(log.from_commit, pin):
+    if isinstance(pin, str) and pin and not commit_matches(log.from_commit, pin):
         p.errors.append(f"the log starts from {log.from_commit}, the map is pinned to {pin}")
     seen: set[str] = set()
     seen_edits: dict[tuple[str, str], str] = {}
@@ -774,7 +774,7 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
     a waiver on a box that did not change — nor, when `--touched` is given, was touched."""
     p = Problems()
     new_pin = new_doc.get("commit")
-    if isinstance(new_pin, str) and new_pin and not _commit_matches(log.to_commit, new_pin):
+    if isinstance(new_pin, str) and new_pin and not commit_matches(log.to_commit, new_pin):
         p.errors.append(f"the log ends at {log.to_commit}, the new map is pinned to {new_pin}")
     delta = diff_maps(old_doc, new_doc)
     changed: dict[str, str] = {}
@@ -854,35 +854,43 @@ def _row_name(kind: str, row: dict[str, Any]) -> str | None:
     return None
 
 
-def _group_of(rid: str, doc_index: dict[str, tuple[str, dict[str, Any]]], added_kind: dict[str, str]) -> str:
-    array = added_kind.get(rid) or (doc_index[rid][0] if rid in doc_index else "")
+def _group_of(rid: str, doc_index: dict[str, tuple[str, dict[str, Any]]], added_kind: dict[str, str],
+              old_index: dict[str, tuple[str, dict[str, Any]]] | None = None) -> str:
+    """Which group tab a box belongs to. A box the map no longer holds is looked up in the map as it
+    was (`old_index`), when the caller has it."""
+    array = added_kind.get(rid) or (doc_index[rid][0] if rid in doc_index
+                                    else (old_index or {})[rid][0] if rid in (old_index or {}) else "")
     if rid.startswith(FLOW_PREFIX):
         array = "use_cases"
     spec = KIND_OF.get(array)
     return spec.group if spec else "hood"
 
 
-def _text(v: Any, names: dict[str, str] | None = None) -> str:
-    if v is None:
-        return "—"
-    if isinstance(v, str):
-        return (names or {}).get(v, v)
-    if isinstance(v, list):
-        return ", ".join(_text(x, names) for x in v)
-    if isinstance(v, dict):
-        return "; ".join(f"{k}: {_text(x, names)}" for k, x in v.items())
-    return json.dumps(v, ensure_ascii=False)
+def edit_view(ed: FieldEdit, names: dict[str, str]) -> dict[str, Any]:
+    """One edit as the map diff's own field row (`mapdiff.FieldDelta`), computed by the diff engine
+    on the one field the edit names, so the viewer draws the story's edit and the evidence under it
+    with one renderer, and a site reads the way it reads there: its reason, then its file. An item
+    addressed on its own (`sites[2]`) is a one-item list, so it reads as what came or went. Never an
+    id: the engine names every id it meets."""
+    parts = ed.key.split(".")
+    leaf = parts[-1].split("[")[0]
+    was, now = ed.was, ed.now
+    if "[" in parts[-1] and not isinstance(was, list) and not isinstance(now, list):
+        was, now = ([] if was is None else [was]), ([] if now is None else [now])
+    rows = field_deltas({leaf: was}, {leaf: now}, {}, frozenset(), names, names)
+    view: dict[str, Any] = asdict(rows[0]) if rows else {
+        "cls": field_spec(leaf).cls, "old": None, "new": None, "spans": [], "added": [], "removed": []}
+    view.update({"key": ed.key, "label": _edit_label(ed.key)})
+    return view
 
 
 def _edit_text(ed: FieldEdit, names: dict[str, str]) -> str:
-    """One edit as a reader reads it: a list by what came and went, by name; anything else as
-    was → now. Never an id: a way in reads by its trigger, a box by its name."""
-    if isinstance(ed.was, list) or isinstance(ed.now, list):
-        was = [_text(x, names) for x in (ed.was if isinstance(ed.was, list) else [])]
-        now = [_text(x, names) for x in (ed.now if isinstance(ed.now, list) else [])]
-        bits = [f"+ {x}" for x in now if x not in was] + [f"− {x}" for x in was if x not in now]
+    """The same edit on one markdown line: a list by what came and went, anything else as was → now."""
+    view = edit_view(ed, names)
+    if isinstance(ed.was, list) or isinstance(ed.now, list) or "[" in ed.key.split(".")[-1]:
+        bits = [f"+ {x}" for x in view["added"]] + [f"− {x}" for x in view["removed"]]
         return "; ".join(bits) if bits else "reordered"
-    return f"{_text(ed.was, names)} → {_text(ed.now, names)}"
+    return f"{view['old'] or '—'} → {view['new'] or '—'}"
 
 
 def _edit_label(key: str) -> str:
@@ -899,26 +907,85 @@ def _edit_label(key: str) -> str:
     return label
 
 
-def render(log: ChangeLog, doc: dict[str, Any]) -> str:
-    """Markdown: the header, then each entry under the group its boxes belong to (Product first),
-    with its boxes by name and its edits as label: was → now. An entry whose boxes span both groups
-    appears under both."""
+@dataclass(frozen=True)
+class LogNames:
+    """Every box a log can name, by name, and the array each row the log adds goes into."""
+    names: dict[str, str]
+    added_kind: dict[str, str]
+
+
+def _log_names(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None = None) -> LogNames:
+    """Every box a log can name, by name — the map's own rows, a flow under its use case's name, the
+    rows the log adds — and the array each added row goes into. A removed box is no longer in the
+    map, so its name comes from `old_doc`, the map as it was, when the caller has it."""
     names = _names(doc)
+    if old_doc is not None:
+        for rid, name in _names(old_doc).items():
+            names.setdefault(rid, name)
     for rid in list(names):
         names.setdefault(FLOW_PREFIX + rid, names[rid])   # a flow reads by its use case's name
-    index = index_map(doc)
     added_kind: dict[str, str] = {}
     for e in log.entries:
         for a in e.added:
             rid = a.row.get("id") if isinstance(a.row.get("id"), str) else synthetic_id(a.kind, a.row)
-            if rid:
-                added_kind[rid] = a.kind
-    for e in log.entries:
-        for a in e.added:
-            rid = a.row.get("id") if isinstance(a.row.get("id"), str) else synthetic_id(a.kind, a.row)
+            if not rid:
+                continue
+            added_kind[rid] = a.kind
             name = _row_name(a.kind, a.row)
-            if rid and name:
+            if name:
                 names.setdefault(rid, name)
+    return LogNames(names, added_kind)
+
+
+def _box_state(rid: str, e: Entry, added_kind: dict[str, str]) -> str:
+    """What the entry does to a box it names: adds it, removes it, edits it, or only names it. A
+    use case named by its flow is the use case, as an edit on the flow is an edit on it."""
+    if rid in added_kind:
+        return "added"
+    if rid in e.removed:
+        return "removed"
+    box = rid[len(FLOW_PREFIX):] if rid.startswith(FLOW_PREFIX) else rid
+    return "modified" if box in e.ids_edited() else "named"
+
+
+def to_view(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The log as the viewer reads it: every box by name, kind and group, with what its entry does
+    to it; every edit by its field's label and its words. An id travels only as the key the viewer
+    opens a box by, never as a word on screen. `old_doc` names the boxes an entry removed, which the
+    map no longer holds; without it their name is null and the viewer says the kind."""
+    resolved = _log_names(log, doc, old_doc)
+    names, added_kind = resolved.names, resolved.added_kind
+    index = index_map(doc)
+    old_index = index_map(old_doc) if old_doc is not None else {}
+
+    def box(rid: str, e: Entry) -> dict[str, Any]:
+        array = added_kind.get(rid) or (index[rid][0] if rid in index else old_index[rid][0] if rid in old_index else "")
+        if rid.startswith(FLOW_PREFIX):
+            array = "use_cases"
+        spec = KIND_OF.get(array)
+        return {"id": rid, "name": names.get(rid), "kind": array, "group": _group_of(rid, index, added_kind, old_index),
+                "word": spec.word if spec else ("the map" if rid == MAP_ID else "box"),
+                "state": _box_state(rid, e, added_kind)}
+
+    def edit(ed: FieldEdit) -> dict[str, Any]:
+        box_id = ed.id[len(FLOW_PREFIX):] if ed.id.startswith(FLOW_PREFIX) else ed.id
+        return {"box": box_id, "name": names.get(box_id), **edit_view(ed, names)}
+
+    entries = [{"id": e.id, "headline": e.headline, "sentence": e.sentence, "confidence": e.confidence,
+                "evidence": list(e.evidence), "boxes": [box(i, e) for i in e.elements],
+                "edits": [edit(ed) for ed in e.edits]} for e in log.entries]
+    return {"from": log.from_commit, "to": log.to_commit, "date": log.date, "entries": entries,
+            "waived": [{"id": w.id, "name": names.get(w.id), "why": w.why} for w in log.waived],
+            "notes": log.notes}
+
+
+def render(log: ChangeLog, doc: dict[str, Any]) -> str:
+    """Markdown: the header, then each entry under the group its boxes belong to (Product first),
+    with its boxes by name and its edits as label: was → now. An entry whose boxes span both groups
+    appears under both."""
+    resolved = _log_names(log, doc)
+    names, added_kind = resolved.names, resolved.added_kind
+    index = index_map(doc)
     lines = [f"# What changed: {log.from_commit[:10]} → {log.to_commit[:10]} ({log.date})", ""]
     n_add = sum(len(e.added) for e in log.entries)
     n_rem = sum(len(e.removed) for e in log.entries)

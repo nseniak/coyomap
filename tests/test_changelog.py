@@ -241,6 +241,46 @@ def test_a_list_edit_renders_as_what_came_and_went_by_name():
     assert "- Open the map · step 2 · Code link: srv.py:21 → srv.py:40" in md
 
 
+def test_the_viewer_s_form_names_every_box_with_its_kind_group_and_what_the_entry_did_to_it():
+    """`to_view` is what the Changes tabs draw: a box by name, kind and group, with the entry's act on
+    it; an edit by its field's label, its words, and the word spans the map's own diff uses. A removed
+    box is named from the map as it was, and has no name without it."""
+    doc = make_doc(components=[{"id": "C1", "name": "Server", "source": "srv.py:10", "purpose": "serves the map",
+                                "files": ["srv.py"]}])
+    old = copy(doc)
+    old["components"].append({"id": "C2", "name": "Worker", "source": "w.py:1", "purpose": "runs the queue"})
+    log = make_log(make_entry(elements=["BR1", "C1", "BR2", "C2", "UC1"],
+                              edits=[FieldEdit("BR1", "risk", "a team is left open", "a team is locked out"),
+                                     FieldEdit("BR1", "statement", "A token is checked", "A token is checked twice"),
+                                     FieldEdit("flow:UC1", "steps[n=2].phrase", "does thing 2", "does the second thing"),
+                                     FieldEdit("C1", "files", ["srv.py"], ["srv.py", "cli.py"])],
+                              added=[Addition("rules", make_rule("BR2", "A token expires"))], removed=["C2"],
+                              evidence=["srv.py"], confidence="likely"))
+    view = changelog.to_view(log, doc, old)
+    assert (view["from"], view["to"], view["date"]) == ("aaaaaaa", "bbbbbbb", "2026-09-17")
+    (e,) = view["entries"]
+    assert (e["headline"], e["confidence"], e["evidence"]) == ("The reader sees a plainer rule", "likely", ["srv.py"])
+    assert [(b["name"], b["kind"], b["word"], b["group"], b["state"]) for b in e["boxes"]] == [
+        ("A token is checked", "rules", "rule", "product", "modified"),
+        ("Server", "components", "component", "hood", "modified"),
+        ("A token expires", "rules", "rule", "product", "added"),
+        ("Worker", "components", "component", "hood", "removed"),
+        ("Open the map", "use_cases", "use case", "product", "modified"),
+    ]
+    risk, statement, step, files = e["edits"]
+    assert (risk["box"], risk["name"], risk["label"], risk["cls"]) == ("BR1", "A token is checked", "Risk", "structure")
+    assert (risk["old"], risk["new"], risk["spans"]) == ("a team is left open", "a team is locked out", [])
+    assert statement["cls"] == "wording", "a sentence gets its changed words marked"
+    assert "".join(sp["text"] for sp in statement["spans"] if sp["op"] != "ins") == "A token is checked"
+    assert "".join(sp["text"] for sp in statement["spans"] if sp["op"] != "del") == "A token is checked twice"
+    assert (step["box"], step["name"], step["label"]) == ("UC1", "Open the map", "step 2 · Phrase")
+    assert (files["added"], files["removed"], files["cls"]) == (["cli.py"], [], "structure")
+    # Without the map as it was, the removed box keeps its kind and group from nowhere: null name, no group known.
+    bare = changelog.to_view(log, doc)
+    worker = bare["entries"][0]["boxes"][3]
+    assert worker["name"] is None and worker["state"] == "removed"
+
+
 def test_the_rendering_names_boxes_and_puts_each_entry_under_its_group():
     doc = make_doc()
     log = make_log(

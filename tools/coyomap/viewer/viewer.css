@@ -1357,6 +1357,7 @@ body.panel-dragging { user-select: none; }
 .badge.modified { background: #fff8c5; color: #9a6700; }
 .badge.deleted { background: #ffebe9; color: #cf222e; }
 .badge.rippled { background: #ffedd5; color: #b45309; }  /* the change-impact summary's "ripples to" group */
+.badge.named { background: #eef2ff; color: #3730a3; }    /* an update log names the box without editing it */
 .badge.role { background: #dcfce7; color: #166534; }     /* a dep's DERIVED role (bus/store/…), read off its incoming edge verbs */
 #panel dl { margin: 0; }
 #panel dt { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin-top: 10px; }
@@ -1896,6 +1897,34 @@ button.cmp-stop { font: inherit; font-size: 11.5px; padding: 2px 9px; border-rad
 button.cmp-stop:hover { background: #f9fafb; }
 .cmp-warn { margin: 0; flex: 1 1 100%; font-size: 12px; color: #92400e; background: #fef3c7;
             border-radius: 7px; padding: 6px 9px; }
+/* THE STORY: an update log on the Changes tab. One card per entry — the headline as its name, the
+   sentence as its text, its boxes as item pills — and the map's own diff folded under it as evidence,
+   with the three filters inside the fold, since they read the diff and never the entries. */
+button.cmp-mark { font: inherit; font-size: 11.5px; padding: 2px 9px; border-radius: 9px; cursor: pointer;
+                  background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; margin-left: auto; }
+button.cmp-mark:hover { background: #e0e7ff; }
+.cmp-later { color: #92400e; }
+.ecard.ecard-entry .ibox-what { -webkit-line-clamp: unset; line-clamp: unset; display: block; }
+.cmp-entry-boxes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cmp-entry-boxes .ecard-lbl { margin-right: 2px; }
+.cmp-conf { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280;
+            border: 1px solid #e5e7eb; border-radius: 8px; padding: 0 6px; margin-left: 4px; }
+.cmp-conf-verified { color: #166534; border-color: #c3ddcc; }
+.cmp-conf-inferred { color: #92400e; border-color: #fcd34d; }
+details.cmp-evidence { margin: 16px 0 0; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+                       background: #fafafa; }
+details.cmp-evidence > summary { cursor: pointer; font-size: 12.5px; color: #374151; font-weight: 600; }
+details.cmp-evidence > summary .muted { font-weight: 400; }
+details.cmp-evidence[open] > summary { margin-bottom: 8px; }
+details.cmp-evidence .cmp-filters { margin: 0 0 10px; }
+.cmp-noevidence { margin: 14px 0 0; font-size: 12px; color: #6b7280; }
+.cmp-story { margin: 0 0 6px; }
+.cmp-story .cmp-because { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                          color: #6b7280; margin-right: 4px; }
+.cmp-story b { font-weight: 600; color: #111827; }
+.cmp-evidence-page { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+.cmp-evidence-page h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+                        letter-spacing: .05em; color: #6b7280; }
 /* THE "WHAT CHANGED" BLOCK on a page about one box: the same framed section every item page uses,
    with the old words struck and the new words marked, and a list's items as came / went. */
 .cmpsec { margin: 12px 0 16px; padding: 10px 14px 12px; border: 1px solid #e5e7eb; border-radius: 10px;

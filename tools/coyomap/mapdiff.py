@@ -999,6 +999,13 @@ def diff_maps(old_doc: dict[str, Any], new_doc: dict[str, Any], old_label: str =
 
 # ── renderers ──────────────────────────────────────────────────────────────────────────────────────
 
+def kinds_json() -> list[dict[str, str]]:
+    """The kinds in the reader's order, with their words and group tab, so the viewer's Changes tabs
+    cut a list the way this table says and invent no second one. Sent with every change document
+    and with every update log, since either may be the one the viewer holds."""
+    return [{"array": k.array, "word": k.word, "plural": k.plural, "group": k.group} for k in KINDS]
+
+
 def to_json(delta: MapDelta) -> dict[str, Any]:
     return {"kind": "coyomap-map-diff", "version": 2,
             "old": delta.old_label, "new": delta.new_label,
@@ -1006,10 +1013,7 @@ def to_json(delta: MapDelta) -> dict[str, Any]:
             "arrows": [asdict(a) for a in delta.arrows],
             "counts": [asdict(c) for c in delta.counts],
             "warnings": delta.warnings, "idmap": delta.idmap,
-            # The kinds in the reader's order, with their words and group tab, so the viewer's
-            # Changes tabs cut the list the way this table says and invent no second one.
-            "kinds": [{"array": k.array, "word": k.word, "plural": k.plural, "group": k.group}
-                      for k in KINDS]}
+            "kinds": kinds_json()}
 
 
 def _count_line(c: KindCount) -> str:
