@@ -482,6 +482,11 @@ def test_a_fix_after_a_refutation_gets_one_more_wave_over_the_re_minted_statemen
         ch.run_challenge(inputs, cap=40, floor=0)
         refuted = "Component C2 (Beta) is described as: Keeps the beta list."
         make_wave(inputs, refute=refuted)
+        # The closer upholds the refutation, in its own file beside the wave's.
+        (inputs.verify / f"closer-{pin}-{head}-closer.json").write_text(json.dumps({"grounding": [
+            {"claim": refuted, "verdict": "uphold", "skeptic": f"{pin}-{head}-closer",
+             "evidence": "svc/b.py:2", "note": "read the line; the list is bounded"}]}, indent=1),
+            encoding="utf-8")
         # The fix: one more entry rewording C2, which retires the refuted statement.
         log_doc = json.loads(inputs.log_path.read_text(encoding="utf-8"))
         log_doc["entries"].append(
@@ -511,6 +516,13 @@ def test_a_fix_after_a_refutation_gets_one_more_wave_over_the_re_minted_statemen
         wave = g["history"][-1]
         assert wave["challenged"] == 9 and wave["refuted"] == 1 and wave["skeptics"] == 6
         assert wave["retired"] == 7
+        # The appeal stays counted where the closer wrote it, so the record and the closer file
+        # agree — the first real run reported `uphold 0` against a file holding two.
+        assert g["closer_upheld"] == 1 and wave["closer_upheld"] == 1
+        from coyomap.validate_model import validate_model
+        _problems, warnings = validate_model(load_model(inputs.map_path.read_text(encoding="utf-8")),
+                                             inputs.map_path, disclose_records=False)
+        assert not [w for w in warnings if "appeal counts disagree" in w], warnings
         retired = json.loads((inputs.verify / f"retired-{pin}-{head}.json").read_text(encoding="utf-8"))
         assert any(r["claim"] == refuted and r["file"] == "this update's wave" for r in retired["rows"])
         files = [str(p) for p in ch.verdict_files(inputs.verify)]

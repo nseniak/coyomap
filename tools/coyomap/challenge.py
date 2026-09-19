@@ -578,8 +578,12 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
         errors.append(f"{len(orphans)} wave verdict(s) name a statement that is not in scope — a "
                       f"skeptic reworded a claim, or the log changed after `challenge` ran (re-run "
                       f"it). First: {orphans[0][:120]}")
+    # SKEPTIC rows only. The closer's appeal on a refutation the fix then removed stays where the
+    # closer wrote it: `validate` ties the record's appeal counts to the closer files beside the
+    # map, and a record that said `uphold 0` over a file holding two upheld appeals was reported
+    # stale on the first real run.
     gone_rows = [r for r in wave_rows if str(r.get("claim")) not in live_set
-                 and isinstance(r.get("claim"), str)]
+                 and isinstance(r.get("claim"), str) and not is_closer_row(r)]
     if gone_rows:
         for r in gone_rows:
             r["file"] = "this update's wave"
@@ -961,6 +965,9 @@ def format_fold(fold: Fold, inp: Inputs, dry_run: bool) -> str:
                      f"unverifiable; {len(hist) if isinstance(hist, list) else 0} wave(s) in the "
                      f"ledger")
         lines.append(wave_facts(s, fold, rec))
+    note = str(rec.get("note") or "") if rec else ""
+    if note and note != "dry run":
+        lines.append(f"  note: {len(note)} characters, checked against this wave's numbers — accepted")
     if not dry_run and not fold.errors:
         lines.append(f"  wrote {inp.map_path.name} (grounding), {inp.verify / WORKLIST} (re-pinned), "
                      f"{inp.log_path.name} (challenge block)")

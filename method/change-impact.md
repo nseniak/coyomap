@@ -10,7 +10,7 @@ what the map already says.
 
 | Step | Action | Tool | Writes |
 |---|---|---|---|
-| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` must FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes` | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
+| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
 | **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them | the impact file, beside the log (deleted at step 7, never committed) |
 | **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by a `where` edit in the entry that read that code (step 3) |
 | **3 Read and write** | read the diff and the touched boxes; write the log | you | `.coyomap/changes/<from>-<to>.json` |
@@ -32,12 +32,15 @@ what the map already says.
   `.gitignore`. (The old rule analyzed the working tree so an edit could be read before its commit;
   that preview is `git stash` away, and a log that names a commit is worth more than one that names
   a moment.)
-- **`.coyomap/changes/` must be tracked.** The test, at step 0: `git check-ignore -q
-  .coyomap/changes/<from>-<to>.json` must fail (exit 1: the path is not ignored). If it passes, the
-  log would be left out of the commit without a word — a map whose files are tracked can still sit
-  under an ignore rule for the whole folder, and the tracked files hide it. Fix the rule with the
-  user before going on: git cannot re-include a path under an ignored folder, so a rule `.coyomap/`
-  becomes `.coyomap/*` plus `!.coyomap/changes/`. Never `git add -f` around it: a forced add works
+- **`.coyomap/changes/` and `.coyomap/verify/` must be tracked.** The test, at step 0: `git
+  check-ignore -q .coyomap/changes/<from>-<to>.json` must fail (exit 1: the path is not ignored),
+  and so must `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` — the wave writes
+  new files under `verify/` (its batches, its verdicts, the retired rows, the old pin), and they
+  are the map's warrant. If either passes, those files would be left out of the commit without a
+  word — a map whose files are tracked can still sit under an ignore rule for the whole folder,
+  and the tracked files hide it. Fix the rule with the user before going on: git cannot re-include
+  a path under an ignored folder, so a rule `.coyomap/` becomes `.coyomap/*` plus
+  `!.coyomap/changes/` and `!.coyomap/verify/`. Never `git add -f` around it: a forced add works
   once and leaves the next log ignored again.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
@@ -83,9 +86,12 @@ linted, the closer on every refutation, the note written from the printed facts.
    the next; without `--prefix` the generator writes a brief per BUILD batch too, and sends
    skeptics at claims settled months ago. The skeptic ids are the batch ids, so the verdict files
    land as `verdicts-<from>-<to>-<theme>.json`, beside the build's, and the barrier is `coyomap
-   grounding lint --verdicts <each wave file> --expect <every batch id the challenge printed>`. A
-   batch nobody answered is REPLACED by the next `challenge` run (its statements go out again under
-   the new prefix); an answered batch is never rewritten.
+   grounding lint --verdicts <each wave file> --expect <every SKEPTIC id the brief generator
+   printed>` — the skeptic ids, not the batch ids: a three-voted batch `…-security` answers as
+   `…-security-a`, `-b` and `-c`, and the batch id fails the barrier (measured: one failed run).
+   Pass `--votes security=3` on EVERY `challenge` run, the second wave's included. A batch nobody
+   answered is REPLACED by the next `challenge` run (its statements go out again under the new
+   prefix); an answered batch is never rewritten.
 3. **The closer reads this wave only:** `coyomap contract closer --from-verdicts .coyomap/verify
    --prefix <from>-<to>- --map <the applied copy> --fill <slots.json> --out <brief>`, its agent id
    `<from>-<to>-closer`, so its file is `closer-<from>-<to>-closer.json` and counts with the wave.
@@ -198,7 +204,16 @@ small logs; one per week gives one log with more entries. Either way every entry
   the reading lands in the log: a link `reanchor` left behind is re-pointed by a `where` edit (on
   `flow:UC6`, key `steps[n=3].where`; on `BR168`, key `sites[0].where`) in the entry that read that
   code, so the move and its reason travel together. The log never carries a move `reanchor` made,
-  and `check` ignores link-only changes.
+  and `check` ignores link-only changes. **A left-behind link is never waived.** A waiver says the
+  box's meaning did not change; it says nothing about the link, which still points at a line the
+  code rewrote. No gate catches that until `validate` at step 7 — and only when the stale line
+  happens to be a comment or a header: the first real update shipped two such links behind
+  waivers. Re-point every link `reanchor` listed, or say in the entry why the old line still acts.
+- **Waive the BOX, not the row `impact` marks.** `impact`'s text marks rows such as `step:UC6:4`
+  or `edge:C15>calls>C13` with `*`; the gate counts them under the box that owns them (the use
+  case, the arrow's source component, the rule). A waiver on the row id is refused by `lint`
+  ("not in the map"); name the owning box. `impact --json` lists more rows at line or symbol
+  resolution than the text marks, because a way in (`ep:<file>:<line>`) belongs to no box.
 - **Per change.** Classify a box as modified / added / removed; **ripple** by following its
   relations (arrows, flows, Happy Path steps). Verify by reading the changed code; a pure refactor
   or move with no behaviour change is a **waiver**, not an entry (keep noise down).
