@@ -59,7 +59,8 @@ from typing import Any, Callable
 
 from coyomap.anchors import parse_anchor
 from coyomap.audit_model import WorkItem, l2_worklist_model, worklist_payload, write_theme_batches
-from coyomap.changelog import ChangeLog, apply, dump_log, element_of, gated_box, load_log, touched_ids
+from coyomap.changelog import (ChangeLog, apply, commit_matches, dump_log, element_of, gated_box,
+                               load_log, touched_ids)
 from coyomap.grounding import (
     _note_contradictions,
     _verdict_bucket,
@@ -68,11 +69,12 @@ from coyomap.grounding import (
     closer_ruling,
     closer_word,
     is_closer_row,
-    note_facts_block,
+    multi_vote_agreement,
     skeptic_labels,
     split_closer_rows,
     worklist_is_behavioural,
     DISPUTED,
+    REDUNDANT_PHRASE,
 )
 from coyomap.impact_git import ImpactError, rename_map, resolve_ref, tree_paths, u0_diff
 from coyomap.model import ModelError, load_model, resolve_map_path
@@ -135,6 +137,7 @@ class Scope:
     touched: dict[str, str] = field(default_factory=dict)    # box → why it counts as touched
     rippled: dict[str, str] = field(default_factory=dict)    # box → what reached it
     notes: list[str] = field(default_factory=list)
+    no_warrant: bool = False                     # no pinned worklist with verdicts beside the map
 
     @property
     def claims_in_scope(self) -> list[str]:
@@ -196,6 +199,27 @@ def read_rows(path: Path) -> tuple[dict[str, Any] | list[Any], list[dict[str, An
     return payload, [r for r in rows if isinstance(r, dict)]
 
 
+def batch_claims(path: Path) -> list[str]:
+    """The statements one claims batch holds, as `write_theme_batches` wrote them."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    claims = payload.get("claims") if isinstance(payload, dict) else None
+    return [str(c["claim"]) for c in (claims or []) if isinstance(c, dict) and c.get("claim")]
+
+
+def unanswered_batches(verify: Path, update: str) -> list[Path]:
+    """This update's claims batches that no verdicts file answers, across all its waves."""
+    answered = {f.name for f in wave_files(verify, update)}
+    out: list[Path] = []
+    for claims_file in sorted(verify.glob(f"claims-{update}-*.json")):
+        batch = claims_file.stem[len("claims-"):]
+        if not any(name.startswith(f"verdicts-{batch}") for name in answered):
+            out.append(claims_file)
+    return out
+
+
 def verdict_files(verify: Path) -> list[Path]:
     """Every file `grounding write` would be handed: the skeptics' votes and the closer's appeals."""
     return sorted(verify.glob("verdicts-*.json")) + sorted(verify.glob("closer-*.json"))
@@ -231,6 +255,30 @@ def next_prefix(verify: Path, update: str) -> str:
     return f"{update}-w{n}-"
 
 
+def pin_for(verify: Path, log: ChangeLog) -> Path:
+    """The pinned worklist this update measures against: the one the map had BEFORE it.
+
+    After `ground` has run, `worklist.json` is this update's own re-pin (`pinned_by` names it) and
+    the list it replaced sits under the from-commit's name. Reading that one keeps a second
+    `ground` — a retry after a crash, a re-run by mistake — computing the same scope as the first,
+    instead of finding every statement already pinned and calling the wave's votes orphans."""
+    current = verify / WORKLIST
+    if grounded_already(verify, log):
+        old = verify / f"worklist-{log.from_commit[:7]}.json"
+        if old.is_file():
+            return old
+    return current
+
+
+def grounded_already(verify: Path, log: ChangeLog) -> bool:
+    """Has this update's `ground` already re-pinned the worklist?"""
+    try:
+        payload = json.loads((verify / WORKLIST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("pinned_by") == f"{log.from_commit}-{log.to_commit}"
+
+
 def _ripple_via(imp: dict[str, Any]) -> str:
     via = imp.get("via") or []
     first = via[0] if via and isinstance(via[0], dict) else {}
@@ -246,7 +294,7 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
     disk at `ground` time; both are the same document, which is what lets the two verbs agree on the
     scope without a file passing between them."""
     update = f"{log.from_commit}-{log.to_commit}"
-    pin = verify / WORKLIST
+    pin = pin_for(verify, log)
     behavioural = worklist_is_behavioural(pin) if pin.is_file() else False
     new = load_model(json.dumps(new_doc))
     live = l2_worklist_model(new, behavioural=behavioural)
@@ -273,7 +321,17 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
     # TOUCHED: what the gate counts (a line or symbol hit, a link into a deleted file), and every
     # box the log itself names or waives — an entry says "this box changed meaning", a waiver says
     # "the code touched it and the meaning did not", and both are claims a stranger should read.
+    impacts = impact.get("impacts") or {}
     touched: dict[str, str] = {box: "the code touched it" for box in touched_ids(impact)}
+    # A WAY IN's own hit. `element_of` files an `ep:<file>:<line>` hit under no box, so the gate
+    # never counts it — but a cadence statement is about exactly that way in. Resolve the hit to
+    # the entry point's id through the map, the way `coyomap impact` prints it.
+    ep_ids = {f"ep:{ep.source}": ep.id for ep in new.entry_points if ep.id and ep.source}
+    for eid, imp in impacts.items():
+        if (isinstance(imp, dict) and imp.get("cause") == "direct" and str(eid) in ep_ids
+                and imp.get("change") != "drifted"
+                and (imp.get("change") == "deleted" or imp.get("resolution") in ("line", "symbol"))):
+            touched.setdefault(ep_ids[str(eid)], "the code touched it")
     for e in log.entries:
         for box in e.elements:
             touched.setdefault(box, f"entry {e.id} names it")
@@ -282,7 +340,6 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
     # RIPPLED: what the change reached through the map's own relations, one hop — from a hit the
     # gate counts. A ripple out of a link that merely drifted (the text moved, nothing changed) or
     # out of a file-resolution hit is the map being walked, not a change arriving.
-    impacts = impact.get("impacts") or {}
     rippled: dict[str, str] = {}
     for eid, imp in impacts.items():
         if not isinstance(imp, dict) or imp.get("cause") != "ripple":
@@ -328,7 +385,7 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
         notes.append(f"{n} {theme} statement(s) stay unvoted: the build voted none of that theme, "
                      f"and an update reads no theme the build did not")
     return Scope(update, log.date, behavioural, live, renames, pinned, in_scope, carried, unvoted,
-                 superseded, touched, rippled, notes)
+                 superseded, touched, rippled, notes, no_warrant)
 
 
 def scope_payload(scope: Scope, batches: list[tuple[str, int]]) -> dict[str, Any]:
@@ -393,27 +450,40 @@ class LineMaps:
         return new_path, self._maps[path](line)
 
 
-def shift_evidence(rows: list[dict[str, Any]], maps: LineMaps, update: str) -> tuple[int, int]:
-    """Move each carried row's `evidence` line with the code. Returns `(moved, stale)`: a line
-    the diff replaced, or a file that is gone, is marked `evidence_stale: <update>` rather than
-    guessed — the row's verdict still stands, its citation no longer points anywhere."""
+def shift_evidence(rows: list[dict[str, Any]], maps: LineMaps, log: ChangeLog) -> tuple[int, int]:
+    """Move each carried row's `evidence` line with the code. Returns `(moved, stale)`.
+
+    IDEMPOTENT, and it has to be: `ground` is re-run after a crash, or by mistake, and a shift
+    that reads a row's current line and pushes it through the diff again moves every carried
+    citation twice (measured: 38 of 38 rows on the mcpolis rehearsal). `evidence_at` records the
+    commit a row's citation is at; only a row still at this update's from-commit — or with no
+    mark, the build's rows — is shifted, and every row is marked at the to-commit after.
+
+    A line the diff replaced, or a file that is gone, cannot be followed. The citation is cut to
+    the bare file (`evidence_was` keeps it, `evidence_stale` says which update cut it), because
+    `anchor-drift` reads a confirmed row's cited LINE as where the map's link should be, and
+    `fix apply-drift` writes it: a dead line left in place moved a correct link back to the line
+    the diff had replaced. A bare path carries no line, so it moves nothing."""
     moved = stale = 0
+    update = f"{log.from_commit}-{log.to_commit}"
     for row in rows:
+        at = row.get("evidence_at")
+        if isinstance(at, str) and at and not commit_matches(at, log.from_commit):
+            continue                    # already at this update's to-commit
+        row["evidence_at"] = log.to_commit
         ev = str(row.get("evidence") or "")
         loc = parse_anchor(ev) if ev else None
         if loc is None or loc.lo is None:
             continue
         hit = maps.map(loc.path, loc.lo)
-        if hit is None:
-            row["evidence_stale"] = update
-            stale += 1
-            continue
-        new_path, lo = hit
+        new_path, lo = hit if hit else (loc.path, None)
         hi: int | None = lo
-        if loc.hi is not None and loc.hi != loc.lo:
+        if hit and loc.hi is not None and loc.hi != loc.lo:
             hi_hit = maps.map(loc.path, loc.hi)
             hi = hi_hit[1] if hi_hit else None
         if lo is None or hi is None:
+            row.setdefault("evidence_was", ev)
+            row["evidence"] = new_path if hit else loc.path
             row["evidence_stale"] = update
             stale += 1
             continue
@@ -447,6 +517,12 @@ class Fold:
     wave_rows: list[dict[str, Any]]
     kept_rows: list[dict[str, Any]]
     retired_rows: list[dict[str, Any]]
+    wave_gone: list[dict[str, Any]] = field(default_factory=list)   # wave rows on statements a fix removed
+    #: Every row this update has retired, across runs: the retired file's rows merged with this
+    #: run's. The ledger counts THIS, so a retry after a crash reports what the update retired
+    #: and not what one run happened to find still in place.
+    retired_all: list[dict[str, Any]] = field(default_factory=list)
+    skipped: str = ""                                                 # why nothing was done, when so
     rekeyed: int = 0
     evidence_moved: int = 0
     evidence_stale: int = 0
@@ -474,12 +550,20 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
     # EVERY BATCH LANDED, and every in-scope statement has a vote. The barrier `grounding lint
     # --expect` enforces per batch; this is the same question asked of the claims files, because
     # an unattended update that lost a skeptic must refuse here rather than re-pin a hole.
+    voted = {str(r.get("claim")) for r in wave_rows if not is_closer_row(r)}
     for claims_file in sorted(verify.glob(f"claims-{scope.update}-*.json")):
         batch = claims_file.stem[len("claims-"):]
-        if not any(f.name.startswith(f"verdicts-{batch}") for f in wave):
-            errors.append(f"batch {batch} has no verdicts file beside it — the wave has not "
-                          f"landed, or a skeptic returned without writing")
-    voted = {str(r.get("claim")) for r in wave_rows if not is_closer_row(r)}
+        if any(f.name.startswith(f"verdicts-{batch}") for f in wave):
+            continue
+        # A batch nobody answered whose statements were all re-issued and voted under a later
+        # wave is settled, not missing; `challenge` replaces such a file, and a copy that slipped
+        # through must not block `ground` for ever.
+        in_batch = batch_claims(claims_file)
+        live_claims = {it.claim for it in scope.live}
+        if in_batch and all(c in voted or c not in live_claims for c in in_batch):
+            continue
+        errors.append(f"batch {batch} has no verdicts file beside it — the wave has not landed, "
+                      f"or a skeptic returned without writing")
     missing = [c for c in scope.claims_in_scope if c not in voted]
     if missing:
         errors.append(f"{len(missing)} in-scope statement(s) have no verdict from this wave — "
@@ -499,6 +583,7 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
     if gone_rows:
         for r in gone_rows:
             r["file"] = "this update's wave"
+        fold.wave_gone = gone_rows
         fold.retired_rows.extend(gone_rows)
         fold.wave_rows = [r for r in wave_rows if r not in gone_rows]
     retire = set(scope.superseded) | set(scope.claims_in_scope)
@@ -519,7 +604,7 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
         gone = [r for r in rows if str(r.get("claim")) in retire]
         for r in gone:
             r["file"] = f.name
-        moved, stale = shift_evidence(kept, maps, scope.update)
+        moved, stale = shift_evidence(kept, maps, log)
         fold.evidence_moved += moved
         fold.evidence_stale += stale
         fold.kept_rows.extend(kept)
@@ -533,16 +618,17 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
 
 def _wave_row(scope: Scope, fold: Fold, note: str) -> dict[str, Any]:
     """One row of `grounding.history` for this update."""
-    split = split_closer_rows(fold.wave_rows)
+    # EVERYTHING THE WAVE VOTED, including a statement it refuted that the fix then removed from
+    # the map: the ledger is the permanent record of what the wave caught, and a row that said
+    # `refuted 0` about a wave whose refutation is the reason the map changed would understate it.
+    split = split_closer_rows(fold.wave_rows + fold.wave_gone)
     votes: dict[str, list[dict[str, Any]]] = {}
     for r in split.skeptics:
         if isinstance(r.get("claim"), str):
             votes.setdefault(str(r["claim"]), []).append(r)
     buckets = {"confirmed": 0, "refuted": 0, "unverifiable": 0}
-    for claim in scope.claims_in_scope:
-        rows = votes.get(claim)
-        if rows:
-            buckets[_verdict_bucket(rows)] += 1
+    for rows in votes.values():
+        buckets[_verdict_bucket(rows)] += 1
     words = [closer_word(r) for r in split.closer]
     r = scope.by_reason()
     return {
@@ -551,7 +637,7 @@ def _wave_row(scope: Scope, fold: Fold, note: str) -> dict[str, Any]:
         "confirmed": buckets["confirmed"], "refuted": buckets["refuted"],
         "unverifiable": buckets["unverifiable"],
         "carried": len(scope.carried),
-        "retired": len({str(x.get("claim")) for x in fold.retired_rows}),
+        "retired": len({str(x.get("claim")) for x in fold.retired_all}),
         "changed": r["changed"], "touched": r["touched"], "rippled": r["rippled"],
         "closer_upheld": words.count("uphold"), "closer_rejected": words.count("reject"),
         "closer_unsure": words.count("unsure"),
@@ -662,7 +748,7 @@ def _inputs(rest: list[str]) -> Inputs:
     return Inputs(log_path, log, map_path, map_doc, before_text, before_doc, impact, repo, verify)
 
 
-def run_challenge(inp: Inputs, cap: int, floor: int) -> tuple[Scope, list[tuple[str, int]], Path]:
+def run_challenge(inp: Inputs, cap: int, floor: int) -> tuple[Scope, list[tuple[str, int]], Path, str]:
     applied, _done = apply(inp.log, inp.map_doc)
     scope = scope_update(inp.log, inp.before_text, applied, inp.impact, inp.verify, inp.repo)
     applied_path = inp.log_path.with_name(inp.log_path.name[:-len(".json")] + ".applied.json")
@@ -672,6 +758,11 @@ def run_challenge(inp: Inputs, cap: int, floor: int) -> tuple[Scope, list[tuple[
     # A RE-RUN after a wave landed (a refutation amended the log) batches only what no wave of this
     # update has voted yet; an answered batch is never rewritten, an unanswered one is replaced.
     already = wave_voted(inp.verify, scope.update)
+    # An unanswered batch from an earlier run is REPLACED: its statements go out again below, under
+    # this run's prefix, if they are still in scope. Left in place it would block `ground` for
+    # ever ("batch X has no verdicts file") while the very statements it held had come home.
+    for stale in unanswered_batches(inp.verify, scope.update):
+        stale.unlink()
     prefix = next_prefix(inp.verify, scope.update)
     todo = [s.item for s in scope.in_scope if s.item.claim not in already]
     if already:
@@ -679,51 +770,76 @@ def run_challenge(inp: Inputs, cap: int, floor: int) -> tuple[Scope, list[tuple[
                            f"a verdict from this update's earlier wave; {len(todo)} go out now")
     if todo:
         batches = write_theme_batches(todo, inp.verify, cap, floor=floor, prefix=prefix)
-    else:
-        for stale in inp.verify.glob(f"claims-{prefix}*.json"):
-            stale.unlink()
     scope_path = inp.log_path.with_name(inp.log_path.name[:-len(".json")] + ".scope.json")
     scope_path.write_text(json.dumps(scope_payload(scope, batches), indent=1, ensure_ascii=False)
                           + "\n", encoding="utf-8")
-    return scope, batches, applied_path
+    return scope, batches, applied_path, prefix
 
 
 def run_ground(inp: Inputs, note: str, dry_run: bool) -> Fold:
     scope = scope_update(inp.log, inp.before_text, inp.map_doc, inp.impact, inp.verify, inp.repo)
     fold = fold_update(scope, inp.verify, inp.repo, inp.log)
+    retired_path = inp.verify / f"retired-{scope.update}.json"
+    existing = _retired_rows(retired_path)
+    seen = {_row_key(r) for r in existing}
+    fold.retired_all = existing + [r for r in fold.retired_rows if _row_key(r) not in seen]
+    g = inp.map_doc.get("grounding")
+    prior: dict[str, Any] = g if isinstance(g, dict) else {}
+    recorded = any(prior.get(k) for k in ("claims_total", "claims_challenged"))
+    if scope.no_warrant:
+        # The map says it was challenged and nothing beside it can show a vote: the warrant files
+        # are missing, not absent — refuse rather than rewrite the record down to zero and call
+        # that measured. A map with no record at all has nothing to ground, and says so.
+        if recorded:
+            fold.errors = [f"the map records {prior.get('claims_challenged')} challenged "
+                           f"statement(s) but no pinned worklist with verdicts sits beside it under "
+                           f"{inp.verify}: the warrant files are missing (they are committed with "
+                           f"the map). Restore them, or run a build's Phase-4 pass; nothing was "
+                           f"written"]
+        else:
+            fold.skipped = ("the map carries no warrant — no record, no pinned worklist, no "
+                            "verdicts — so there is nothing to carry and nothing to measure. "
+                            "Nothing was written; a build's Phase-4 pass is what warrants a map")
+        return fold
     if fold.errors:
         return fold
     live = [it.claim for it in scope.live]
     all_rows = fold.kept_rows + fold.wave_rows
-    # A dry run has no note yet — it prints the facts the note is written from — and a partial
-    # surface (a build that voted part of its worklist) refuses a record with no note, rightly.
+    # A dry run may have no note yet — it prints the facts the note is written from — and a
+    # partial surface (a build that voted part of its worklist) refuses a record with no note.
     record, errors = build_record(live, all_rows, note or ("dry run" if dry_run else ""),
                                   live_claims=live, partial=bool(scope.unvoted))
-    if not dry_run:
-        faults = _note_contradictions(note, fold.wave_rows, record, live)
+    if note:
+        # Against the WAVE's rows, and against a record without `claims_added_since`: after a
+        # re-pin that count is zero by construction, and a note that says "24 new statements" is
+        # telling the truth about the update, not contradicting the record.
+        checked = {k: v for k, v in record.items() if k != "claims_added_since"}
+        faults = _note_contradictions(note, fold.wave_rows + fold.wave_gone, checked, live)
         errors = list(errors) + [f"the `--note-file` contradicts this wave's own numbers. {f}"
                                  for f in faults]
     if errors:
         fold.errors = errors
         fold.record = record
         return fold
-    g = inp.map_doc.get("grounding")
-    prior: dict[str, Any] = g if isinstance(g, dict) else {}
     history = [h for h in (prior.get("history") or []) if isinstance(h, dict)]
-    if not history and any(prior.get(k) for k in ("claims_total", "claims_challenged")):
-        prior_rows = [r for f in fold.prior for r in read_rows(f)[1]]
-        history.append(build_row(prior, inp.before_doc, prior_rows))
+    if not history and recorded:
+        # The build's rows are the ones this update carries plus the ones it retired — read from
+        # what the fold holds, never from the files, which a retry finds already rewritten.
+        history.append(build_row(prior, inp.before_doc, fold.kept_rows + fold.retired_all))
+    # ONE ROW PER UPDATE. A re-run replaces its own row rather than appending a phantom wave.
+    history = [h for h in history if not (h.get("kind") == "update" and h.get("at") == scope.update)]
     history.append(_wave_row(scope, fold, note))
     record["history"] = history
     fold.record = record
     if dry_run:
         return fold
     # WRITE, in the order that leaves the least behind if interrupted: the retired rows first (a
-    # copy), then the prior files, the pin, the map, the log.
-    retired_path = inp.verify / f"retired-{scope.update}.json"
-    if fold.retired_rows:
+    # copy), then the prior files, the pin, the map, the log. Every step is safe to repeat: the
+    # retired file is merged, the shift is marked per row, the pin is measured against the list
+    # the update replaced, the ledger keeps one row per update.
+    if fold.retired_all:
         retired_path.write_text(json.dumps({"format": RETIRED_FORMAT, "update": scope.update,
-                                            "rows": fold.retired_rows}, indent=1,
+                                            "rows": fold.retired_all}, indent=1,
                                            ensure_ascii=False) + "\n", encoding="utf-8")
     for f, (payload, kept) in fold.prior_files_rows.items():
         if not kept:
@@ -732,7 +848,7 @@ def run_ground(inp: Inputs, note: str, dry_run: bool) -> Fold:
         out: Any = {**payload, "grounding": kept} if isinstance(payload, dict) else kept
         f.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     pin = inp.verify / WORKLIST
-    if pin.is_file():
+    if pin.is_file() and not grounded_already(inp.verify, inp.log):
         old_pin = inp.verify / f"worklist-{inp.log.from_commit[:7]}.json"
         if not old_pin.exists():
             shutil.copy(pin, old_pin)
@@ -748,18 +864,92 @@ def run_ground(inp: Inputs, note: str, dry_run: bool) -> Fold:
     return fold
 
 
+def _retired_rows(path: Path) -> list[dict[str, Any]]:
+    """The rows an earlier run of this update already retired, or none."""
+    if not path.is_file():
+        return []
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [r for r in (old.get("rows") or []) if isinstance(r, dict)] if isinstance(old, dict) else []
+
+
+def _row_key(r: dict[str, Any]) -> tuple[str, str, str, str]:
+    """What makes two retired rows the same row: the same vote by the same skeptic from the same
+    file. `grounded`/`verdict` spelled as text so a closer row and a skeptic row never collide."""
+    return (str(r.get("claim")), str(r.get("skeptic")), str(r.get("file")),
+            str(r.get("grounded", r.get("verdict"))))
+
+
+def wave_facts(scope: Scope, fold: Fold, record: dict[str, object]) -> str:
+    """THE NUMBERS THE UPDATE'S NOTE WILL CITE, computed over the WAVE and then the map. The
+    build's `NOTE FACTS` block mixes the two when handed an update — its `superseded` is zero by
+    construction after a re-pin, and its confirmed count is the map's beside the wave's rows —
+    so an update gets its own block, with the map-wide line said as such."""
+    rows = split_closer_rows(fold.wave_rows + fold.wave_gone)
+    claimed = [r for r in rows.skeptics if r.get("claim")]
+    voted = {str(r["claim"]) for r in claimed}
+    redundant = max(0, len(claimed) - len(voted))
+    labels = skeptic_labels(rows.skeptics)
+    multi, verdict_dis, anchor_dis = multi_vote_agreement(rows.skeptics)
+    by_claim: dict[str, list[dict[str, Any]]] = {}
+    for r in claimed:
+        by_claim.setdefault(str(r["claim"]), []).append(r)
+    tied = sum(1 for rs in by_claim.values()
+               if sum(1 for r in rs if r.get("grounded") is True)
+               == sum(1 for r in rs if r.get("grounded") is False) > 0)
+    w = _wave_row(scope, fold, "")
+    sup = set(scope.superseded)
+    sup_confirmed = len({str(r.get("claim")) for r in fold.retired_all
+                         if str(r.get("claim")) in sup and r.get("grounded") is True})
+    r_ = scope.by_reason()
+    lines = ["  WAVE FACTS — quote these, do not retype them from an earlier run:",
+             f"    verdict rows {len(rows.skeptics)} over {len(voted)} distinct statement(s) — "
+             f"{REDUNDANT_PHRASE.format(n=redundant)}",
+             f"    distinct skeptic labels {len(labels)} (a label is not an agent: one agent may "
+             f"carry several batches)",
+             f"    confirmed {w['confirmed']} · refuted {w['refuted']} · unverifiable "
+             f"{w['unverifiable']} · tied {tied}",
+             f"    multi-voted statements {multi} · verdict disagreements {verdict_dis} · "
+             f"evidence-anchor disagreements {anchor_dis} (unanimity is only a fact about the "
+             f"multi-voted ones)"]
+    if rows.closer:
+        words = [closer_word(r) for r in rows.closer]
+        lines.append(f"    closer appeal rows {len(rows.closer)} — uphold {words.count('uphold')} · "
+                     f"reject {words.count('reject')} · unsure {words.count('unsure')} (an appeal "
+                     f"is not a vote: none of the counts above moved)")
+    lines += [f"    in scope {len(scope.in_scope)} ({r_['changed']} changed · {r_['touched']} on a "
+              f"touched box · {r_['rippled']} on a box the change reached) · carried "
+              f"{len(scope.carried)} · never voted {len(scope.unvoted)} · re-keyed across a line "
+              f"shift {len(scope.renames)}",
+              f"    superseded {len(scope.superseded)}, of which {sup_confirmed} had been CONFIRMED "
+              f"— each is a settled verdict this update overrode, and a note that does not say so "
+              f"hides it; retired verdict rows {len(fold.retired_all)}",
+              f"  MAP-WIDE, after this update: {record.get('claims_challenged')} of "
+              f"{record.get('claims_total')} statement(s) carry a verdict — "
+              f"{record.get('claims_confirmed')} confirmed, {record.get('claims_refuted')} refuted, "
+              f"{record.get('claims_unverifiable')} unverifiable"]
+    return "\n".join(lines)
+
+
 def format_fold(fold: Fold, inp: Inputs, dry_run: bool) -> str:
     s = fold.scope
     rec = fold.record
+    if fold.skipped:
+        return f"ground {s.update} — {fold.skipped}"
     wave = _wave_row(s, fold, "")
     lines = [f"ground {s.update}{' (dry run — nothing written)' if dry_run else ''} — "
              f"{wave['challenged']} statement(s) re-argued: {wave['confirmed']} confirmed, "
              f"{wave['refuted']} refuted, {wave['unverifiable']} unverifiable; "
              f"{len(s.carried)} carried, {wave['retired']} retired, {len(s.unvoted)} never voted"]
+    for n in s.notes:
+        lines.append(f"  note: {n}")
     if fold.rekeyed or fold.evidence_moved or fold.evidence_stale:
         lines.append(f"  carried rows: {fold.rekeyed} re-keyed across a line shift, "
                      f"{fold.evidence_moved} evidence line(s) moved with the code, "
-                     f"{fold.evidence_stale} evidence line(s) the diff replaced (marked stale)")
+                     f"{fold.evidence_stale} evidence line(s) the diff replaced (cut to the file, "
+                     f"marked stale)")
     for name in fold.emptied:
         lines.append(f"  {name}: every row retired, file removed (its rows are in "
                      f"retired-{s.update}.json)")
@@ -770,9 +960,7 @@ def format_fold(fold: Fold, inp: Inputs, dry_run: bool) -> str:
                      f"{rec.get('claims_refuted')} refuted, {rec.get('claims_unverifiable')} "
                      f"unverifiable; {len(hist) if isinstance(hist, list) else 0} wave(s) in the "
                      f"ledger")
-    live = [it.claim for it in s.live]
-    if rec:
-        lines.append(note_facts_block(s.claims_in_scope, fold.wave_rows, rec, live))
+        lines.append(wave_facts(s, fold, rec))
     if not dry_run and not fold.errors:
         lines.append(f"  wrote {inp.map_path.name} (grounding), {inp.verify / WORKLIST} (re-pinned), "
                      f"{inp.log_path.name} (challenge block)")
@@ -799,17 +987,18 @@ def main(verb: str, rest: list[str]) -> int:
         if verb == "challenge":
             cap = int(cap_opt) if cap_opt else DEFAULT_CAP
             floor = int(floor_opt) if floor_opt else DEFAULT_FLOOR
-            scope, batches, applied_path = run_challenge(inp, cap, floor)
+            scope, batches, applied_path, prefix = run_challenge(inp, cap, floor)
             if as_json:
-                print(json.dumps({**scope_payload(scope, batches), "applied": str(applied_path)},
-                                 indent=1, ensure_ascii=False))
+                print(json.dumps({**scope_payload(scope, batches), "applied": str(applied_path),
+                                  "prefix": prefix}, indent=1, ensure_ascii=False))
             else:
                 print(format_scope(scope, batches))
                 print(f"  applied copy: {applied_path} — the «MAP» every skeptic reads")
                 if batches:
                     print(f"  next: coyomap contract skeptic --from-batches {inp.verify} "
-                          f"--prefix {scope.update}- --fill <slots.json> --out-dir <scratch>/briefs "
-                          f"--votes security=3")
+                          f"--prefix {prefix} --fill <slots.json> --out-dir <scratch>/briefs "
+                          f"--votes security=3  (this run's prefix; an earlier wave's batches are "
+                          f"answered and stay)")
             return 0
         note = ""
         if note_file:
@@ -826,8 +1015,7 @@ def main(verb: str, rest: list[str]) -> int:
             for e in fold.errors:
                 print(f"ERROR: {e}", file=sys.stderr)
             if fold.record:
-                print(note_facts_block(fold.scope.claims_in_scope, fold.wave_rows, fold.record,
-                                       [it.claim for it in fold.scope.live]), file=sys.stderr)
+                print(wave_facts(fold.scope, fold, fold.record), file=sys.stderr)
             print("REFUSED: the record would misstate what was challenged; nothing was written.",
                   file=sys.stderr)
             return 1

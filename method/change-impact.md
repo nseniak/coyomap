@@ -78,11 +78,14 @@ linted, the closer on every refutation, the note written from the printed facts.
    path. A refutation then amends the LOG, and the map on disk is untouched.
 2. **The batches sit beside the build's, under the wave's name:** `claims-<from>-<to>-<theme>.json`
    in `.coyomap/verify/`. The briefs come from `coyomap contract skeptic --from-batches
-   .coyomap/verify --prefix <from>-<to>- --fill <slots.json> --out-dir <scratch>/briefs --votes
-   security=3`; without `--prefix` the generator writes a brief per BUILD batch too, and sends
+   .coyomap/verify --prefix <the prefix the challenge printed> --fill <slots.json> --out-dir
+   <scratch>/briefs --votes security=3` — `<from>-<to>-` for the first wave, `<from>-<to>-w2-` for
+   the next; without `--prefix` the generator writes a brief per BUILD batch too, and sends
    skeptics at claims settled months ago. The skeptic ids are the batch ids, so the verdict files
    land as `verdicts-<from>-<to>-<theme>.json`, beside the build's, and the barrier is `coyomap
-   grounding lint --verdicts <each wave file> --expect <every batch id the challenge printed>`.
+   grounding lint --verdicts <each wave file> --expect <every batch id the challenge printed>`. A
+   batch nobody answered is REPLACED by the next `challenge` run (its statements go out again under
+   the new prefix); an answered batch is never rewritten.
 3. **The closer reads this wave only:** `coyomap contract closer --from-verdicts .coyomap/verify
    --prefix <from>-<to>- --map <the applied copy> --fill <slots.json> --out <brief>`, its agent id
    `<from>-<to>-closer`, so its file is `closer-<from>-<to>-closer.json` and counts with the wave.
@@ -94,14 +97,19 @@ linted, the closer on every refutation, the note written from the printed facts.
 5. **Nothing is dropped and nothing is skipped.** `changes ground` refuses a batch with no verdicts
    file and an in-scope statement with no vote, in words, and writes nothing. There is no
    `--partial` here: an update that could not finish its wave has not finished, and an unattended
-   run must fail loudly rather than re-pin a hole. A statement the BUILD never voted (a partial
-   build) stays unvoted and is said to be, unless the change put it in scope — then it is voted
-   now.
+   run must fail loudly rather than re-pin a hole. A statement the BUILD never voted stays unvoted
+   and is said to be: the update reads no THEME the build did not (mcpolis pinned 949 step phrases
+   and voted none; they stay unvoted), and skips none it did. A map whose record says it was
+   challenged but whose `verify/` holds no verdicts is refused too — the warrant files are missing,
+   not absent — and a map with no record at all is left alone. `ground` may be run again, after a
+   crash or by mistake: it measures against the list the update replaced, moves no citation twice,
+   and keeps one ledger row per update.
 6. **The note is the wave's, and the facts are printed for it.** `changes ground --dry-run` prints
-   the `NOTE FACTS` of this wave — rows, distinct skeptic labels, the split, the multi-vote
-   agreement — and the map-wide record. Write the note from them, put it in a file, and pass
-   `--note-file`. A note whose numbers contradict the wave is refused, exactly as a build's is; a
-   note that cites the build's figures cites them as the build's.
+   the `WAVE FACTS` of this wave — rows, distinct skeptic labels, the split, the multi-vote
+   agreement, what was superseded and how many of those had been confirmed — and one `MAP-WIDE`
+   line. Write the note from them, put it in a file, and pass `--note-file` (with `--dry-run` first,
+   to have the draft checked). A note whose numbers contradict the wave is refused, exactly as a
+   build's is; a note that cites the build's figures cites them as the build's.
 
 **What `changes ground` leaves behind, and why each part is there.** The record's counts now
 describe the map at its NEW pin: `claims_total` is every statement the map makes, `claims_challenged`

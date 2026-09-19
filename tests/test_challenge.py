@@ -5,6 +5,7 @@ Real temp git repos, explicit make_* builders, no fixtures/classes."""
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -57,7 +58,14 @@ def make_map_doc(pin: str) -> dict[str, Any]:
                     {"src": "C3", "verb": "uses", "dst": "D1", "where": "svc/b.py:6"}]
     doc["blocks"] = [{"id": "BLK1", "name": "Limits", "purpose": "what is bounded"}]
     doc["rules"] = [{"id": "BR1", "name": "A guard", "statement": "A guard holds.", "block": "BLK1",
-                     "sites": [{"where": "svc/a.py:20", "why": "guards"}]}]
+                     "sites": [{"where": "svc/a.py:20", "why": "guards"}]},
+                    # Its site only shifts too; its BUILD verdict cites the line the diff rewrites.
+                    {"id": "BR3", "name": "A second guard", "statement": "A second guard holds.",
+                     "block": "BLK1", "sites": [{"where": "svc/a.py:19", "why": "guards twice"}]}]
+    # A way in whose declaring line the diff rewrites: a hit the gate files under no box.
+    doc["entry_points"] = [{"id": "EP1", "kind": "job", "trigger": "nightly sweep", "component": "C1",
+                            "source": "svc/a.py:8", "cadence": "every night",
+                            "cadence_source": "svc/a.py:8"}]
     return doc
 
 
@@ -76,11 +84,12 @@ def make_build(root: Path, doc: dict[str, Any]) -> tuple[Path, list[str]]:
     verify.mkdir(parents=True)
     (verify / "worklist.json").write_text(json.dumps(worklist_payload([], items), indent=1),
                                           encoding="utf-8")
-    rows = [make_verdict(it.claim, it.anchor or "svc/b.py:1") for it in items]
+    rows = [make_verdict(it.claim, "svc/a.py:8" if it.claim == rule_claim("svc/a.py:19", "A second guard holds.", "guards twice")
+                         else it.anchor or "svc/b.py:1") for it in items]
     (verify / "verdicts-build.json").write_text(json.dumps({"grounding": rows}, indent=1),
                                                 encoding="utf-8")
     claims = [it.claim for it in items]
-    record, errs = build_record(claims, rows, "seven claims, one skeptic", live_claims=claims)
+    record, errs = build_record(claims, rows, "nine claims, one skeptic", live_claims=claims)
     assert not errs, errs
     doc["grounding"] = record
     map_path = root / ".coyomap" / "project-map.json"
@@ -139,12 +148,14 @@ def make_update(td: str) -> tuple[ch.Inputs, Path, str, str]:
 
 
 def make_wave(inputs: ch.Inputs, refute: str | None = None, skip_batch: str | None = None) -> None:
-    """The skeptics' answer: one verdicts file per batch `challenge` wrote, confirming everything
-    but `refute`; `skip_batch` is a batch nobody answered."""
+    """The skeptics' answer: one verdicts file per batch `challenge` wrote and nobody has answered
+    yet, confirming everything but `refute`; `skip_batch` is a batch nobody answers."""
     for claims_file in sorted(inputs.verify.glob(f"claims-{inputs.log.from_commit}-*.json")):
         batch = claims_file.stem[len("claims-"):]
         if skip_batch and batch.endswith(skip_batch):
             continue
+        if (inputs.verify / f"verdicts-{batch}.json").exists():
+            continue                    # an earlier wave answered it; its votes stand
         payload = json.loads(claims_file.read_text(encoding="utf-8"))
         rows = [make_verdict(c["claim"], c.get("anchor") or "svc/b.py:1",
                              grounded=(c["claim"] != refute), skeptic=batch)
@@ -179,16 +190,22 @@ def test_every_statement_lands_in_exactly_one_bucket_for_the_right_reason():
             rule_claim("svc/b.py:4", "The beta list holds at most ten items.", "refuses the eleventh")}
         # Same words, changed code: C1's arrow sits on the rewritten line (a gate hit), and C3 is
         # the box an entry names — every statement with C3 at either end goes too.
-        assert by["touched"] == {"Component C1 (Alpha) is described as: Reads the alpha file.",
-                                 "C1 calls C2", "C3 uses D1", "C2 calls C3"}
+        touched = by["touched"]
+        cadence = next(c for c in touched if "nightly sweep" in c)
+        assert touched - {cadence} == {"Component C1 (Alpha) is described as: Reads the alpha file.",
+                                       "C1 calls C2", "C3 uses D1", "C2 calls C3"}
+        # The way in's own line was rewritten: its schedule statement is touched, through EP1.
+        assert scope.touched["EP1"] == "the code touched it"
         # Same words, a neighbour changed: C2 is where C1's rewritten arrow lands.
         assert by["rippled"] == {"Component C2 (Beta) is described as: Keeps the beta list."}
-        # The rule's site only shifted two lines: re-keyed and carried, never re-voted.
-        assert scope.renames == {rule_claim("svc/a.py:20"): rule_claim("svc/a.py:22")}
-        assert scope.carried == [rule_claim("svc/a.py:22")]
+        # The two rule sites only shifted two lines: re-keyed and carried, never re-voted.
+        assert scope.renames == {rule_claim("svc/a.py:20"): rule_claim("svc/a.py:22"),
+                                 rule_claim("svc/a.py:19", "A second guard holds.", "guards twice"):
+                                 rule_claim("svc/a.py:21", "A second guard holds.", "guards twice")}
+        assert set(scope.carried) == set(scope.renames.values())
         assert scope.unvoted == []
         assert scope.superseded == ["Component C3 (Gamma) is described as: Sends gamma mail."]
-        assert len(scope.live) == 8 == len(scope.in_scope) + len(scope.carried)
+        assert len(scope.live) == 10 == len(scope.in_scope) + len(scope.carried)
         assert scope.touched["C1"] == "the code touched it"
         assert scope.touched["C3"] == "entry e1 names it"
         assert scope.rippled["C2"].startswith("edge:C1>calls>C2")
@@ -197,19 +214,21 @@ def test_every_statement_lands_in_exactly_one_bucket_for_the_right_reason():
 def test_challenge_writes_the_applied_copy_the_batches_and_the_scope_file():
     with tempfile.TemporaryDirectory() as td:
         inputs, root, pin, head = make_update(td)
-        scope, batches, applied_path = ch.run_challenge(inputs, cap=40, floor=0)
+        scope, batches, applied_path, prefix = ch.run_challenge(inputs, cap=40, floor=0)
+        assert prefix == f"{pin}-{head}-"
         assert applied_path.name == f"{pin}-{head}.applied.json"
         applied = json.loads(applied_path.read_text(encoding="utf-8"))
         assert applied["commit"] == head and any(r["id"] == "BR2" for r in applied["rules"])
         names = {name for name, _n in batches}
-        assert names == {f"claims-{pin}-{head}-{t}.json" for t in ("rule", "dep-usage", "description", "backbone")}
-        assert sum(n for _name, n in batches) == 7
+        assert names == {f"claims-{pin}-{head}-{t}.json"
+                         for t in ("rule", "dep-usage", "cadence", "description", "backbone")}
+        assert sum(n for _name, n in batches) == 8
         # The build's own batch files and verdicts are untouched: they are the map's warrant.
         assert (inputs.verify / "verdicts-build.json").is_file()
         scope_doc = json.loads((root / ".coyomap" / "changes" / f"{pin}-{head}.scope.json").read_text())
-        assert scope_doc["counts"] == {"live": 8, "in_scope": 7, "changed": 2, "touched": 4,
-                                       "rippled": 1, "carried": 1, "unvoted": 0, "superseded": 1,
-                                       "shifted": 1}
+        assert scope_doc["counts"] == {"live": 10, "in_scope": 8, "changed": 2, "touched": 5,
+                                       "rippled": 1, "carried": 2, "unvoted": 0, "superseded": 1,
+                                       "shifted": 2}
         # The map on disk has not moved: the skeptics read the copy, and a refutation amends the log.
         on_disk = json.loads(inputs.map_path.read_text(encoding="utf-8"))
         assert on_disk["commit"] == pin and not any(r["id"] == "BR2" for r in on_disk["rules"])
@@ -218,7 +237,7 @@ def test_challenge_writes_the_applied_copy_the_batches_and_the_scope_file():
 
 # --- the fold -----------------------------------------------------------------------------------
 
-def make_grounded(td: str, note: str = "one wave, four skeptics") -> tuple[ch.Inputs, ch.Fold, str, str]:
+def make_grounded(td: str, note: str = "one wave, five skeptics") -> tuple[ch.Inputs, ch.Fold, str, str]:
     """Challenge, the wave, apply, ground — the whole step, everything confirmed."""
     inputs, _root, pin, head = make_update(td)
     ch.run_challenge(inputs, cap=40, floor=0)
@@ -237,43 +256,50 @@ def test_ground_carries_rekeys_and_retires_and_the_record_describes_the_new_pin(
         verify = inputs.verify
         # The old pin is kept under the from-commit's name; the new pin is the live surface.
         old = json.loads((verify / f"worklist-{pin[:7]}.json").read_text(encoding="utf-8"))
-        assert len(old["worklist"]) == 7 and "pinned_by" not in old
+        assert len(old["worklist"]) == 9 and "pinned_by" not in old
         new = json.loads((verify / "worklist.json").read_text(encoding="utf-8"))
-        assert new["pinned_by"] == f"{pin}-{head}" and len(new["worklist"]) == 8
+        assert new["pinned_by"] == f"{pin}-{head}" and len(new["worklist"]) == 10
         assert {i["claim"] for i in new["worklist"]} == {it.claim for it in fold.scope.live}
-        # The build's file keeps only the carried row, re-keyed across the shift, its evidence moved.
+        # The build's file keeps only the carried rows, re-keyed across the shift. One citation
+        # moved with the code; the other cited the line the diff rewrote, so it is cut to the file.
         kept = json.loads((verify / "verdicts-build.json").read_text(encoding="utf-8"))["grounding"]
-        assert [r["claim"] for r in kept] == [rule_claim("svc/a.py:22")]
-        assert kept[0]["claim_was"] == rule_claim("svc/a.py:20") and kept[0]["rekeyed"] == f"{pin}-{head}"
-        assert kept[0]["evidence"] == "svc/a.py:22" and kept[0]["evidence_was"] == "svc/a.py:20"
-        assert (fold.rekeyed, fold.evidence_moved, fold.evidence_stale) == (1, 1, 0)
+        by_claim = {r["claim"]: r for r in kept}
+        assert set(by_claim) == set(fold.scope.renames.values())
+        one = by_claim[rule_claim("svc/a.py:22")]
+        assert one["claim_was"] == rule_claim("svc/a.py:20") and one["rekeyed"] == f"{pin}-{head}"
+        assert one["evidence"] == "svc/a.py:22" and one["evidence_was"] == "svc/a.py:20"
+        assert one["evidence_at"] == head
+        two = by_claim[rule_claim("svc/a.py:21", "A second guard holds.", "guards twice")]
+        assert two["evidence"] == "svc/a.py" and two["evidence_was"] == "svc/a.py:8"
+        assert two["evidence_stale"] == f"{pin}-{head}"
+        assert (fold.rekeyed, fold.evidence_moved, fold.evidence_stale) == (2, 1, 1)
         # Every other build row is retired, with the file it came from, in a payload no verdict
         # reader recognises as votes.
         retired = json.loads((verify / f"retired-{pin}-{head}.json").read_text(encoding="utf-8"))
-        assert retired["format"] == ch.RETIRED_FORMAT and len(retired["rows"]) == 6
+        assert retired["format"] == ch.RETIRED_FORMAT and len(retired["rows"]) == 7
         assert {r["file"] for r in retired["rows"]} == {"verdicts-build.json"}
         assert "grounding" not in retired
         # The record is about the map as it now is: every live statement has a verdict, none is
         # superseded or added, and the ledger tells how it got there.
         g = json.loads(inputs.map_path.read_text(encoding="utf-8"))["grounding"]
-        assert (g["claims_total"], g["claims_challenged"], g["claims_confirmed"], g["claims_refuted"]) == (8, 8, 8, 0)
-        assert (g["claims_superseded"], g["claims_added_since"], g["claims_live_challenged"]) == (0, 0, 8)
-        assert g["note"] == "one wave, four skeptics"
+        assert (g["claims_total"], g["claims_challenged"], g["claims_confirmed"], g["claims_refuted"]) == (10, 10, 10, 0)
+        assert (g["claims_superseded"], g["claims_added_since"], g["claims_live_challenged"]) == (0, 0, 10)
+        assert g["note"] == "one wave, five skeptics"
         build_row, wave_row = g["history"]
-        assert build_row["kind"] == "build" and build_row["at"] == pin and build_row["challenged"] == 7
-        assert build_row["note"] == "seven claims, one skeptic" and build_row["skeptics"] == 1
+        assert build_row["kind"] == "build" and build_row["at"] == pin and build_row["challenged"] == 9
+        assert build_row["note"] == "nine claims, one skeptic" and build_row["skeptics"] == 1
         assert wave_row["kind"] == "update" and wave_row["at"] == f"{pin}-{head}"
         assert wave_row["date"] == "2026-09-19"
-        assert (wave_row["challenged"], wave_row["confirmed"], wave_row["refuted"]) == (7, 7, 0)
-        assert (wave_row["carried"], wave_row["retired"]) == (1, 6)
-        assert (wave_row["changed"], wave_row["touched"], wave_row["rippled"]) == (2, 4, 1)
-        assert wave_row["skeptics"] == 4
+        assert (wave_row["challenged"], wave_row["confirmed"], wave_row["refuted"]) == (8, 8, 0)
+        assert (wave_row["carried"], wave_row["retired"]) == (2, 7)
+        assert (wave_row["changed"], wave_row["touched"], wave_row["rippled"]) == (2, 5, 1)
+        assert wave_row["skeptics"] == 5
         # The log says the same, in its own block.
         log = load_log(inputs.log_path.read_text(encoding="utf-8"))
         assert log.challenge is not None
-        assert log.challenge["challenged"] == 7 and log.challenge["carried"] == 1
-        assert log.challenge["superseded"] == 1 and log.challenge["shifted"] == 1
-        assert len(log.challenge["batches"]) == 4
+        assert log.challenge["challenged"] == 8 and log.challenge["carried"] == 2
+        assert log.challenge["superseded"] == 1 and log.challenge["shifted"] == 2
+        assert len(log.challenge["batches"]) == 5
         # The map loads with the ledger in it, and the refutation gate is clean over the folder.
         load_model(inputs.map_path.read_text(encoding="utf-8"))
         files = [str(p) for p in ch.verdict_files(verify)]
@@ -325,7 +351,7 @@ def test_a_dry_run_reports_the_wave_and_writes_nothing():
         before = {p.name: p.read_text(encoding="utf-8") for p in inputs.verify.iterdir()}
         fold = ch.run_ground(inputs, "", dry_run=True)
         assert not fold.errors, fold.errors
-        assert fold.record["claims_challenged"] == 8 and len(fold.record["history"]) == 2
+        assert fold.record["claims_challenged"] == 10 and len(fold.record["history"]) == 2
         assert {p.name: p.read_text(encoding="utf-8") for p in inputs.verify.iterdir()} == before
         assert "history" not in json.loads(inputs.map_path.read_text(encoding="utf-8"))["grounding"]
 
@@ -339,7 +365,10 @@ def test_a_note_that_contradicts_the_wave_is_refused():
         inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
         inputs.map_doc = applied
         fold = ch.run_ground(inputs, "Nine skeptics re-read the change.", dry_run=False)
-        assert any("contradicts this wave" in e and "4 distinct skeptic" in e for e in fold.errors), fold.errors
+        assert any("contradicts this wave" in e and "5 distinct skeptic" in e for e in fold.errors), fold.errors
+        # A dry run given a note checks it too, so a draft is refused where it is cheap.
+        fold = ch.run_ground(inputs, "Nine skeptics re-read the change.", dry_run=True)
+        assert any("contradicts this wave" in e for e in fold.errors), fold.errors
 
 
 # --- the command line -----------------------------------------------------------------------------
@@ -353,20 +382,23 @@ def test_the_verbs_run_from_the_command_line(capsys):
                 "--repo", str(root)]
         assert ch.main("challenge", [*args, "--floor", "0"]) == 0
         out = capsys.readouterr().out
-        assert out.startswith(f"challenge {pin}-{head} — 7 of 8 statement(s) to re-argue: 2 changed, "
-                              "4 on a touched box, 1 on a box the change reached; 1 carried"), out
-        assert f"--prefix {pin}-{head}-" in out
+        assert out.startswith(f"challenge {pin}-{head} — 8 of 10 statement(s) to re-argue: 2 changed, "
+                              "5 on a touched box, 1 on a box the change reached; 2 carried"), out
+        assert f"--prefix {pin}-{head}- " in out
         make_wave(inputs)
         applied, _ = apply(inputs.log, inputs.map_doc, "2026-09-19")
         inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
         assert ch.main("ground", [*args, "--dry-run"]) == 0
         out = capsys.readouterr().out
-        assert "dry run — nothing written" in out and "NOTE FACTS" in out
+        assert "dry run — nothing written" in out and "WAVE FACTS" in out
         note = root / "note.txt"
-        note.write_text("Four fresh-context skeptics re-read the seven statements the change reached.\n")
+        note.write_text("Five fresh-context skeptics re-read the eight statements the change reached, "
+                        "and the map gained 2 new statements.\n")
         assert ch.main("ground", [*args, "--note-file", str(note)]) == 0
         out = capsys.readouterr().out
-        assert "7 statement(s) re-argued: 7 confirmed" in out and "next: coyomap grounding refutations" in out
+        assert "8 statement(s) re-argued: 8 confirmed" in out and "next: coyomap grounding refutations" in out
+        assert "WAVE FACTS" in out and "superseded 1, of which 1 had been CONFIRMED" in out, out
+        assert "MAP-WIDE, after this update: 10 of 10" in out, out
         assert ch.main("ground", [*args]) == 2, "a real write needs the note"
 
 
@@ -390,7 +422,7 @@ def test_the_written_map_is_refused_by_check_until_the_record_describes_it():
         _problems, warnings = validate_model(load_model(json.dumps(applied)), inputs.map_path,
                                              disclose_records=False)
         assert any("does not describe this map" in w for w in warnings), warnings
-        fold = ch.run_ground(inputs, "one wave, four skeptics", dry_run=False)
+        fold = ch.run_ground(inputs, "one wave, five skeptics", dry_run=False)
         assert not fold.errors, fold.errors
         grounded = json.loads(inputs.map_path.read_text(encoding="utf-8"))
         fresh = check(inputs.log, inputs.before_doc, grounded, inputs.impact, new_path=inputs.map_path)
@@ -435,9 +467,9 @@ def test_a_map_with_no_warrant_gets_no_wave_and_is_told_why():
         applied, _ = apply(inputs.log, inputs.map_doc)
         scope = ch.scope_update(inputs.log, inputs.before_text, applied, inputs.impact,
                                 inputs.verify, inputs.repo)
-        assert scope.in_scope == [] and len(scope.unvoted) == 8 and scope.carried == []
+        assert scope.in_scope == [] and len(scope.unvoted) == 10 and scope.carried == []
         assert any("carries no warrant" in n for n in scope.notes), scope.notes
-        _scope, batches, _applied = ch.run_challenge(inputs, cap=40, floor=0)
+        _scope, batches, _applied, _prefix = ch.run_challenge(inputs, cap=40, floor=0)
         assert batches == [] and not list(inputs.verify.glob("claims-*.json"))
 
 
@@ -460,7 +492,8 @@ def test_a_fix_after_a_refutation_gets_one_more_wave_over_the_re_minted_statemen
              "evidence": ["svc/b.py"], "confidence": "verified"})
         inputs.log_path.write_text(json.dumps(log_doc, indent=2), encoding="utf-8")
         inputs.log = load_log(inputs.log_path.read_text(encoding="utf-8"))
-        scope, batches, _applied = ch.run_challenge(inputs, cap=40, floor=0)
+        scope, batches, _applied, prefix = ch.run_challenge(inputs, cap=40, floor=0)
+        assert prefix == f"{pin}-{head}-w2-"
         assert [name for name, _n in batches] == [f"claims-{pin}-{head}-w2-description.json"]
         assert batches[0][1] == 1, "only the statement the fix re-minted goes out"
         assert any("already have a verdict from this update's earlier wave" in n for n in scope.notes)
@@ -470,13 +503,133 @@ def test_a_fix_after_a_refutation_gets_one_more_wave_over_the_re_minted_statemen
         applied, _ = apply(inputs.log, inputs.map_doc, "2026-09-19")
         inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
         inputs.map_doc = applied
-        fold = ch.run_ground(inputs, "two waves, five skeptics", dry_run=False)
+        fold = ch.run_ground(inputs, "two waves, six skeptics", dry_run=False)
         assert not fold.errors, fold.errors
         g = json.loads(inputs.map_path.read_text(encoding="utf-8"))["grounding"]
-        assert g["claims_refuted"] == 0 and g["claims_challenged"] == g["claims_total"] == 8
+        assert g["claims_refuted"] == 0 and g["claims_challenged"] == g["claims_total"] == 10
+        # The ledger row counts what the wave caught, including the statement the fix then removed.
         wave = g["history"][-1]
-        assert wave["challenged"] == 7 and wave["refuted"] == 0 and wave["skeptics"] == 5
+        assert wave["challenged"] == 9 and wave["refuted"] == 1 and wave["skeptics"] == 6
+        assert wave["retired"] == 7
         retired = json.loads((inputs.verify / f"retired-{pin}-{head}.json").read_text(encoding="utf-8"))
         assert any(r["claim"] == refuted and r["file"] == "this update's wave" for r in retired["rows"])
         files = [str(p) for p in ch.verdict_files(inputs.verify)]
         assert grounding_main(["refutations", "--map", str(inputs.map_path), "--verdicts", *files]) == 0
+
+
+# --- the reviewer's findings, each pinned ---------------------------------------------------------
+
+def _verify_snapshot(verify: Path) -> dict[str, str]:
+    return {p.name: p.read_text(encoding="utf-8") for p in sorted(verify.iterdir())}
+
+
+def test_ground_run_twice_changes_nothing_the_second_time():
+    """A re-run by mistake: the same scope against the list the update replaced, no citation moved
+    twice, one ledger row — the second run is a no-op on every file."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, fold, _pin, _head = make_grounded(td)
+        before = _verify_snapshot(inputs.verify)
+        map_before = inputs.map_path.read_text(encoding="utf-8")
+        log_before = inputs.log_path.read_text(encoding="utf-8")
+        inputs.map_doc = json.loads(map_before)
+        again = ch.run_ground(inputs, "one wave, five skeptics", dry_run=False)
+        assert not again.errors, again.errors
+        assert _verify_snapshot(inputs.verify) == before
+        assert inputs.map_path.read_text(encoding="utf-8") == map_before
+        assert inputs.log_path.read_text(encoding="utf-8") == log_before
+        assert len(json.loads(map_before)["grounding"]["history"]) == 2
+
+
+def test_a_retry_after_a_crash_finishes_the_fold_without_moving_a_citation_twice():
+    """The crash state the reviewer forced: the retired file written and the prior files rewritten,
+    the pin, the map and the log not yet. The retry must complete and leave the same result."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, fold, pin, _head = make_grounded(td)
+        done = _verify_snapshot(inputs.verify)
+        map_done = inputs.map_path.read_text(encoding="utf-8")
+        # Back to the crash state: the old pin back in place, the map and the log as before ground.
+        shutil.copy(inputs.verify / f"worklist-{pin[:7]}.json", inputs.verify / "worklist.json")
+        doc = json.loads(map_done)
+        doc["grounding"] = inputs.before_doc["grounding"]
+        inputs.map_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        inputs.map_doc = doc
+        log_doc = json.loads(inputs.log_path.read_text(encoding="utf-8"))
+        log_doc.pop("challenge")
+        inputs.log_path.write_text(json.dumps(log_doc, indent=2), encoding="utf-8")
+        inputs.log = load_log(inputs.log_path.read_text(encoding="utf-8"))
+        retry = ch.run_ground(inputs, "one wave, five skeptics", dry_run=False)
+        assert not retry.errors, retry.errors
+        assert (retry.rekeyed, retry.evidence_moved, retry.evidence_stale) == (0, 0, 0), \
+            "the prior files were already carried: nothing to re-key or move"
+        assert _verify_snapshot(inputs.verify) == done
+        assert json.loads(inputs.map_path.read_text(encoding="utf-8")) == json.loads(map_done)
+
+
+def test_a_dead_citation_is_not_read_as_drift_by_the_anchor_check():
+    """The reviewer's end-to-end case: a carried confirmed row cited the line the diff rewrote;
+    left as a line, `anchor-drift` reported the map's correct link as drifted and `fix
+    apply-drift` moved it back. Cut to the file, the row carries no line to read."""
+    from coyomap.anchor_drift import drift_findings
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _fold, _pin, _head = make_grounded(td)
+        rows: list[dict] = []
+        for f in ch.verdict_files(inputs.verify):
+            rows.extend(ch.read_rows(f)[1])
+        m = load_model(inputs.map_path.read_text(encoding="utf-8"))
+        found = drift_findings(l2_worklist_model(m), rows, tolerance=2)
+        assert not [w.claim for w, _d in found if "second guard" in w.claim], found
+        site = next(r for r in m.rules if r.id == "BR3").sites[0].where
+        assert site == "svc/a.py:21", "the map's own link stays where the re-anchor step put it"
+
+
+def test_an_unanswered_batch_is_replaced_by_the_next_challenge_run_and_never_blocks_ground():
+    """Wave 1 lost a skeptic; a refutation elsewhere amended the log; `challenge` re-runs. The lost
+    batch's statements go out again under the new prefix, and `ground` sees every statement voted."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, pin, head = make_update(td)
+        ch.run_challenge(inputs, cap=40, floor=0)
+        make_wave(inputs, refute="Component C2 (Beta) is described as: Keeps the beta list.",
+                  skip_batch="backbone")
+        log_doc = json.loads(inputs.log_path.read_text(encoding="utf-8"))
+        log_doc["entries"].append(
+            {"id": "e3", "headline": "Beta keeps a bounded list", "elements": ["C2"],
+             "sentence": "The beta list is bounded, and the description now says so.",
+             "edits": [{"id": "C2", "key": "purpose", "was": "Keeps the beta list.",
+                        "now": "Keeps the bounded beta list."}],
+             "evidence": ["svc/b.py"], "confidence": "verified"})
+        inputs.log_path.write_text(json.dumps(log_doc, indent=2), encoding="utf-8")
+        inputs.log = load_log(inputs.log_path.read_text(encoding="utf-8"))
+        _scope, batches, _applied, prefix = ch.run_challenge(inputs, cap=40, floor=0)
+        assert not (inputs.verify / f"claims-{pin}-{head}-backbone.json").exists(), "replaced"
+        assert {name for name, _n in batches} == {f"claims-{prefix}backbone.json",
+                                                  f"claims-{prefix}description.json"}
+        make_wave(inputs)
+        applied, _ = apply(inputs.log, inputs.map_doc, "2026-09-19")
+        inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
+        inputs.map_doc = applied
+        fold = ch.run_ground(inputs, "two waves, six skeptics", dry_run=False)
+        assert not fold.errors, fold.errors
+
+
+def test_missing_warrant_files_are_refused_and_a_map_with_no_record_is_left_alone():
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, _pin, _head = make_update(td)
+        for p in inputs.verify.iterdir():
+            p.unlink()
+        applied, _ = apply(inputs.log, inputs.map_doc, "2026-09-19")
+        inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
+        inputs.map_doc = applied
+        # The record says 9 challenged and nothing beside the map can show a vote: refuse.
+        fold = ch.run_ground(inputs, "a note", dry_run=False)
+        assert any("warrant files are missing" in e for e in fold.errors), fold.errors
+        assert not list(inputs.verify.iterdir()) and "history" not in \
+            json.loads(inputs.map_path.read_text(encoding="utf-8"))["grounding"]
+        # No record at all: nothing to ground, nothing written, no error.
+        applied.pop("grounding")
+        inputs.map_path.write_text(json.dumps(applied, indent=2), encoding="utf-8")
+        inputs.map_doc = applied
+        fold = ch.run_ground(inputs, "a note", dry_run=False)
+        assert not fold.errors and "carries no warrant" in fold.skipped
+        assert not list(inputs.verify.iterdir())
+        assert "grounding" not in json.loads(inputs.map_path.read_text(encoding="utf-8"))
+        assert load_log(inputs.log_path.read_text(encoding="utf-8")).challenge is None
