@@ -27,7 +27,7 @@ from coyomap.viewer import url as url_cmd
 from coyomap.viewer.recents import RecentsStore
 from coyomap.viewer.running import forget_running, note_running, running_servers
 from coyomap.viewer.serve import Handler, build_projects
-from coyomap.viewer.url import link_for
+from coyomap.viewer.url import HOME_VIEWS, link_for
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_MAP = REPO_ROOT / "tests" / "fixtures" / "mcpolis-project-map.json"
@@ -242,7 +242,8 @@ def test_with_a_running_server_the_address_is_whole_and_the_path_is_the_servers(
                            "view": "features", "fragment": "v=features&sel=sfeat%3ACAP1",
                            "path": "/coyomap/alpha/",
                            "url": f"http://127.0.0.1:{port}/coyomap/alpha/#v=features&sel=sfeat%3ACAP1",
-                           "server": {"port": port, "pid": os.getpid()}}
+                           "server": {"port": port, "pid": os.getpid()},
+                           "state": "served", "note": ""}
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -306,3 +307,133 @@ def test_bad_input_fails_loudly_and_never_with_exit_0() -> None:
         assert code == 1 and "not found" in err
         code, out, _err = run_url(["--help"], running)
         assert code == 0 and "usage: coyomap url" in out
+
+
+# ── --home: the map's own address ────────────────────────────────────────────────────────────
+
+
+def test_home_is_the_map_address_with_no_element_and_no_fragment() -> None:
+    """What a finished build hands the reader: the front door, on the server that is actually up —
+    never a port spelled from memory."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project(Path(td))
+        httpd, port = make_served(Path(td), [folder])
+        try:
+            running = Path(td) / "running.json"
+            note_running(port, os.getpid(), running)
+            code, out, err = run_url(["--home", "--repo", str(folder)], running)
+            assert code == 0, err
+            assert out.strip() == f"http://127.0.0.1:{port}/coyomap/alpha/"
+            assert "#" not in out and "note:" not in err
+            code, out, err = run_url(["--home", "--repo", str(folder), "--json"], running)
+            assert code == 0, err
+            got = json.loads(out)
+            assert got == {"id": None, "kind": None, "name": None, "view": None, "fragment": None,
+                           "path": "/coyomap/alpha/",
+                           "url": f"http://127.0.0.1:{port}/coyomap/alpha/",
+                           "server": {"port": port, "pid": os.getpid()},
+                           "state": "served", "note": ""}
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def test_home_says_which_of_the_two_silences_it_met() -> None:
+    """`state` is the word the closing message branches on, and the two answers are not the same
+    remedy: with NO server you start one, with a server that does not list the map you add the
+    folder to the one already up."""
+    with tempfile.TemporaryDirectory() as td:
+        mine = make_project(Path(td), "mine")
+        other = make_project(Path(td), "other")
+        running = Path(td) / "running.json"  # never written: no server ever ran
+        code, out, err = run_url(["--home", "--repo", str(mine), "--json"], running)
+        assert code == 0
+        got = json.loads(out)
+        assert got["state"] == "no-server" and got["url"] is None and got["server"] is None
+        assert got["path"] == "/coyomap/mine/" and "no coyomap server is running" in got["note"]
+        assert "no coyomap server is running" in err
+
+        httpd, port = make_served(Path(td), [other])
+        try:
+            note_running(port, os.getpid(), running)
+            code, out, err = run_url(["--home", "--repo", str(mine), "--json"], running)
+            assert code == 0
+            got = json.loads(out)
+            assert got["state"] == "not-listed" and got["url"] is None
+            assert f"port {port}" in got["note"] and str(mine) in got["note"]
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def test_home_answers_for_a_map_it_cannot_parse() -> None:
+    """The address does not depend on the contents, and a build asking where its map is served must
+    not be blocked by what the gates are there to judge."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project(Path(td))
+        (folder / ".coyomap" / "project-map.json").write_text("{ not json", encoding="utf-8")
+        running = Path(td) / "running.json"
+        code, out, _err = run_url(["--home", "--repo", str(folder)], running)
+        assert code == 0 and out.strip() == "/coyomap/alpha/"
+        code, _out, err = run_url(["UC1", "--repo", str(folder)], running)  # the element half still reads it
+        assert code == 1 and "ERROR" in err
+
+
+def test_home_refuses_the_flags_that_only_make_sense_for_an_element() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project(Path(td))
+        running = Path(td) / "running.json"
+        code, _out, err = run_url(["--home", "UC1", "--repo", str(folder)], running)
+        assert code == 2 and "takes no element id" in err
+        code, _out, err = run_url(["--home", "--context", "--repo", str(folder)], running)
+        assert code == 2 and "cannot be combined with --home" in err
+        code, _out, err = run_url(["--repo", str(folder)], running)
+        assert code == 2 and "--home" in err  # the missing-id error teaches the flag
+        code, _out, err = run_url(["--home", "--repo", str(Path(td) / "nowhere")], running)
+        assert code == 1 and "not found" in err
+
+
+def test_a_named_screen_is_the_whole_map_address_plus_that_screen() -> None:
+    """What an update hands the reader: the Update log, no element selected. `--view` is the
+    no-element mode by itself, so it needs no `--home` beside it."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project(Path(td))
+        httpd, port = make_served(Path(td), [folder])
+        try:
+            running = Path(td) / "running.json"
+            note_running(port, os.getpid(), running)
+            code, out, err = run_url(["--view", "updates", "--repo", str(folder)], running)
+            assert code == 0, err
+            assert out.strip() == f"http://127.0.0.1:{port}/coyomap/alpha/#v=updates"
+            code, out, err = run_url(["--view", "updates", "--repo", str(folder), "--json"], running)
+            got = json.loads(out)
+            assert got["view"] == "updates" and got["fragment"] == "v=updates"
+            assert got["id"] is None and got["name"] is None and got["state"] == "served"
+            assert got["url"] == f"http://127.0.0.1:{port}/coyomap/alpha/#v=updates"
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def test_every_home_view_is_a_screen_the_viewer_draws() -> None:
+    """The tripwire for the closed list: a word here that the viewer does not render would send the
+    reader to the default screen with nothing to tell them so."""
+    js = VIEWER_JS.read_text(encoding="utf-8")
+    for word in HOME_VIEWS:
+        assert f"kind === '{word}'" in js or f"kind: '{word}'" in js, \
+            f"--view {word} is no screen the viewer draws"
+        assert f"const URL_WORD = {{ usecases: 'features' }}" in js  # the only kind→word rename
+        assert f"'{word}':" not in js.split("const URL_WORD = {", 1)[1].split("}", 1)[0], \
+            f"{word} is renamed on its way into the URL"
+
+
+def test_a_screen_the_command_cannot_address_is_refused_by_name() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project(Path(td))
+        running = Path(td) / "running.json"
+        code, _out, err = run_url(["--view", "nonsense", "--repo", str(folder)], running)
+        assert code == 2 and "no screen this command can address" in err and "updates" in err
+        code, _out, err = run_url(["--view", "updates", "UC1", "--repo", str(folder)], running)
+        assert code == 2 and "takes no element id" in err
+        code, _out, err = run_url(["--view", "--repo", str(folder)], running)
+        assert code == 2 and "--view needs a screen" in err

@@ -45,6 +45,9 @@ Commands:
              `coyomap url UC12` prints http://127.0.0.1:<port>/coyomap/<slug>/#v=usecase&uc=UC12
              with the running server's port, or the path alone when no server runs.
              `--context` gives the home view with the element lit instead of its page.
+             `--home` gives the map's own address — the front door a finished build hands
+             over — and `--view updates` the Update log, which an update hands over. With
+             `--json`, a `state` saying served / no-server / not-listed.
   assemble   Merge build agents' structured-row fragments into the canonical
              project-map.json (+ generated views).
   lint-fragment  Self-check ONE build fragment before returning it (schema + anchor

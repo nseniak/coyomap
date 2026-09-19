@@ -6,7 +6,7 @@ makes. The log is the product of the update; the updated map is what it leaves b
 as building the baseline — read code → meaning — scoped to the diff, and bounded by tools that know
 what the map already says.
 
-## Lifecycle — one verb, seven steps, two documents
+## Lifecycle — one verb, eight steps, two documents
 
 | Step | Action | Tool | Writes |
 |---|---|---|---|
@@ -18,10 +18,11 @@ what the map already says.
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
 | **6 Apply** | the entries land in the map, the pin moves; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
 | **7 Close** | the invariant, the rendering, the record, the commit | render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json` and `.impact.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index, `provenance.json`; **one commit** of map + log + views + pre-index + provenance, with a plain `git add` — never `git add -f` |
+| **8 Hand over** | the reader is told where to see what changed | `coyomap url --view updates --repo <repo> --json`, and `coyomap serve` when nothing is running (Step 8 below) | nothing |
 
 - **`update`** is the whole sequence. **`analyze`** is steps 0–5: the log written, linted and gated,
   the map's meaning untouched — its code links have moved (step 2), which is a change of no meaning
-  — for a reader who wants the log before it lands. **`accept`** is steps 6–7 on a log that already
+  — for a reader who wants the log before it lands. **`accept`** is steps 6–8 on a log that already
   exists; it finds the `.before.json` copy and the `.impact.json` file that steps 0 and 1 left
   beside the log.
 - **From and to are commits.** `from` is the map's pin, `to` is `HEAD`. A dirty tree cannot be
@@ -39,6 +40,52 @@ what the map already says.
   once and leaves the next log ignored again.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
+
+## Step 8 — hand the reader the Update log
+
+An update that ends at the commit ends with nothing to look at. The work of steps 3–6 is a story
+about what changed, and the screen that tells it — the **Update log** — is one the reader has to go
+and find. So close the way a build closes, on the same three answers, and **ask where the map is
+served rather than spelling an address** (`method.md`'s closing section is the long form of why):
+
+```
+.venv/bin/coyomap url --view updates --repo <repo> --json
+```
+
+`updates` is the Update log itself, every update newest first — **never one update's own page**. A
+reader who wants this update opens it from the list, and the list is also what says the update
+landed at all.
+
+- **`served`** — close with its `url`, verbatim:
+
+  > **The map of `<project>` is up to date.**
+  >
+  > A viewer is already running. See what changed at `<url>`
+
+- **`no-server`** — offer, and start it yourself on a yes (`<path>` is what the command printed,
+  and 8765 is safe to name because no coyomap server holds a port):
+
+  > **The map of `<project>` is up to date.**
+  >
+  > No viewer is running. Shall I start one? It stays up until you stop it, and serves every map you
+  > have opened.
+  >
+  > Then what changed is at `http://127.0.0.1:8765<path>#v=updates`
+
+  On a yes, start it detached, and never behind a `cd`:
+
+  ```
+  nohup .venv/bin/coyomap serve > /tmp/coyomap-serve.log 2>&1 &
+  ```
+
+  Then re-run the `url` command and give the reader the `url` it now prints, not the one you
+  predicted.
+
+- **`not-listed`** — a viewer is up but does not serve this folder. **Do not start a second one.**
+  Print the command's own `note`: it names the port and what to add to it.
+
+**Analyze stops before this.** It writes a log and lands nothing, so there is no update to look at;
+its closing line is the log's own path, as before.
 
 ## Where the map lags, and how far
 

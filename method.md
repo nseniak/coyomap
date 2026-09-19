@@ -3299,15 +3299,60 @@ It is a *rendering* of the model (no second source; never hand-edit it — `vali
 view) — commit it alongside the model so the two stay in step. The interactive diagram is not a file:
 it is served live from the model by `coyomap serve`. **Finish by reporting the artifacts as links** —
 the model (`.coyomap/project-map.json`) and the markdown view (`.coyomap/project-map.md`), as relative
-paths. **Then give the reader the URL to open the interactive map in a browser through the
-coyomap map server** — that is where the diagram, file browser, and code viewer light up (data + source
-served from git at the map's commit). Rendering just registered this project with the server, so it shows up there as a
-card. Tell the reader: if the server isn't already running, start it once from the coyomap clone —
-`make start` (or `.venv/bin/coyomap serve`) — then open `http://127.0.0.1:8765/coyomap/<repo-folder-name>/`
-(the `<repo-folder-name>` is the mapped repo's folder name), or the landing page
-`http://127.0.0.1:8765/` and click this project. (Paths like `.venv/bin/coyomap` are relative to the
-coyomap clone, like the validator above.) For the address of ONE element — a use case the reader asked
-about, a rule — `.venv/bin/coyomap url <ID> --repo <repo>` prints it, port included.
+paths.
+
+**Then close on the viewer — ASK where the map is served, never spell an address.** A map nobody
+opens is a file, and the two facts the closing line needs — whether a viewer is up, and on which
+port — live in `~/.coyomap/serve-running.json`, never here. This paragraph used to spell
+`http://127.0.0.1:8765/…` as a constant; a session with a viewer on another port then handed the
+reader an address that answered nothing. Ask instead:
+
+```
+.venv/bin/coyomap url --home --repo <repo> --json
+```
+
+`state` is the branch, and the three answers have three different closings. (`render` just
+registered this project, so a server that is already up lists it without a restart.) The viewer is
+where the diagram, the file browser and the code viewer light up, with data and source read from git
+at the map's commit.
+
+- **`served`** — a viewer is up and serves this map. Close with its `url`, verbatim:
+
+  > **The map of `<project>` is ready.**
+  >
+  > A viewer is already running. Open your map at `<url>`
+
+- **`no-server`** — nothing is running. **Offer, and start it yourself on a yes.** The reader asked
+  for a map, not for a chore; and because no coyomap server holds any port, the one you are about to
+  start takes `serve`'s default 8765, which is what makes the address in the offer safe to name
+  (`<path>` is what the command printed):
+
+  > **The map of `<project>` is ready.**
+  >
+  > No viewer is running. Shall I start one? It stays up until you stop it, and serves every map you
+  > have opened.
+  >
+  > Then your map is at `http://127.0.0.1:8765<path>`
+
+  On a yes, start it detached — it must outlive the turn that started it — and **never behind a
+  `cd`**, which is the exact shell drift `resolve_map_path` exists to catch:
+
+  ```
+  nohup .venv/bin/coyomap serve > /tmp/coyomap-serve.log 2>&1 &
+  ```
+
+  The port is recorded only once the server binds, so **re-run `url --home` and give the reader the
+  `url` it now prints** rather than the one you predicted. Still `no-server` after a few seconds
+  means the start failed or something else holds the port: show the log, not a guess.
+
+- **`not-listed`** — a viewer is up but does not serve this folder, so registration did not take.
+  **Do not start a second one** — two servers on one machine is how a reader ends up on the stale
+  port. Print the command's own `note`: it names the port and what to add to it.
+
+`<project>` is the mapped repo's folder name, the same word the address carries. (Paths like
+`.venv/bin/coyomap` are relative to the coyomap clone, like the validator above.) For the address of
+ONE element — a use case the reader asked about, a rule — `.venv/bin/coyomap url <ID> --repo <repo>`
+prints it, port included.
 
 **Maintaining the map.** When code changes after a baseline exists, follow
 [change-impact](method/change-impact.md), which is the whole procedure: `coyomap impact` says
