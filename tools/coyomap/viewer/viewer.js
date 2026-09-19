@@ -9494,12 +9494,35 @@ function productLeadHtml(secs) {
     `<div class="view-lead"><div class="view-lead-body">`
     + proseBlocksHtml(overview, (p) => mdRefs(p, GRAPH.nodes)) + '</div></div>');
 }
+// THE WARRANT, in one line: how much of what this map says a fresh-context skeptic has read against
+// the code, and how that came to be — the build's pass, then each update's wave. Until this line
+// existed the record travelled inside the map and appeared on NO screen, so a reader could not tell
+// a map argued with by eighteen skeptics from one nobody had checked; after an update the numbers
+// are re-measured over the map as it now is, and the waves say what was carried and what was re-read.
+function warrantLineHtml() {
+  const w = GRAPH.warrant;
+  if (!w) return '';
+  const waves = w.waves || [];
+  const parts = [`${w.live_challenged} of ${countLabel(w.live_total, 'statement')} have a verdict from a fresh-context skeptic`
+                 + (w.refuted ? `, ${w.refuted} refuted` : '')];
+  const updates = waves.filter((x) => x.kind === 'update');
+  const build = waves.find((x) => x.kind === 'build');
+  if (updates.length) {
+    const last = updates[updates.length - 1];
+    parts.push(`${countLabel(updates.length, 'update wave')} since the build`
+               + (build && build.date ? ` of ${build.date}` : '')
+               + `; the last re-argued ${last.challenged} and carried ${last.carried}`);
+  }
+  return `<p class="warrant-line" data-warrant>${parts.map(esc).join(' · ')}</p>`;
+}
 function renderOverviewTab() {
   // The description alone. A digest of the map's people, features and interfaces as pills sat under
   // it for one day (2026-09-11) and was taken out the next: the tab is the one screen meant to be READ,
   // and the Features board already draws every one of those names with its sentence, one tab over.
+  // The warrant line is the one exception: it is about the description's own trustworthiness.
   diagram.innerHTML = '<div class="usecases-wrap overview-wrap">'
-    + (productLeadHtml([]) || '<p class="empty">This map records no product description.</p>') + '</div>';
+    + (productLeadHtml([]) || '<p class="empty">This map records no product description.</p>')
+    + warrantLineHtml() + '</div>';
   bindProductLead();
 }
 
@@ -17214,7 +17237,19 @@ function timelineRowCardHtml(r) {
   const desc = heads.slice(0, 3).join(' \u00b7 ') + (heads.length > 3 ? ` \u00b7 and ${heads.length - 3} more` : '');
   return plainCardHtml({ key: 'at:' + r.at, name: versionTitle(r), desc,
                          pill: countPillOf(countLabel(l.entries, 'entry')),
-                         foot: `<p class="ecard-extra"><span class="ecard-lbl">Written</span> ${esc(l.date)}</p>` + landed });
+                         foot: `<p class="ecard-extra"><span class="ecard-lbl">Written</span> ${esc(l.date)}</p>` + landed
+                               + challengeLineHtml(l.challenge) });
+}
+// WHAT THE UPDATE'S OWN SKEPTICS DECIDED, on its row and at the head of its page. An update that
+// ran no wave says so in as many words: the reader is told which updates were argued with, not
+// left to assume all of them were.
+function challengeLineHtml(c) {
+  if (!c) return '<p class="ecard-extra"><span class="ecard-lbl">Challenged</span> <span class="cmp-later">no skeptic read this update</span></p>';
+  const text = `${countLabel(c.challenged, 'statement')} re-argued by ${countLabel(c.skeptics, 'skeptic')}`
+    + (c.refuted ? `, ${c.refuted} refuted` : ', none refuted')
+    + (c.closer_rejected ? ` (${countLabel(c.closer_rejected, 'refutation')} rejected on appeal)` : '')
+    + ` \u00b7 ${c.carried} carried`;
+  return `<p class="ecard-extra"><span class="ecard-lbl">Challenged</span> ${esc(text)}</p>`;
 }
 function timelineListHtml() {
   if (EXPORTED) return '<p class="empty">This shared copy carries no update log. Open the map with <code>coyomap serve</code> to read its updates.</p>';
@@ -17249,7 +17284,9 @@ function timelineHeadHtml(row, doc) {
     ? '<p class="cmp-marked-note">Marks of this update on today\u2019s map: the badges say which boxes it touched, and each box wears its current words. What this update did to a box is on that box\u2019s page.</p>'
     : '';
   const warns = doc ? (doc.warnings || []).map((w) => `<p class="cmp-warn">${esc(w)}</p>`).join('') : '';
-  return `<div class="cmp-head"><p class="cmp-since">${line}</p>${control}${marked}${warns}</div>`;
+  // The row carries the log's own block (api/changes), so the line does not wait for the document.
+  const challenged = challengeLineHtml(l.challenge);
+  return `<div class="cmp-head"><p class="cmp-since">${line}</p>${challenged}${control}${marked}${warns}</div>`;
 }
 // The diff is EVIDENCE: folded under the entries, with the three filters inside the fold, since
 // they read the diff and never the entries.

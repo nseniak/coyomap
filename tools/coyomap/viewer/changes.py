@@ -23,7 +23,7 @@ from coyomap.changelog import commit_matches
 LOG_NAME = re.compile(r"^[0-9a-f]{7,40}-[0-9a-f]{7,40}$")
 LOG_PREFIX = "log:"
 #: What the update leaves beside a log until step 7 is clean; never a log.
-SCRATCH_SUFFIXES = (".before.json", ".impact.json")
+SCRATCH_SUFFIXES = (".before.json", ".impact.json", ".applied.json", ".scope.json")
 
 
 @dataclass(frozen=True)

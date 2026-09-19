@@ -28,7 +28,7 @@ Regenerate after an INTENTIONAL output change:
     coyomap assemble fragments/*.json --out /tmp/exp --reconcile reconcile.json
     python -c "import json,pathlib;m=json.load(open('/tmp/exp/project-map.json'));\
 [m.pop(k,None) for k in ('tool_commit','tool_committed','built')];\
-pathlib.Path('expected/project-map.json').write_text(json.dumps(m,indent=1,ensure_ascii=False)+'\\n')"
+pathlib.Path('expected/project-map.json').write_text(json.dumps(m,indent=2,ensure_ascii=False)+'\\n')"
 """
 from __future__ import annotations
 

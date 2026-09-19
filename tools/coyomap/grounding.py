@@ -34,7 +34,7 @@ from pathlib import Path
 
 from coyomap import subverb_help
 from coyomap.anchor_drift import load_verdicts
-from coyomap.audit_model import ClaimTarget, l2_worklist_model, resolve_claim
+from coyomap.audit_model import ClaimTarget, claim_digest, l2_worklist_model, pinned_tier, resolve_claim
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 
@@ -688,13 +688,11 @@ def live_claims_digest(claims: "Iterable[str]") -> str:
     unchanged), and a reconcile that rewrites a claim IS 1-for-1 by construction — 4 of the 6
     superseded claims on the build this was written for were exactly that shape. De-duplicated
     because `build_record` de-duplicates the pinned side, and two sides counted by different rules
-    is how a check ends up measuring the rule instead of the map."""
-    import hashlib
-    # JSON-encoded, not newline-joined: a separator that can appear inside a claim makes the digest
-    # ambiguous, and `["a\nb"]` hashed identically to `["a", "b"]`. No claim carries a newline
-    # today, which is exactly why this is worth removing now rather than after one does.
-    payload = json.dumps(sorted(set(claims)), ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    is how a check ends up measuring the rule instead of the map.
+
+    The hashing itself is `audit_model.claim_digest`, so `validate` and `changes check` recompute
+    the very same value without importing this module."""
+    return claim_digest(claims)
 
 
 def build_record(worklist_claims: list[str], grounding_rows: list[dict],
@@ -1747,13 +1745,10 @@ def worklist_is_behavioural(path: Path) -> bool:
     written from — and `live_claims_digest` described a different surface from the one that was
     pinned. That made the tier unusable in practice, which is why 1,049 rows of the 2026-09-02
     mcpolis map were outside the worklist "by construction". The two surfaces must be computed the
-    same way or the record is about neither."""
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    items = payload if isinstance(payload, list) else payload.get("worklist", [])
-    return any(isinstance(i, dict) and str(i.get("theme", "")) == "behaviour" for i in items)
+    same way or the record is about neither.
+
+    The reading itself is `audit_model.pinned_tier`, shared with `validate` and `changes check`."""
+    return pinned_tier(path)
 
 
 def _worklist_claims(path: Path) -> list[str]:

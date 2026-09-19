@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from coyomap import subverb_help
+from coyomap.audit_model import record_gap
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import Finding, field_findings, history_findings, iter_prose_fields
@@ -69,7 +70,14 @@ USAGE = """usage: coyomap changes <verb> [options]
         the completeness gate BEFORE the write: the log, applied to a copy of this map, explains
         every change it makes, and names or waives every box the code touched (--touched)
         --old <map> --new <map> in place of --map: the same gate AFTER apply, on the map before
-        and after it
+        and after it — and the new map's `grounding` record must describe it (`changes ground`)
+  challenge <log> --map <map> --before <before.json> --touched <impact.json>
+        the update's skeptic wave, part one: which statements the change put in scope, cut into
+        claims batches beside the build's, and the applied copy of the map the skeptics read
+  ground <log> --map <map> --before <before.json> --touched <impact.json> --note-file <path>
+        part two, after `apply`: the warrant re-pinned, verdicts carried or retired, the record
+        re-measured and written into the map, the log told what the wave decided
+        (`coyomap changes challenge --help` has both in full)
 
 The log is `.coyomap/changes/<from>-<to>.json`, written by the agent that analyzed the code.
 Every verb is read-only except `apply`, which writes the map it is given (or `--out`).
@@ -132,6 +140,11 @@ class ChangeLog:
     entries: list[Entry]
     waived: list[Waiver] = field(default_factory=list)   # boxes the code touched with no change of meaning
     notes: str = ""                     # the honesty footer: resolution reached, gaps, seams
+    #: What the update's skeptics decided, written by `changes ground` once the wave has landed:
+    #: how many statements the change put in scope and why, how the votes fell, what was carried.
+    #: None until then. The viewer's Update log reads it; the map's own `grounding.history`
+    #: carries the same wave as the map's statement about itself.
+    challenge: dict[str, Any] | None = None
 
     def named(self) -> set[str]:
         return {i for e in self.entries for i in e.elements}
@@ -203,13 +216,18 @@ def load_log(text: str) -> ChangeLog:
         w = a_dict(w, f"waived[{i}]")
         need(w, ("id",), f"waived[{i}]")
         waived.append(Waiver(str(w["id"]), str(w.get("why") or "")))
+    challenge = doc.get("challenge")
+    if challenge is not None and not isinstance(challenge, dict):
+        raise ValueError("challenge is not an object")
     return ChangeLog(str(doc["from_commit"]), str(doc["to_commit"]), str(doc["date"]), entries,
-                     waived, str(doc.get("notes") or ""))
+                     waived, str(doc.get("notes") or ""), challenge)
 
 
 def dump_log(log: ChangeLog) -> str:
     doc: dict[str, Any] = {"format": FORMAT, "version": VERSION}
     doc.update(asdict(log))
+    if doc.get("challenge") is None:
+        doc.pop("challenge", None)      # a log the wave has not reached carries no empty key
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -766,14 +784,24 @@ def touched_ids(impact: dict[str, Any]) -> set[str]:
 
 
 def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
-          impact: dict[str, Any] | None = None) -> Problems:
+          impact: dict[str, Any] | None = None, new_path: Path | None = None) -> Problems:
     """The two-way rule between the log and the map's own change.
     Errors: a box the map diff says changed (wording or structure) that no entry names and no
     waiver covers — a keyed row (a glossary term, a run command…) counts under its synthetic id and
     the map's header under `map`; a box an entry names that the new map does not hold; a `to_commit`
-    that is not the new map's pin. Warnings: a box the code touched that nobody names or waives, and
-    a waiver on a box that did not change — nor, when `--touched` is given, was touched."""
+    that is not the new map's pin; and, when `new_path` names the map on disk after the write, a
+    `grounding` record that does not describe it — the update skipped `changes ground`, so the
+    statements it wrote have been argued with by nobody while the record says otherwise.
+    Warnings: a box the code touched that nobody names or waives, and a waiver on a box that did
+    not change — nor, when `--touched` is given, was touched."""
     p = Problems()
+    if new_path is not None:
+        try:
+            gap = record_gap(load_model(json.dumps(new_doc)), new_path)
+        except ModelError:
+            gap = None          # the loader's own message is the validator's to give, not this gate's
+        if gap:
+            p.errors.append(gap)
     new_pin = new_doc.get("commit")
     if isinstance(new_pin, str) and new_pin and not commit_matches(log.to_commit, new_pin):
         p.errors.append(f"the log ends at {log.to_commit}, the new map is pinned to {new_pin}")
@@ -1002,6 +1030,7 @@ def to_view(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None 
                 "evidence": list(e.evidence), "boxes": [box(i, e) for i in e.elements],
                 "edits": [edit(ed) for ed in e.edits]} for e in log.entries]
     return {"from": log.from_commit, "to": log.to_commit, "date": log.date, "entries": entries,
+            "challenge": log.challenge,
             "waived": [{"id": w.id, "name": names.get(w.id), "why": w.why,
                         "word": (lambda a: KIND_OF[a].word if a in KIND_OF else "box")(
                             index[w.id][0] if w.id in index else old_index[w.id][0] if w.id in old_index else array_of_id(w.id) or "")}
@@ -1084,6 +1113,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if args else 2
     verb = args[0]
     rest = args[1:]
+    if verb in ("challenge", "ground"):
+        # The options the two wave verbs take. Parsed in `challenge.py`; named here too so this
+        # command refuses a stray one before delegating, in its own words.
+        challenge_options = ("--map", "--before", "--touched", "--repo", "--cap", "--floor",
+                             "--note-file", "--dry-run", "--json", "-h", "--help")
+        unknown = [a for a in rest if a.startswith("-") and a not in challenge_options]
+        if unknown:
+            print(f"ERROR: unknown option '{unknown[0]}' for `changes {verb}`\n", file=sys.stderr)
+            print(USAGE, file=sys.stderr)
+            return 2
+        from coyomap import challenge  # noqa: PLC0415 — it imports this module; loaded on use
+        return challenge.main(verb, rest)
     if verb not in ("lint", "render", "apply", "check"):
         print(f"ERROR: unknown verb '{verb}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
@@ -1133,7 +1174,8 @@ def main(argv: list[str] | None = None) -> int:
             if map_opt:
                 p = check_before_write(log, _read_map(Path(map_opt)), impact)
             else:
-                p = check(log, _read_map(Path(old_opt or "")), _read_map(Path(new_opt or "")), impact)
+                p = check(log, _read_map(Path(old_opt or "")), _read_map(Path(new_opt or "")), impact,
+                          new_path=Path(new_opt or ""))
             if as_json:
                 print(json.dumps({"kind": "coyomap-changes-check", "ok": p.ok, "errors": p.errors,
                                   "warnings": p.warnings}, indent=2, ensure_ascii=False))

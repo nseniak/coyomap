@@ -142,8 +142,10 @@ that is the lead's problem, not yours.
 ## Your inputs and output
 
 - **Claims file**: `.coyomap/verify/claims-«CLAIMS».json`
-  — written by `coyomap audit <map> --batches .coyomap/verify --cap 40`. A `claims-small.json`
-  holds several small themes at once; each claim there carries its own `theme`.
+  — written by `coyomap audit <map> --batches .coyomap/verify --cap 40`, or, for an UPDATE's wave,
+  by `coyomap changes challenge` under the update's own name (`claims-<from>-<to>-<theme>.json`).
+  A `claims-small.json` (or `claims-<from>-<to>-small.json`) holds several small themes at once;
+  each claim there carries its own `theme`.
 - **Map**: `«MAP»` · **Repo root**: `«REPO»`
 - **Write your verdicts to**: `.coyomap/verify/verdicts-«BATCH».json`
 
