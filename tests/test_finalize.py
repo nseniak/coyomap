@@ -1073,6 +1073,233 @@ def test_a_build_that_reconciled_nothing_is_asked_not_scolded(tmp_path, capsys):
     assert "NOT in that command" not in out, out
 
 
+
+
+# --- claim batches nobody answered are BLOCKING (2026-09-19) -------------------------------------
+# The 2026-09-08 mcpolis build cut 24 behaviour batches holding 949 claims, dispatched none, and
+# shipped ADVISORIES. One unchallenged step said an expired sign-in warns the team's ADMIN where the
+# code warns the affected USER. `grounding write --partial` legitimately lifts the refusal over the
+# same fact, so the fact needed a second gate that no flag lifts.
+#
+# The FIRST version of that gate paired file names and an adversarial review broke it both ways
+# (F1/F2 below). It pairs claim text now; the two criticals are regression tests here.
+
+def _verify(tmp_path):
+    out = tmp_path / ".coyomap"
+    (out / "verify").mkdir(parents=True)
+    return out
+
+
+def _batch(out, name, claims, theme=None):
+    """A claims batch as `write_theme_batches` writes one."""
+    import json
+    payload = {"theme": theme or "backbone",
+               "claims": [{"claim": c, "anchor": None} for c in claims]}
+    (out / "verify" / f"claims-{name}.json").write_text(json.dumps(payload))
+
+
+def _verdicts(out, name, claims):
+    """A skeptic's answer. No `verdict` field, so these are VOTES, not closer appeals."""
+    import json
+    rows = [{"claim": c, "grounded": True, "evidence": "x.py:1", "skeptic": name} for c in claims]
+    (out / "verify" / f"verdicts-{name}.json").write_text(json.dumps({"grounding": rows}))
+
+
+def test_the_method_states_the_pairing_the_claims_leg_actually_does():
+    """A substring check on a file name is what let the first version ship: the method said names
+    were paired, the leg paired names, and both were wrong together."""
+    from pathlib import Path
+    method = (Path(__file__).resolve().parents[1] / "method.md").read_text(encoding="utf-8")
+    assert "verdicts-«BATCH».json" in method
+    assert "reads the CLAIMS, never the file names" in method, (
+        "the method must say the gate pairs claims, or a lead reads a name mismatch as a failure "
+        "and starts copying verdict files to satisfy it")
+
+
+def test_a_batch_nobody_answered_blocks(tmp_path):
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", ["UC44 step 6 — warn the team admin"], theme="behaviour")
+    leg = _undispatched_claims_leg(out / "project-map.json")
+    assert leg is not None
+    assert leg.blocking and not leg.advisory, "an unanswered batch must BLOCK, not advise"
+    assert "behaviour" in leg.blocking[0]
+
+
+def test_an_answered_batch_is_silent(tmp_path):
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", ["UC44 step 6 — warn the team admin"])
+    _verdicts(out, "behaviour-1", ["UC44 step 6 — warn the team admin"])
+    assert _undispatched_claims_leg(out / "project-map.json") is None
+
+
+def test_one_verdict_file_may_answer_several_batches(tmp_path):
+    """F1, CRITICAL. `skeptic-contract.md`: «BATCH» is the SKEPTIC's id, «CLAIMS» the file it reads,
+    and they "are NOT the same thing". argus has one `verdicts-smallmix.json` answering 77 of 77
+    claims across five batches; the name-pairing version called all five unread and offered to
+    delete them."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "cadence", ["EP13 fires hourly"], theme="cadence")
+    _batch(out, "lifecycle", ["C23 is torn down on exit"], theme="lifecycle")
+    _verdicts(out, "smallmix", ["EP13 fires hourly", "C23 is torn down on exit"])
+    assert _undispatched_claims_leg(out / "project-map.json") is None
+
+
+def test_batch_ten_does_not_absolve_batch_one(tmp_path):
+    """F2, CRITICAL. `verdicts-behaviour-10.json` starts with `verdicts-behaviour-1`, so the glob
+    `verdicts-behaviour-1*.json` matched it. Builds cut two-digit batch counts routinely (mcpolis
+    24, reminderrepo 16), and the gate reported CLEAN over 39 unread claims."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", ["step one"], theme="behaviour")
+    _batch(out, "behaviour-10", ["step ten"], theme="behaviour")
+    _verdicts(out, "behaviour-10", ["step ten"])
+    leg = _undispatched_claims_leg(out / "project-map.json")
+    assert leg is not None, "batch 1 was answered by nobody"
+    assert "1 of 2" in leg.blocking[0], leg.blocking[0]
+
+
+def test_an_empty_verdict_file_is_not_an_answer(tmp_path):
+    """F3. The name-pairing version could be satisfied by `touch`, with no record."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", ["step one"], theme="behaviour")
+    (out / "verify" / "verdicts-behaviour-1.json").write_text("")
+    assert _undispatched_claims_leg(out / "project-map.json") is not None
+    (out / "verify" / "verdicts-behaviour-1.json").write_text("NOT JSON AT ALL")
+    assert _undispatched_claims_leg(out / "project-map.json") is not None
+
+
+def test_a_closer_appeal_is_not_a_vote(tmp_path):
+    """`grounding.is_closer_row`: a row carrying a `verdict` field rules on an appeal, it does not
+    vote. A batch answered only by the closer was still answered by no skeptic."""
+    import json
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", ["step one"], theme="behaviour")
+    (out / "verify" / "closer-1.json").write_text(json.dumps(
+        {"grounding": [{"claim": "step one", "verdict": "uphold"}]}))
+    assert _undispatched_claims_leg(out / "project-map.json") is not None
+
+
+def test_the_theme_is_read_off_the_file_not_the_name(tmp_path):
+    """F5. `claims-small.json` holds `theme: mixed` — the spelling `audit --json` uses. Parsing the
+    name reported `small`, which appears in no theme count anywhere."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "small", ["a stray claim"], theme="mixed")
+    leg = _undispatched_claims_leg(out / "project-map.json")
+    assert leg is not None
+    assert "mixed" in leg.blocking[0] and "small" not in leg.blocking[0], leg.blocking[0]
+
+
+def test_a_wave_batch_reports_its_theme_not_a_pair_of_shas(tmp_path):
+    """F5. An update wave writes `claims-<from>-<to>-<theme>.json`; the name parse announced
+    `a3f91c2-7b2e4d8-backbone` as the theme."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "a3f91c2-7b2e4d8-backbone", ["C1 calls C2"], theme="backbone")
+    leg = _undispatched_claims_leg(out / "project-map.json")
+    assert leg is not None
+    assert "a3f91c2" not in leg.blocking[0], leg.blocking[0]
+    assert "backbone" in leg.blocking[0]
+
+
+def test_the_message_names_themes_not_every_file(tmp_path):
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    for n in range(1, 25):
+        _batch(out, f"behaviour-{n}", [f"step {n}"], theme="behaviour")
+    leg = _undispatched_claims_leg(out / "project-map.json")
+    assert leg is not None
+    assert leg.blocking[0].count("behaviour") == 1, "24 files, one theme, said once"
+
+
+def test_a_batch_with_no_readable_claims_is_skipped_not_accused(tmp_path):
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    (out / "verify" / "claims-broken.json").write_text("NOT JSON")
+    assert _undispatched_claims_leg(out / "project-map.json") is None
+
+
+def test_an_unbatched_build_pays_no_line(tmp_path):
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    assert _undispatched_claims_leg(out / "project-map.json") is None
+
+
+def test_one_voted_claim_does_not_clear_a_whole_batch(tmp_path):
+    """The gate's own exploit, found by review: `claims & answered` was non-empty intersection, so
+    a hand-written verdict file of 24 rows — one claim lifted from each unread batch — moved
+    mcpolis-rehearsal from BLOCKED to ADVISORIES with 925 of 949 claims still unread. Every claim
+    must be voted."""
+    from coyomap.finalize import _undispatched_claims_leg
+    out = _verify(tmp_path)
+    _batch(out, "behaviour-1", [f"step {n}" for n in range(40)], theme="behaviour")
+    _verdicts(out, "behaviour-1", ["step 0"])
+    assert _undispatched_claims_leg(out / "project-map.json") is not None
+    _verdicts(out, "behaviour-1", [f"step {n}" for n in range(40)])
+    assert _undispatched_claims_leg(out / "project-map.json") is None
+
+
+def test_the_blocking_leg_reaches_the_verdict_and_the_exit_code():
+    """The leg is only worth having if `build_report` turns it into BLOCKED and `main` exits 1.
+
+    Every other test here calls the leg directly. Review deleted the single `build_report` line
+    that registers it and all 115 of them still passed — the wiring was the untested part."""
+    from coyomap import finalize
+    root, map_path = make_repo()
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    (verify / "claims-behaviour-1.json").write_text(json.dumps(
+        {"theme": "behaviour", "claims": [{"claim": "UC44 warns the admin"}]}), encoding="utf-8")
+
+    report = finalize.build_report(map_path, root, [])
+    legs = [l for l in report.legs if l.name == "skeptic dispatch"]
+    assert len(legs) == 1, [l.name for l in report.legs]
+    assert report.verdict == "BLOCKED", report.verdict
+    assert report.blocking_total >= 1
+    assert finalize.main([str(map_path), "--repo", str(root)]) == 1
+
+    (verify / "verdicts-behaviour-1.json").write_text(json.dumps(
+        {"grounding": [{"claim": "UC44 warns the admin", "grounded": True, "skeptic": "b1"}]}),
+        encoding="utf-8")
+    again = finalize.build_report(map_path, root, [])
+    assert [l for l in again.legs if l.name == "skeptic dispatch"] == []
+    assert again.verdict != "BLOCKED", again.verdict
+
+
+def test_prose_ten_does_not_absolve_prose_one(tmp_path):
+    """F4. Rewiring the prose leg onto the shared helper carried the collision into it, and the
+    coyomap map itself runs `prose-1` … `prose-10`."""
+    from coyomap.finalize import _undispatched_prose_leg
+    out = _verify(tmp_path)
+    (out / "verify" / "prose-1.json").write_text("{}")
+    (out / "verify" / "prose-10.json").write_text("{}")
+    (out / "verify" / "verdicts-prose-10.json").write_text('{"x": 1}')
+    leg = _undispatched_prose_leg(out / "project-map.json")
+    assert leg is not None, "prose-1 was read by nobody"
+    assert "1 of 2" in leg.advisory[0], leg.advisory[0]
+
+
+def test_a_prose_voter_suffix_still_counts(tmp_path):
+    from coyomap.finalize import _undispatched_prose_leg
+    out = _verify(tmp_path)
+    (out / "verify" / "prose-1.json").write_text("{}")
+    (out / "verify" / "verdicts-prose-1-b.json").write_text('{"x": 1}')
+    assert _undispatched_prose_leg(out / "project-map.json") is None
+
+
+def test_an_empty_prose_verdict_is_not_a_review(tmp_path):
+    from coyomap.finalize import _undispatched_prose_leg
+    out = _verify(tmp_path)
+    (out / "verify" / "prose-1.json").write_text("{}")
+    (out / "verify" / "verdicts-prose-1.json").write_text("")
+    assert _undispatched_prose_leg(out / "project-map.json") is not None
+
+
 # --- the prose leg keys on a convention the method now states (adversarial review, 2026-09-02) ----
 # It shipped keyed on `verdicts-prose-*.json` while nothing asked anyone to write that name, so it
 # was an advisory no build could satisfy except by deleting its own batches.

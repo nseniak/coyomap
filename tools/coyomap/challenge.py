@@ -209,13 +209,48 @@ def batch_claims(path: Path) -> list[str]:
     return [str(c["claim"]) for c in (claims or []) if isinstance(c, dict) and c.get("claim")]
 
 
+def batch_theme(path: Path) -> str:
+    """The theme a claims batch is FOR, read off the file rather than parsed out of its name.
+
+    `write_theme_batches` stamps `theme` into every batch it writes, so the file already knows. The
+    first version of finalize's dispatch gate re-derived it from the file NAME, which is wrong twice
+    over: an update wave is `claims-<from>-<to>-<theme>.json`, so the parse announced a pair of git
+    shas as the theme, and `claims-small.json` reports `small` where the file itself says `mixed` —
+    the spelling `audit --json`'s `theme_counts` uses. Falls back to the name only for a file with
+    no `theme` at all."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = None
+    theme = payload.get("theme") if isinstance(payload, dict) else None
+    if isinstance(theme, str) and theme.strip():
+        return theme.strip()
+    stem = path.stem[len("claims-"):] if path.stem.startswith("claims-") else path.stem
+    head, _, tail = stem.rpartition("-")
+    return head if (head and tail.isdigit()) else stem
+
+
 def unanswered_batches(verify: Path, update: str) -> list[Path]:
-    """This update's claims batches that no verdicts file answers, across all its waves."""
-    answered = {f.name for f in wave_files(verify, update)}
+    """This update's claims batches that no verdicts file answers, across all its waves.
+
+    ANSWERED IS A CLAIM, NEVER A FILE NAME. The first version matched
+    `name.startswith(f"verdicts-{batch}")`, which is wrong in both directions and was caught only
+    when the same mistake was written a second time in `finalize`:
+
+    * It absolves a batch nobody read. `verdicts-behaviour-10.json` starts with
+      `verdicts-behaviour-1`, so batch 1 reads as answered whenever batch 10 was. Two-digit batch
+      counts are ordinary — one build cut `behaviour-1` through `behaviour-24`.
+    * It accuses a batch that was answered. `«BATCH»` is the SKEPTIC's id and `«CLAIMS»` the file it
+      reads (`method/templates/skeptic-contract.md`); one skeptic may legitimately answer several
+      small batches in one file. On the argus map, `verdicts-smallmix.json` answers 77 of 77 claims
+      across five batches, every one of which the name match called unread.
+
+    The claims themselves settle it, they are already on disk, and they cannot collide."""
+    answered = voted_claims(wave_files(verify, update))
     out: list[Path] = []
     for claims_file in sorted(verify.glob(f"claims-{update}-*.json")):
-        batch = claims_file.stem[len("claims-"):]
-        if not any(name.startswith(f"verdicts-{batch}") for name in answered):
+        claims = batch_claims(claims_file)
+        if claims and not (set(claims) & answered):
             out.append(claims_file)
     return out
 
@@ -230,10 +265,15 @@ def wave_files(verify: Path, update: str) -> list[Path]:
     return [f for f in verdict_files(verify) if update in f.name]
 
 
-def wave_voted(verify: Path, update: str) -> set[str]:
-    """The statements this update's earlier waves already voted on."""
+def voted_claims(files: list[Path]) -> set[str]:
+    """Every statement a skeptic actually voted on across `files`.
+
+    A file that cannot be read contributes NOTHING, which is the honest answer and also the useful
+    one: an empty, truncated or non-JSON verdict file is not a review, and a gate that pairs on this
+    set cannot be satisfied by `touch`ing a name into existence. Closer rows are excluded — the
+    closer rules on appeals, it does not vote (`grounding.is_closer_row`)."""
     out: set[str] = set()
-    for f in wave_files(verify, update):
+    for f in files:
         try:
             _payload, rows = read_rows(f)
         except (OSError, ValueError):
@@ -241,6 +281,11 @@ def wave_voted(verify: Path, update: str) -> set[str]:
         out.update(str(r["claim"]) for r in rows if isinstance(r.get("claim"), str)
                    and not is_closer_row(r))
     return out
+
+
+def wave_voted(verify: Path, update: str) -> set[str]:
+    """The statements this update's earlier waves already voted on."""
+    return voted_claims(wave_files(verify, update))
 
 
 def next_prefix(verify: Path, update: str) -> str:
@@ -553,12 +598,16 @@ def fold_update(scope: Scope, verify: Path, repo: Path, log: ChangeLog) -> Fold:
     voted = {str(r.get("claim")) for r in wave_rows if not is_closer_row(r)}
     for claims_file in sorted(verify.glob(f"claims-{scope.update}-*.json")):
         batch = claims_file.stem[len("claims-"):]
-        if any(f.name.startswith(f"verdicts-{batch}") for f in wave):
+        in_batch = batch_claims(claims_file)
+        # CLAIMS, not names — `unanswered_batches` above says why, and this was the THIRD copy of
+        # the same `startswith`: `verdicts-…-behaviour-10.json` cleared batch `…-behaviour-1`
+        # because one name is a prefix of the other. The `missing` check below catches the in-scope
+        # case, so only the message was ever wrong, but this is the pattern the module refuses.
+        if set(in_batch) & voted:
             continue
         # A batch nobody answered whose statements were all re-issued and voted under a later
         # wave is settled, not missing; `challenge` replaces such a file, and a copy that slipped
         # through must not block `ground` for ever.
-        in_batch = batch_claims(claims_file)
         live_claims = {it.claim for it in scope.live}
         if in_batch and all(c in voted or c not in live_claims for c in in_batch):
             continue

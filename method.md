@@ -2482,7 +2482,24 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   .coyomap/verify --cap 40` emits one claims file per theme, most-dangerous-first, each claim
   carrying its `anchor` and `detail`; themes with fewer than 5 claims share `claims-small.json`
   (`theme: mixed`), because a 1-claim batch still costs a whole skeptic — the security theme never
-  shares. A hand-rolled batcher drops the anchor, and the claims then
+  shares.
+  **Every batch you cut must come back answered, and `finalize` BLOCKS on one that did not.**
+  It reads the CLAIMS, never the file names: a batch counts as answered when EVERY claim it holds
+  is voted on by some verdict file in `.coyomap/verify/`. So the «BATCH»/«CLAIMS» split costs you
+  nothing here — one skeptic answering five small batches in a single `verdicts-«BATCH».json`
+  passes, and so does a vote writing `verdicts-«BATCH»-a/-b/-c.json` over one `claims-«CLAIMS».json`.
+  Cutting the batches is one command; DISPATCHING them is your next act, and a batch file
+  sitting beside a map says a review happened. So dispatch them, or delete them — deleting
+  costs nothing and states the truth. `grounding write --partial` records a pass you
+  knowingly cut short; it does not answer a batch nobody read, and no flag lifts this gate.
+  An empty or unparseable verdict file does not lift it either: it votes on nothing, and neither
+  does a file that answers one claim out of forty.
+  The 2026-09-08 mcpolis build cut 24 behaviour batches holding 949 claims — every flow
+  title and every step phrase, the half of the map a reader actually reads — dispatched
+  none, and shipped ADVISORIES. One unchallenged step said an expired sign-in warns the
+  team's ADMIN where the code warns the affected USER: a two-armed `if` written down as one
+  arm, on the very line the step anchors.
+  A hand-rolled batcher drops the anchor, and the claims then
   reach the skeptics as a bare `C140 calls C78` while the prompt promised them a `path:line`. (read
   it with `coyomap audit --json` — the machine-readable `{findings, worklist, themes, theme_counts}`
   payload built for this batching step; never regex-parse the human report; the same rule covers the

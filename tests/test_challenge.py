@@ -645,3 +645,64 @@ def test_missing_warrant_files_are_refused_and_a_map_with_no_record_is_left_alon
         assert not list(inputs.verify.iterdir())
         assert "grounding" not in json.loads(inputs.map_path.read_text(encoding="utf-8"))
         assert load_log(inputs.log_path.read_text(encoding="utf-8")).challenge is None
+
+
+# --- unanswered_batches pairs CLAIMS, never file names (adversarial review, 2026-09-19) ----------
+# It matched `name.startswith(f"verdicts-{batch}")`, which is wrong in both directions. The same
+# mistake was written a second time in `finalize`'s dispatch gate before either was caught.
+
+def make_wave_files(verify: Path, batches: dict[str, list[str]],
+                    verdicts: dict[str, list[str]]) -> None:
+    """`claims-<name>.json` per batch and `verdicts-<name>.json` per skeptic, as the wave writes."""
+    verify.mkdir(parents=True, exist_ok=True)
+    for name, claims in batches.items():
+        (verify / f"claims-{name}.json").write_text(json.dumps(
+            {"theme": "backbone", "claims": [{"claim": c} for c in claims]}))
+    for name, claims in verdicts.items():
+        (verify / f"verdicts-{name}.json").write_text(json.dumps(
+            {"grounding": [{"claim": c, "grounded": True, "skeptic": name} for c in claims]}))
+
+
+def test_wave_batch_ten_does_not_absolve_wave_batch_one():
+    upd = "a3f91c2-7b2e4d8"
+    with tempfile.TemporaryDirectory() as td:
+        verify = Path(td) / "verify"
+        make_wave_files(verify,
+                        {f"{upd}-backbone-1": ["C1 calls C2"],
+                         f"{upd}-backbone-10": ["C9 calls C10"]},
+                        {f"{upd}-backbone-10": ["C9 calls C10"]})
+        left = [p.name for p in ch.unanswered_batches(verify, upd)]
+        assert left == [f"claims-{upd}-backbone-1.json"], left
+
+
+def test_one_wave_skeptic_may_answer_several_wave_batches():
+    upd = "a3f91c2-7b2e4d8"
+    with tempfile.TemporaryDirectory() as td:
+        verify = Path(td) / "verify"
+        make_wave_files(verify,
+                        {f"{upd}-cadence": ["EP13 fires hourly"],
+                         f"{upd}-lifecycle": ["C23 is torn down on exit"]},
+                        {f"{upd}-smallmix": ["EP13 fires hourly", "C23 is torn down on exit"]})
+        assert ch.unanswered_batches(verify, upd) == []
+
+
+def test_an_empty_wave_verdict_file_answers_nothing():
+    upd = "a3f91c2-7b2e4d8"
+    with tempfile.TemporaryDirectory() as td:
+        verify = Path(td) / "verify"
+        make_wave_files(verify, {f"{upd}-backbone-1": ["C1 calls C2"]}, {})
+        (verify / f"verdicts-{upd}-backbone-1.json").write_text("")
+        left = [p.name for p in ch.unanswered_batches(verify, upd)]
+        assert left == [f"claims-{upd}-backbone-1.json"], left
+
+
+def test_batch_theme_is_read_off_the_file():
+    with tempfile.TemporaryDirectory() as td:
+        verify = Path(td)
+        make_wave_files(verify, {"small": ["a stray claim"]}, {})
+        (verify / "claims-small.json").write_text(json.dumps(
+            {"theme": "mixed", "claims": [{"claim": "a stray claim"}]}))
+        assert ch.batch_theme(verify / "claims-small.json") == "mixed"
+        # No `theme` at all: fall back to the name, minus a trailing batch number.
+        (verify / "claims-behaviour-7.json").write_text(json.dumps({"claims": []}))
+        assert ch.batch_theme(verify / "claims-behaviour-7.json") == "behaviour"
