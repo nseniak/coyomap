@@ -129,6 +129,7 @@
             <!-- UNDER THE HOOD — how the code is arranged, what it pulls in, how well it is tested,
                  and what actually runs. Code and Operations used to be two groups; they answer the same
                  second question, and keeping them apart cost a top-row tab for no reading gain. -->
+            <button data-view="arch" data-group="hood">Architecture</button>  <!-- the stories' own picture of the machine: people, the doors they come through, the components their walks work in, laid out by distance from the person. Hidden when no happy path lays one out. It leads the group because it is the way IN to the machine; Components answers the different question of how the code is grouped. -->
             <button data-view="container" data-group="hood">Components</button>  <!-- internal kind stays `container`; the tab is named for what the reader is looking FOR
                  (the parts of the code) rather than for the boxes it draws them in. A SUBSYSTEM is
                  still a subsystem — it is the word for a set of components, on its boxes, in its
@@ -186,6 +187,11 @@
            with 447px of an 860px window. -->
       <div id="diagwrap">
       <div id="diagram"></div>
+      <!-- THE FLOW, TOLD STEP BY STEP: the Architecture view's text column, to the right of its
+           drawing and only there. The drawing keeps the step numbers, this keeps each step's sentence,
+           and a click on either finds the other. A sibling of #diagram in this row, so the drawing is
+           fitted to what is left beside it. Hidden on every other view (syncArchText). -->
+      <aside id="archtext" hidden></aside>
       <!-- THE OVERLAY CONTROLS, in ONE column at the TOP-LEFT. They used to sit along the bottom edge,
            where they moved on every selection, so unrelated things shifted every time the reader
            clicked a box.

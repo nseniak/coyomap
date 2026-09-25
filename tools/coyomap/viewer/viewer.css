@@ -905,6 +905,62 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 /* A LANDING'S HEAD: the view's name at the size an item page's name has (.page-hero-subject) — it is
    the page's title — over the view's question. */
 .landing-head .item-sec-title { font-size: 16px; }
+/* THE ARCHITECTURE VIEW'S ACTOR TOGGLE, under the view's question. One row of small buttons, the one
+   in force filled: the question asks who reaches the product, and these are the answers, so they
+   read as a continuation of it rather than as a control bar of their own. */
+.archwho-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.archwho {
+  font: inherit; font-size: 12px; line-height: 1; padding: 6px 10px; cursor: pointer;
+  border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #334155;
+}
+.archwho:hover { border-color: #94a3b8; background: #f8fafc; }
+.archwho.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
+.archwho[disabled] { cursor: default; color: #94a3b8; border-style: dashed; background: #fff; }
+/* The happy-path switch sits after the people, past a thin rule: it narrows WHICH STORIES, not WHO,
+   so it must not read as one more person. A box fills when it is on. */
+.archwho-sep { width: 1px; align-self: stretch; background: #cbd5e1; margin: 2px 4px; }
+.archhp {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; line-height: 1; padding: 6px 10px; cursor: pointer;
+  border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #334155;
+}
+.archhp:hover { border-color: #94a3b8; background: #f8fafc; }
+.archhp-box { width: 11px; height: 11px; border: 1.5px solid #64748b; border-radius: 2px; background: #fff; }
+.archhp.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
+.archhp.on .archhp-box { border-color: #4f46e5; background: #4f46e5; }
+/* …and under it, the key to the two line styles, drawn as the lines themselves. */
+.archkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 12px; color: #475569; }
+.archkey span { display: inline-flex; align-items: center; gap: 6px; }
+.archkey-num { font-weight: 600; color: #334155; min-width: 26px; text-align: center; }
+/* THE FLOW TEXT, to the right of the Architecture drawing (see #archtext in viewer.html). A fixed share
+   of the row, so the drawing is fitted to what is left; the floaters anchored to the right edge move
+   left by the same amount, or the zoom control and the selection card would sit on the text. */
+#archtext { flex: 0 0 clamp(260px, 32%, 380px); box-sizing: border-box; overflow: auto;
+            border-left: 1px solid #e5e7eb; background: #fff; padding: 12px 14px 20px; }
+#archtext[hidden] { display: none; }
+#diagwrap:has(> #archtext:not([hidden])):not(.archtext-below) :is(#zoomctl, #panel) { right: calc(clamp(260px, 32%, 380px) + 12px); }
+/* A narrow drawing area stacks the text UNDER the drawing (viewer.js placeArchText sets the class). */
+#diagwrap.archtext-below { flex-direction: column; }
+#diagwrap.archtext-below > #archtext { flex: 0 0 45%; border-left: 0; border-top: 1px solid #e5e7eb; }
+.archtext-head { font-size: 13px; font-weight: 600; color: #1f2937; margin: 0 0 10px; }
+.archtext-steps { list-style: none; margin: 0; padding: 0; }
+.archtext-step { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; }
+.archtext-n { flex: 0 0 22px; font-weight: 600; color: #334155; font-size: 13px; line-height: 20px;
+              text-align: right; }
+.archtext-lines { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.archtext-line { border-radius: 6px; padding: 3px 6px; margin: -3px -6px; cursor: pointer; }
+.archtext-line:hover { background: #f8fafc; }
+.archtext-line.archtext-on { background: #eef2ff; box-shadow: inset 2px 0 0 #4f46e5; }
+.archtext-ends { font-size: 12px; font-weight: 600; color: #334155; line-height: 18px; }
+.archtext-arrow { color: #94a3b8; font-weight: 400; }
+.archtext-via { font-weight: 400; color: #64748b; }
+.archtext-sent { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; }
+.archtext-story { font-size: 11px; color: #64748b; white-space: nowrap; }
+.archtext-more summary { cursor: pointer; font-size: 12px; color: #4f46e5; margin-top: 3px; }
+/* …and the arrow a line of the text is about, lit on the drawing. */
+#diagram path.arch-hl { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
+#diagram g.edgeLabel.arch-hl .label, #diagram g.edgeLabel.arch-hl span { background: #e0e7ff !important;
+                                                                          color: #312e81 !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
    column heads and the "The product" tag are drawn inside that air, and the wrap is what clips. */
 .item-sec-frame .ifd-wrap, .item-sec-frame .hfade-wrap > .ifd-wrap { padding: 16px 0; }

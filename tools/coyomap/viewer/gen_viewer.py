@@ -1048,6 +1048,505 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
     return {f"{sub}>{sd}": gen_bridge_card_mermaid(graph, sub, sd) for sub, sd in sorted(pairs)}
 
 
+# ── The Architecture view: every story merged into one flow ─────────────────────────────────────
+#
+# WHAT THE PICTURE IS. A macro flow: every use case's walk merged into one, so the product is drawn
+# as the path its stories take together. Who comes in, through which door, what runs behind it,
+# and which outside systems it reaches. Every line is a way at least one story goes.
+#
+# THE RULE, stated so it can be argued with:
+#   merge the walks; leave out records, replies, and results going back out to a person
+#   draw each subsystem the stories use as ONE box, holding the components they use in it; a
+#     component stands alone when it is the only one of its subsystem those stories use
+#   always keep the people, the doors they come through, and the outside systems (at most 6)
+#   keep the ARCH_BOX_BUDGET boxes the most stories pass through
+#   fold every other box into the lines that pass through it: A -> (not shown) -> B draws A -> B
+#   number every line by the order the stories take it, so each story reads 1, 2, 3 on the picture
+#
+# WHY SUBSYSTEMS, AND WHICH ONES. A component's OWN subsystem, the smallest one it sits in, is named
+# for a job on the maps measured: "Serving tools", "Client credentials", "Sign-in machinery". Drawn
+# as boxes they cut a person's picture to one that fits whole: the team member's is 17 boxes and 25
+# lines against 29 and 41 in components, and about a quarter of the steps fold away inside a box.
+# The TOP-LEVEL areas were measured and rejected: half the steps between components (258 of 507 on
+# mcpolis) cross from one area to another, and "Foundations" alone sits on 154 of those crossings,
+# so as one box it becomes a hub named after nothing.
+#
+# WHY ONLY THAT ONE CASE STANDS ALONE. A lone used component says exactly what the box would, and
+# more precisely, so it never costs a box. Three wider signals for "this component matters on its
+# own" were measured and none is safe: how many stories pass through it pulls 9 of a 4-story
+# person's components out of their boxes; deciding a business rule pulls 49 of the everyone
+# picture's 77; and "Application Assembly", which is wiring, ranks near the top on both.
+#
+# WHY FOLD, NOT SAMPLE. The version before this picked boxes by how busy they were inside each story
+# and cut every line that passed through a box it had not picked. Measured on mcpolis's everyone
+# picture: 29 story connections ran through unpicked boxes, and 21 of them appeared nowhere. Folding
+# keeps every connection by construction, so no box is ever left with no way in.
+#
+# WHY RANK BY "HOW MANY STORIES PASS THROUGH". A macro flow's trunk is what most stories share. It
+# draws what the busiest-inside-one-story rule missed by design, the access check every call passes,
+# and it also draws what the stories pass through that a reader may call plumbing, the admin API
+# client. Telling those apart needs a kind on each component, which the map does not record.
+#
+# NO AREA FRAMES. Every area holds members at opposite ends of a walk (Mounting MCP servers at step 1
+# and at step 11), so a frame would stretch across the whole picture. A box says its area as a pill.
+ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a component standing alone
+ARCH_OUTSIDE_MAX = 6
+
+#: The two sets of stories the Architecture view can be drawn from: every use case's walk, or only
+#: the happy path's. The keys of `gen_arch_views` and the view's `scope` field both use them.
+ARCH_SCOPES = ("all", "happy")
+
+
+def _expanded_flow_steps(graph: GraphDict, flow: dict[str, Any]) -> list[dict[str, Any]]:
+    """The walk's steps with each shared sub-walk reference replaced inline by that sub-walk's own
+    steps — the graph-level twin of `model.expanded_flow_steps`. The Architecture view asks what a
+    use case REACHES, and work it borrows from a shared walk is work it reaches."""
+    sfs = {str(sf.get("id")): sf for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
+    out: list[dict[str, Any]] = []
+    for st in cast("list[dict[str, Any]]", flow.get("steps") or []):
+        if not st.get("ok"):
+            continue
+        sf = sfs.get(str(st.get("subflow") or ""))
+        inner = [x for x in cast("list[dict[str, Any]]", (sf or {}).get("steps") or []) if x.get("ok")]
+        out.extend(inner or [st])
+    return out
+
+
+def _arch_walks(graph: GraphDict, feature: str = "", scope: str = "all") -> list[str]:
+    """The use cases an Architecture picture is built from: the happy path's first, in its order,
+    then every other use case in the map's order — or, with `scope="happy"`, the happy path's alone.
+    With a `feature` (its id), only that feature's use cases.
+
+    ONE PICTURE PER FEATURE, not per person. A person's stories span features, and that was what
+    made their pictures unreadable: the team admin's 30 stories cross 8 features and drew 26 boxes
+    and 66 lines. Cut by feature, mcpolis's pictures measured a median of 14 boxes and about 15
+    lines, with no grey line on any of them. A use case's feature is its node's `parent`."""
+    hp = [str(h["uc"]) for h in graph["happy_path"] if h.get("uc")]
+    ucs = hp if scope == "happy" else hp + [str(f.get("uc")) for f in graph["flows"]
+                                            if str(f.get("uc")) not in hp]
+    if not feature:
+        return ucs
+    return [uc for uc in ucs if str(graph["nodes"].get(uc, {}).get("parent") or "") == feature]
+
+
+def arch_features(graph: GraphDict) -> list[dict[str, str]]:
+    """Every feature at least one walk belongs to, `{id, name}`, in the map's own feature order
+    (the Features page's). These are the choices the Architecture view's feature toggle offers."""
+    walked = {str(graph["nodes"].get(uc, {}).get("parent") or "") for uc in _arch_walks(graph)}
+    return [{"id": i, "name": str(v["name"])} for i, v in graph["nodes"].items()
+            if str(v.get("kind")) == "capability" and i in walked]
+
+
+def _person_id(name: str) -> str:
+    """A stable mermaid id for a person drawn on the overview. A Role is not a graph node, so it has
+    no id of its own to reuse — the flow map mints its `FAn` aliases for the same reason."""
+    return "CYP" + re.sub(r"[^A-Za-z0-9]", "", name)[:24]
+
+
+class _ArchFlow(TypedDict):
+    walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
+    phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
+                                                    # order, beside `walks` (what the flow text prints)
+    people: list[str]                               # the people the walks name, first met first
+    doors: list[str]                                # the interfaces a person steps straight into
+
+
+def _arch_flow(graph: GraphDict, walks: list[str]) -> _ArchFlow:
+    """Each walk as the steps the Architecture picture merges, people by name.
+
+    Four kinds of step are left out. One touching a RECORD, because this picture draws what runs,
+    not what is kept: the Data view draws that. A REPLY, a step back to a box that called this one
+    earlier in the same walk: a walk records the answer coming back as a step of its own, and drawn
+    it is a second line pointing back up that says nothing the call did not. And a step INTO a
+    person or INTO a door, which is the result going back out: this picture draws the way in."""
+    nodes = graph["nodes"]
+    flows = {str(f.get("uc")): f for f in graph["flows"]}
+    expanded = [(uc, _expanded_flow_steps(graph, flows[uc])) for uc in walks if uc in flows]
+    people: dict[str, None] = {}
+    doors: dict[str, None] = {}
+    for _, sts in expanded:
+        for st in sts:
+            s, d = str(st.get("src") or ""), str(st.get("dst") or "")
+            if is_role_endpoint(bool(st.get("src_is_id"))):
+                people.setdefault(s, None)
+                if str(nodes.get(d, {}).get("kind")) == "interface":
+                    doors.setdefault(d, None)
+    out: list[tuple[str, list[tuple[str, str]]]] = []
+    phrases: dict[str, list[str]] = {}
+    for uc, sts in expanded:
+        callers: dict[str, set[str]] = {}
+        steps: list[tuple[str, str]] = []
+        said: list[str] = []
+        for st in sts:
+            s, d = str(st.get("src") or ""), str(st.get("dst") or "")
+            if "entity" in (str(nodes.get(s, {}).get("kind")), str(nodes.get(d, {}).get("kind"))):
+                continue
+            from_person = is_role_endpoint(bool(st.get("src_is_id")))
+            back_out = d in doors and not from_person   # a person's own step INTO a door is the way in
+            if is_role_endpoint(bool(st.get("dst_is_id"))) or back_out or d in callers.get(s, set()):
+                continue
+            callers.setdefault(d, set()).add(s)
+            steps.append((s, d))
+            said.append(str(st.get("phrase") or "").strip())
+        out.append((uc, steps))
+        phrases[uc] = said
+    return _ArchFlow(walks=out, phrases=phrases, people=list(people), doors=list(doors))
+
+
+class _ArchLifted(_ArchFlow):
+    box_of: dict[str, str]   # each component the stories use -> the box that draws it
+
+
+def _arch_lift(graph: GraphDict, flow: _ArchFlow) -> _ArchLifted:
+    """The merged steps redrawn over BOXES (see the rule above the Architecture section): each
+    component becomes its own subsystem, unless it is the only component of that subsystem the
+    stories use, in which case it stays itself.
+
+    A step with both ends in one box happens inside it and is dropped. A step back to a box that
+    called this one earlier in the same story is a reply at box level, as `_arch_flow` treats one
+    between components, and is dropped too: without that, a box calling a member of another box that
+    then calls a different member of the first draws a line back up that no story meant as a call."""
+    nodes = graph["nodes"]
+    used: dict[str, set[str]] = {}
+    for _, steps in flow["walks"]:
+        for s, d in steps:
+            for x in (s, d):
+                if str(nodes.get(x, {}).get("kind")) == "component":
+                    used.setdefault(str(nodes[x].get("parent") or x), set()).add(x)
+    box_of = {c: (sid if len(members) > 1 else c) for sid, members in used.items() for c in members}
+    walks: list[tuple[str, list[tuple[str, str]]]] = []
+    phrases: dict[str, list[str]] = {}
+    for uc, steps in flow["walks"]:
+        callers: dict[str, set[str]] = {}
+        lifted: list[tuple[str, str]] = []
+        said: list[str] = []
+        for (s, d), text in zip(steps, flow["phrases"][uc]):
+            a, b = box_of.get(s, s), box_of.get(d, d)
+            if a == b or b in callers.get(a, set()):
+                continue
+            callers.setdefault(b, set()).add(a)
+            lifted.append((a, b))
+            said.append(text)
+        walks.append((uc, lifted))
+        phrases[uc] = said
+    return _ArchLifted(walks=walks, phrases=phrases, people=flow["people"], doors=flow["doors"],
+                       box_of=box_of)
+
+
+def _story_order_numbers(sequences: list[list[tuple[str, str]]]) -> dict[tuple[str, str], int]:
+    """THE MACRO FLOW'S STEP NUMBERS. Each story is the list of arrows it takes, in its own order.
+    An arrow's number is 1 + the largest number of any arrow a story takes just before it, so no
+    story ever reads backwards on the picture, and arrows at the same point of different stories
+    share a number: same number and dashed reads "one or the other here", solid reads "both".
+
+    Stories can disagree: one takes arrow X before Y, another Y before X. Those arrows form a loop,
+    and a loop has no order to give, so all its arrows share one number. Measured on mcpolis: 0 of
+    the team member's 32 arrows, 26 of the team admin's 58, 34 of everyone's 94.
+
+    Longest path over the arrows, loops merged first (Tarjan's strongly connected components, which
+    come out in reverse order, so walking them backwards visits every arrow after all before it)."""
+    arrows = list(dict.fromkeys(a for seq in sequences for a in seq))
+    succ: dict[tuple[str, str], set[tuple[str, str]]] = {a: set() for a in arrows}
+    for seq in sequences:
+        for x, y in zip(seq, seq[1:]):
+            if x != y:
+                succ[x].add(y)
+    index: dict[tuple[str, str], int] = {}
+    low: dict[tuple[str, str], int] = {}
+    group_of: dict[tuple[str, str], int] = {}
+    groups: list[list[tuple[str, str]]] = []
+    stack: list[tuple[str, str]] = []
+    on_stack: set[tuple[str, str]] = set()
+
+    def visit(v: tuple[str, str]) -> None:
+        index[v] = low[v] = len(index)
+        stack.append(v)
+        on_stack.add(v)
+        for w in succ[v]:
+            if w not in index:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            group: list[tuple[str, str]] = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                group_of[w] = len(groups)
+                group.append(w)
+                if w == v:
+                    break
+            groups.append(group)
+
+    for a in arrows:
+        if a not in index:
+            visit(a)
+    level = [1] * len(groups)
+    for g in reversed(range(len(groups))):
+        for a in groups[g]:
+            for b in succ[a]:
+                if group_of[b] != g:
+                    level[group_of[b]] = max(level[group_of[b]], level[g] + 1)
+    return {a: level[group_of[a]] for a in arrows}
+
+
+class _ArchLine(TypedDict):
+    src: str        # a person's name, or an element id
+    dst: str
+    stories: list[str]   # the use cases that take this line
+    always: bool    # every story leaving `src` takes it: drawn solid, else dashed
+    hidden: int     # boxes folded away between the two ends; 0 = one real step
+    verb: str       # the link list's word for a one-step line ("calls ×2"), else ""
+    number: int     # its step in the macro flow (_story_order_numbers)
+    sentences: list[tuple[str, str]]   # (use case, its own sentence for the step that starts this
+                                       # line), one per story taking it, first met first
+
+
+class _ArchModel(TypedDict):
+    people: list[str]
+    doors: list[str]
+    inside: list[str]        # the boxes kept inside the product, first met first: a subsystem, or a
+                             # component standing alone (see the rule above)
+    outside: list[str]
+    lines: list[_ArchLine]   # in reading order: by number, then first met
+    stories: dict[str, list[tuple[str, str]]]   # use case -> the lines it takes, in its own order
+
+
+def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all") -> _ArchModel | None:
+    """The Architecture picture as data: the chosen stories merged into one flow and simplified by
+    the rule in the block above, with every line's style and step number worked out. `None` when
+    the chosen stories reach no component. `gen_overview_mermaid` draws it; keeping the two apart
+    lets the numbering be checked on the flow itself instead of by reading a drawing back."""
+    nodes = graph["nodes"]
+
+    def kind_of(i: str) -> str:
+        return str(nodes.get(i, {}).get("kind"))
+
+    flow = _arch_lift(graph, _arch_flow(graph, _arch_walks(graph, feature, scope)))
+    people, doors = set(flow["people"]), set(flow["doors"])
+    passing: dict[str, set[str]] = {}   # inside box -> the stories passing through it, first met first
+    reach: dict[str, set[str]] = {}     # outside system -> the stories reaching it
+    for uc, steps in flow["walks"]:
+        for s, d in steps:
+            for x in (s, d):
+                if kind_of(x) in ("component", "subsystem"):
+                    passing.setdefault(x, set()).add(uc)
+            if kind_of(d) in ("interface", "dep") and d not in doors:
+                reach.setdefault(d, set()).add(uc)
+    if not passing:
+        return None
+    met = list(passing)
+    inside = sorted(met, key=lambda c: (-len(passing[c]), met.index(c)))[:ARCH_BOX_BUDGET]
+    inside.sort(key=met.index)
+    outside = sorted(reach, key=lambda o: (-len(reach[o]), str(nodes[o]["name"])))[:ARCH_OUTSIDE_MAX]
+    kept = people | doors | set(inside) | set(outside)
+
+    # The merged flow over the kept boxes. From each kept box, a step to a kept box is a line of its
+    # own; a step to a box that is NOT kept is followed on through the walk, over boxes not kept,
+    # until it reaches kept ones, and each becomes a folded line counting the boxes it passed. Each
+    # story also keeps the lines it takes in its own order, which is what the step numbers read.
+    lines_by: dict[tuple[str, str], tuple[set[str], int]] = {}   # (a, b) -> (stories, fewest hidden)
+    said: dict[tuple[str, str], dict[str, str]] = {}   # (a, b) -> story -> the sentence of its step
+    stories: dict[str, list[tuple[str, str]]] = {}
+    for uc, steps in flow["walks"]:
+        seq: list[tuple[str, str]] = []
+        for i, (s, d) in enumerate(steps):
+            if s not in kept:
+                continue
+            found: list[tuple[str, int]] = []
+            if d in kept:
+                found.append((d, 0))
+            else:
+                todo, seen = [(d, i, 1)], {d}
+                while todo:
+                    head, at, hidden = todo.pop()
+                    for hs, hd in steps[at + 1:]:
+                        at += 1
+                        if hs != head:
+                            continue
+                        if hd in kept:
+                            found.append((hd, hidden))
+                        elif hd not in seen:
+                            seen.add(hd)
+                            todo.append((hd, at, hidden + 1))
+            for b, hidden in found:
+                if b == s:
+                    continue
+                walks_of, fewest = lines_by.get((s, b), (set(), hidden))
+                lines_by[(s, b)] = (walks_of | {uc}, min(fewest, hidden))
+                # THE LINE'S SENTENCE is the one of the step that starts it: for a one-step line the
+                # step itself, for a folded line the step leaving its first box. First step wins.
+                said.setdefault((s, b), {}).setdefault(uc, flow["phrases"][uc][i])
+                if (s, b) not in seq:
+                    seq.append((s, b))
+        if seq:
+            stories[uc] = seq
+    leaving: dict[str, set[str]] = {}
+    for (a, _), (walks_of, _) in lines_by.items():
+        leaving.setdefault(a, set()).update(walks_of)
+    # THE WORDS ON A LINE come from the links in the code between the two boxes' components, only the
+    # components these stories use, so a subsystem box's line counts its members' links.
+    links: dict[tuple[str, str], dict[str, int]] = {}
+    for e in graph["edges"]:
+        s, d = str(e["src"]), str(e["dst"])
+        if (kind_of(s) == "component" and s not in flow["box_of"]) or \
+           (kind_of(d) == "component" and d not in flow["box_of"]):
+            continue
+        a, b = flow["box_of"].get(s, s), flow["box_of"].get(d, d)
+        if a != b and a in kept and b in kept and a not in people and b not in people:
+            per_pair = links.setdefault((a, b), {})
+            per_pair[str(e["verb"])] = per_pair.get(str(e["verb"]), 0) + 1
+    numbers = _story_order_numbers(list(stories.values()))
+    first = {pair: i for i, pair in enumerate(lines_by)}
+    lines: list[_ArchLine] = []
+    for (a, b), (walks_of, hidden) in lines_by.items():
+        verb = ""
+        if not hidden and links.get((a, b)):
+            verbs = links[(a, b)]
+            total = sum(verbs.values())
+            top = sorted(verbs.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            # Several links in the code under one line: name the commonest verb AND how many there
+            # are, so the label never passes itself off as the whole of what crosses.
+            verb = top if total == 1 else f"{top} ×{total}"
+        lines.append(_ArchLine(src=a, dst=b, stories=sorted(walks_of), always=walks_of == leaving[a],
+                               hidden=hidden, verb=verb, number=numbers[(a, b)],
+                               sentences=list(said.get((a, b), {}).items())))
+    lines.sort(key=lambda ln: (ln["number"], first[(ln["src"], ln["dst"])]))
+    return _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
+                      lines=lines, stories=stories)
+
+
+def gen_overview_mermaid(graph: GraphDict, feature: str = "", scope: str = "all") -> str:
+    """The Architecture picture: every chosen story merged into one flow (`_arch_model`), drawn top
+    to bottom by Mermaid, which puts the people first because every line leads away from them.
+
+    `feature` draws ONE feature's stories and `scope="happy"` only the happy path's (`_arch_walks`).
+    Neither is the big picture with boxes hidden: the rule is re-asked over the chosen stories, so
+    the budget keeps the boxes THOSE stories pass through most.
+
+    Every line carries its STEP NUMBER first: "3 · calls", "6 · via 1", or a bare "4". Follow the
+    numbers up and any one story reads in order. A line is SOLID when every story leaving its box
+    takes it and DASHED when only some do, so a shared number with dashed lines reads "one or the
+    other here" and with solid lines "both". A line through boxes folded away is grey: "via 2".
+
+    `""` when the chosen stories draw nothing: a map with no walks hides the view, and a feature
+    with no happy-path story gets no happy-path picture."""
+    model = _arch_model(graph, feature, scope)
+    return _arch_mermaid(graph, model) if model is not None else ""
+
+
+def _arch_box_id(model: _ArchModel, x: str) -> str:
+    """The id a box of the Architecture picture is drawn under: a person's minted `CYP…` alias, else
+    the element's own id. The drawing and its flow text both use it, so a line in one is found in the
+    other."""
+    return _person_id(x) if x in model["people"] else x
+
+
+def _arch_mermaid(graph: GraphDict, model: _ArchModel) -> str:
+    """Draw an Architecture model (see `gen_overview_mermaid` for how it reads)."""
+
+    def box_id(x: str) -> str:
+        return _arch_box_id(model, x)
+
+    lines = [SLOT_MAP_INIT, "flowchart TB"]
+    for p in model["people"]:
+        lines.append(f'  {_person_id(p)}["{_slot("role", "figure", p)}"]')
+        lines.append(f"  class {_person_id(p)} itembox")
+    for iid in model["doors"]:
+        lines.append(f'  {iid}["{_slot("interface", "tight", iid)}"]:::cy-{iid}')
+        lines.append(f"  class {iid} itembox")
+    for bid in model["inside"]:
+        # A subsystem box is drawn the way every other picture draws a collapsed subsystem (its
+        # component count in the band); a component standing alone as before. Either one names the
+        # top-level area it sits in, unless it IS that area.
+        kind = str(graph["nodes"].get(bid, {}).get("kind"))
+        area = _top_subsystem(graph, bid) or ""
+        pill = _area_pill(graph, area) if area and area != bid else ""
+        variant = "compact" if kind == "subsystem" else "tight"
+        lines.append(f'  {bid}["{_slot(kind, variant, bid, pill)}"]:::cy-{bid}')
+        lines.append(f"  class {bid} itembox")
+    for oid in model["outside"]:  # an interface or a dependency, each in its own kind's box
+        kind = str(graph["nodes"].get(oid, {}).get("kind"))
+        lines.append(f'  {oid}["{_slot(kind, "tight", oid)}"]:::cy-{oid}')
+        lines.append(f"  class {oid} itembox")
+    folded: list[str] = []
+    for n_line, ln in enumerate(model["lines"]):
+        # NO WORD IS PUT ON A STEP THAT HAS NO VERB. The step's own phrase is a sentence, too long
+        # for a line, and the link list has none for this pair; a filler verb was tried and took
+        # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries its number.
+        words = f"via {ln['hidden']}" if ln["hidden"] else ln["verb"]
+        label = _edge_label(f"{ln['number']} · {words}" if words else str(ln["number"]))
+        if ln["hidden"]:
+            folded.append(str(n_line))
+        head = "-->" if ln["always"] else "-.->"
+        lines.append(f"  {box_id(ln['src'])} {head}|{label}| {box_id(ln['dst'])}")
+    if folded:
+        lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
+    lines.append(ITEM_SLOT_CLASSDEF)
+    return "\n".join(lines)
+
+
+def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
+    """THE FLOW, TOLD STEP BY STEP: the text beside an Architecture picture, one entry per line in
+    reading order (by step number, then first met). Each entry names its two ends and gives, for
+    every story taking the line, that story's own sentence for the step and the story's name.
+
+    Why a text and not words on the lines: a step's sentence is 48 characters at the median, and
+    one line can carry many of them (24 on the team admin's line into the Dashboard, one per story).
+    The picture keeps the numbers; the text keeps the sentences; the numbers join the two.
+
+    Only DISTINCT sentences are kept, each with the stories that say it, so 3 stories saying the
+    same thing are one sentence with 3 names rather than the same words 3 times."""
+    nodes = graph["nodes"]
+    titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
+
+    def name(x: str) -> str:
+        return str(nodes[x]["name"]) if x in nodes else x
+
+    out: list[dict[str, Any]] = []
+    for ln in model["lines"]:
+        by_text: dict[str, list[str]] = {}
+        for uc, text in ln["sentences"]:
+            if text:
+                by_text.setdefault(text, []).append(titles.get(uc, uc))
+        out.append({
+            "n": ln["number"],
+            "src": name(ln["src"]), "dst": name(ln["dst"]),
+            "srcBox": _arch_box_id(model, ln["src"]), "dstBox": _arch_box_id(model, ln["dst"]),
+            "hidden": ln["hidden"],
+            "sentences": [{"text": t, "stories": s} for t, s in by_text.items()],
+        })
+    return out
+
+
+def gen_arch_views(graph: GraphDict) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
+    """Every Architecture drawing the view's two toggles can ask for, and the flow text beside each,
+    keyed `<scope>|<feature id>`: `all|` is the whole product over every walk, `happy|CAP3` is one
+    feature over the happy path alone. Pre-rendered side by side, the way every other per-element
+    drawing already is, from ONE model per key so the text can never describe another drawing.
+
+    A combination that draws nothing is left out, and the view reads that as "not offered": a
+    feature with no happy-path story has no button while the happy path is switched on."""
+    drawings: dict[str, str] = {}
+    texts: dict[str, list[dict[str, Any]]] = {}
+    for scope in ARCH_SCOPES:
+        for feature in ["", *(f["id"] for f in arch_features(graph))]:
+            model = _arch_model(graph, feature, scope)
+            if model is None:
+                continue
+            drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model)
+            texts[f"{scope}|{feature}"] = _arch_text(graph, model)
+    return drawings, texts
+
+
+def _area_pill(graph: GraphDict, area: str) -> str:
+    """The area a box belongs to, as the box's own extra pill. With no frames to say it, the area
+    still has to be readable ON the box — and a pill is the one place every other picture already
+    puts a fact like this."""
+    return str(graph["nodes"][area]["name"]) if area in graph["nodes"] else ""
+
+
 def gen_container_mermaid(graph: GraphDict) -> str:
     """C4 Container: each top-level subsystem an ITEM BOX — a slot the viewer fills with the same box
     every other picture draws (see gen_flow_map_mermaid), its component count in the box's band — with
@@ -3240,6 +3739,10 @@ class ViewBundle(TypedDict):
     mermaidBase: str
     mermaidContext: str
     mermaidContainer: str
+    mermaidArch: str               # the Architecture view, everyone over every walk; "" = no walks
+    mermaidArchBy: dict[str, str]  # every drawing its two toggles can ask for, "<scope>|<person>"
+    archText: dict[str, list[dict[str, Any]]]  # …and the flow text beside each, same keys (_arch_text)
+    archFeatures: list[dict[str, str]]  # the features any walk belongs to, {id, name}, map order
     mermaidBySub: dict[str, str]
     mermaidEdgeCard: dict[str, str]
     containerEdges: dict[str, list[dict[str, str]]]
@@ -3357,6 +3860,9 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
     base_mm = gen_mermaid(graph)
     context_mm = gen_context_mermaid(graph)
     context_edges = gen_context_edges(graph)
+    arch_drawings, arch_texts = gen_arch_views(graph) if has_grouping(graph) else ({}, {})  # = `grouping`,
+    # which is set further down, beside the other grouped pictures; the Architecture view needs both
+    # dicts from one pass, so it is worked out here
     # Source-link config, derived from the mapped repo (the anchor dir sits inside its work tree).
     # Seeded into the viewer; the user can override the root / GitHub URL in Settings (localStorage).
     repo_root = repo_root_default(anchor)
@@ -3394,6 +3900,10 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
         graph=mg,
         mermaidBase=base_mm, mermaidContext=context_mm,
         mermaidContainer=gen_container_mermaid(graph) if grouping else "",
+        mermaidArch=arch_drawings.get("all|", ""),
+        mermaidArchBy=arch_drawings,
+        archText=arch_texts,
+        archFeatures=arch_features(graph) if grouping else [],
         mermaidBySub=subsystem_component_mermaids(graph) if grouping else {},
         mermaidEdgeCard=edge_card_mermaids(graph) if grouping else {},
         containerEdges=gen_container_edges(graph) if grouping else {},

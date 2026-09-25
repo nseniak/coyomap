@@ -12,7 +12,7 @@ let GRAPH;
 // `const` declared further down is not yet initialised at that moment — the boot threw on it once.
 const MEMBER_BORDER_MIX = 34;
 const CONTAINER_BORDER_MIX = 65;
-let MERMAID_BASE, MERMAID_CONTEXT, MERMAID_CONTAINER;
+let MERMAID_BASE, MERMAID_CONTEXT, MERMAID_CONTAINER, MERMAID_ARCH, MERMAID_ARCH_BY, ARCH_FEATURES, ARCH_TEXT;
 let MERMAID_BY_SUB;         // subsystem neighbourhood: sid -> sub-diagram
 let MERMAID_EDGE_CARD;      // edge pair: 'A>B' -> two-subsystem sub-diagram
 let CONTAINER_EDGES;        // inter-subsystem arrow 'A>B' -> [crossing component edges]
@@ -108,6 +108,8 @@ function applyBundle(b) {
   GRAPH = b.graph;
   MERMAID_BASE = b.mermaidBase; MERMAID_CONTEXT = b.mermaidContext;
   MERMAID_CONTAINER = b.mermaidContainer; MERMAID_BY_SUB = b.mermaidBySub;
+  MERMAID_ARCH = b.mermaidArch; MERMAID_ARCH_BY = b.mermaidArchBy || {}; ARCH_FEATURES = b.archFeatures || [];
+  ARCH_TEXT = b.archText || {};
   MERMAID_EDGE_CARD = b.mermaidEdgeCard; CONTAINER_EDGES = b.containerEdges;
   MERMAID_DOMAIN = b.mermaidDomain; MERMAID_DOMAIN_CONTAINER = b.mermaidDomainContainer;
   MERMAID_DOMAIN_SUB = b.mermaidDomainSub; MERMAID_DOMAIN_EDGE_CARD = b.mermaidDomainEdgeCard;
@@ -246,6 +248,19 @@ const viewsw = document.getElementById('viewsw');
 const groupsw = document.getElementById('groupsw');
 const pagehero = document.getElementById('pagehero');    // what the page you drilled into IS (syncPageHero)
 const diaghead = document.getElementById('diaghead');    // …and a walk's own head, in the page (walkHeadHtml)
+// The Architecture view's feature toggle and happy-path switch live in the head strip, which is
+// rewritten on every render, so they are bound ONCE here by delegation rather than re-bound per
+// render (the same one-listener-per-container rule the `data-where` links above follow). An empty
+// `cap` is the whole product, and `go` makes the narrowed picture its own screen: its own address,
+// its own Back step.
+diaghead.addEventListener('click', (e) => {
+  const cur = (hi >= 0 && history[hi]) || {};
+  const cap = e.target.closest && e.target.closest('[data-archcap]');
+  if (cap && !cap.disabled) { go(archState(cur.scope, cap.getAttribute('data-archcap') || '')); return; }
+  // The happy-path switch keeps the feature in force; one with no happy-path story drops to All.
+  const sw = e.target.closest && e.target.closest('[data-archhp]');
+  if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
+});
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
 const tip = document.getElementById('tip');
@@ -4292,6 +4307,7 @@ const VIEW_Q = {
   overview: 'What is this product, and who is it for?',
   hp: 'Which features does one successful run touch, and in what order?',
   usecases: 'What can this product do, feature by feature?',
+  arch: 'Who reaches this product, what do they come through, and what runs behind it?',
   container: 'How is the code organised, and what depends on what?',
   domain: 'What things does this system know about, and how do they relate?',
   context: 'What does it rely on from the outside world?',
@@ -5137,6 +5153,10 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // `at` is WHICH update an Updates page, or a removed box's page, is about:
                       // the log's name, `<from>-<to>`.
                       'at',
+                      // `scope` is which stories the Architecture view draws from: `happy` = the
+                      // happy path's alone. Unset = every use case's. (Its ONE feature rides on
+                      // `cap`, the field the Features page already names a feature by.)
+                      'scope',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
                       // maps, and looked up by scanning rather than by position, so a flow whose numbers
@@ -5151,8 +5171,12 @@ function stateKey(s) {
     + (s.entity ? '#' + s.entity : '')  // store→store / row jump actually re-renders (not a no-op)
     + (s.blk ? ':' + s.blk : '')    // Business-logic cross-links focus a BLOCK pane — same reason
     + (s.br ? '#' + s.br : '')      // …and a rule row inside it
-    + (s.cap ? ':' + s.cap : '')   // one FEATURE's use cases ('-' = the ones assigned to none)
+    + (s.cap ? ':' + s.cap : '')   // one FEATURE's use cases ('-' = the ones assigned to none), or
+                                   // the Architecture view narrowed to one feature
     + (s.act ? ':' + s.act : '')   // …or one ACTOR's, the overview's other axis
+    + (s.scope ? '~' + s.scope : '')  // the Architecture view on the happy path's stories: a
+                                      // different drawing, so it has to key apart or the switch
+                                      // is a no-op on the screen
     + (s.bkid ? ':' + s.bkid : '')  // bucketfold drills are keyed by their BKF id
     + (s.gid ? ':' + s.gid : '')   // …and a deployment container card by its group id
     + (s.epk ? ':' + s.epk : '')   // …and one entry-point KIND inside the Entry points collection
@@ -6849,6 +6873,9 @@ function hpFocus(scene, keep) {  // dim every focusable HP element not in the ke
 // --- render ---------------------------------------------------------------------
 function mermaidFor(s) {
   if (s.kind === 'context') return MERMAID_CONTEXT;
+  // The drawing for this person and this set of stories; a combination the map does not draw (a
+  // pasted address naming nobody, or someone with no happy-path story) falls back to everyone.
+  if (s.kind === 'arch') return MERMAID_ARCH_BY[archKey(s)] || MERMAID_ARCH;
   if (s.kind === 'container') return MERMAID_CONTAINER;
   if (s.kind === 'subsystem') return MERMAID_BY_SUB[s.sid];
   if (s.kind === 'edge') return MERMAID_EDGE_CARD[s.a + '>' + s.b];
@@ -7480,7 +7507,163 @@ function landingHeadHtml(view) {
   const pairs = !answer ? [] : (Array.isArray(answer[0]) ? answer : [answer]);
   const n = pairs.filter((c) => c[0]).map((c) => countLabel(c[0], c[1]));
   // `landing-head`: the title takes the size an item page's name has, since this is the page's title.
-  return `<div class="landing-head">${itemSectionHeadHtml(name, n, q)}</div>`;
+  return `<div class="landing-head">${itemSectionHeadHtml(name, n, q)}${view === 'arch' ? archFeatureHtml() : ''}</div>`;
+}
+// THE FEATURE TOGGLE, on the Architecture view only: All, then one button per feature, in the
+// Features page's order, then the Happy path switch, which narrows whichever is picked to the happy
+// path's stories.
+//
+// WHY BY FEATURE, and why a different drawing rather than the same one dimmed. It was one button per
+// PERSON first, and a person's stories span features: the team admin's 30 stories cross 8 of them,
+// which drew 26 boxes and 66 lines. Cut by feature, mcpolis's pictures measured a median of 14 boxes
+// and about 15 lines, with no grey line on any. The whole rule is re-asked over the feature's own
+// stories, so the budget keeps the boxes THEY pass through.
+//
+// The choice is in the address (`cap`), so a narrowed picture is a link you can send and a Back step
+// of its own, like every other screen here.
+function archFeatureHtml() {
+  if (!(ARCH_FEATURES || []).length) return '';
+  const s = (hi >= 0 && history[hi]) || {};
+  const scope = archScope(s);
+  const now = archFeature(s);
+  // A feature with no drawing under this scope (no happy-path story, with the happy path on) keeps
+  // its place in the row but cannot be picked, so the row does not reshuffle as the switch moves.
+  const one = (val, label) => {
+    const off = val && !MERMAID_ARCH_BY[scope + '|' + val];
+    return `<button class="archwho${val === now ? ' on' : ''}" data-archcap="${esc(val)}"`
+      + (off ? ' disabled title="No happy-path story in this feature"' : '')
+      + `>${esc(label)}</button>`;
+  };
+  const happy = scope === 'happy';
+  const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
+    + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
+  return `<div class="archwho-row">${one('', 'All')}`
+    + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
+    + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
+    + archKeyHtml();
+}
+// WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
+// scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
+// pasted address and a switch flip both land on a drawing that exists.
+// THE FLOW, TOLD STEP BY STEP: the Architecture view's text column. One entry per numbered step,
+// each line of the drawing under it with its two ends and, for every story taking it, the story's own
+// sentence for that step and the story's name. A line many stories take shows its first two
+// sentences and folds the rest ("+22 more"): the team admin's line into the Dashboard carries 24.
+const archtext = document.getElementById('archtext');
+const ARCH_TEXT_SHOWN = 2;
+// BESIDE THE DRAWING, OR UNDER IT. Beside, the text keeps at least 260px, so on a narrow pane it took
+// the whole row: measured at a 340px-wide page, the drawing was left 38px. Under ARCH_TEXT_BESIDE_MIN
+// the text moves below the drawing and takes the full width instead, and the drawing is re-fitted,
+// because a class change reaches none of the re-fit paths on its own.
+const ARCH_TEXT_BESIDE_MIN = 640;
+function placeArchText() {
+  const wrap = document.getElementById('diagwrap');
+  const below = !archtext.hidden && wrap.clientWidth < ARCH_TEXT_BESIDE_MIN;
+  if (below !== wrap.classList.contains('archtext-below')) {
+    wrap.classList.toggle('archtext-below', below);
+    refitStage();
+  }
+}
+if ('ResizeObserver' in window) new ResizeObserver(placeArchText).observe(document.getElementById('diagwrap'));
+function syncArchText(s) {
+  const entries = s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || ARCH_TEXT['all|'] || []) : null;
+  archtext.hidden = !entries || !entries.length;
+  placeArchText();
+  if (archtext.hidden) { archtext.innerHTML = ''; return; }
+  const sentence = (x) => {
+    const who = x.stories.length > 1 ? `${x.stories[0]} +${x.stories.length - 1}` : x.stories[0];
+    return `<p class="archtext-sent">${esc(capFirst(x.text))}`
+      + ` <span class="archtext-story" title="${esc(x.stories.join('\n'))}">${esc(who)}</span></p>`;
+  };
+  const line = (e) => {
+    const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(sentence).join('');
+    const rest = e.sentences.slice(ARCH_TEXT_SHOWN);
+    return `<div class="archtext-line" tabindex="0" data-src="${esc(e.srcBox)}" data-dst="${esc(e.dstBox)}">`
+      + `<div class="archtext-ends">${esc(e.src)} <span class="archtext-arrow">→</span> ${esc(e.dst)}`
+      + (e.hidden ? ` <span class="archtext-via">through ${Number(e.hidden)} not shown</span>` : '') + '</div>'
+      + shown
+      + (rest.length ? `<details class="archtext-more"><summary>+${rest.length} more</summary>`
+        + rest.map(sentence).join('') + '</details>' : '')
+      + '</div>';
+  };
+  const steps = [];
+  for (const e of entries) {
+    if (!steps.length || steps[steps.length - 1].n !== e.n) steps.push({ n: e.n, lines: [] });
+    steps[steps.length - 1].lines.push(e);
+  }
+  archtext.innerHTML = '<div class="archtext-head">The flow, step by step</div>'
+    + '<ol class="archtext-steps">' + steps.map((st) => `<li class="archtext-step">`
+      + `<span class="archtext-n">${Number(st.n)}</span><div class="archtext-lines">${st.lines.map(line).join('')}</div></li>`).join('')
+    + '</ol>';
+}
+// TEXT <-> DRAWING. A line in the text lights its arrow; an arrow on the drawing lights its line in
+// the text and brings it into view. One mark each side at a time, so the pair stays unambiguous.
+function archMarkArrow(src, dst) {
+  if (!mainScene) return;
+  mainScene.root.querySelectorAll('.arch-hl').forEach((el) => el.classList.remove('arch-hl'));
+  eachEdge(mainScene.root, (p, label, m) => {
+    if (m[1] === src && m[2] === dst) { p.classList.add('arch-hl'); if (label) label.classList.add('arch-hl'); }
+  });
+}
+function archMarkText(src, dst, scroll) {
+  let hit = null;
+  archtext.querySelectorAll('.archtext-line').forEach((el) => {
+    const on = el.dataset.src === src && el.dataset.dst === dst;
+    el.classList.toggle('archtext-on', on);
+    if (on) hit = el;
+  });
+  if (hit && scroll) hit.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+archtext.addEventListener('click', (e) => {
+  const el = e.target.closest && e.target.closest('.archtext-line');
+  if (!el || (e.target.closest && e.target.closest('summary'))) return;
+  archMarkText(el.dataset.src, el.dataset.dst, false);
+  archMarkArrow(el.dataset.src, el.dataset.dst);
+});
+// THE ARCHITECTURE VIEW'S BOXES open the way a flow picture's do (bindFlowMap): a plain click on the
+// NAME opens the thing, so a subsystem box opens its components and a lone component its own page;
+// the rest of the box selects it. The generic binder it used before only selected, so a subsystem box
+// standing for 5 components offered no way to see them.
+function bindArch() {
+  bindNodes(mainScene, (id, el, ev) => {
+    const locate = locateActionFor(id);
+    if (locate && isDrillClick(ev)) { locate.run(); return; }
+    if (nameClick(ev)) { drillInto(id); return; }
+    selectNodeFromCanvas(el, id, ev);
+  });
+  bindEdges(mainScene, resolveComponentEdge);
+  bindArchText();   // …and every arrow finds its line in the text
+}
+function bindArchText() {
+  if (!mainScene) return;
+  eachEdge(mainScene.root, (p, label, m) => {
+    const find = () => { archMarkText(m[1], m[2], true); archMarkArrow(m[1], m[2]); };
+    for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.addEventListener('click', find);
+  });
+}
+function archScope(s) { return s && s.scope === 'happy' ? 'happy' : 'all'; }
+function archFeature(s) {
+  const cap = (s && s.cap) || '';
+  return cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
+}
+function archKey(s) { return archScope(s) + '|' + archFeature(s); }
+function archState(scope, cap) {
+  const s = { kind: 'arch' };
+  if (scope === 'happy') s.scope = 'happy';
+  if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
+  return s;
+}
+// THE KEY TO THE TWO LINE STYLES, drawn as the lines themselves rather than named: a reader
+// matches a stroke faster than they decode a word for one. Solid = every story through that box
+// goes this way, so two solid lines out of one box read "and"; dashed = only some do, so read "or".
+function archKeyHtml() {
+  const line = (dash, stroke) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
+    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="1.6"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
+  return '<div class="archkey">'
+    + `<span>${line(false, '#475569')} every story through that box goes this way</span>`
+    + `<span>${line(true, '#475569')} only some do</span>`
+    + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
+    + '<span><b class="archkey-num">3</b> the step: follow 1, 2, 3 and any story reads in order</span></div>';
 }
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
 // the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.
@@ -8117,6 +8300,7 @@ function bindFor(s) {
   else if (s.kind === 'deploymentUnit') bindDeployment(s.unit);  // same binder; the focal process (s.unit) drills nowhere further
   else if (s.kind === 'libs') bindLibs();
   else if (s.kind === 'bucketfold') bindBucketFold();
+  else if (s.kind === 'arch') bindArch();
   else bindComponent();
 }
 // An element's DETAILS page has no tab of its own: it belongs under whichever tab is that element's
@@ -8129,7 +8313,7 @@ function elementHomeView(id) {
 function topView(kind, id) {  // which top-level button a state lives under (container/subsystem/edge → Subsystems)
   if (kind === 'element') return id ? elementHomeView(id) : 'container';
   if (kind === 'updates' || kind === 'removed') return 'updates';   // a removed box's page hangs under the version it was read on
-  if (kind === 'overview' || kind === 'context' || kind === 'component' || kind === 'domain' || kind === 'glossary' || kind === 'system' || kind === 'data' || kind === 'tests' || kind === 'rules' || kind === 'interfaces') return kind;
+  if (kind === 'overview' || kind === 'arch' || kind === 'context' || kind === 'component' || kind === 'domain' || kind === 'glossary' || kind === 'system' || kind === 'data' || kind === 'tests' || kind === 'rules' || kind === 'interfaces') return kind;
   if (kind === 'sysSection') return 'system';  // one System collection lives under the System tab
   if (kind === 'domsub' || kind === 'domedge') return 'domain';  // subdomain card + edge pair live under the Domain button
   if (kind === 'bridge') return 'container';  // a structure↔domain bridge card is anchored on its subsystem
@@ -8200,6 +8384,7 @@ function elementSidePillsHtml(id) {
   return (c.pills || []).map((p) => `<span class="ecard-pill ${esc(p.cls || '')}">${esc(p.text)}</span>`).join('');
 }
 function stateTitle(s) {
+  if (s.kind === 'arch') return 'Architecture';
   if (s.kind === 'context') return 'Dependencies';
   // THE TAB IS 'Components', the boxes on it are still SUBSYSTEMS. A reader comes here looking for
   // the parts of the code; a subsystem is the word for a set of those parts, and it keeps that word
@@ -8366,6 +8551,7 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   if (s.kind === 'bucketfold') return bucketFoldParent(s.bkid) === 'libs'   // library bucket: Context › Libraries › <bucket>
     ? [{ kind: 'context' }, { kind: 'libs' }, { kind: 'bucketfold', bkid: s.bkid }]
     : [{ kind: 'context' }, { kind: 'bucketfold', bkid: s.bkid }];          // external bucket: Context › <bucket>
+  if (s.kind === 'arch') return [{ kind: 'arch' }];
   if (s.kind === 'context') return [{ kind: 'context' }];
   if (s.kind === 'component') return [{ kind: 'component' }];
   if (s.kind === 'rules') {
@@ -13937,6 +14123,8 @@ async function renderView(sArg, transient, seq) {
   pickNow = null;       // …and a picked box belongs to its board, on the same rule
   const s = sArg || history[hi];
   syncInfoPane(s, transient);   // every navigation starts with no card (one rule, before any return)
+  syncArchText(s);   // …and with the flow text shown on the Architecture view alone, BEFORE the drawing
+                     // is fitted, so the fit measures the room the text leaves it
   syncCodePane(s);   // …and no source pane either, until the reader asks for a file
   // The step player's card, HERE, before the HTML-tab early returns below: the table views and the
   // degraded "could not render" branch never reach the end of render, so a card shown on a walk would
@@ -16538,6 +16726,9 @@ viewsw.querySelectorAll('button[data-view]').forEach((b) => {
   GROUP_OF_VIEW[b.dataset.view] = b.dataset.group;
 });
 viewsw.querySelectorAll('button').forEach((b) => {
+  // The Architecture picture is laid out by how far each box is from the person who starts a walk,
+  // so a map with no happy path has nothing to lay it out with and the generator returns "".
+  if (b.dataset.view === 'arch' && !MERMAID_ARCH) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'container' && !HAS_GROUPING) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'domain' && !HAS_DOMAIN) { b.style.display = 'none'; return; }
   if (b.dataset.view === 'hp' && !HAS_HP) { b.style.display = 'none'; return; }

@@ -3661,7 +3661,10 @@ def test_code_and_operations_read_as_one_question() -> None:
     assert "'Under the hood'" in table and "'Update log'" in table
     hood = re.findall(r'<button data-view="(\w+)" data-group="hood">', html)
     # Storage is a machine fact — where the data physically lives — so it sits under the hood too.
-    assert set(hood) == {"container", "data", "context", "tests", "deployment", "system"}, hood
+    # Architecture too: it draws the components a walk works in, laid out by distance from the person.
+    # The walks choose its boxes, but what it draws is still the machine, so it leads this group
+    # rather than joining Product.
+    assert set(hood) == {"arch", "container", "data", "context", "tests", "deployment", "system"}, hood
     assert re.findall(r'<button data-view="(\w+)" data-group="changelog">', html) == ["updates"]
 
 
