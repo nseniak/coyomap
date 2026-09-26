@@ -101,11 +101,28 @@ lead; nothing above this line goes into an agent prompt.
 >   verb there reads as a sentence missing its start. It is also the form a use case's name and a
 >   shared sub-flow's name already take, which is what lets one line title either kind of step.
 >   A condition or qualifier belongs in `note`, never in `phrase`.
+> - **A step where the code DECIDES says its condition in `note`.** When the step checks a
+>   permission, a limit or an input and can refuse the story or send it another way, the note says
+>   when the story goes on or when it stops: "only when the role allows the tool", "refused once the
+>   plan's server count is used up". The pictures draw a rule mark on such a step, and the note is
+>   the one place that says which way it goes.
 > - **Every element↔element step carries its own `where`** — the `path:line` in the `src` side's code
 >   where THIS step's action fires. Not the callee's definition. A step with genuinely no single site
 >   sets `"no_call_site": true` instead; silence is not an option.
 > - **Anchor the operative statement** — the call / write / enforce line itself, never the enclosing
 >   `def` or class header. That header is the most common drift the adversarial pass finds.
+> - **Four arrow mistakes, named**, because each one draws a story the code does not run:
+>     1. **Reversed** — the step points from the called side to the caller. `src` is the side
+>        whose code makes the call, at `where`.
+>     2. **An invented pipeline** — `A → B → C` when A calls B and then calls C itself. Chain two
+>        steps only when B's own code makes the second call.
+>     3. **A skipped middle** — `A → C` when A calls B and B calls C. Every box the call passes
+>        through is a step of its own.
+>     4. **A neighbour's call** — a step given to a component because it sits in the same folder or
+>        subsystem as the one that makes the call. `where` must be in the `src` component's own files.
+>   For example, `orders.py:40` calls `billing.charge()`, whose line 12 calls `stripe.charge()`: the
+>   steps are `orders → billing` at `orders.py:40` and `billing → Stripe` at `billing.py:12`. Not
+>   `billing → orders` (reversed), not `orders → Stripe` (the skipped middle).
 > - **`n` is unique within a flow.** It identifies the step for navigation and for diff impact.
 > - **Actor steps** use the role id as `src` (`R1 → C5`). An actor step needs no `where`, though one
 >   is welcome when the handler line is clear.

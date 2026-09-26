@@ -370,6 +370,7 @@ def test_a_prose_slot_key_is_refused_with_the_key_it_objects_to(tmp_path):
     (home / "method" / "templates" / "toy-contract.md").write_text(
         "lead half\n\n> agent half with «FINE» and «a whole sentence nobody types».\n",
         encoding="utf-8")
+    (home / "method" / "templates" / "repo-text-rule.md").write_text("the shared rule\n", encoding="utf-8")
     contract.CONTRACTS["toy"] = "toy-contract.md"
     try:
         with pytest.raises(ValueError, match=re.escape("a whole sentence nobody types")):
@@ -650,6 +651,7 @@ def test_a_slot_with_no_spec_is_refused_and_named(tmp_path: Path) -> None:
     (home / "method" / "templates" / "toy-contract.md").write_text(
         "lead half\n\n- **«DESCRIBED»** — what this one holds.\n\n"
         "> agent half with «DESCRIBED» and «UNDESCRIBED».\n", encoding="utf-8")
+    (home / "method" / "templates" / "repo-text-rule.md").write_text("the shared rule\n", encoding="utf-8")
     contract.CONTRACTS["toy"] = "toy-contract.md"
     try:
         with pytest.raises(ValueError, match="UNDESCRIBED"):

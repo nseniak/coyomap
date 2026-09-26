@@ -72,6 +72,11 @@ lead; nothing above this line goes into an agent prompt.
 > slice** (one component ≈ one module-/folder-sized unit, ≤ ~10 source files / ~3 kLOC). If you come
 > out far under, you are folding subsystem-shaped dirs into single components — make those
 > subsystems and recurse into their units; far over, you are splitting module-sized units.
+> **Name a subsystem for its JOB**, the way its `purpose` opens ("Managing teams and members",
+> "Serving tools"), never a bare topic noun ("Teams and members"): a reader takes a topic for a
+> store of data. **Test code is not a component**: test cases, fixtures and test helpers are left to
+> the test-completeness agent. A script in a test folder that a person runs to operate the product
+> is a component like any other, because what decides is what the code does, not where it sits.
 > **WHEN THE BUDGET AND THE SIZE CEILING DISAGREE, THE CEILING WINS.** The budget is the lead's
 > pre-read ESTIMATE, made without opening your files; the ceiling is a property of the code in front
 > of you. A slice of 46 files and 11 kLOC cannot be 5 components without two of them breaking the

@@ -102,7 +102,7 @@ MACHINE_READ_HEADINGS: tuple[str, ...] = (
     "access baseline exceptions",
     "unclaimed surfaces", "drift exceptions", "interface exceptions",
     "bucket vocabulary", "sweep debt", "naming exceptions",
-    "missing surfaces", "walk jumps",
+    "missing surfaces", "walk jumps", "condition exceptions", "test code exceptions",
 )
 
 

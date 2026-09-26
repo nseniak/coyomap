@@ -1315,6 +1315,25 @@ def element_capabilities(m: ProjectModel) -> dict[str, set[str]]:
 #      file alone is NOT a link. The weak strength needs a symbol table it cannot derive from the
 #      model, so it degrades to exact-only rather than silently widening to file equality.
 
+def _job_word(text: str) -> str:
+    """The first word of `text` when it names an activity (an -ing word such as "Creating",
+    "Serving"), else "". Five letters at least, so "thing" and "ring" are not taken for one."""
+    first = (text.split() or [""])[0].strip(",.;:")
+    return first if len(first) >= 5 and first.lower().endswith("ing") else ""
+
+
+_TEST_DIRS = frozenset({"test", "tests", "__tests__", "spec", "specs", "e2e"})
+_TEST_FILE = re.compile(r"^test_.*\.py$|_test\.(?:py|go)$|\.(?:test|spec)\.[jt]sx?$")
+
+
+def _is_test_path(path: str) -> bool:
+    """Is this file (or folder) test code by its place or its name: a `tests/` folder, a
+    `test_*.py`, a `*.test.ts`. Where a file sits decides only whether it LOOKS like test code; the
+    advisory that reads this also asks whether any story runs it."""
+    parts = [x.lower() for x in path.replace("\\", "/").strip("/").split("/") if x]
+    return bool(set(parts) & _TEST_DIRS) or bool(parts and _TEST_FILE.search(parts[-1]))
+
+
 def element_sort_key(eid: str) -> tuple[str, int, str]:
     """Sort key putting `UC2` before `UC10` — element ids are prefix + NUMBER, so plain lexicographic
     order reads them as strings and interleaves the tens with the ones."""
@@ -1847,6 +1866,27 @@ def check_rules_model(m: ProjectModel,
             "'Sweep debt' line, and counted as SWEPT because of it: "
             f"{_shown(silenced, 10, unit='step(s)')}. Re-read one by validating a copy with that "
             "line removed")
+
+    # A STEP WHERE A RULE DECIDES SAYS ITS CONDITION (the trace contract's step rules). The pictures
+    # mark such a step, and its note is the one place that says which way the story goes from it.
+    # The steps are the rules view's own links from a rule to a step, so the advisory and the mark
+    # name the same steps.
+    anchored = anchored_flow_steps(m)
+    written = {(f.uc, str(st.n)): st for f in m.flows for st in f.steps}
+    written.update({(sf.id, str(st.n)): st for sf in m.subflows for st in sf.steps})
+    decided = sorted({(link.container, str(link.n)) for r in m.rules
+                      for link in rule_steps(m, r, extents, anchored)},
+                     key=lambda cn: (element_sort_key(cn[0]), int(cn[1]) if cn[1].isdigit() else 0))
+    recorded_conditions = _recorded_line_keys(m, "condition exceptions")
+    silent = [f"{c} step {n}" for c, n in decided if (c, n) in written
+              and not written[(c, n)].note.strip()
+              and not _records_key(recorded_conditions, (written[(c, n)].where or "").strip())]
+    if silent:
+        warnings.append(
+            f"Steps where a business rule decides say no condition in their note: "
+            f"{_shown(silent, 12, unit='step(s)')} — say when the story goes on or when it stops "
+            "(\"only when …\", \"refused when …\"), or record '<path:line>: <why>' under a "
+            "'Condition exceptions' extras heading")
 
     return problems, warnings
 
@@ -6923,6 +6963,38 @@ def _records_disclosure(m: ProjectModel, live: list[str],
 
 # ── orchestration ────────────────────────────────────────────────────────────────────────────────
 
+def topic_named_subsystem_warnings(m: ProjectModel) -> list[str]:
+    """A SUBSYSTEM NAMED FOR A TOPIC WHILE ITS SENTENCE OPENS WITH ITS JOB (method.md, Level 0).
+
+    Only that case, because there the advice has an answer: the job word the name dropped is in the
+    subsystem's own sentence. Measured on mcpolis, 5 of its 7 unclear subsystem names."""
+    named_on_purpose = _recorded_ids(m, "naming exceptions", ("S",))
+    topic = [f"{s.id} '{s.name}' ('{_job_word(s.purpose)} …')" for s in m.subsystems
+             if _job_word(s.purpose) and f"{s.id}/topic" not in named_on_purpose
+             and not any(_job_word(w) for w in re.findall(r"[A-Za-z]+", s.name))]
+    if not topic:
+        return []
+    return [f"Subsystems named for a topic while their sentence opens with their job: "
+            f"{_shown(topic, 8)} — name each for its job, the way its sentence opens, or record "
+            "'<Sn>/topic: <why>' under a 'Naming exceptions' extras heading"]
+
+
+def test_code_component_warnings(m: ProjectModel) -> list[str]:
+    """TEST CODE IS NOT A COMPONENT (method.md, T1): one whose every file is test code and that no
+    story reaches. A script in a test folder that a story runs is a component like any other."""
+    reached = {x for f in m.flows for _, st in expanded_steps_with_container(m, f) for x in (st.src, st.dst)}
+    kept_as_components = _recorded_ids(m, "test code exceptions", ("C",))
+    test_only = sorted((c.id for c in m.components
+                        if c.files and all(_is_test_path(p) for p in c.files) and c.id not in reached
+                        and c.id not in kept_as_components),
+                       key=element_sort_key)
+    if not test_only:
+        return []
+    return [f"Components that are only test code and that no story reaches: {_shown(test_only, 12)} "
+            "— test code belongs in the test-completeness table, not in a component, or record "
+            "'<Cn>: <why>' under a 'Test code exceptions' extras heading"]
+
+
 def validate_model(m: ProjectModel, model_path: Path | None = None, *,
                    check_sources: bool = False, check_coverage: bool = False,
                    repo_root: Path | None = None, model_is_edited: bool = False,
@@ -7125,6 +7197,9 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     if redundant:
         warnings.append("Groups whose only child is another group of the same kind (redundant "
                         f"nesting level): {', '.join(redundant)}")
+
+    warnings.extend(topic_named_subsystem_warnings(m))
+    warnings.extend(test_code_component_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —
     # sparse roots, over-dense screens, single-child wrapper levels. Model-only, so always on.

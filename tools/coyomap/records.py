@@ -196,7 +196,9 @@ HEADINGS: tuple[HeadingSpec, ...] = (
     # an operator would plausibly invent: the bare `In` answers the leading article, so somebody
     # answering the OTHER question here reaches for `In/article` — which parses, silences nothing,
     # and reads as answered. The others are listed in `validate`'s follow-up, not guessed at here.
-    HeadingSpec("Naming exceptions", True, NAMING_KEY, scopes=("code-name",)),
+    HeadingSpec("Naming exceptions", True, NAMING_KEY, scopes=("code-name", "topic")),
+    # A component that is only test code, kept as a component on purpose: `<Cn>: <why>`.
+    HeadingSpec("Test code exceptions", True, ID_KEY),
     # Keyed by a repo PATH, not an id — the thing being adjudicated is a file that used to hold an
     # access rule and no longer does. It had been pointed at "Audit exceptions", whose key
     # vocabulary is `[A-Z]+\d+`: a path can never be a key there, so twenty records written on one
@@ -204,6 +206,9 @@ HEADINGS: tuple[HeadingSpec, ...] = (
     HeadingSpec("Access baseline exceptions", True, DIR_KEY, SEP, strict_multi=DIR_KEY_STRICT,
                 merged_form="<path>, <path>: <why>"),
     HeadingSpec("Sweep debt", True),                # key = a `path:line` anchor (free text)
+    # A step where a rule decides whose note deliberately says no condition: keyed by the step's
+    # own `path:line`, like 'Sweep debt', because that anchor is what names one step of one walk.
+    HeadingSpec("Condition exceptions", True),      # key = a `path:line` anchor (free text)
     # Notes: machine-read too, but what they SAY is about the code, not about the map's own checks.
     HeadingSpec("Entry-point coverage", False,      # key = a kind + a contract word
                 value=r"complete|sampled|partial"),
