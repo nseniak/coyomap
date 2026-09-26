@@ -230,6 +230,9 @@ FIELD_META: dict[tuple[str, str], dict] = {
     ("TestRow", "confidence"): {"enum": [*grammar.CONFIDENCE_VALUES, ""],
                              "description": "verified = read in the code; inferred = deduced. '' = unstated."},
 
+    ("Component", "kind"): {"enum": ["", *grammar.COMPONENT_KINDS], "description": "what kind of "
+                             "thing the component is, one word: screen, api, logic, check, store, pipe, "
+                             "job, wiring. '' = not stated (a map built before the field)."},
     ("Dep", "id"): {"pattern": r"^D\d+$"},
     ("Dep", "kind"): {"enum": [*grammar.DEP_KINDS, None], "description": "closed Context "
                        "vocabulary; null → inferred from `type`."},

@@ -327,6 +327,10 @@ class Component:
     name: str
     subsystem: str | None = None
     purpose: str = ""
+    #: WHAT KIND OF THING IT IS, one word of `grammar.COMPONENT_KINDS`: screen, api, logic, check,
+    #: store, pipe, job, wiring. Optional so a map built before it loads unchanged; "" = not stated.
+    #: The name stays free: the kind is said once, here, and shown as a pill beside the name.
+    kind: str = ""
     depends_on: str = ""             # the coarse derived summary text (edge list is the source)
     source: str | None = None        # v2: the canonical source anchor — where the component LIVES
     confidence: str = ""

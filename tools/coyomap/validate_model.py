@@ -6979,6 +6979,25 @@ def topic_named_subsystem_warnings(m: ProjectModel) -> list[str]:
             "'<Sn>/topic: <why>' under a 'Naming exceptions' extras heading"]
 
 
+def component_kind_problems(m: ProjectModel) -> list[str]:
+    """A `Component.kind` outside the closed list BLOCKS: the Architecture picture acts on the kind,
+    and a word it does not know would silently do nothing."""
+    words = ", ".join(grammar.COMPONENT_KINDS)
+    return [f"{c.id} ({c.name}) kind='{c.kind}' — must be one of {words}"
+            for c in m.components if c.kind and c.kind not in grammar.COMPONENT_KINDS]
+
+
+def component_kind_warnings(m: ProjectModel) -> list[str]:
+    """A missing `Component.kind` is only ADVISED, and only on a map that states kinds for other
+    components: a map built before the field has none at all and loads, and draws, as it did."""
+    stated = [c for c in m.components if c.kind]
+    unstated = sorted((c.id for c in m.components if not c.kind), key=element_sort_key)
+    if not stated or not unstated:
+        return []
+    return [f"Components with no kind, on a map where {len(stated)} others have one: "
+            f"{_shown(unstated, 12)} — give each one word: {', '.join(grammar.COMPONENT_KINDS)}"]
+
+
 def test_code_component_warnings(m: ProjectModel) -> list[str]:
     """TEST CODE IS NOT A COMPONENT (method.md, T1): one whose every file is test code and that no
     story reaches. A script in a test folder that a story runs is a component like any other."""
@@ -7200,6 +7219,8 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
 
     warnings.extend(topic_named_subsystem_warnings(m))
     warnings.extend(test_code_component_warnings(m))
+    problems.extend(component_kind_problems(m))
+    warnings.extend(component_kind_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —
     # sparse roots, over-dense screens, single-child wrapper levels. Model-only, so always on.

@@ -525,8 +525,14 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   Give each subsystem a **`tech`** label — ONE honest stack name ("Python/FastAPI", "Go", "Elixir")
   read off the manifests, with `tech_source` anchoring the manifest line (go.mod, package.json) —
   from the manifests, not a stack essay. Subsystem-only (`validate` blocks it on subdomains).
-- **T1 Components**: `Component | Subsystem | Purpose | Entry point | Depends on` (the `Subsystem`
-  cell is the component's one parent `S`, or empty = ungrouped).
+- **T1 Components**: `Component | Kind | Subsystem | Purpose | Entry point | Depends on` (the
+  `Subsystem` cell is the component's one parent `S`, or empty = ungrouped).
+  **`Kind` is one word for what kind of thing the component is**: `screen`, `api`, `logic`,
+  `check`, `store`, `pipe`, `job` or `wiring` (the harvest contract says what each means). The
+  name stays free, and the kind is shown beside it. The Architecture picture acts on it: it draws
+  through a `pipe` and the `wiring`, and draws a `store` and a `check` as boxes of their own inside
+  their subsystem. Optional in the file, so a map built before it still loads; `validate` blocks a
+  word outside the eight and advises on a component with none once others have one.
   **Test code is not a component, and never a product area.** Test cases, fixtures and test helpers
   belong in the test-completeness table, never in a component or a subsystem. What decides is what
   the code does, not where it sits: a script in a test folder that a person runs to operate the

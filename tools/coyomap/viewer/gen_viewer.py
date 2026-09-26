@@ -1230,6 +1230,37 @@ def _person_id(name: str) -> str:
     return "CYP" + re.sub(r"[^A-Za-z0-9]", "", name)[:24]
 
 
+def _component_kind(graph: GraphDict, x: str) -> str:
+    """A component's kind (`grammar.COMPONENT_KINDS`), "" for anything else or when unstated."""
+    return str(graph["nodes"].get(x, {}).get("component_kind") or "")
+
+
+def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
+    """PIPES AND THE WIRING ARE DRAWN THROUGH (`grammar.COMPONENT_KINDS_DRAWN_THROUGH`). A step into
+    one waits; a step out of it joins the step that came in, so A -> pipe -> B draws A -> B, with A's
+    sentence and the map steps of both. A pipe is plumbing: drawn, it stood between every screen and
+    the server it calls ("Admin API Calls" on 7 of the team admin's stories), and said nothing either
+    end did not. A pipe no step enters, the wiring that starts a story, stays drawn; one no step
+    leaves is where that story's line stops."""
+    def through(x: str) -> bool:
+        return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH
+
+    waiting: dict[str, _ArchStep] = {}   # a pipe -> the step that went into it last
+    out: list[_ArchStep] = []
+    for st in steps:
+        came = waiting.get(st["src"]) if through(st["src"]) else None
+        if came is not None:
+            st = _ArchStep(src=came["src"], dst=st["dst"], from_person=came["from_person"],
+                           to_person=st["to_person"], phrase=came["phrase"],
+                           keys=[*came["keys"], *st["keys"]], store=st["store"])
+        if through(st["dst"]) and not st["to_person"]:
+            waiting[st["dst"]] = st
+            continue
+        if st["src"] != st["dst"]:
+            out.append(st)
+    return out
+
+
 class _ArchFlow(TypedDict):
     walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
     phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
@@ -1255,7 +1286,7 @@ def _arch_flow(graph: GraphDict, walks: list[str]) -> _ArchFlow:
     on an answer is still marked on the line the story took to get there."""
     nodes = graph["nodes"]
     flows = {str(f.get("uc")): f for f in graph["flows"]}
-    stepped = [(uc, _arch_steps(graph, flows[uc])) for uc in walks if uc in flows]
+    stepped = [(uc, _draw_through(graph, _arch_steps(graph, flows[uc]))) for uc in walks if uc in flows]
     people: dict[str, None] = {}
     doors: dict[str, None] = {}
     for _, sts in stepped:
@@ -1317,7 +1348,15 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow) -> _ArchLifted:
             for x in (s, d):
                 if str(nodes.get(x, {}).get("kind")) == "component":
                     used.setdefault(str(nodes[x].get("parent") or x), set()).add(x)
-    box_of = {c: (sid if len(members) > 1 else c) for sid, members in used.items() for c in members}
+    # A STORE AND A CHECK STAND ALONE (`grammar.COMPONENT_KINDS_STANDING_ALONE`): the records a
+    # subsystem keeps and the gate a story passes are the two things a reader looks for inside it,
+    # and inside the subsystem's box neither can be seen. The rest of the subsystem is still one box,
+    # or its one remaining component when only one is left.
+    def alone(c: str) -> bool:
+        return _component_kind(graph, c) in grammar.COMPONENT_KINDS_STANDING_ALONE
+
+    box_of = {c: (c if alone(c) or len([x for x in members if not alone(x)]) < 2 else sid)
+              for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
     keys: dict[str, list[list[str]]] = {}

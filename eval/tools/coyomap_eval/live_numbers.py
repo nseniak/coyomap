@@ -295,7 +295,7 @@ def _entities_with_a_lifecycle(maps: dict) -> str:
 # live claim, and the report then told a reader to "repair" a sentence that was true.
 
 LEDGER: tuple[Claim, ...] = (
-    Claim(site="tools/coyomap/model.py:932", maps=("coyomap",),
+    Claim(site="tools/coyomap/model.py:936", maps=("coyomap",),
           quote="this repo's own map has 462 anchored expanded steps, 462 distinct "
                 "`(uc, container, n)` keys — and only 337 distinct `(uc, n)` keys.",
           measure=_anchored_expanded_steps,
@@ -321,7 +321,7 @@ LEDGER: tuple[Claim, ...] = (
                 "of its 245 call-site anchors (2%)",
           measure=_rule_sites_in_shared_files,
           note="one of two 'measured facts that must not be designed away'"),
-    Claim(site="tools/coyomap/views.py:584", maps=("coyomap",),
+    Claim(site="tools/coyomap/views.py:586", maps=("coyomap",),
           quote="on this repo's own map 2% of call-site anchors sit in a file 3-4 components "
                 "claim.",
           measure=_rule_sites_short,

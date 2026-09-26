@@ -188,6 +188,42 @@ def test_each_story_carries_its_trigger_outcome_and_its_own_lines():
     assert (first["start"], first["end"]) == (gv._person_id("Admin"), "I1")
 
 
+# --- what a component's kind changes ------------------------------------------------------
+
+def make_kinded_map(**kinds: str) -> dict[str, Any]:
+    """The same map with the Client in a subsystem of its own, and a kind on the named components."""
+    doc = make_arch_map()
+    doc["subsystems"].append({"id": "S3", "name": "Passing calls on", "purpose": "passes calls on"})
+    for c in doc["components"]:
+        if c["id"] == "C2":
+            c["subsystem"] = "S3"
+        if c["id"] in kinds:
+            c["kind"] = kinds[c["id"]]
+    return doc
+
+
+def test_without_a_kind_the_client_between_page_and_server_is_drawn():
+    ln = lines_of(gv._arch_model(make_graph(make_kinded_map()), "", "all") or make_model())
+    assert ("C1", "C2") in ln and ("C2", "S2") in ln
+
+
+def test_a_pipe_is_drawn_through():
+    model = gv._arch_model(make_graph(make_kinded_map(C2="pipe")), "", "all")
+    assert model is not None
+    ln = lines_of(model)
+    assert ("C1", "S2") in ln
+    assert not any("C2" in pair for pair in ln)
+    assert ln[("C1", "S2")]["sentences"] == [("UC1", "send the thing")]
+
+
+def test_a_store_stands_alone_inside_its_subsystem():
+    model = gv._arch_model(make_graph(make_kinded_map(C5="store")), "", "all")
+    assert model is not None
+    assert "C5" in model["inside"] and "S2" not in model["inside"]
+    assert ("C5", "D1") in lines_of(model)
+    assert ("SF1", "C5") in lines_of(model)   # the save after the check, hidden inside S2 before
+
+
 # --- the use case map marks the same things ---------------------------------------------
 
 def test_a_use_case_map_marks_the_arrow_that_runs_a_deciding_sub_use_case():

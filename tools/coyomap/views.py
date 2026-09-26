@@ -277,6 +277,8 @@ def _component_headers(m: ProjectModel) -> tuple[list[str], bool, list[str]]:
     with_conf = any(c.confidence for c in m.components)
     extra = sorted({k for c in m.components for k in c.extra})
     headers = ["ID", "Component", "Subsystem", "Purpose", "Depends on"]
+    if any(c.kind for c in m.components):
+        headers.insert(2, "Kind")
     if with_conf:
         headers.append("Conf.")
     if any(c.files for c in m.components):
@@ -412,8 +414,8 @@ def model_to_markdown(m: ProjectModel) -> str:
         headers, with_conf, extra = _component_headers(m)
         rows = []
         for c in m.components:
-            row = [f"**{c.id}**", c.name, c.subsystem or "", c.purpose,
-                   c.depends_on]
+            row = [f"**{c.id}**", c.name, *([c.kind] if "Kind" in headers else []), c.subsystem or "",
+                   c.purpose, c.depends_on]
             if with_conf:
                 row.append(c.confidence)
             if "Files" in headers:
@@ -1156,6 +1158,7 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
     for c in m.components:
         subsystem_name = subsystem_names.get(c.subsystem, c.subsystem) if c.subsystem else ""
         fields = {"Component": c.name, "Subsystem": subsystem_name, "Purpose": c.purpose,
+                  **({"Kind": grammar.COMPONENT_KIND_WORDS.get(c.kind, c.kind)} if c.kind else {}),
                   **({"Runs in": ", ".join(c.runs_in)} if c.runs_in else {}),
                   **({"States": _states_str(c.states)} if c.states else {}),
                   **{k: _extra_str(v) for k, v in c.extra.items()}}
@@ -1166,6 +1169,7 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
         node.files = _component_files(c)
         node.entry_points = eps_by_comp.get(c.id, [])
         node.runs_in = list(c.runs_in)
+        node.component_kind = c.kind
         node.states_lines = _states_parts(c.states)   # a component lifecycle lists per line too
         nodes[c.id] = node
     # A dep's ROLE set is derived from the verbs of its incoming C→D edges (grammar.dep_roles), so a

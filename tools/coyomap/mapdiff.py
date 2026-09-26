@@ -622,6 +622,14 @@ def _reidentify(spec: KindSpec, pairs: list[Pair]) -> list[Pair]:
 _SKIP_FIELDS = frozenset({"id", "steps"})
 
 
+def is_empty_value(x: object) -> bool:
+    """A field with nothing in it: absent (None), "", [] or {}. A MAP BUILT BEFORE A FIELD EXISTED
+    DOES NOT CARRY ITS KEY, and the same map written again carries the field's empty default, so
+    the two must compare equal. Measured when `kind` joined the components: without this, every
+    component of an older map read as modified, and every update of it failed the log's gate."""
+    return x is None or x == "" or x == [] or x == {}
+
+
 def field_deltas(old: dict[str, Any], new: dict[str, Any], idmap: dict[str, str],
                  skip: frozenset[str] = _SKIP_FIELDS, names_old: dict[str, str] | None = None,
                  names_new: dict[str, str] | None = None) -> list[FieldDelta]:
@@ -633,7 +641,9 @@ def field_deltas(old: dict[str, Any], new: dict[str, Any], idmap: dict[str, str]
         if key in skip:
             continue
         a, b = _translate(old.get(key), idmap), new.get(key)
-        if a == b:
+        # Two rows that BOTH exist and both hold nothing in this field did not change it. A row that
+        # came or went keeps every field, the empty ones too: its page lists what it held.
+        if a == b or (old and new and is_empty_value(a) and is_empty_value(b)):
             continue
         spec = field_spec(key)
         da, db = _name_ids(a, names_old or {}), _name_ids(b, names_new or {})   # display forms

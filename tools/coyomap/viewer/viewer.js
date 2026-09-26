@@ -839,6 +839,9 @@ function cardFacts(id) {
   // An actor's nature and its SIDE, in one pill each — see actorSidePills for the four readings.
   if (isActor) for (const p of actorSidePills(n.kind, n.audience)) pills.push(p);
   if (n.kind === 'dep' && f.Kind) pills.push({ text: f.Kind, cls: '' });
+  // A COMPONENT'S KIND beside its name ("Team MCPs · screen"): the name alone did not say whether a
+  // box is a page, the logic or the data, and the kind says it once, as a dependency's does.
+  if (n.kind === 'component' && f.Kind) pills.push({ text: f.Kind, cls: 'comp-kind' });
   return { id, kind: n.kind, name: n.name || id, type: elementLabel(n.kind), desc, pills };
 }
 
@@ -1233,8 +1236,14 @@ function itemSpecOf(id) {
     // "entities", not "records": the count takes every named thing in the area, and only some of
     // those are saved records (the Data tab counts "82 entities" by the same rule).
     const leaf = n.kind === 'subsystem' ? 'component' : 'entity';
-    const kids = Object.keys(GRAPH.nodes).filter((x) => GRAPH.nodes[x].kind === leaf && isAncestorOf(id, x)).length;
-    if (kids) spec.band.push(kids + (n.kind === 'subsystem' ? ' components' : ' entities'));
+    const members = Object.keys(GRAPH.nodes).filter((x) => GRAPH.nodes[x].kind === leaf && isAncestorOf(id, x));
+    const kids = members.length;
+    // …and WHAT it holds, once its components say what they are: "screen · API · logic · store"
+    // answers "is this the data or the logic?" on the box itself, where a count could not.
+    const kinds = n.kind === 'subsystem' ? COMPONENT_KIND_ORDER.filter((k) =>
+      members.some((x) => (GRAPH.nodes[x].component_kind || '') === k)) : [];
+    if (kinds.length) spec.band.push(kinds.map((k) => COMPONENT_KIND_WORD[k] || k).join(' · '));
+    else if (kids) spec.band.push(kids + (n.kind === 'subsystem' ? ' components' : ' entities'));
     // A CONTAINER IS DASHED, as a shared sub-use case is: a dashed line says "there is more inside".
     spec.dashed = true;
   }
@@ -7881,6 +7890,10 @@ function archKeyHtml() {
 // The two marks the picture's key names, kept equal to the ones gen_viewer draws (RULE_MARK and
 // ARCH_STORE_LINE there): the key must show the marks the picture actually carries.
 const RULE_MARK = '⚖';
+// A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
+// each is written on a box (grammar.COMPONENT_KIND_WORDS).
+const COMPONENT_KIND_ORDER = ['screen', 'api', 'logic', 'check', 'store', 'pipe', 'job', 'wiring'];
+const COMPONENT_KIND_WORD = { api: 'API' };
 const ARCH_STORE_LINE = '#0f766e';
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
 // the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.

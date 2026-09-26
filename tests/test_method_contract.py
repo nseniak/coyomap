@@ -532,6 +532,11 @@ def test_a_mode_flag_does_not_silently_swallow_the_flags_its_mode_ignores():
 #: An entry here is a claim: "this is always fixable at the point it fires, so an operator never
 #: has to live with it." Adding a line to this list is a design decision, not a formality.
 KNOWN_NO_ESCAPE: dict[str, str] = {
+    # A component's kind is one word the build writes, from a closed list of eight. There is no
+    # component for which "no kind" is the right answer once the map states kinds for the others, so
+    # there is nothing to record: the fix is the word.
+    "Components with no kind, on a map where {} others have one":
+        "the finding IS a missing word; the fix is to write it",
     # There is no legitimate way to owe a direction and not give one, so there is nothing to
     # record. The field is owed only where the map's OWN CODE touches a surface or a record, and a
     # door — a role standing at a surface, a human action with no product end — is already exempt

@@ -36,6 +36,7 @@ class Node:
     parent: str | None = None  # the one parent S-id (grouping); None = top-level / ungrouped
     attrs: list[dict[str, str]] = field(default_factory=list)  # entity attributes (T5 cards only)
     dep_kind: str | None = None  # T2 deps only: the Context Kind (datastore/messaging/service/…); see classify_dep
+    component_kind: str = ""     # components only: what kind of thing it is (grammar.COMPONENT_KINDS), "" = unstated
     files: list[str] = field(default_factory=list)  # every repo-relative file this element covers,
                                   # bare (no line anchor), the canonical `source` file first. A
                                   # component's owned files; a group's = union of its members' files;

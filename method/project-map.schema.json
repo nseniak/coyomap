@@ -569,6 +569,21 @@
         "purpose": {
           "type": "string"
         },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "",
+            "screen",
+            "api",
+            "logic",
+            "check",
+            "store",
+            "pipe",
+            "job",
+            "wiring"
+          ],
+          "description": "what kind of thing the component is, one word: screen, api, logic, check, store, pipe, job, wiring. '' = not stated (a map built before the field)."
+        },
         "depends_on": {
           "type": "string"
         },

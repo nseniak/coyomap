@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from coyomap import subverb_help
-from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, looks_like_map
+from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, is_empty_value, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import Finding, field_findings, history_findings, iter_prose_fields
 from coyomap.validate_model import validate_model
@@ -795,7 +795,8 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
             changed.setdefault(a.src, f"an arrow {a.change}")
     header = [k for k in set(old_doc) | set(new_doc)
               if k not in MAP_BOOKKEEPING and not isinstance(old_doc.get(k, new_doc.get(k)), (list, dict))
-              and old_doc.get(k) != new_doc.get(k)]
+              and old_doc.get(k) != new_doc.get(k)
+              and not (is_empty_value(old_doc.get(k)) and is_empty_value(new_doc.get(k)))]
     if header:
         changed[MAP_ID] = "modified (" + ", ".join(sorted(header)) + ")"
     named = log.named()

@@ -33,6 +33,23 @@ DEEP_NEST_WARN = 5  # warn (non-blocking) when a membership chain is deeper than
 CONFIDENCE_VALUES: tuple[str, ...] = ("verified", "inferred")
 
 DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "library")
+
+#: WHAT KIND OF THING A COMPONENT IS, in one word (`Component.kind`). CLOSED, because the Architecture
+#: picture acts on it: it draws THROUGH a pipe or the wiring, and lets a store or a check stand alone
+#: inside its subsystem. A word it does not know would silently do nothing. The fifth "kind" in the
+#: map, and none of the five overlaps: an interface's, a way in's, an actor's, a dependency's, this.
+#:   screen  a page a person uses              check   decides whether something is allowed
+#:   api     an entry the product's own         store   keeps records
+#:           screens or clients call            pipe    passes calls on, adding nothing
+#:   logic   does the work                      job     runs on its own schedule
+#:                                              wiring  assembles and starts the product
+#: Measured on mcpolis before it existed: 8 of its 15 screens had a name that never said it was a
+#: screen ("Team MCPs"), and neither a story's shape nor a file's place could tell a screen from a
+#: pipe, so the kind is authored, never derived.
+COMPONENT_KINDS = ("screen", "api", "logic", "check", "store", "pipe", "job", "wiring")
+COMPONENT_KIND_WORDS = {"api": "API"}   # how a kind is written on a box; every other word as stored
+COMPONENT_KINDS_DRAWN_THROUGH = ("pipe", "wiring")   # the Architecture picture joins the lines around them
+COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as boxes of their own
 DEP_KINDS_FOLDED = ("framework", "library")                          # in-process — fold into "Libraries"
 # The EXTERNAL (system) dep kinds — everything the project talks to across a boundary. A deployment
 # unit that hosts no code but name-matches one of these is that dep's own box, not a real process.
