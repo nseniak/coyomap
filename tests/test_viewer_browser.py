@@ -4232,3 +4232,77 @@ def test_a_pages_own_title_carries_no_glossary_link() -> None:
         assert got["inTitle"] == 0, got
         assert got["onPage"] > 0, "the page's prose still links its terms"
         assert not page.js_errors, page.js_errors
+
+
+# --- the Architecture view: one feature first, one story followed, one box's steps ------------------
+
+def _arch_ready(page: Any) -> None:
+    page.wait_for_selector("#archtext:not([hidden]) .archtext-line")
+    _settle(page)
+
+
+def test_the_architecture_view_opens_on_the_first_feature_and_all_is_one_click_away() -> None:
+    """The whole product is the picture with the most lines, so the view opens on the first feature
+    the Features page lists, and `All` is a button that names itself in the address."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => ({
+            lit: document.querySelector('.archwho.on').dataset.archcap,
+            buttons: [...document.querySelectorAll('.archwho')].map((b) => b.dataset.archcap) })""")
+        assert seen["buttons"][0] == "all"
+        assert seen["lit"] == seen["buttons"][1], seen
+        page.evaluate("() => document.querySelector('.archwho[data-archcap=\"all\"]').click()")
+        page.wait_for_function("() => location.hash.includes('cap=all')")
+        _arch_ready(page)
+        assert page.evaluate("() => document.querySelector('.archwho.on').dataset.archcap") == "all"
+        assert not page.js_errors, page.js_errors
+
+
+def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_ends() -> None:
+    """Picking a story lights its lines, numbers them 1, 2, 3 in its own order, and draws a start
+    circle and an end bar. It is a screen of its own: the story is in the address."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        page.evaluate("() => document.querySelector('.archtext-storybtn').click()")
+        page.wait_for_function("() => location.hash.includes('story=')")
+        _arch_ready(page)
+        seen = page.evaluate("""() => {
+          const lit = [...document.querySelectorAll('#diagram g.edgeLabel.arch-story-on')].map((l) => l.textContent.trim());
+          return { lit, marks: [...document.querySelectorAll('#diagram .ucm-mark')].map((m) => m.firstElementChild.getAttribute('class')),
+                   steps: document.querySelectorAll('#archtext .archtext-step').length,
+                   start: (document.querySelector('#archtext .archtext-start') || {}).textContent || '' };
+        }""")
+        numbers = sorted(int(t) for t in seen["lit"])
+        assert numbers == list(range(1, len(numbers) + 1)) and numbers, seen
+        assert sorted(seen["marks"]) == ["ucm-end", "ucm-start"], seen
+        assert seen["steps"] == len(numbers)
+        assert seen["start"].startswith("Starts when:"), seen
+        page.evaluate("() => document.querySelector('#archtext [data-archstory=\"\"]').click()")
+        page.wait_for_function("() => !location.hash.includes('story=')")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
+    """The box around the name selects it and keeps only the lines that touch it in the text; the
+    text says whose steps these are, and one click shows every step again."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        # ON THE BOX'S SENTENCE: clear of its name, which opens it, and of the corner icon a subsystem
+        # box carries, which drills into it.
+        spot = page.evaluate("""() => {
+            const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.querySelector('.ibox-map .ibox-what'));
+            const w = n.querySelector('.ibox-what').getBoundingClientRect();
+            return { x: w.left + w.width / 2, y: w.top + w.height / 2 };
+        }""")
+        before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(700)
+        seen = page.evaluate("""() => ({
+            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
+            head: document.querySelector('#archtext .archtext-filter').hidden ? '' :
+                  document.querySelector('#archtext .archtext-filter').textContent })""")
+        assert 0 < seen["shown"] < before, (before, seen)
+        assert seen["head"].startswith("Only the steps through"), seen
+        page.evaluate("() => document.querySelector('#archtext [data-archfilter-clear]').click()")
+        assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == before
+        assert not page.js_errors, page.js_errors

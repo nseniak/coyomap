@@ -49,8 +49,8 @@ the code's names.
   away hand edits.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
-  Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Subsystems,
-  Storage, Dependencies, Tests, Deployment, System, Updates.
+  Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,
+  Subsystems, Storage, Dependencies, Tests, Deployment, System, Updates.
 - **group** — the three tabs above the views: Product, Under the hood, Update
   log. A group is a set of tabs, never a page you can be on. Data (the entities)
   and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
@@ -249,6 +249,27 @@ design principles these come from)
   interfaces that feature calls out to. It reads *not stated* on most features,
   because a feature is linked to a service only when a step of its own flow is
   drawn at that service.
+- **Architecture** (a view) — the first tab under the hood. It answers "who reaches
+  this product, what do they come through, and what runs behind it?" with one picture
+  per feature. It opens on the first feature; All is one button away.
+- **macro flow** — what the Architecture picture draws: every story of the picture
+  merged into one flow over the product's boxes, so each line is a way some story goes.
+  Answers going back and results handed to a person are left out.
+- **step number** (on the Architecture picture) — the number on a line. Follow 1, 2, 3
+  and any story reads in order. Lines the stories take in different orders share one
+  number.
+- **grey "via" line** — a line through boxes the picture does not show. "via 2" says
+  how many; the text beside the picture names them.
+- **following a story** — picking one story on the Architecture view: its lines light
+  up, numbered 1, 2, 3 in its own order, and the text tells it from its trigger to its
+  outcome.
+- **start and end marks** — a filled circle on the box where a story starts and a bar
+  on the box where it ends, as Use Case Maps draw a path. Shown for a followed story and
+  on every use case map; their tips carry the use case's trigger and outcome.
+- **store line** — a line from a box to the database that keeps its records. Its own
+  colour, and no step number.
+- **rule mark** — the ⚖ on a line or an arrow where a business rule decides. The text
+  beside the Architecture picture names the rule.
 
 **How coyomap is delivered**
 

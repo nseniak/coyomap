@@ -13,6 +13,7 @@ let GRAPH;
 const MEMBER_BORDER_MIX = 34;
 const CONTAINER_BORDER_MIX = 65;
 let MERMAID_BASE, MERMAID_CONTEXT, MERMAID_CONTAINER, MERMAID_ARCH, MERMAID_ARCH_BY, ARCH_FEATURES, ARCH_TEXT;
+let FLOW_ENDS;          // uc-id -> {start, end}: the boxes a use case map's walk starts and ends at
 let MERMAID_BY_SUB;         // subsystem neighbourhood: sid -> sub-diagram
 let MERMAID_EDGE_CARD;      // edge pair: 'A>B' -> two-subsystem sub-diagram
 let CONTAINER_EDGES;        // inter-subsystem arrow 'A>B' -> [crossing component edges]
@@ -109,7 +110,7 @@ function applyBundle(b) {
   MERMAID_BASE = b.mermaidBase; MERMAID_CONTEXT = b.mermaidContext;
   MERMAID_CONTAINER = b.mermaidContainer; MERMAID_BY_SUB = b.mermaidBySub;
   MERMAID_ARCH = b.mermaidArch; MERMAID_ARCH_BY = b.mermaidArchBy || {}; ARCH_FEATURES = b.archFeatures || [];
-  ARCH_TEXT = b.archText || {};
+  ARCH_TEXT = b.archText || {}; FLOW_ENDS = b.flowEnds || {};
   MERMAID_EDGE_CARD = b.mermaidEdgeCard; CONTAINER_EDGES = b.containerEdges;
   MERMAID_DOMAIN = b.mermaidDomain; MERMAID_DOMAIN_CONTAINER = b.mermaidDomainContainer;
   MERMAID_DOMAIN_SUB = b.mermaidDomainSub; MERMAID_DOMAIN_EDGE_CARD = b.mermaidDomainEdgeCard;
@@ -1074,7 +1075,7 @@ function roleChipOf(role, fallbackName) {
 // ── the box ──────────────────────────────────────────────────────────────────────────────────────
 const ITEM_VARIANT = {
   full:    { what: true,  facts: true,  band: true,  clamp: 0, word: true },
-  map:     { what: true,  facts: false, band: true,  clamp: 2, word: true },
+  map:     { what: true,  facts: false, band: true,  clamp: 3, word: true },
   compact: { what: false, facts: false, band: true,  clamp: 0, word: false },
   tight:   { what: false, facts: false, band: false, clamp: 0, word: false },
   // The PERSON on a use case map, at the size the stick figure has always been drawn there: the
@@ -1133,7 +1134,7 @@ function itemBoxHtml(spec, variant, opts) {
     + `<span class="ibox-title">${name}${pills}</span></span>`];
   const what = o.what !== undefined ? o.what : spec.what;
   if (v.what && what) {
-    out.push(`<span class="ibox-what${v.clamp === 2 ? ' ibox-clamp2' : ''}">`
+    out.push(`<span class="ibox-what${v.clamp ? ' ibox-clamp' + v.clamp : ''}">`
       + `${mdInline(what)}</span>`);
   }
   if (v.facts) {
@@ -5157,6 +5158,9 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // happy path's alone. Unset = every use case's. (Its ONE feature rides on
                       // `cap`, the field the Features page already names a feature by.)
                       'scope',
+                      // `story` is the ONE story the Architecture view follows: its lines lit and
+                      // numbered in its own order. Unset = every story, numbered together.
+                      'story',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
                       // maps, and looked up by scanning rather than by position, so a flow whose numbers
@@ -5174,6 +5178,7 @@ function stateKey(s) {
     + (s.cap ? ':' + s.cap : '')   // one FEATURE's use cases ('-' = the ones assigned to none), or
                                    // the Architecture view narrowed to one feature
     + (s.act ? ':' + s.act : '')   // …or one ACTOR's, the overview's other axis
+    + (s.story ? '@' + s.story : '')  // …following one story: a different screen of one drawing
     + (s.scope ? '~' + s.scope : '')  // the Architecture view on the happy path's stories: a
                                       // different drawing, so it has to key apart or the switch
                                       // is a no-op on the screen
@@ -6123,6 +6128,9 @@ function flowMapPaintStepLabel(label, stepIdx, current) {
   if (!p) return;
   const want = stepIdx.join(',');
   if (p.dataset.fsteps !== want) {
+    // THE RULE MARK the generator put after the numbers (RULE_MARK) is kept through the repaint: it
+    // says a business rule decides on one of this arrow's steps, and the label was sized with it.
+    const ruled = p.dataset.frule === '1' || p.textContent.includes(RULE_MARK);
     const parts = [];
     stepIdx.forEach((i, k) => {
       if (k) {
@@ -6137,8 +6145,16 @@ function flowMapPaintStepLabel(label, stepIdx, current) {
       number.textContent = String(i + 1);
       parts.push(number);
     });
+    if (ruled) {
+      const mark = document.createElement('span');
+      mark.className = 'flow-rule-mark';
+      mark.title = 'A business rule decides on this arrow';
+      mark.textContent = ' ' + RULE_MARK;
+      parts.push(mark);
+    }
     p.replaceChildren(...parts);
     p.dataset.fsteps = want;
+    p.dataset.frule = ruled ? '1' : '';
   }
   const active = stepIdx.length > 1 && stepIdx.includes(current);
   for (const el of p.children) {
@@ -6408,6 +6424,11 @@ function bindFlowMap(uc) {
   // lifeline columns (x only) there, whole boxes here.
   const partsById = {};
   for (const id in scene.nodeEls) partsById[id] = [scene.nodeEls[id]];
+  // WHERE THE STORY STARTS AND ENDS, marked as the Architecture view marks the story it follows, with
+  // the use case's own trigger and outcome in the tips (markStartEnd).
+  const ends = FLOW_ENDS[uc];
+  const facts = ((GRAPH.nodes[uc] || {}).fields) || {};
+  if (ends && ends.start) markStartEnd(scene, ends.start, ends.end, facts.Trigger || '', facts.Outcome || '');
   flowPlay = steps.length
     ? { uc, kind: 'map', steps, msgEls, partsById, mapArrows: arrows, cur: -1, active: false }
     : null;
@@ -7529,15 +7550,16 @@ function archFeatureHtml() {
   // A feature with no drawing under this scope (no happy-path story, with the happy path on) keeps
   // its place in the row but cannot be picked, so the row does not reshuffle as the switch moves.
   const one = (val, label) => {
-    const off = val && !MERMAID_ARCH_BY[scope + '|' + val];
-    return `<button class="archwho${val === now ? ' on' : ''}" data-archcap="${esc(val)}"`
+    const off = val !== 'all' && !MERMAID_ARCH_BY[scope + '|' + val];
+    const on = (val === 'all' ? '' : val) === now;
+    return `<button class="archwho${on ? ' on' : ''}" data-archcap="${esc(val)}"`
       + (off ? ' disabled title="No happy-path story in this feature"' : '')
       + `>${esc(label)}</button>`;
   };
   const happy = scope === 'happy';
   const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
     + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
-  return `<div class="archwho-row">${one('', 'All')}`
+  return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
     + archKeyHtml();
@@ -7565,36 +7587,134 @@ function placeArchText() {
   }
 }
 if ('ResizeObserver' in window) new ResizeObserver(placeArchText).observe(document.getElementById('diagwrap'));
+// THE TEXT BESIDE A PICTURE is `ARCH_TEXT[key]`, `{lines, stories}` (gen_viewer._arch_text and
+// _arch_stories), and it reads one picture three ways:
+//   the whole flow, step by step (the default);
+//   one box's steps: a plain click on a box keeps only the lines that touch it;
+//   one story followed: its lines lit and numbered 1, 2, 3 in its own order, from what starts it to
+//     what the person comes away with. The shared numbers cannot give that order wherever stories take
+//     the same lines in different orders, which is half the lines of some pictures (see
+//     _story_order_numbers on loops).
+function archTextOf(s) { return s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || null) : null; }
+function archStoryOf(s, t) {
+  return s && s.story && t ? (t.stories || []).find((x) => x.uc === s.story) || null : null;
+}
+// A story list this long or shorter opens by itself; a longer one (the All picture's 52) stays folded.
+const ARCH_FOLLOW_OPEN = 8;
+let archBoxFilter = '';
 function syncArchText(s) {
-  const entries = s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || ARCH_TEXT['all|'] || []) : null;
+  const t = archTextOf(s);
+  const entries = t ? (t.lines || []) : null;
   archtext.hidden = !entries || !entries.length;
   placeArchText();
+  archBoxFilter = '';
   if (archtext.hidden) { archtext.innerHTML = ''; return; }
-  const sentence = (x) => {
-    const who = x.stories.length > 1 ? `${x.stories[0]} +${x.stories.length - 1}` : x.stories[0];
-    return `<p class="archtext-sent">${esc(capFirst(x.text))}`
-      + ` <span class="archtext-story" title="${esc(x.stories.join('\n'))}">${esc(who)}</span></p>`;
-  };
+  const story = archStoryOf(s, t);
+  archtext.innerHTML = story ? archStoryTextHtml(t, story) : archFlowTextHtml(t);
+  bindItemPills(archtext);   // a rule decided on a line is an item pill, and opens that rule
+}
+function archList(xs) {
+  return xs.length <= 1 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+}
+// A line's two ends, and for a grey line the boxes it passes through, by name: "via 2" on the picture
+// says how many, and this is the one place that says which.
+function archEndsHtml(e) {
+  const via = (e.via || []).length
+    ? ` <span class="archtext-via">through ${esc(archList(e.via))}, not shown</span>` : '';
+  return `<div class="archtext-ends">${esc(e.src)} <span class="archtext-arrow">→</span> ${esc(e.dst)}${via}</div>`;
+}
+// WHAT A RULE DECIDES ON A LINE: the rules linked to its steps, as the rules' own item pills, and the
+// condition the deciding step's note gives. Following one story, only that story's.
+function archDecidedHtml(e, uc) {
+  const rules = uc ? ((e.rulesByStory || {})[uc] || []) : (e.rules || []);
+  const conds = uc ? ((e.conditionsByStory || {})[uc] || []) : (e.conditions || []);
+  return (rules.length ? '<div class="archtext-rules"><span class="archtext-lbl">Decided here</span>'
+      + rules.map((r) => itemPillHtml(r.id, { kind: 'rule', name: r.name })).join('') + '</div>' : '')
+    + conds.map((c) => `<p class="archtext-cond"><span class="archtext-lbl">Condition</span> ${esc(c)}</p>`).join('');
+}
+// A sentence, then the story it is from. The story's name follows that story; a sentence several
+// stories share names the first and counts the rest, all of them in the tip.
+function archSentenceHtml(x) {
+  const who = x.stories.length > 1 ? `${x.stories[0]} +${x.stories.length - 1}` : x.stories[0];
+  return `<p class="archtext-sent">${esc(capFirst(x.text))}`
+    + ` <button type="button" class="archtext-story" data-archstory="${esc(x.ucs[0])}"`
+    + ` title="${esc('Follow this story: ' + x.stories.join(', '))}">${esc(who)}</button></p>`;
+}
+function archLineHtml(e, body) {
+  return `<div class="archtext-line" tabindex="0" data-src="${esc(e.srcBox)}" data-dst="${esc(e.dstBox)}">`
+    + archEndsHtml(e) + body + '</div>';
+}
+function archFlowTextHtml(t) {
   const line = (e) => {
-    const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(sentence).join('');
+    const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(archSentenceHtml).join('');
     const rest = e.sentences.slice(ARCH_TEXT_SHOWN);
-    return `<div class="archtext-line" tabindex="0" data-src="${esc(e.srcBox)}" data-dst="${esc(e.dstBox)}">`
-      + `<div class="archtext-ends">${esc(e.src)} <span class="archtext-arrow">→</span> ${esc(e.dst)}`
-      + (e.hidden ? ` <span class="archtext-via">through ${Number(e.hidden)} not shown</span>` : '') + '</div>'
-      + shown
+    return archLineHtml(e, archDecidedHtml(e, '') + shown
       + (rest.length ? `<details class="archtext-more"><summary>+${rest.length} more</summary>`
-        + rest.map(sentence).join('') + '</details>' : '')
-      + '</div>';
+        + rest.map(archSentenceHtml).join('') + '</details>' : ''));
   };
   const steps = [];
-  for (const e of entries) {
+  for (const e of t.lines) {
+    if (e.store) continue;
     if (!steps.length || steps[steps.length - 1].n !== e.n) steps.push({ n: e.n, lines: [] });
     steps[steps.length - 1].lines.push(e);
   }
-  archtext.innerHTML = '<div class="archtext-head">The flow, step by step</div>'
-    + '<ol class="archtext-steps">' + steps.map((st) => `<li class="archtext-step">`
+  const keeps = t.lines.filter((e) => e.store);
+  const stories = t.stories || [];
+  return '<div class="archtext-head">The flow, step by step</div>'
+    + '<div class="archtext-filter" hidden></div>'
+    + (stories.length ? `<details class="archtext-follow"${stories.length <= ARCH_FOLLOW_OPEN ? ' open' : ''}>`
+      + `<summary>Follow one story (${stories.length})</summary><div class="archtext-follow-list">`
+      + stories.map((x) => `<button type="button" class="archtext-storybtn" data-archstory="${esc(x.uc)}">`
+        + `${esc(x.name)}</button>`).join('')
+      + '</div></details>' : '')
+    + '<ol class="archtext-steps">' + steps.map((st) => '<li class="archtext-step">'
       + `<span class="archtext-n">${Number(st.n)}</span><div class="archtext-lines">${st.lines.map(line).join('')}</div></li>`).join('')
-    + '</ol>';
+    + '</ol>'
+    + (keeps.length ? '<div class="archtext-keepsec"><div class="archtext-head archtext-keeps-head">Where the records are kept</div>'
+      + `<div class="archtext-lines">${keeps.map(line).join('')}</div></div>` : '');
+}
+function archStoryTextHtml(t, story) {
+  const byPair = new Map(t.lines.map((e) => [e.srcBox + '>' + e.dstBox, e]));
+  const own = story.lines.map(([a, b], i) => {
+    const e = byPair.get(a + '>' + b);
+    if (!e) return '';
+    const said = e.sentences.find((x) => x.ucs.includes(story.uc));
+    return `<li class="archtext-step"><span class="archtext-n">${i + 1}</span><div class="archtext-lines">`
+      + archLineHtml(e, archDecidedHtml(e, story.uc)
+        + (said ? `<p class="archtext-sent">${esc(capFirst(said.text))}</p>` : ''))
+      + '</div></li>';
+  }).join('');
+  return '<div class="archtext-head">Following one story '
+    + '<button type="button" class="archtext-all" data-archstory="">Show every story</button></div>'
+    + `<div class="archtext-storyname">${esc(story.name)}</div>`
+    + (story.trigger ? '<p class="archtext-start"><span class="ucm-key-start" aria-hidden="true"></span>'
+      + `Starts when: ${esc(story.trigger)}</p>` : '')
+    + `<ol class="archtext-steps">${own}</ol>`
+    + (story.outcome ? '<p class="archtext-end"><span class="ucm-key-end" aria-hidden="true"></span>'
+      + `Ends with: ${esc(story.outcome)}</p>` : '');
+}
+// ONE BOX'S STEPS: the text keeps the lines with this box at either end, and the steps holding them.
+// An empty id shows every line again.
+function archFilterBox(id, name) {
+  archBoxFilter = id || '';
+  archtext.querySelectorAll('.archtext-line').forEach((el) => {
+    el.hidden = !!archBoxFilter && el.dataset.src !== archBoxFilter && el.dataset.dst !== archBoxFilter;
+  });
+  archtext.querySelectorAll('.archtext-step, .archtext-keepsec').forEach((el) => {
+    el.hidden = !!archBoxFilter && !el.querySelector('.archtext-line:not([hidden])');
+  });
+  const head = archtext.querySelector('.archtext-filter');
+  if (!head) return;
+  head.hidden = !archBoxFilter;
+  head.innerHTML = archBoxFilter ? `Only the steps through <b>${esc(name || archBoxFilter)}</b> `
+    + '<button type="button" class="archtext-all" data-archfilter-clear>Show every step</button>' : '';
+}
+function archBoxName(t, id) {
+  for (const e of (t && t.lines) || []) {
+    if (e.srcBox === id) return e.src;
+    if (e.dstBox === id) return e.dst;
+  }
+  return id;
 }
 // TEXT <-> DRAWING. A line in the text lights its arrow; an arrow on the drawing lights its line in
 // the text and brings it into view. One mark each side at a time, so the pair stays unambiguous.
@@ -7615,24 +7735,38 @@ function archMarkText(src, dst, scroll) {
   if (hit && scroll) hit.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 archtext.addEventListener('click', (e) => {
+  const pick = e.target.closest && e.target.closest('[data-archstory]');
+  if (pick) {   // follow a story, or ("") show every story again: its own screen, its own address
+    e.stopPropagation();
+    const cur = (hi >= 0 && history[hi]) || {};
+    go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || ''));
+    return;
+  }
+  if (e.target.closest && e.target.closest('[data-archfilter-clear]')) { archFilterBox(''); return; }
   const el = e.target.closest && e.target.closest('.archtext-line');
-  if (!el || (e.target.closest && e.target.closest('summary'))) return;
+  if (!el || (e.target.closest && e.target.closest('summary, .item-pill, button'))) return;
   archMarkText(el.dataset.src, el.dataset.dst, false);
   archMarkArrow(el.dataset.src, el.dataset.dst);
 });
 // THE ARCHITECTURE VIEW'S BOXES open the way a flow picture's do (bindFlowMap): a plain click on the
 // NAME opens the thing, so a subsystem box opens its components and a lone component its own page;
-// the rest of the box selects it. The generic binder it used before only selected, so a subsystem box
-// standing for 5 components offered no way to see them.
+// the rest of the box selects it, and the text beside the picture keeps that box's steps alone (a
+// second click on the same box shows them all again). The generic binder it used before only selected,
+// so a subsystem box standing for 5 components offered no way to see them.
 function bindArch() {
+  const s = (hi >= 0 && history[hi]) || {};
+  const t = archTextOf(s);
+  const story = archStoryOf(s, t);
   bindNodes(mainScene, (id, el, ev) => {
     const locate = locateActionFor(id);
     if (locate && isDrillClick(ev)) { locate.run(); return; }
     if (nameClick(ev)) { drillInto(id); return; }
     selectNodeFromCanvas(el, id, ev);
+    if (!story) archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id));
   });
   bindEdges(mainScene, resolveComponentEdge);
   bindArchText();   // …and every arrow finds its line in the text
+  if (story) archFollow(story);
 }
 function bindArchText() {
   if (!mainScene) return;
@@ -7641,21 +7775,95 @@ function bindArchText() {
     for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.addEventListener('click', find);
   });
 }
+// FOLLOWING ONE STORY on the drawing: its lines stay lit and carry its own numbers, 1, 2, 3 in its
+// order, everything else steps back, and its start and end are marked (markStartEnd).
+function archFollow(story) {
+  if (!mainScene) return;
+  const own = new Map(story.lines.map(([a, b], i) => [a + '>' + b, i + 1]));
+  mainScene.root.classList.add('arch-following');
+  eachEdge(mainScene.root, (p, label, m) => {
+    const n = own.get(m[1] + '>' + m[2]);
+    const on = n !== undefined;
+    for (const el of [p, ...(p._segs || []), label].filter(Boolean)) el.classList.toggle('arch-story-on', on);
+    if (on && label) setEdgeLabelText(label, String(n));
+  });
+  const boxes = new Set(story.lines.flat());
+  mainScene.root.querySelectorAll('g.node').forEach((el) => el.classList.toggle('arch-story-on', boxes.has(idOf(el))));
+  markStartEnd(mainScene, story.start, story.end, story.trigger, story.outcome);
+}
+// An arrow's label text, replaced in place: the innermost element holding its text, so the label keeps
+// its box and its styling.
+function setEdgeLabelText(label, text) {
+  const host = label.querySelector('span.edgeLabel p, span.edgeLabel, p, span, text') || label;
+  host.textContent = text;
+}
+// START AND END, marked the way Use Case Maps mark a path: a filled circle where a story starts and a
+// bar where it ends, each on the box, its sentence in the tip. The one drawing of the two marks, shared
+// by the Architecture view (following one story) and every use case map.
+function markStartEnd(scene, startId, endId, trigger, outcome) {
+  if (!scene) return;
+  scene.root.querySelectorAll('.ucm-mark').forEach((x) => x.remove());
+  const NS = 'http://www.w3.org/2000/svg';
+  const nodeEl = (id) => [...scene.root.querySelectorAll('g.node')].find((el) => idOf(el) === id);
+  const put = (id, tipText, make) => {
+    const el = id && nodeEl(id);
+    if (!el) return;
+    const bb = el.getBBox();
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'ucm-mark');
+    make(g, bb);
+    if (tipText) {
+      const tt = document.createElementNS(NS, 'title');
+      tt.textContent = tipText;
+      g.appendChild(tt);
+    }
+    el.appendChild(g);
+  };
+  put(startId, trigger ? 'Starts when: ' + trigger : 'Starts here', (g, bb) => {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', String(bb.x - 9));
+    c.setAttribute('cy', String(bb.y + bb.height / 2));
+    c.setAttribute('r', '6');
+    c.setAttribute('class', 'ucm-start');
+    // Inline, because the drawing's own node rules (scoped to its id) would repaint a plain class.
+    c.setAttribute('style', 'fill:#0f172a;stroke:#fff;stroke-width:1.5');
+    g.appendChild(c);
+  });
+  put(endId, outcome ? 'Ends with: ' + outcome : 'Ends here', (g, bb) => {
+    const r = document.createElementNS(NS, 'rect');
+    r.setAttribute('x', String(bb.x + bb.width + 4));
+    r.setAttribute('y', String(bb.y + bb.height / 2 - 10));
+    r.setAttribute('width', '4');
+    r.setAttribute('height', '20');
+    r.setAttribute('class', 'ucm-end');
+    r.setAttribute('style', 'fill:#0f172a;stroke:none');
+    g.appendChild(r);
+  });
+}
 function archScope(s) { return s && s.scope === 'happy' ? 'happy' : 'all'; }
+// WHICH FEATURE A STATE DRAWS. `all` is the whole product; a feature id is that feature, when this
+// scope draws it; and nothing named opens on the FIRST feature this scope draws, in the Features
+// page's order. The whole product is one click away, but it is the picture with the most lines
+// (113 on mcpolis), so it is no longer where the view opens.
 function archFeature(s) {
   const cap = (s && s.cap) || '';
-  return cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
+  if (cap === 'all') return '';
+  if (cap) return MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
+  const first = (ARCH_FEATURES || []).find((f) => MERMAID_ARCH_BY[archScope(s) + '|' + f.id]);
+  return first ? first.id : '';
 }
 function archKey(s) { return archScope(s) + '|' + archFeature(s); }
-function archState(scope, cap) {
+function archState(scope, cap, story) {
   const s = { kind: 'arch' };
   if (scope === 'happy') s.scope = 'happy';
-  if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
+  if (cap === 'all') s.cap = 'all';
+  else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
+  if (story) s.story = story;
   return s;
 }
-// THE KEY TO THE TWO LINE STYLES, drawn as the lines themselves rather than named: a reader
-// matches a stroke faster than they decode a word for one. Solid = every story through that box
-// goes this way, so two solid lines out of one box read "and"; dashed = only some do, so read "or".
+// THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
+// than they decode a word for one. Solid = every story through that box goes this way, so two solid
+// lines out of one box read "and"; dashed = only some do, so read "or".
 function archKeyHtml() {
   const line = (dash, stroke) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
     + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="1.6"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
@@ -7663,8 +7871,17 @@ function archKeyHtml() {
     + `<span>${line(false, '#475569')} every story through that box goes this way</span>`
     + `<span>${line(true, '#475569')} only some do</span>`
     + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
-    + '<span><b class="archkey-num">3</b> the step: follow 1, 2, 3 and any story reads in order</span></div>';
+    + `<span>${line(true, ARCH_STORE_LINE)} where a box keeps its records</span>`
+    + `<span><b class="archkey-num">${RULE_MARK}</b> a business rule decides on this line</span>`
+    + '<span><b class="archkey-num">3</b> the step: follow 1, 2, 3 and any story reads in order.'
+    + ' One number on several lines: the stories take them in different orders, so follow one story</span>'
+    + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
+    + ' where the story you follow starts and ends</span></div>';
 }
+// The two marks the picture's key names, kept equal to the ones gen_viewer draws (RULE_MARK and
+// ARCH_STORE_LINE there): the key must show the marks the picture actually carries.
+const RULE_MARK = '⚖';
+const ARCH_STORE_LINE = '#0f766e';
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
 // the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.
 // ABOVE the head, not inside it: the head is "what this is" and stays the same object on every page;
@@ -8800,7 +9017,26 @@ function clampFitZoom(alignToStart) {
                y: vb.height * r > a.height ? FIT_EDGE_PX - r * vb.y : pan.y });
 }
 // The one fit every path uses: frame the whole drawing in the current box, then clamp (above).
-function fitStage() { mainPz.resize(); mainPz.fit(); mainPz.center(); clampFitZoom(true); }
+function fitStage() {
+  mainPz.resize(); mainPz.fit(); mainPz.center();
+  const cur = (hi >= 0 && history[hi]) || {};
+  if (cur.kind === 'arch') fitWidth(); else clampFitZoom(true);
+}
+// THE ARCHITECTURE PICTURE FITS ITS WIDTH, AND SCROLLS DOWN. A fit to the whole drawing made a tall
+// picture small, because the text beside it takes up to 380 pixels of the row; the floor then left it
+// part-drawn anyway. Fitted to the width, a reader starts at the top and pans down. The same floor and
+// ceiling hold as for every other fit.
+function fitWidth() {
+  const s = mainPz.getSizes();
+  if (!usableScale(s.realZoom)) return;
+  const fits = (s.width - 2 * FIT_EDGE_PX) / s.viewBox.width;
+  const want = Math.min(FIT_MAX_SCALE, Math.max(FIT_MIN_SCALE, fits));
+  mainPz.zoom(mainPz.getZoom() * want / s.realZoom);
+  const a = mainPz.getSizes();
+  const r = a.realZoom, vb = a.viewBox;
+  const x = vb.width * r > a.width ? FIT_EDGE_PX - r * vb.x : (a.width - vb.width * r) / 2 - r * vb.x;
+  mainPz.pan({ x, y: FIT_EDGE_PX - r * vb.y });
+}
 // PRESERVE: keep the user's current zoom level and keep the point that was at the viewport centre at the
 // centre — the diagram doesn't jump. Used for EVERY drag-handle resize — the vertical info-pane split
 // AND the two horizontal splits (left-column width, file-browser width) — where re-fitting would throw
@@ -14271,6 +14507,8 @@ async function renderView(sArg, transient, seq) {
   tintClusters(diagram);  // recolour expanded group frames (subsystem/subdomain clusters) to their family
   emphasizeZoomedFrame(diagram, s);  // thicker border + bigger title on the group you drilled into
   if (s.kind === 'deployment' || s.kind === 'deploymentUnit') styleDeploymentLanes(diagram);  // bold lane titles + gap
+  // A followed story dims every other line (archFollow); a new drawing starts with nothing followed.
+  diagram.classList.remove('arch-following');
   mainScene = makeScene(diagram, () => applyDefaultPanel(s));
   iconOverlay = ensureIconOverlay(diagram);  // front layer for corner icons + badges — must exist before bindFor/decorate add any
   for (const id in ACTION_ICONS) delete ACTION_ICONS[id];  // the previous render's icons, cleared before this one draws its own
