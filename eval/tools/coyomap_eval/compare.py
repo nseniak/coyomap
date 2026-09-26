@@ -85,6 +85,14 @@ OPTIONAL_BANDS: tuple[str, ...] = ("rules_shrink_pct", "rule_sites_shrink_pct")
 # concern. Values are allowed ABSOLUTE drops in the metric's own units (pass-rate 0..1, scores 0..4).
 # `grounding_failure_rate_max` is the exception — an absolute CAP on the candidate's judge-failure
 # rate (n_failures/n_claims): grounding whose orchestration mostly failed must not read as PASS.
+#: WHAT A BUILD COST, per row of map it produced, may RISE by at most this much before the verdict
+#: says DRIFT. Per row, because the map grows while the method changes under it: across four mcpolis
+#: builds absolute cost moved $189-$207 while the map grew 1,195 -> 1,564 rows, so an absolute band
+#: reads growth as a regression. A fall is always within: cheaper is never a drift. Not a hard gate,
+#: because a build costs what it costs; the point is that a change which gains a little quality and
+#: doubles the bill cannot read PASS.
+DEFAULT_SPEND_BANDS: dict[str, float] = {"cost_per_row": 0.25, "seconds_per_row": 0.25}
+
 DEFAULT_JUDGE_BANDS: dict[str, float] = {
     "l2_grounding_passrate_drop": 0.10,
     "judge_score_drop": 0.10,
@@ -113,6 +121,7 @@ class Thresholds:
     bands: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_BANDS))
     judge_bands: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_JUDGE_BANDS))
     granularity_band_pct: float = DEFAULT_GRANULARITY_BAND_PCT
+    spend_bands: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_SPEND_BANDS))
 
     @classmethod
     def from_config(cls, cfg: dict, project: str | None = None) -> "Thresholds":
@@ -127,7 +136,10 @@ class Thresholds:
         jbands = dict(DEFAULT_JUDGE_BANDS)
         jbands.update(g.get("judge_bands", {}))
         gran = g.get("granularity_band_pct", DEFAULT_GRANULARITY_BAND_PCT)
+        sbands = dict(DEFAULT_SPEND_BANDS)
+        sbands.update(g.get("spend_bands", {}))
         pp = cfg.get("per_project", {}).get(project, {}) if project else {}
+        sbands.update(pp.get("spend_bands", {}))
         hard.update(pp.get("hard_gates", {}))
         bands.update(pp.get("bands", {}))
         jbands.update(pp.get("judge_bands", {}))
@@ -142,6 +154,7 @@ class Thresholds:
             bands=bands,
             judge_bands=jbands,
             granularity_band_pct=float(gran),
+            spend_bands=sbands,
         )
 
 
@@ -170,6 +183,42 @@ class JudgeBand:
     candidate: float
     drop: float          # baseline - candidate (positive = a drop, the concern)
     allowed_drop: float
+    within: bool
+
+
+@dataclass(frozen=True)
+class Spend:
+    """What one build cost, per row of the map it produced (`coyomap_eval.cost`). Either number may be
+    missing: a transcript whose model has no list price has no cost."""
+    rows: int
+    cost_per_row: float | None
+    seconds_per_row: float | None
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2, sort_keys=True)
+
+    @classmethod
+    def from_json(cls, text: str) -> "Spend":
+        d = json.loads(text)
+        return cls(int(d["rows"]), d.get("cost_per_row"), d.get("seconds_per_row"))
+
+    @classmethod
+    def from_cost(cls, rows: int, per_row: dict[str, float], unpriced: list[str]) -> "Spend | None":
+        """From a cost report's numbers (`coyomap_eval.cost`). None when the report was made without
+        the map, so there is no row count to divide by. The cost is left out when a model in the
+        transcript has no list price: a bill missing part of itself would read as cheaper."""
+        if not rows or not per_row:
+            return None
+        return cls(rows, None if unpriced else per_row.get("cost"), per_row.get("seconds"))
+
+
+@dataclass(frozen=True)
+class SpendBand:
+    metric: str
+    baseline: float
+    candidate: float
+    rise_pct: float      # signed fractional change vs baseline (positive = dearer, the concern)
+    allowed_pct: float
     within: bool
 
 
@@ -205,6 +254,7 @@ class DeltaReport:
     #: the band table is short of these rows. A silent skip is what kept `rules` out of every
     #: retrospective's band table since the day it was banded.
     unbanded: list[str] = field(default_factory=list)
+    spend_bands: list[SpendBand] = field(default_factory=list)  # empty unless both sides carry a Spend
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
@@ -323,9 +373,22 @@ def _load_profile(text: str) -> MapProfile:
         raise SystemExit(f"ERROR: {e}")
 
 
+def _compare_spend(baseline: Spend, candidate: Spend, t: Thresholds) -> list[SpendBand]:
+    """Rise-only bands on what a build cost per row: a rise past the allowance breaches (→ DRIFT)."""
+    out: list[SpendBand] = []
+    for metric, allowed in sorted(t.spend_bands.items()):
+        b, c = getattr(baseline, metric, None), getattr(candidate, metric, None)
+        if not isinstance(b, (int, float)) or not isinstance(c, (int, float)) or b <= 0:
+            continue
+        rise = (c - b) / b
+        out.append(SpendBand(metric, float(b), float(c), rise, allowed, rise <= allowed))
+    return out
+
+
 def compare(baseline: MapProfile, candidate: MapProfile, thresholds: Thresholds | None = None,
             baseline_judge: JudgeReport | None = None,
-            candidate_judge: JudgeReport | None = None) -> DeltaReport:
+            candidate_judge: JudgeReport | None = None,
+            baseline_spend: Spend | None = None, candidate_spend: Spend | None = None) -> DeltaReport:
     """Apply the relative hard gates + bands, returning a ranked DeltaReport with a PASS/DRIFT/REGRESSED
     verdict. `thresholds` defaults to the built-in defaults (all hard gates on, DEFAULT_BANDS). When
     BOTH judge reports are given, drop-only judge bands are applied too (a breach → DRIFT)."""
@@ -592,14 +655,24 @@ def compare(baseline: MapProfile, candidate: MapProfile, thresholds: Thresholds 
                          "were skipped; judge the baseline map (method.md Step 4) into its "
                          ".coyomap-eval/cache/<map sha12>/judge.json and re-run")
 
+    sbands = _compare_spend(baseline_spend, candidate_spend, t) \
+        if baseline_spend is not None and candidate_spend is not None else []
+    if (baseline_spend is None) != (candidate_spend is None):
+        # A NOTE, not a breach: what a build cost is measured from its transcript, and a baseline
+        # blessed before this band existed has none. It would DRIFT every run until re-blessed.
+        notes.append("what the build cost was measured on one side only — give each map a spend.json "
+                     "(`coyomap-eval cost <transcript> --map <map> --spend-out`) to compare cost and "
+                     "time per row")
+
     if any(not g.passed for g in gates):
         verdict = REGRESSED
     elif (any(not b.within for b in bands) or any(not j.within for j in jbands)
+          or any(not s.within for s in sbands)
           or (granularity is not None and not granularity.within)):
         verdict = DRIFT
     else:
         verdict = PASS
-    return DeltaReport(verdict, gates, bands, notes, jbands, granularity, tool_delta, unbanded)
+    return DeltaReport(verdict, gates, bands, notes, jbands, granularity, tool_delta, unbanded, sbands)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -842,6 +915,13 @@ def format_report(report: DeltaReport) -> str:
             tag = "ok" if j.within else "DRIFT"
             out.append(f"  [{tag}] {j.metric}: {j.baseline:g} -> {j.candidate:g} "
                        f"(change {j.drop:+g}, allowed {j.allowed_drop:g})")
+        out.append("")
+    if report.spend_bands:
+        out.append("What the build cost, per row (a rise past the allowance is a DRIFT):")
+        for s in report.spend_bands:
+            tag = "ok" if s.within else "DRIFT"
+            out.append(f"  [{tag}] {s.metric}: {s.baseline:.4g} -> {s.candidate:.4g} "
+                       f"({s.rise_pct:+.0%}, allowed +{s.allowed_pct:.0%})")
         out.append("")
     out.append("Hard gates (relative to baseline):")
     for g in report.gates:

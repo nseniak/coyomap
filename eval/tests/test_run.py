@@ -346,3 +346,22 @@ def _run() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_run())
+
+
+# --- what the build cost, read off its cost report ---------------------------------------------------
+
+def test_spend_is_the_cost_report_per_row():
+    from coyomap_eval.compare import Spend
+    spend = Spend.from_cost(500, {"cost": 0.1, "seconds": 1.2}, [])
+    assert spend is not None and (spend.rows, spend.cost_per_row, spend.seconds_per_row) == (500, 0.1, 1.2)
+
+
+def test_a_bill_missing_an_unpriced_model_is_not_compared():
+    from coyomap_eval.compare import Spend
+    spend = Spend.from_cost(500, {"cost": 0.1, "seconds": 1.2}, ["some-model"])
+    assert spend is not None and spend.cost_per_row is None and spend.seconds_per_row == 1.2
+
+
+def test_a_cost_report_made_without_the_map_has_no_spend():
+    from coyomap_eval.compare import Spend
+    assert Spend.from_cost(0, {}, []) is None

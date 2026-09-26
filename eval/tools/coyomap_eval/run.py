@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from coyomap_eval.compare import DeltaReport, Thresholds, compare, format_report, load_thresholds
+from coyomap_eval.compare import DeltaReport, Spend, Thresholds, compare, format_report, load_thresholds
 from coyomap_eval.judge import (
     GROUNDING_PROMPT_VERSION,
     Judge,
@@ -48,6 +48,7 @@ class RunResult:
     judge: JudgeReport | None
     delta: DeltaReport | None     # None when there is no baseline yet
     verdict: str                  # PASS | DRIFT | REGRESSED | BASELINE
+    spend: Spend | None = None    # what the build cost per row, when its spend.json was given
 
 
 def run_eval(project: str, map_text: str, repo_root: Path | None = None, *,
@@ -55,7 +56,8 @@ def run_eval(project: str, map_text: str, repo_root: Path | None = None, *,
              thresholds: Thresholds | None = None,
              baseline_profile: MapProfile | None = None, baseline_judge: JudgeReport | None = None,
              judge_report: JudgeReport | None = None, judge: Judge | None = None,
-             rubric: str | None = None, n_judges: int = 3) -> RunResult:
+             rubric: str | None = None, n_judges: int = 3,
+             spend: Spend | None = None, baseline_spend: Spend | None = None) -> RunResult:
     """Profile the map, attach a judge report (pre-computed `judge_report`, else built from an injected
     `judge`+`rubric`), and compare against the baseline if one is given. No baseline → verdict BASELINE."""
     profile = build_profile(map_text, repo_root=repo_root, map_path=map_path)
@@ -65,9 +67,9 @@ def run_eval(project: str, map_text: str, repo_root: Path | None = None, *,
     delta: DeltaReport | None = None
     verdict = BASELINE
     if baseline_profile is not None:
-        delta = compare(baseline_profile, profile, thresholds, baseline_judge, jr)
+        delta = compare(baseline_profile, profile, thresholds, baseline_judge, jr, baseline_spend, spend)
         verdict = delta.verdict
-    return RunResult(project, profile, jr, delta, verdict)
+    return RunResult(project, profile, jr, delta, verdict, spend)
 
 
 # ── persistence (the coyomap-tests workspace side) ─────────────────────────────────────────────────
@@ -81,6 +83,13 @@ def load_baseline(baseline_dir: Path) -> tuple[MapProfile | None, JudgeReport | 
         raise SystemExit(f"ERROR: {e}")
     judge = JudgeReport.from_json(judge_p.read_text(encoding="utf-8")) if judge_p.exists() else None
     return prof, judge
+
+
+def load_baseline_spend(baseline_dir: Path) -> Spend | None:
+    """`spend.json` from a baseline dir: what the baseline's build cost per row. None when the baseline
+    was blessed without a transcript."""
+    p = baseline_dir / "spend.json"
+    return Spend.from_json(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def delta_md(result: RunResult) -> str:
@@ -104,6 +113,13 @@ def delta_md(result: RunResult) -> str:
                   f"drift     : {dr}",
                   f"rubric    : " + " · ".join(f"{d.dimension} {d.score:g}" for d in j.dimensions)
                   + (f"  (overall {j.overall:g})" if j.overall is not None else ""),
+                  "```", ""]
+    if result.spend is not None:
+        s = result.spend
+        cost = "n/a (a model with no list price)" if s.cost_per_row is None else f"${s.cost_per_row:.4f}"
+        secs = "n/a" if s.seconds_per_row is None else f"{s.seconds_per_row:.2f} s"
+        lines += ["## What the build cost", "```",
+                  f"per row   : {cost} · {secs} of active time · over {s.rows} rows",
                   "```", ""]
     lines += [
         "## Profile", "```",
@@ -145,7 +161,7 @@ def archive_view_bundle(map_path: Path, bundle_path: Path) -> None:
 # + its generated md view + project-map.view.json (the served viewer's data snapshot, built at write
 # time); bless copies whichever of these exist (a pre-migration legacy run dir may hold .md only).
 _RUN_ARTIFACTS = ("project-map.json", "project-map.md", "project-map.view.json", "profile.json",
-                  "judge.json", "delta.md")
+                  "judge.json", "spend.json", "delta.md")
 
 
 def write_run(out_dir: Path, result: RunResult, map_text: str,
@@ -167,6 +183,8 @@ def write_run(out_dir: Path, result: RunResult, map_text: str,
     (out_dir / "profile.json").write_text(result.profile.to_json(), encoding="utf-8")
     if result.judge is not None:
         (out_dir / "judge.json").write_text(result.judge.to_json(), encoding="utf-8")
+    if result.spend is not None:
+        (out_dir / "spend.json").write_text(result.spend.to_json(), encoding="utf-8")
     (out_dir / "delta.md").write_text(delta_md(result), encoding="utf-8")
     archive_view_bundle(map_path, out_dir / "project-map.view.json")
     if conversation_src is not None and conversation_src.exists():
@@ -193,11 +211,15 @@ def run_cli(argv: list[str]) -> int:
     if "-h" in argv or "--help" in argv:
         print("usage: coyomap-eval run --project <name> --map <project-map.json> [--repo <root>]\n"
               "       [--expect-map-hash <sha256>] [--judge <judge.json>] [--baseline-dir <dir>]\n"
-              "       [--thresholds <file>] [--project-key <name>] [--out <run-dir>] [--json]\n\n"
+              "       [--thresholds <file>] [--project-key <name>] [--out <run-dir>] [--json]\n"
+              "       [--spend <spend.json>]\n\n"
               "Profile a built map, attach a pre-computed judge report, compare vs the baseline, and\n"
               "archive to --out. --expect-map-hash is the freeze guard: the run REFUSES if the map on\n"
               "disk no longer matches the hash written at freeze time (any later edit invalidates\n"
-              "the run). Exit: 0 PASS/BASELINE · 2 DRIFT · 1 REGRESSED.")
+              "the run). --spend is what the candidate's build cost per row (`coyomap-eval cost\n"
+              "--spend-out`); it is compared with the baseline dir's spend.json, and a rise past the\n"
+              "allowance is a DRIFT.\n"
+              "Exit: 0 PASS/BASELINE · 2 DRIFT · 1 REGRESSED.")
         return 0
     project = _opt(argv, "--project")
     map_arg = _opt(argv, "--map")
@@ -233,7 +255,15 @@ def run_cli(argv: list[str]) -> int:
     if (jp := _opt(argv, "--judge")) is not None:
         judge_report = JudgeReport.from_json(Path(jp).read_text(encoding="utf-8"))
 
+    spend: Spend | None = None
+    if (sp := _opt(argv, "--spend")) is not None:
+        if not Path(sp).exists():
+            print(f"ERROR: --spend {sp} not found", file=sys.stderr)
+            return 1
+        spend = Spend.from_json(Path(sp).read_text(encoding="utf-8"))
+
     baseline_profile = baseline_judge = None
+    baseline_spend: Spend | None = None
     if (bd := _opt(argv, "--baseline-dir")) is not None:
         # Fail CLOSED. This used to skip a missing dir silently, which turned the whole comparison
         # off: with no baseline profile the verdict is BASELINE and the exit code is 0 — a caller
@@ -245,6 +275,7 @@ def run_cli(argv: list[str]) -> int:
                   "omit --baseline-dir to establish a baseline on purpose.", file=sys.stderr)
             return 2
         baseline_profile, baseline_judge = load_baseline(bl)
+        baseline_spend = load_baseline_spend(bl)
         if baseline_profile is None:
             print(f"ERROR: --baseline-dir {bl} holds no profile.json, so there is nothing to "
                   "compare against. Refusing to report a verdict from an empty baseline.",
@@ -259,7 +290,8 @@ def run_cli(argv: list[str]) -> int:
     try:
         result = run_eval(project, map_path.read_text(encoding="utf-8"), repo_root, map_path=map_path,
                           thresholds=thresholds, baseline_profile=baseline_profile,
-                          baseline_judge=baseline_judge, judge_report=judge_report)
+                          baseline_judge=baseline_judge, judge_report=judge_report,
+                          spend=spend, baseline_spend=baseline_spend)
     except ModelError as e:
         print(f"ERROR: {map_path}: {e}", file=sys.stderr)
         return 1

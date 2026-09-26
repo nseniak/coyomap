@@ -243,7 +243,7 @@ candidate today is already scored when it becomes the baseline of the next round
 Cache layout, one directory per map:
 ```
 .coyomap-eval/cache/<first 12 chars of the map hash>/
-    map-hash · profile.json · judge.json · judge-verdicts.json
+    map-hash · profile.json · judge.json · judge-verdicts.json · spend.json
 ```
 
 For each of the two maps, in this order:
@@ -273,6 +273,12 @@ For each of the two maps, in this order:
 4. Missing `judge.json` → judge the map with **Step 4** and save it there. Note the two are written
    in this order, so an interrupted run can leave a profile with no judge — Step 5 treats a
    half-filled entry as a real problem, not a skip.
+5. Missing `spend.json` → what the map's build COST, per row of map. The session that built it is the
+   last `build` entry in the map's `.coyomap/provenance.json`; its transcript is
+   `~/.claude/projects/<the repo path, every / replaced by ->/<session_id>.jsonl`. Then
+   `COYOMAP_HOME/.venv/bin/coyomap-eval cost <transcript> --map <map> --spend-out
+   .coyomap-eval/cache/<sha12>/spend.json`. No transcript on this machine → no `spend.json`, and
+   the comparison says so in a note: cost is compared only when both maps have it.
 
 A cache hit on both maps means the run costs nothing but the comparison — the normal state when you
 re-run an eval without rebuilding.
@@ -356,8 +362,13 @@ For a map M:
      --thresholds COYOMAP_HOME/eval/thresholds.json \
      --baseline-dir ".coyomap-eval/cache/$BASE" \
      --judge ".coyomap-eval/cache/$CAND/judge.json" \
+     --spend ".coyomap-eval/cache/$CAND/spend.json" \
      --out .coyomap-eval/runs/<ts>
    ```
+   Leave `--spend` out when the candidate has no `spend.json`. When both maps have one, what the
+   build cost per row is a rise-only band: a build that costs more than 25% more per row than the
+   baseline's reads DRIFT, however its quality moved, so a change that gains a little quality and
+   doubles the bill cannot pass unseen.
    `--project` is the human label in the report (it names both sides); `--project-key` is what the
    thresholds file is looked up by, so per-project gates keep working. A hash-mismatch refusal means
    the candidate map was modified during the run — the run is void; restart from Step 1.

@@ -980,3 +980,41 @@ def test_an_interface_kind_that_goes_to_zero_is_noted() -> None:
     r = compare(old, new)
     assert any("handoff (1 -> 0)" in n for n in r.notes), r.notes
     assert not any("interface kind(s)" in n for n in compare(old, old).notes)
+
+
+# --- what the build cost, per row ------------------------------------------------------------------
+
+def make_spend(cost: float | None = 0.10, seconds: float | None = 3.0, rows: int = 1000):
+    from coyomap_eval.compare import Spend
+    return Spend(rows, cost, seconds)
+
+
+def test_a_build_that_costs_more_per_row_than_allowed_drifts():
+    from coyomap_eval.compare import compare
+    p = make_profile()
+    report = compare(p, p, baseline_spend=make_spend(0.10), candidate_spend=make_spend(0.20))
+    assert report.verdict == "DRIFT"
+    breached = [s.metric for s in report.spend_bands if not s.within]
+    assert breached == ["cost_per_row"]
+
+
+def test_a_cheaper_build_is_never_a_drift():
+    from coyomap_eval.compare import compare
+    p = make_profile()
+    report = compare(p, p, baseline_spend=make_spend(0.20, 6.0), candidate_spend=make_spend(0.05, 1.0))
+    assert report.verdict == "PASS" and all(s.within for s in report.spend_bands)
+
+
+def test_spend_measured_on_one_side_only_is_a_note_not_a_drift():
+    from coyomap_eval.compare import compare
+    p = make_profile()
+    report = compare(p, p, candidate_spend=make_spend())
+    assert report.verdict == "PASS" and not report.spend_bands
+    assert any("one side only" in n for n in report.notes)
+
+
+def test_a_missing_cost_leaves_only_the_time_band():
+    from coyomap_eval.compare import compare
+    p = make_profile()
+    report = compare(p, p, baseline_spend=make_spend(None, 3.0), candidate_spend=make_spend(None, 3.3))
+    assert [s.metric for s in report.spend_bands] == ["seconds_per_row"]

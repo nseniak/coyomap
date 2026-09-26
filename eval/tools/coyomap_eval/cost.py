@@ -48,6 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from coyomap_eval.compare import Spend
 from coyomap_eval.transcript import ToolCall, Turn, Usage, read_turns
 
 #: $ per million tokens (input, output) at list price. Cache reads bill at 0.1x input and cache
@@ -1043,6 +1044,8 @@ the spend — a reader that opens only the session file measures the lead and mi
                  build session: there the sidechains are the sub-agents, and they are already
                  read from <session>/subagents/, so it would count them twice.
   --json         the whole report as JSON, for tracking builds over time.
+  --spend-out P  also write what the build cost PER ROW to P (needs --map): the spend.json that
+                 `coyomap-eval run --spend` compares with the baseline's, as a rise-only band.
 
 Not a gate: it emits no verdict. Read it beside `coyomap-eval compare` — a change that halves
 the bill and doubles the refutation rate is not an improvement."""
@@ -1060,7 +1063,8 @@ def main(argv: list[str] | None = None) -> int:
         i = args.index(flag) + 1
         return args[i] if i < len(args) else None
 
-    consumed = {opt(f) for f in ("--map", "--from-turn", "--to-turn", "--idle-gap", "--cache-ttl")}
+    consumed = {opt(f) for f in ("--map", "--from-turn", "--to-turn", "--idle-gap", "--cache-ttl",
+                                 "--spend-out")}
     positional = [a for a in args if not a.startswith("--") and a not in consumed]
     if not positional:
         print("ERROR: give a transcript path\n", file=sys.stderr)
@@ -1098,6 +1102,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
+    if (spend_out := opt("--spend-out")) is not None:
+        spend = Spend.from_cost(int(report.map.get("rows", 0)), report.per_row, report.unpriced_models)
+        if spend is None:
+            print("ERROR: --spend-out needs --map: what a build cost per row is divided by its rows",
+                  file=sys.stderr)
+            return 2
+        Path(spend_out).write_text(spend.to_json() + "\n", encoding="utf-8")
     if "--json" in args:
         print(json.dumps(asdict(report), indent=2, sort_keys=True))
         return 0
