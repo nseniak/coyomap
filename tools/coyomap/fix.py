@@ -36,6 +36,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
 from coyomap import subverb_help
 from coyomap.subverb_help import usage_error
 from coyomap.assemble import load_fragment_paths, merge_fragments
@@ -1423,7 +1424,8 @@ _NEVER_WRITABLE: dict[str, str] = {
 #: That silently violates the one thing this verb is for. Named, not guessed: a file the loader
 #: cannot read is an ERROR the caller must see, so "it did not load" must never double as "skip it".
 _NOT_A_FRAGMENT = frozenset({"project-map.json", "preindex.json", "provenance.json",
-                             "reconcile.json", "rules.json", "finalize-report.json"})
+                             "reconcile.json", "rules.json", "finalize-report.json",
+                             LINE_TEXTS_JSON})
 
 
 def _fragment_paths(where: Path) -> tuple[list[Path], list[str]]:

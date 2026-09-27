@@ -2918,6 +2918,9 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     4.  the last STRUCTURAL assemble; applies set_anchors.
     5.  grounding report: WHICH claims were refuted / tied / unvoted — the reconcile worklist, and
         what `grounding.note` is written from.
+    5b. YOURS, while you write the note — the Architecture line texts: `line-texts pending`, then
+        ONE writer (`contract line-texts`), `line-texts check-input`, ONE FRESH checker
+        (`contract line-texts-check`), and `line-texts record`. Nothing pending: skip both agents.
     6.  grounding write, measured against the map it describes.
     7.  assemble again, carrying the RECORD in. Idempotent, and not optional — skip it and the
         grounding record never reaches the map.
@@ -2932,8 +2935,36 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
         real numbers, and the 53-line write-up was left in a temp folder, one sweep from gone, while
         the backlog row still read unanswered. That question had been parked three times before
         somebody finally ran it.
-   13. commit the map, the .md, the pre-index and provenance
+   13. commit the map, the .md, the pre-index, provenance and the line texts
     ```
+
+    **Step 5b writes the one text a reader meets that no skeptic reads.** The Architecture picture
+    merges a feature's stories, so one line between two boxes carries one step sentence per story
+    that takes it: 62 of the 113 lines of mcpolis's whole-product picture carried two or more. A
+    merged text is ONE sentence standing for all of them, and the viewer shows it first, with each
+    story's own sentence folded under it. It runs after step 4 because the flows are final there,
+    and nothing in steps 6 to 12 changes a sentence.
+
+    `ship` does not run it; these are yours, with `LT=<repo>/.coyomap/build-fragments/line-texts`:
+
+    ```
+    mkdir -p $LT && .venv/bin/coyomap line-texts pending --out $LT/pending.json
+    #   the writer: `contract line-texts --fill`, with LINES=$LT/pending.json, OUT=$LT/written.json
+    .venv/bin/coyomap line-texts check-input --lines $LT/pending.json --texts $LT/written.json \
+        --out $LT/to-check.json
+    #   the checker: `contract line-texts-check --fill`, with TEXTS=$LT/to-check.json,
+    #   OUT=$LT/verdicts.json, and an AGENT_ID that is not the writer's
+    .venv/bin/coyomap line-texts record --texts $LT/written.json --verdicts $LT/verdicts.json
+    ```
+
+    - **The checker is a FRESH agent, never the writer.** A merged text has no code line, so no
+      skeptic can check it: it is right when it says what its sentences say, no more and no less. A
+      trial on 96 lines found 4 wrong: 2 gave an action an object its sentence did not name, 2
+      dropped a sentence from a long line. The writer reads its own text as what it meant to say.
+    - **A rejected text costs nothing.** `record` keeps only what the checker passed and `lint`
+      does not fault; every other line shows its stories' own sentences, as it did before.
+    - **The texts are keyed by their sentences**, so a text is never shown beside sentences it was
+      not written for. The next build or update lists only the lines whose sentences changed.
 
     **Steps 5, 8, 9 and 12 are here because the list without them cost real builds.** `grounding
     report` used to live only in prose 74 lines above, so a build that followed this block literally

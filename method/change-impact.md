@@ -10,7 +10,7 @@ what the map already says.
 
 | Step | Action | Tool | Writes |
 |---|---|---|---|
-| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
+| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL, and so must `git check-ignore -q .coyomap/line-texts.json` unless `git ls-files --error-unmatch .coyomap/line-texts.json` finds it tracked (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
 | **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them | the impact file, beside the log (deleted at step 7, never committed) |
 | **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by a `where` edit in the entry that read that code (step 3) |
 | **3 Read and write** | read the diff and the touched boxes; write the log | you | `.coyomap/changes/<from>-<to>.json` |
@@ -18,7 +18,7 @@ what the map already says.
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
 | **5b Challenge** | the statements the update wrote, and the ones its change reached, re-argued by fresh-context skeptics — before anything is written | `coyomap changes challenge <log> --map .coyomap/project-map.json --before .coyomap/changes/<from>-<to>.before.json --touched .coyomap/changes/<from>-<to>.impact.json`, then the wave (Step 5b below): the briefs with `coyomap contract skeptic --from-batches .coyomap/verify --prefix <from>-<to>-`, the barrier with `coyomap grounding lint --expect`, the closer with `coyomap contract closer --from-verdicts .coyomap/verify --prefix <from>-<to>-`. An upheld refutation amends the log and sends you back to step 4 | `.coyomap/changes/<from>-<to>.applied.json` (the copy the skeptics read) and `<from>-<to>.scope.json` (scratch, deleted at step 7); the wave's `claims-<from>-<to>-*.json` and `verdicts-<from>-<to>-*.json` under `.coyomap/verify/`, which stay: they are the map's warrant |
 | **6 Apply** | the entries land in the map, the pin moves; the record is re-measured over the map as it now is; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes ground <log> --map .coyomap/project-map.json --before … --touched … --note-file <note>` (its `--dry-run` first, for the facts the note quotes); then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json`, which now also refuses a map whose record does not describe it | the map (`commit` = the log's `to_commit`, `committed` = that commit's date, `grounding` re-pinned with one more row in its `history`); `.coyomap/verify/worklist.json` re-pinned, the old pin kept as `worklist-<from>.json`, the build's verdict rows carried or moved to `retired-<from>-<to>.json`; the log's `challenge` block |
-| **7 Close** | the invariant, the rendering, the record, the commit | the refutation gate first: `coyomap grounding refutations --map .coyomap/project-map.json --verdicts .coyomap/verify/verdicts-*.json .coyomap/verify/closer-*.json` must exit 0; then render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json`, `.impact.json`, `.applied.json` and `.scope.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index, `provenance.json`; **one commit** of map + log + views + pre-index + provenance + the `verify/` files the wave wrote or rewrote, with a plain `git add` — never `git add -f` |
+| **7 Close** | the invariant, the rendering, the record, the commit | the refutation gate first: `coyomap grounding refutations --map .coyomap/project-map.json --verdicts .coyomap/verify/verdicts-*.json .coyomap/verify/closer-*.json` must exit 0; then render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; the Architecture line texts (Step 7 below): `coyomap line-texts pending --out .coyomap/changes/<from>-<to>.lines.json`, and when it lists lines, the writer, `check-input`, a fresh checker and `record`; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json`, `.impact.json`, `.applied.json`, `.scope.json` and `.lines.json` scratch files LAST (with the line texts' `.texts.json`, `.to-check.json` and `.text-verdicts.json`), once validate is clean | the markdown view, the rendered log, the pre-index, `line-texts.json`, `provenance.json`; **one commit** of map + log + views + pre-index + line texts + provenance + the `verify/` files the wave wrote or rewrote, with a plain `git add` — never `git add -f` |
 | **8 Hand over** | the reader is told where to see what changed | `coyomap url --view updates --repo <repo> --json`, and `coyomap serve` when nothing is running (Step 8 below) | nothing |
 
 - **`update`** is the whole sequence. **`analyze`** is steps 0–5b: the log written, linted, gated
@@ -40,8 +40,10 @@ what the map already says.
   word — a map whose files are tracked can still sit under an ignore rule for the whole folder,
   and the tracked files hide it. Fix the rule with the user before going on: git cannot re-include
   a path under an ignored folder, so a rule `.coyomap/` becomes `.coyomap/*` plus
-  `!.coyomap/changes/` and `!.coyomap/verify/`. Never `git add -f` around it: a forced add works
-  once and leaves the next log ignored again.
+  `!.coyomap/changes/`, `!.coyomap/verify/` and `!.coyomap/line-texts.json`. Never `git add -f`
+  around it: a forced add works once and leaves the next log ignored again. The line texts are in
+  that list because a map built before they existed has no such file, so its first update creates
+  one, and a new file under an ignored folder is refused by a plain `git add`.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
 
@@ -133,6 +135,27 @@ of one statement would otherwise tally as a tie and read as "unverifiable". The 
 
 **Analyze includes the wave.** A log handed to a reader before it lands is a log whose statements
 have been argued with; `accept` then runs `ground` and the gates on verdicts that already exist.
+
+## Step 7 — the Architecture line texts
+
+The update changed some step sentences, so some lines of the Architecture pictures carry sentences
+no merged text was written for. `pending` lists exactly those: a line whose sentences did not change
+keeps its text, because a text is keyed by its sentences. When it lists none, skip both agents.
+Otherwise run what a build runs (method.md, closing step 5b), with the files beside the log:
+
+```
+.venv/bin/coyomap line-texts pending --out .coyomap/changes/<from>-<to>.lines.json
+#   the writer: `contract line-texts --fill`, LINES = that file, OUT = <from>-<to>.texts.json
+.venv/bin/coyomap line-texts check-input --lines .coyomap/changes/<from>-<to>.lines.json \
+    --texts .coyomap/changes/<from>-<to>.texts.json --out .coyomap/changes/<from>-<to>.to-check.json
+#   a FRESH checker: `contract line-texts-check --fill`, OUT = <from>-<to>.text-verdicts.json
+.venv/bin/coyomap line-texts record --texts .coyomap/changes/<from>-<to>.texts.json \
+    --verdicts .coyomap/changes/<from>-<to>.text-verdicts.json
+```
+
+It runs after step 6, because the entries have landed there and no sentence changes after. A
+rejected text costs nothing: its line shows its stories' own sentences, and the next update lists
+it again.
 
 ## Step 8 — hand the reader the Update log
 

@@ -7653,8 +7653,16 @@ function archLineHtml(e, body) {
   return `<div class="archtext-line" tabindex="0" data-src="${esc(e.srcBox)}" data-dst="${esc(e.dstBox)}">`
     + archEndsHtml(e) + body + '</div>';
 }
+// ONE SENTENCE FOR A WHOLE LINE, when the map keeps one (`coyomap line-texts`): it covers every
+// story's sentence, and those are folded under it, each still a button that follows its story.
+function archMergedHtml(e) {
+  return `<p class="archtext-merged">${esc(capFirst(e.merged))}</p>`
+    + `<details class="archtext-more"><summary>The ${e.sentences.length} sentences it merges</summary>`
+    + e.sentences.map(archSentenceHtml).join('') + '</details>';
+}
 function archFlowTextHtml(t) {
   const line = (e) => {
+    if (e.merged) return archLineHtml(e, archDecidedHtml(e, '') + archMergedHtml(e));
     const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(archSentenceHtml).join('');
     const rest = e.sentences.slice(ARCH_TEXT_SHOWN);
     return archLineHtml(e, archDecidedHtml(e, '') + shown

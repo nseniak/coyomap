@@ -29,8 +29,12 @@ from urllib.request import urlopen
 import pytest
 
 from browser_harness import new_page
+from coyomap import line_texts
+from coyomap.model import load_model
+from coyomap.viewer.gen_viewer import gen_arch_views
 from coyomap.viewer.recents import RecentsStore
 from coyomap.viewer.serve import Handler, build_projects
+from coyomap.views import model_to_graph
 
 _FIXTURE_MAP = Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json"
 
@@ -44,9 +48,10 @@ def make_served_map(parent: Path, name: str) -> Path:
 
 
 @contextmanager
-def _served_map(mutate: Any) -> Iterator[str]:
+def _served_map(mutate: Any, beside: Any = None) -> Iterator[str]:
     """The same server, over a map this test has changed first — for the shapes the committed
-    fixture cannot hold (a step with no use case behind it, say)."""
+    fixture cannot hold (a step with no use case behind it, say). `beside`, when given, is called
+    with the map's `.coyomap/` folder, for a file the viewer reads next to the map."""
     import json
     with tempfile.TemporaryDirectory() as td:
         folder = make_served_map(Path(td), "alpha")
@@ -54,6 +59,8 @@ def _served_map(mutate: Any) -> Iterator[str]:
         m = json.loads(f.read_text())
         mutate(m)
         f.write_text(json.dumps(m))
+        if beside is not None:
+            beside(folder / ".coyomap")
         projects = build_projects([str(folder)])
         slug = next(iter(projects))
         Handler.store = RecentsStore()
@@ -4279,6 +4286,39 @@ def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_e
         assert seen["start"].startswith("Starts when:"), seen
         page.evaluate("() => document.querySelector('#archtext [data-archstory=\"\"]').click()")
         page.wait_for_function("() => !location.hash.includes('story=')")
+        assert not page.js_errors, page.js_errors
+
+
+def make_one_merged_text(folder: Path) -> None:
+    """A kept merged text beside the map, for the first line of the whole-product picture that
+    carries two different sentences."""
+    graph = model_to_graph(load_model((folder / "project-map.json").read_text()))
+    _drawings, texts = gen_arch_views(graph)
+    said = next([x["text"] for x in e["sentences"]] for e in texts["all|"]["lines"]
+                if line_texts.wants_text(x["text"] for x in e["sentences"]))
+    line_texts.save(folder, {line_texts.line_key(said): "Test words for the whole line"})
+
+
+def test_a_line_with_a_merged_text_shows_it_first_and_folds_every_storys_sentence() -> None:
+    """One sentence for the whole line, then a closed fold holding each story's own sentence, each
+    still a button that follows its story."""
+    with _served_map(lambda m: None, beside=make_one_merged_text) as url, \
+            _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => {
+            const p = document.querySelector('#archtext .archtext-merged');
+            const fold = p && p.closest('.archtext-line').querySelector('.archtext-more');
+            return { text: p ? p.textContent : '', count: document.querySelectorAll('#archtext .archtext-merged').length,
+                     summary: fold ? fold.querySelector('summary').textContent : '',
+                     folded: fold ? fold.querySelectorAll('.archtext-sent').length : 0,
+                     buttons: fold ? fold.querySelectorAll('[data-archstory]').length : 0,
+                     open: fold ? fold.open : null };
+        }""")
+        assert seen["text"] == "Test words for the whole line", seen
+        assert seen["count"] >= 1, seen
+        assert seen["folded"] >= 2 and seen["summary"] == f"The {seen['folded']} sentences it merges", seen
+        assert seen["buttons"] == seen["folded"], seen
+        assert seen["open"] is False, seen
         assert not page.js_errors, page.js_errors
 
 

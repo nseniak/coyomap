@@ -490,11 +490,14 @@ def main(argv: list[str] | None = None) -> int:
     if inputs.note_file is None:
         print("\nSHIP PREPARED — the grounding report above is the reconcile worklist. Read it "
               "whole, then write the grounding note to a file.\n"
+              "  While you write it: the Architecture line texts (method.md, closing step 5b), "
+              f"starting with `coyomap line-texts pending --map {inputs.repo}/.coyomap/project-map.json "
+              "--out <file>`.\n"
               f"  Next: coyomap ship {inputs.repo} --note-file <path> [--partial]")
     else:
         print("\nSHIP COMPLETE — quote finalize's verdict line in the commit message "
-              f"(gate block at {inputs.gate_block}), then commit the map, the .md, the pre-index "
-              "and provenance. finalize printed the exact `git add -f` line ABOVE, in this output — "
+              f"(gate block at {inputs.gate_block}), then commit the map, the .md, the pre-index, "
+              "provenance and the line texts. finalize printed the exact `git add -f` line ABOVE, in this output — "
               "the report file does not carry it."
               + _coverage_line(inputs))
     return 0

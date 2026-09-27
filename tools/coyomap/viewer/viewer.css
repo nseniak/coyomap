@@ -956,6 +956,8 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archtext-arrow { color: #94a3b8; font-weight: 400; }
 .archtext-via { font-weight: 400; color: #64748b; }
 .archtext-sent { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; }
+/* The one sentence standing for every story's sentence on a line (`coyomap line-texts`). */
+.archtext-merged { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; font-weight: 500; }
 .archtext-story { font-size: 11px; color: #64748b; white-space: nowrap; }
 .archtext-more summary { cursor: pointer; font-size: 12px; color: #4f46e5; margin-top: 3px; }
 /* …and the arrow a line of the text is about, lit on the drawing. */

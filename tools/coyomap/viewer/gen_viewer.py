@@ -41,7 +41,7 @@ from urllib.parse import quote
 from coyomap.viewer.build_graph import GraphDict
 from coyomap.features import as_bundle, build_index
 from coyomap.model import ModelError, ProjectModel, load_model
-from coyomap import records
+from coyomap import line_texts, records
 from coyomap.validate_model import DATA_OWNER_EXCEPTIONS_HEADING
 from coyomap.impact_git import Extents, load_map_extents
 from coyomap import grammar
@@ -1724,7 +1724,8 @@ def _step_notes(graph: GraphDict) -> dict[tuple[str, str], str]:
     return out
 
 
-def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
+def _arch_text(graph: GraphDict, model: _ArchModel,
+               merged: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """THE FLOW, TOLD STEP BY STEP: the text beside an Architecture picture, one entry per line in
     reading order (by step number, then first met). Each entry names its two ends and gives, for
     every story taking the line, that story's own sentence for the step and the story's name.
@@ -1738,7 +1739,10 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
 
     Each entry also says what the picture cannot: the boxes a grey line passes through (`via`), the
     business rules decided on its steps (`rules`), and the condition a decided step's note gives
-    (`conditions`). The rules are the rules view's own links from a step to a rule, by code line."""
+    (`conditions`). The rules are the rules view's own links from a step to a rule, by code line.
+
+    A line with two or more different sentences also carries its MERGED text when the map keeps one
+    (`merged`, from `line_texts`): one sentence for all of them, which the view shows first."""
     nodes = graph["nodes"]
     titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
     subflow_names = {str(sf.get("id")): str(sf.get("name") or sf.get("id"))
@@ -1766,6 +1770,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
 
         rules, conditions = decided_by(ln["keys"])
         per_story = {uc: decided_by(ks) for uc, ks in ln["story_keys"].items()}
+        together = line_texts.text_for(merged or {}, by_text)
         out.append({
             "n": ln["number"],
             "src": name(ln["src"]), "dst": name(ln["dst"]),
@@ -1779,6 +1784,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
             "conditions": conditions,
             "rulesByStory": {uc: r for uc, (r, _) in per_story.items() if r},
             "conditionsByStory": {uc: c for uc, (_, c) in per_story.items() if c},
+            **({"merged": together} if together else {}),
         })
     return out
 
@@ -1803,14 +1809,15 @@ def _arch_stories(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
     return out
 
 
-def gen_arch_views(graph: GraphDict) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
+                   ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
     """Every Architecture drawing the view's two toggles can ask for, and the flow text beside each,
     keyed `<scope>|<feature id>`: `all|` is the whole product over every walk, `happy|CAP3` is one
     feature over the happy path alone. Pre-rendered side by side, the way every other per-element
     drawing already is, from ONE model per key so the text can never describe another drawing.
 
     The text is `{lines, stories}`: the flow told step by step (`_arch_text`), and each story on its
-    own (`_arch_stories`).
+    own (`_arch_stories`). `merged` is the map's kept line texts (`line_texts.load`), key to text.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -1822,7 +1829,7 @@ def gen_arch_views(graph: GraphDict) -> tuple[dict[str, str], dict[str, dict[str
             if model is None:
                 continue
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model)
-            texts[f"{scope}|{feature}"] = {"lines": _arch_text(graph, model),
+            texts[f"{scope}|{feature}"] = {"lines": _arch_text(graph, model, merged),
                                            "stories": _arch_stories(graph, model)}
     return drawings, texts
 
@@ -4193,9 +4200,15 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
     base_mm = gen_mermaid(graph)
     context_mm = gen_context_mermaid(graph)
     context_edges = gen_context_edges(graph)
-    arch_drawings, arch_texts = gen_arch_views(graph) if has_grouping(graph) else ({}, {})  # = `grouping`,
-    # which is set further down, beside the other grouped pictures; the Architecture view needs both
-    # dicts from one pass, so it is worked out here
+    # The merged line texts kept beside the map. A file that cannot be read shows every line's own
+    # sentences, the way a map with no file does: the viewer still opens.
+    try:
+        merged = line_texts.load(anchor)
+    except (OSError, ValueError):
+        merged = {}
+    arch_drawings, arch_texts = gen_arch_views(graph, merged) if has_grouping(graph) else ({}, {})
+    # (= `grouping`, which is set further down, beside the other grouped pictures; the Architecture
+    # view needs both dicts from one pass, so it is worked out here)
     # Source-link config, derived from the mapped repo (the anchor dir sits inside its work tree).
     # Seeded into the viewer; the user can override the root / GitHub URL in Settings (localStorage).
     repo_root = repo_root_default(anchor)

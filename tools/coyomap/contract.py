@@ -93,6 +93,11 @@ CONTRACTS: dict[str, str] = {
     # brief lost the no-delegation block once (2026-08-20) and was the batch straggler once
     # (2026-09-08, written and dispatched last).
     "tests": "tests-contract.md",
+    # The Architecture picture's merged texts: one sentence per line several stories take. Written
+    # by one agent at the end of a build or an update, then read by a FRESH one, because a merged
+    # text has no code line for a skeptic to check it against, only the sentences it restates.
+    "line-texts": "line-texts-contract.md",
+    "line-texts-check": "line-texts-check-contract.md",
 }
 
 # Which contracts author reader-facing prose, and therefore carry the writing rules. A skeptic

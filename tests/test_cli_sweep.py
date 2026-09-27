@@ -199,6 +199,9 @@ RECIPES: dict[str, tuple] = {
     # worklist is the honest input, since that is the shape a skeptic is actually handed.
     "context":       (lambda t, m: ["context", "--map", str(m), "--repo", str(FIXTURE),
                                     "--claims", str(_claims(t, m)), "--out", str(t / "b.md")], OK),
+    # Reads the map and asks the viewer's own generator which lines it draws; writes only --out.
+    "line-texts":    (lambda t, m: ["line-texts", "pending", "--map", str(m),
+                                    "--out", str(t / "pending.json")], OK),
 }
 
 
