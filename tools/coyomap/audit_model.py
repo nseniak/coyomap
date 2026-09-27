@@ -19,12 +19,13 @@ audit vocabulary — severities, verb sets, Finding/WorkItem, the report formatt
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence, TypeVar
+from typing import Iterable, Sequence, TypeVar
 
 from coyomap import balance_lib, prose, records, grammar
 from coyomap.anchors import FILEREF as _FILEREF, strip_anchor
@@ -581,6 +582,12 @@ class WorkItem:
     # ranking saved its first batch (all security) but batches 2-10 were arbitrary slices of a list.
     # Values are a closed set, `_THEMES`, so a consumer can group without string-matching prose.
     theme: str = "backbone"
+    # The BOXES this claim is about, by id, recorded at the site that builds it — the same rule as
+    # `theme`, and for the same reason: a consumer that needs them must never re-derive them by
+    # parsing `claim`. `changes challenge` reads them to put a statement in an update's scope when
+    # the code touched one of its boxes, or the change reached one through the map. An edge names
+    # both ends, a walk step names its walk and both ends, a legacy security row names nothing.
+    elements: tuple[str, ...] = ()
 
 
 #: The closed set of `WorkItem.theme` values, most-dangerous-first AND in the order
@@ -1125,6 +1132,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             items.append(WorkItem(
                 claim=role_inclusion_claim(r.name, other.name if other else rel.role),
                 anchor=_anchor(rel.source or ""), theme="security",
+                elements=(r.id, rel.role),
                 detail=f"{r.id} includes {rel.role} — {where}",
                 # `apply-drift` has no writer for a role relation, so promising drift-eligibility
                 # here would advertise a correction the fix verbs cannot apply.
@@ -1150,7 +1158,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
                 target = access_items if br.access else rule_items
                 target.append(WorkItem(
                     claim=rule_site_claim(br.statement, where, site.why),
-                    anchor=_anchor(where),
+                    anchor=_anchor(where), elements=(br.id,),
                     theme="security" if br.access else "rule", drift_eligible=True,
                     detail=_rule_site_detail(m, site, owners),
                     why_risky=("an ACCESS decision and the line that enforces it — a false claim "
@@ -1169,24 +1177,27 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         if verb in ("enforces", "encrypts"):
             items.append(WorkItem(
                 claim=claim, anchor=anchor, detail=detail, theme="security",
+                elements=(e.src, e.dst),
                 why_risky=f"'{verb}' is a security-critical relationship — verify the code actually does it."))
         elif e.dst.startswith("D"):
             if e.dst in folded:
                 continue  # explicit framework/library — a false 'uses <lib>' edge is benign
             dep_items.append(WorkItem(
                 claim=claim, anchor=anchor, detail=detail, theme="dep-usage",
+                elements=(e.src, e.dst),
                 why_risky=(f"external-dependency data-flow edge — no deterministic gate reads "
                            f"{e.src}'s code to confirm it reaches {e.dst}; ground the call site "
                            f"against the code (the audit→Elastic false-edge class).")))
         elif e.dst.startswith("E"):
             entity_items.append(WorkItem(
                 claim=claim, anchor=anchor, detail=detail, theme="ownership",
+                elements=(e.src, e.dst),
                 why_risky=(f"domain-model ownership edge — verify {e.src}'s code actually "
                            f"'{verb}' {e.dst}; a wrong persists/writes/reads mis-wires the "
                            f"subsystem→subdomain bridge.")))
         else:
             other_items.append(WorkItem(
-                claim=claim, anchor=anchor, detail=detail,
+                claim=claim, anchor=anchor, detail=detail, elements=(e.src, e.dst),
                 why_risky=(f"backbone edge — no deterministic gate confirms {e.src}'s code "
                            f"'{verb}' {e.dst}; ground the call site against the code.")))
     # The rule tier goes HERE — after the edge loop, which also appends `security`-themed items to
@@ -1224,7 +1235,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         if st is not None and st.dep:
             items.append(WorkItem(
                 claim=store_claim(en.id, en.name, st.dep, st.container or "", st.mode or ""),
-                anchor=_anchor(en.source or ""),
+                anchor=_anchor(en.source or ""), elements=(en.id,),
                 drift_eligible=False, theme="persistence",
                 why_risky=("the persistence inventory hangs on this row — a wrong dep/container "
                            "mis-answers 'what is persisted where?' for every reader.")))
@@ -1236,6 +1247,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         items.append(WorkItem(
             claim=messaging_claim(mr.name, mr.broker or "", mr.publishers, mr.consumers),
             anchor=_anchor(mr.source),
+            elements=tuple(x for x in (*mr.publishers, *mr.consumers) if x),
             drift_eligible=False, theme="messaging",
             why_risky=("the async catalog hangs on this row — verify the enqueue/consume call "
                        "sites actually name this channel.")))
@@ -1273,6 +1285,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             claim=(f"{iface.id} '{iface.name}' is an interface the product exchanges data through"
                    + (f" with {far}" if far else "")),
             anchor=_anchor(anchor_raw),
+            elements=(iface.id, *(d.id for d in owning)),
             detail=(f"the walks carry {crossings} through it" if crossings else None),
             drift_eligible=False, theme="interface",
             why_risky=("whose data crosses is not visible at the call site — read what this service "
@@ -1328,7 +1341,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             items.append(WorkItem(
                 claim=(f"{iface.id} '{iface.name}': {rid} '{role_name.get(rid, rid)}' is on its "
                        f"far side"),
-                anchor=_anchor(door or ways or dep),
+                anchor=_anchor(door or ways or dep), elements=(iface.id, rid),
                 detail=(f"derived, brought by {ucs}; anchored at {via}" if ucs
                         else f"derived; anchored at {via}"),
                 drift_eligible=False, theme="interface",
@@ -1370,7 +1383,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
                     # neither — a writable theme with no writer is how `cadence` and `lifecycle`
                     # each spent months having their confirmed drifts re-typed by hand.
                     anchor=_anchor(st.where or ""), drift_eligible=False,
-                    theme="behaviour",
+                    theme="behaviour", elements=(label, st.src, st.dst),
                     why_risky=("the walk a reader follows — a step phrase is read as what the code "
                                "does, and nothing else checks it against the line it names.")))
         # A USE CASE'S OWN SENTENCE. Its trigger and its outcome are the headline claim of the whole
@@ -1391,6 +1404,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             items.append(WorkItem(
                 claim=f"{uc.id} {uc.name}: {sentence}",
                 anchor=_anchor(first), drift_eligible=False, theme="behaviour",
+                elements=(uc.id,),
                 why_risky=("the headline sentence of the behavioural layer — a reader takes the "
                            "trigger and the outcome away as what the product does.")))
         # WHAT CROSSES A SURFACE is now a WALK STEP, and every walk step is already challenged by
@@ -1417,7 +1431,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             src = sm.source or getattr(el, "source", "") or ""
             items.append(WorkItem(
                 claim=lifecycle_claim(el.id, el.name, sm.states, sm.transitions),
-                anchor=_anchor(src),
+                anchor=_anchor(src), elements=(el.id,),
                 drift_eligible=bool((sm.source or "").strip()), theme="lifecycle",
                 why_risky=("lifecycles rot first — verify the declaring enum/constants still "
                            "list exactly these states and transitions.")))
@@ -1439,6 +1453,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             items.append(WorkItem(
                 claim=cadence_claim(ep.kind, ep.trigger, ep.cadence),
                 anchor=_anchor(ep.cadence_source if cited else ep.source),
+                elements=tuple(x for x in (getattr(ep, "id", "") or "",) if x),
                 drift_eligible=cited, theme="cadence",
                 why_risky=("a schedule is config-tuned and drifts silently — verify the declaring "
                            "line still says this cadence." if cited else
@@ -1456,7 +1471,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         files = ", ".join(c.files[:6]) + (" …" if len(c.files) > 6 else "") if c.files else ""
         items.append(WorkItem(
             claim=description_claim(c.id, c.name, purpose),
-            anchor=_anchor(c.source) if c.source else None,
+            anchor=_anchor(c.source) if c.source else None, elements=(c.id,),
             drift_eligible=False, theme="description",
             detail="; ".join(part for part in (
                 f"declared at {c.source}" if c.source else "",
@@ -1521,6 +1536,82 @@ def _format(findings: list[Finding], worklist: list[WorkItem], verbose: bool = F
     return "\n".join(out)
 
 
+def claim_digest(claims: Iterable[str]) -> str:
+    """sha256 over the sorted, DE-DUPLICATED claim set — the map's claim surface as one value a
+    later gate can recompute. `grounding.live_claims_digest` is this function under the name the
+    record's field has; it lives here so `validate` and `changes check` can recompute it without
+    importing the record writer (which imports them).
+
+    JSON-encoded, not newline-joined: a separator that can appear inside a claim makes the digest
+    ambiguous, and `["a\\nb"]` hashed identically to `["a", "b"]`."""
+    payload = json.dumps(sorted(set(claims)), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def pinned_tier(path: Path) -> bool:
+    """Was this pinned worklist captured with `audit --with-behavioural`? Read off the items' own
+    `theme`: the behavioural tier is the only producer of `behaviour`, so an existing worklist
+    answers with no migration. The live surface MUST be recomputed at the same tier or the record
+    is about neither (see `grounding.worklist_is_behavioural`, which is this function)."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    items = payload if isinstance(payload, list) else payload.get("worklist", [])
+    return any(isinstance(i, dict) and str(i.get("theme", "")) == "behaviour" for i in items)
+
+
+def record_gap(m: ProjectModel, model_path: Path | None) -> str | None:
+    """Does the map's `grounding` record describe THIS map? None when it does, or when nothing can
+    say (no record, no digest, no pinned worklist to read the tier from); else one sentence.
+
+    The record's digest is the one field a rewrite cannot slip past: an update that skipped the
+    challenge step leaves the record pinned to the map as the build left it, and every count then
+    reads as coverage of statements the update rewrote. `changes check --old --new` refuses on
+    this and `validate` warns on it, through this one comparison."""
+    g = m.grounding
+    if g is None or not g.live_claims_digest or model_path is None:
+        return None
+    pin = model_path.parent / "verify" / "worklist.json"
+    if not pin.is_file():
+        return None
+    live = [w.claim for w in l2_worklist_model(m, behavioural=pinned_tier(pin))]
+    if claim_digest(live) == g.live_claims_digest:
+        return None
+    stated = g.claims_total - g.claims_superseded + g.claims_added_since
+    return (f"the map's `grounding` record does not describe this map: its digest was taken over "
+            f"{stated} statement(s) and the map now makes {len(live)}, so an unknown number of them "
+            f"have no verdict. After an update, `coyomap changes ground` re-measures it; after a "
+            f"late edit to a build, re-run `coyomap grounding write --map`.")
+
+
+def worklist_payload(findings: list[Finding], worklist: list[WorkItem]) -> dict[str, object]:
+    """The `audit --json` payload: `{findings, worklist, themes, theme_counts}`. ONE builder, because
+    the pinned worklist a build writes and the one an update re-pins (`changes ground`) must be the
+    same shape for every reader — `worklist_is_behavioural`, `_worklist_claims`, `validate`'s
+    claim-loss check and `finalize` all read it."""
+    return {
+        # `where` mirrors `location`, and BOTH ship. The text report prints `where: …`, so a
+        # reader who saw the human output and then reached for `--json` wrote `f.get("where")`,
+        # matched nothing, printed an empty result and spent the next turn re-doing the same
+        # extraction by grepping the text. Renaming the key instead would break anything that
+        # already reads `location`, which is why the old name stays.
+        "findings": [{"check": f.check, "severity": f.severity, "location": f.location,
+                      "where": f.location,
+                      "message": f.message} for f in findings],
+        # `theme` is what a Phase-4 batcher groups on (method.md: "group by theme/risk"); the
+        # ordered `themes` list saves the consumer from hard-coding the risk order, and the
+        # per-theme counts let it size batches without walking the worklist twice.
+        "worklist": [{"claim": w.claim, "anchor": w.anchor, "detail": w.detail,
+                      "why_risky": w.why_risky, "theme": w.theme,
+                      "drift_eligible": w.drift_eligible,
+                      "elements": list(w.elements)} for w in worklist],
+        "themes": list(_THEMES),
+        "theme_counts": {t: sum(1 for w in worklist if w.theme == t) for t in _THEMES
+                         if any(w.theme == t for w in worklist)},
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Thin wrapper: whole-list mode is process-wide, so reset it on every exit path."""
     try:
@@ -1580,8 +1671,13 @@ SMALL_BATCH = "claims-small.json"
 
 
 def write_theme_batches(worklist: list[WorkItem], out_dir: Path, cap: int,
-                        floor: int = 0) -> list[tuple[str, int]]:
+                        floor: int = 0, prefix: str = "") -> list[tuple[str, int]]:
     """One file per theme (split at `cap` claims), each claim carrying its ANCHOR and `detail`.
+
+    `prefix` goes between `claims-` and the theme (`claims-<prefix>rule-1.json`), and scopes the
+    stale-file sweep to that prefix. An UPDATE's wave writes its batches beside the build's, in the
+    same `verify/` folder the skeptic contract hardcodes, and must neither delete the build's
+    claims files (they are part of the map's warrant) nor be mistaken for them.
 
     This exists because the batching step was hand-scripted on every build, and the hand-script threw
     away the fields the skeptics needed. A live build wrote `f.write(c['claim'])` and nothing else, so
@@ -1603,7 +1699,7 @@ def write_theme_batches(worklist: list[WorkItem], out_dir: Path, cap: int,
     # files behind, so a `claims-*.json` glob dispatched 207 claims for a 184-claim worklist — 23
     # duplicated, while the tool printed the honest total. That is the stale-glob hazard that blocked
     # a `--verdicts` glob in the first place; leaving it here would just move it.
-    for stale in out_dir.glob("claims-*.json"):
+    for stale in out_dir.glob(f"claims-{prefix}*.json"):
         stale.unlink()
     if floor > cap:
         raise ValueError(f"--floor {floor} is above --cap {cap}: a theme would be too small for its "
@@ -1624,7 +1720,8 @@ def write_theme_batches(worklist: list[WorkItem], out_dir: Path, cap: int,
             continue
         chunks = _even_chunks(items, cap) or [[]]
         for n, chunk in enumerate(chunks, 1):
-            name = f"claims-{theme}.json" if len(chunks) == 1 else f"claims-{theme}-{n}.json"
+            name = (f"claims-{prefix}{theme}.json" if len(chunks) == 1
+                    else f"claims-{prefix}{theme}-{n}.json")
             payload = {
                 "schema": BATCH_SCHEMA,
                 "theme": theme,
@@ -1640,7 +1737,8 @@ def write_theme_batches(worklist: list[WorkItem], out_dir: Path, cap: int,
         # sum is not — eleven 4-claim themes are 44 claims, over a cap of 40.
         chunks = _even_chunks(small, cap)
         for n, chunk in enumerate(chunks, 1):
-            name = SMALL_BATCH if len(chunks) == 1 else f"claims-small-{n}.json"
+            name = (f"claims-{prefix}small.json" if len(chunks) == 1
+                    else f"claims-{prefix}small-{n}.json")
             payload = {
                 "schema": BATCH_SCHEMA,
                 "theme": "mixed",
@@ -1845,25 +1943,7 @@ def _run(argv: list[str] | None = None) -> int:
               f"total, each carrying the two rules a counter cannot judge")
         return 0
     if as_json:
-        print(json.dumps({
-            # `where` mirrors `location`, and BOTH ship. The text report prints `where: …`, so a
-            # reader who saw the human output and then reached for `--json` wrote `f.get("where")`,
-            # matched nothing, printed an empty result and spent the next turn re-doing the same
-            # extraction by grepping the text. Renaming the key instead would break anything that
-            # already reads `location`, which is why the old name stays.
-            "findings": [{"check": f.check, "severity": f.severity, "location": f.location,
-                          "where": f.location,
-                          "message": f.message} for f in findings],
-            # `theme` is what a Phase-4 batcher groups on (method.md: "group by theme/risk"); the
-            # ordered `themes` list saves the consumer from hard-coding the risk order, and the
-            # per-theme counts let it size batches without walking the worklist twice.
-            "worklist": [{"claim": w.claim, "anchor": w.anchor, "detail": w.detail,
-                          "why_risky": w.why_risky, "theme": w.theme,
-                          "drift_eligible": w.drift_eligible} for w in worklist],
-            "themes": list(_THEMES),
-            "theme_counts": {t: sum(1 for w in worklist if w.theme == t) for t in _THEMES
-                             if any(w.theme == t for w in worklist)},
-        }, indent=1, ensure_ascii=False))
+        print(json.dumps(worklist_payload(findings, worklist), indent=1, ensure_ascii=False))
     else:
         print(_format(findings, worklist, verbose=verbose))
     return 1 if any(f.severity == CONTRADICTION for f in findings) else 0

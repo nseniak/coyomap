@@ -1506,6 +1506,70 @@
         },
         "note": {
           "type": "string"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GroundingWave"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "GroundingWave": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "challenged": {
+          "type": "integer"
+        },
+        "confirmed": {
+          "type": "integer"
+        },
+        "refuted": {
+          "type": "integer"
+        },
+        "unverifiable": {
+          "type": "integer"
+        },
+        "carried": {
+          "type": "integer"
+        },
+        "retired": {
+          "type": "integer"
+        },
+        "changed": {
+          "type": "integer"
+        },
+        "touched": {
+          "type": "integer"
+        },
+        "rippled": {
+          "type": "integer"
+        },
+        "closer_upheld": {
+          "type": "integer"
+        },
+        "closer_rejected": {
+          "type": "integer"
+        },
+        "closer_unsure": {
+          "type": "integer"
+        },
+        "skeptics": {
+          "type": "integer"
+        },
+        "note": {
+          "type": "string"
         }
       },
       "required": [],

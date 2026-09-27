@@ -481,9 +481,10 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "                                                        [--append <name>]... [--force]\n"
           "       coyomap contract <name> --from-slots <dir> --out-dir <dir> [--append <name>]...\n"
           "       coyomap contract skeptic --from-batches <dir> --fill <slots.json> --out-dir <dir>\n"
-          "                                [--votes <theme>=N]...\n"
+          "                                [--votes <theme>=N]... [--prefix <from>-<to>-]\n"
           "       coyomap contract closer --from-verdicts <dir> --map <map> --fill <slots.json>\n"
-          "                               --out <file> [--exclude <id>]... [--settled <file>]...\n\n"
+          "                               --out <file> [--exclude <id>]... [--settled <file>]...\n"
+          "                               [--prefix <from>-<to>-]\n\n"
           "Print exactly the text one fan-out agent should receive: the contract's agent half,\n"
           "with the writing rules appended for the phases whose agents author map prose\n"
           "(" + ", ".join(sorted(AUTHORING)) + ").\n\n"
@@ -491,6 +492,10 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "            from the file names, --votes <theme>=N writing N voters (-a, -b, -c) over one\n"
           "            claims file. An existing brief is SKIPPED, never rewritten; the pointer\n"
           "            prompts to send are printed. Every build hand-wrote this loop with --force.\n"
+          "  --prefix  only the files of one wave: an update's `changes challenge` names its\n"
+          "            batches `claims-<from>-<to>-…` (and `-w2-` for a second wave) beside the\n"
+          "            build's, and prints the prefix to pass; without it every build batch gets a\n"
+          "            brief too, and every build refutation a closer\n"
           "  --from-slots  the BATCH form of --fill: one brief per <agent-id>.json in <dir>, written\n"
           "            to <out-dir>/<agent-id>.md, with the pointer prompts. Every slots file is\n"
           "            checked BEFORE anything is written and every fault is reported at once, so a\n"
@@ -642,10 +647,13 @@ def record_budget(repo: Path, agent_id: str, expected: str,
     return path
 
 
-def batch_ids(batches_dir: Path) -> list[tuple[str, str]]:
-    """`(batch id, theme)` for every `claims-*.json` an `audit --batches` run wrote, in name order."""
+def batch_ids(batches_dir: Path, prefix: str = "") -> list[tuple[str, str]]:
+    """`(batch id, theme)` for every `claims-*.json` an `audit --batches` run wrote, in name order.
+    `prefix` narrows to one wave's files: an update's `changes challenge` writes
+    `claims-<from>-<to>-<theme>.json` beside the build's, and a brief per build batch would send
+    a skeptic at claims that were settled months ago."""
     out: list[tuple[str, str]] = []
-    for f in sorted(batches_dir.glob("claims-*.json")):
+    for f in sorted(batches_dir.glob(f"claims-{prefix}*.json")):
         theme = ""
         try:
             doc = json.loads(f.read_text(encoding="utf-8"))
@@ -771,7 +779,8 @@ def _budget_reset_faults(budgets: list[tuple[str, Path, str, str]],
 
 
 def fill_from_batches(values: dict[str, str], batches_dir: Path, out_dir: Path,
-                      votes: dict[str, int], root: Path | None = None) -> list[tuple[str, Path, str]]:
+                      votes: dict[str, int], root: Path | None = None,
+                      prefix: str = "") -> list[tuple[str, Path, str]]:
     """One skeptic brief per batch file (`votes` per theme: `{"security": 3}` writes `-a`, `-b`,
     `-c` voters over one claims file). Returns `(batch id, path, state)` with state `written` or
     `skipped`: an existing brief is NEVER rewritten, because under pointer dispatch it may be an
@@ -787,10 +796,11 @@ def fill_from_batches(values: dict[str, str], batches_dir: Path, out_dir: Path,
     if not batches_dir.is_dir():
         raise ValueError(f"--from-batches {batches_dir} is not a directory; it is where "
                          f"`audit --batches` wrote the claims files")
-    batches = batch_ids(batches_dir)
+    batches = batch_ids(batches_dir, prefix)
     if not batches:
-        raise ValueError(f"no claims-*.json under {batches_dir} — run `coyomap audit <map> "
-                         f"--batches {batches_dir}` first; nothing to write a brief for")
+        raise ValueError(f"no claims-{prefix}*.json under {batches_dir} — run `coyomap audit <map> "
+                         f"--batches {batches_dir}` first (or `changes challenge` for an update); "
+                         f"nothing to write a brief for")
     plan: list[tuple[str, Path, str]] = []
     for bid, theme in batches:
         n = votes.get(theme, 1)
@@ -846,15 +856,17 @@ _ID_TOKEN = re.compile(r"\b(?:CAP|BLK|UC|SF|BR|EP|SD|HP|[CDEIRS])\d+\b")
 _STEP_CLAIM = re.compile(r"^(UC\d+|SF\d+) step (\d+): (\S+) → (\S+)(?: \[[a-z]+\])? — ")
 
 
-def refutations(verdicts_dir: Path) -> list[Refutation]:
-    """Every `grounded: false` row across `verdicts-*.json` in one directory, in file-name order."""
+def refutations(verdicts_dir: Path, prefix: str = "") -> list[Refutation]:
+    """Every `grounded: false` row across `verdicts-*.json` in one directory, in file-name order.
+    `prefix` narrows to one wave's files (an update's `verdicts-<from>-<to>-…`): the build's
+    refutations beside them were reconciled long ago and resolve to no row on today's map."""
     if not verdicts_dir.is_dir():
         raise ValueError(f"--from-verdicts {verdicts_dir} is not a directory; it is where the "
                          f"skeptics wrote `verdicts-<batch>.json`")
-    files = sorted(verdicts_dir.glob("verdicts-*.json"))
+    files = sorted(verdicts_dir.glob(f"verdicts-{prefix}*.json"))
     if not files:
-        raise ValueError(f"no verdicts-*.json under {verdicts_dir} — the skeptic fan-out has not "
-                         f"landed, so there is no refutation to close")
+        raise ValueError(f"no verdicts-{prefix}*.json under {verdicts_dir} — the skeptic fan-out "
+                         f"has not landed, so there is no refutation to close")
     out: list[Refutation] = []
     for f in files:
         batch = f.stem[len("verdicts-"):]
@@ -1007,7 +1019,7 @@ def claims_block(m: ProjectModel, refs: list[Refutation]) -> str:
 
 def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Path,
                        exclude: list[str], settled: list[Path],
-                       root: Path | None = None) -> tuple[str, list[Refutation]]:
+                       root: Path | None = None, prefix: str = "") -> tuple[str, list[Refutation]]:
     """The filled closer contract, with «CLAIMS» built from the skeptics' own verdict files.
 
     `exclude` takes a refutation id (`rule-1#12`) or an element id (`BR205`), and an exclusion that
@@ -1027,7 +1039,7 @@ def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Pat
         m = load_model(resolved.read_text(encoding="utf-8"))
     except (OSError, ModelError) as exc:
         raise ValueError(f"--map {map_path}: {exc}") from exc
-    refs = refutations(verdicts_dir)
+    refs = refutations(verdicts_dir, prefix)
     already = settled_by(settled)
     kept: list[Refutation] = []
     hit: dict[str, int] = {k: 0 for k in exclude}
@@ -1102,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
     from_verdicts: str | None = None
     map_path: str | None = None
     out_dir: str | None = None
+    prefix = ""
     votes: dict[str, int] = {}
     append: list[str] = []
     exclude: list[str] = []
@@ -1115,13 +1128,15 @@ def main(argv: list[str] | None = None) -> int:
             force = True
         elif a in ("--fill", "--out", "--brief", "--from-batches", "--out-dir", "--votes",
                    "--append", "--from-slots", "--from-verdicts", "--map", "--exclude",
-                   "--settled"):
+                   "--settled", "--prefix"):
             i += 1
             if i >= len(args):
                 print(f"ERROR: {a} needs a value", file=sys.stderr)
                 return 2
             if a == "--fill":
                 fill_from = args[i]
+            elif a == "--prefix":
+                prefix = args[i]
             elif a == "--out":
                 out_path = args[i]
             elif a == "--from-batches":
@@ -1173,7 +1188,8 @@ def main(argv: list[str] | None = None) -> int:
                   "--out-dir <dir> [--votes <theme>=N]`", file=sys.stderr)
             return 2
         try:
-            results = fill_from_batches(_read_values(fill_from), Path(from_batches), Path(out_dir), votes)
+            results = fill_from_batches(_read_values(fill_from), Path(from_batches), Path(out_dir), votes,
+                                        prefix=prefix)
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
@@ -1207,7 +1223,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             text, kept = fill_from_verdicts(_read_values(fill_from), Path(from_verdicts),
-                                            Path(map_path), exclude, [Path(s) for s in settled])
+                                            Path(map_path), exclude, [Path(s) for s in settled],
+                                            prefix=prefix)
         except (ValueError, json.JSONDecodeError, OSError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2

@@ -788,3 +788,19 @@ def test_graph_roles_carry_relations_only_when_authored():
         {"kind": "includes", "role": m.roles[-1].id},   # includes: no `at` key at all
     ]
     assert all("relations" not in r for r in roles[1:])
+
+
+def test_the_grounding_ledger_is_rendered_one_row_per_wave():
+    """After an update the counts describe the current pin; the ledger says how much a build's
+    skeptics read and how much a later wave re-read, which is what a reader judges the counts by."""
+    from coyomap.model import GroundingWave
+    from coyomap.views import model_to_markdown
+    md = model_to_markdown(make_map_with_grounding(
+        claims_total=48, claims_challenged=48, claims_confirmed=47, claims_refuted=1,
+        live_claims_digest="abc", history=[
+            GroundingWave(kind="build", at="aaaaaaa", date="2026-09-01", challenged=40, confirmed=40, skeptics=6),
+            GroundingWave(kind="update", at="aaaaaaa-bbbbbbb", date="2026-09-17", challenged=9, confirmed=8,
+                          refuted=1, carried=31, retired=4, changed=3, touched=4, rippled=2, skeptics=2)]))
+    assert "one row per wave of skeptics" in md
+    assert "| build aaaaaaa | 2026-09-01 | 40 | 40 | 0 | 0 | 0 | 0 | the whole map | 6 |" in md, md
+    assert "| update aaaaaaa-bbbbbbb | 2026-09-17 | 9 | 8 | 1 | 0 | 31 | 4 | 3 changed · 4 touched · 2 reached | 2 |" in md, md

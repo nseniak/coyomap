@@ -30,7 +30,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from coyomap import anchors, balance_lib, model, prose, records, grammar
-from coyomap.audit_model import l2_worklist_model
+from coyomap.audit_model import l2_worklist_model, record_gap
 from coyomap.reporting import clip as _clip, reset_full_lists, set_full_lists, shown as _shown
 from coyomap.anchors import (
     DIR_ANCHOR as _DIR_ANCHOR,
@@ -4425,6 +4425,15 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
             f"and challenge what it mints."]
 
 
+def _grounding_digest_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
+    """ADVISORY: the `grounding` record was measured over a different set of statements than the
+    ones this map makes. `audit_model.record_gap` is the comparison; `changes check --old --new`
+    BLOCKS on the same one, because there the map on disk was just written by an update and the
+    record either describes it or the update skipped its challenge step."""
+    gap = record_gap(m, model_path)
+    return [gap] if gap else []
+
+
 def _grounding_split_findings(g: Grounding) -> list[str]:
     """ADVISORY: the verdict split is absent, so nothing can be checked against it.
 
@@ -7132,6 +7141,9 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     # …and its mirror: claims the pin held that the shipped map no longer makes. Needs the path,
     # because the pin is a file beside the map rather than a field inside it.
     warnings.extend(_claim_loss_warnings(m, model_path))
+    # …and the one comparison that sees a 1-for-1 rewrite: the record's digest against this map's
+    # own statements. An update that skipped its challenge step lands here.
+    warnings.extend(_grounding_digest_warnings(m, model_path))
     # The appeal, checked against the closer's own files — the same reason, one field along.
     warnings.extend(_closer_record_warnings(m, model_path))
     warnings.extend(_inheritance_runs_in_warnings(m))

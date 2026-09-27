@@ -6,40 +6,133 @@ makes. The log is the product of the update; the updated map is what it leaves b
 as building the baseline — read code → meaning — scoped to the diff, and bounded by tools that know
 what the map already says.
 
-## Lifecycle — one verb, eight steps, two documents
+## Lifecycle — one verb, nine steps, two documents
 
 | Step | Action | Tool | Writes |
 |---|---|---|---|
-| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` must FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes` | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
+| **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
 | **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them | the impact file, beside the log (deleted at step 7, never committed) |
 | **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by a `where` edit in the entry that read that code (step 3) |
 | **3 Read and write** | read the diff and the touched boxes; write the log | you | `.coyomap/changes/<from>-<to>.json` |
 | **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
-| **6 Apply** | the entries land in the map, the pin moves; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` | the map (`commit` = the log's `to_commit`, `committed` = that commit's date) |
-| **7 Close** | the invariant, the rendering, the record, the commit | render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json` and `.impact.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index, `provenance.json`; **one commit** of map + log + views + pre-index + provenance, with a plain `git add` — never `git add -f` |
+| **5b Challenge** | the statements the update wrote, and the ones its change reached, re-argued by fresh-context skeptics — before anything is written | `coyomap changes challenge <log> --map .coyomap/project-map.json --before .coyomap/changes/<from>-<to>.before.json --touched .coyomap/changes/<from>-<to>.impact.json`, then the wave (Step 5b below): the briefs with `coyomap contract skeptic --from-batches .coyomap/verify --prefix <from>-<to>-`, the barrier with `coyomap grounding lint --expect`, the closer with `coyomap contract closer --from-verdicts .coyomap/verify --prefix <from>-<to>-`. An upheld refutation amends the log and sends you back to step 4 | `.coyomap/changes/<from>-<to>.applied.json` (the copy the skeptics read) and `<from>-<to>.scope.json` (scratch, deleted at step 7); the wave's `claims-<from>-<to>-*.json` and `verdicts-<from>-<to>-*.json` under `.coyomap/verify/`, which stay: they are the map's warrant |
+| **6 Apply** | the entries land in the map, the pin moves; the record is re-measured over the map as it now is; then the same gate, on what was written | `coyomap changes apply <log> --map .coyomap/project-map.json --date <to-date>`, where the to-date is what `git log -1 --format=%cs <to>` prints; then `coyomap changes ground <log> --map .coyomap/project-map.json --before … --touched … --note-file <note>` (its `--dry-run` first, for the facts the note quotes); then `coyomap changes check <log> --old .coyomap/changes/<from>-<to>.before.json --new .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json`, which now also refuses a map whose record does not describe it | the map (`commit` = the log's `to_commit`, `committed` = that commit's date, `grounding` re-pinned with one more row in its `history`); `.coyomap/verify/worklist.json` re-pinned, the old pin kept as `worklist-<from>.json`, the build's verdict rows carried or moved to `retired-<from>-<to>.json`; the log's `challenge` block |
+| **7 Close** | the invariant, the rendering, the record, the commit | the refutation gate first: `coyomap grounding refutations --map .coyomap/project-map.json --verdicts .coyomap/verify/verdicts-*.json .coyomap/verify/closer-*.json` must exit 0; then render → validate → audit: `coyomap render … project-map.md`, then `coyomap validate --check-sources`, then `coyomap audit`; `coyomap changes render <log> --map … --out .coyomap/changes/<from>-<to>.md`; `coyomap preindex` when the map has one; `coyomap provenance stamp <repo> --mode accept`, which records this session and the new pin; delete the `.before.json`, `.impact.json`, `.applied.json` and `.scope.json` scratch files LAST, once validate is clean | the markdown view, the rendered log, the pre-index, `provenance.json`; **one commit** of map + log + views + pre-index + provenance + the `verify/` files the wave wrote or rewrote, with a plain `git add` — never `git add -f` |
 | **8 Hand over** | the reader is told where to see what changed | `coyomap url --view updates --repo <repo> --json`, and `coyomap serve` when nothing is running (Step 8 below) | nothing |
 
-- **`update`** is the whole sequence. **`analyze`** is steps 0–5: the log written, linted and gated,
-  the map's meaning untouched — its code links have moved (step 2), which is a change of no meaning
-  — for a reader who wants the log before it lands. **`accept`** is steps 6–8 on a log that already
-  exists; it finds the `.before.json` copy and the `.impact.json` file that steps 0 and 1 left
-  beside the log.
+- **`update`** is the whole sequence. **`analyze`** is steps 0–5b: the log written, linted, gated
+  and argued with, the map's meaning untouched — its code links have moved (step 2), which is a
+  change of no meaning — for a reader who wants the log before it lands. **`accept`** is steps 6–8
+  on a log that already exists; it finds the `.before.json` copy, the `.impact.json` file and the
+  wave's verdicts that steps 0, 1 and 5b left beside the log.
 - **From and to are commits.** `from` is the map's pin, `to` is `HEAD`. A dirty tree cannot be
   named, so step 0 refuses it: commit first, or stash. An untracked product file is refused the same
   way, because a file git does not know is a file no commit describes: commit it, or add it to
   `.gitignore`. (The old rule analyzed the working tree so an edit could be read before its commit;
   that preview is `git stash` away, and a log that names a commit is worth more than one that names
   a moment.)
-- **`.coyomap/changes/` must be tracked.** The test, at step 0: `git check-ignore -q
-  .coyomap/changes/<from>-<to>.json` must fail (exit 1: the path is not ignored). If it passes, the
-  log would be left out of the commit without a word — a map whose files are tracked can still sit
-  under an ignore rule for the whole folder, and the tracked files hide it. Fix the rule with the
-  user before going on: git cannot re-include a path under an ignored folder, so a rule `.coyomap/`
-  becomes `.coyomap/*` plus `!.coyomap/changes/`. Never `git add -f` around it: a forced add works
+- **`.coyomap/changes/` and `.coyomap/verify/` must be tracked.** The test, at step 0: `git
+  check-ignore -q .coyomap/changes/<from>-<to>.json` must fail (exit 1: the path is not ignored),
+  and so must `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` — the wave writes
+  new files under `verify/` (its batches, its verdicts, the retired rows, the old pin), and they
+  are the map's warrant. If either passes, those files would be left out of the commit without a
+  word — a map whose files are tracked can still sit under an ignore rule for the whole folder,
+  and the tracked files hide it. Fix the rule with the user before going on: git cannot re-include
+  a path under an ignored folder, so a rule `.coyomap/` becomes `.coyomap/*` plus
+  `!.coyomap/changes/` and `!.coyomap/verify/`. Never `git add -f` around it: a forced add works
   once and leaves the next log ignored again.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
+
+## Step 5b — the wave: an update is argued with, like a build
+
+A build ends with fresh-context skeptics reading every statement the map makes against the code
+(`method.md`, Phase 4). An update writes statements too — a rewritten sentence, a new rule site, a
+waiver saying "the code moved and the meaning did not" — and until this step existed nobody read
+them against the code, while the map's `grounding` record went on describing the build. The wave
+closes that, and costs in proportion to the diff: only what the change touched is re-argued.
+
+**What is in scope — the tool decides, never you.** `changes challenge` sorts every statement the
+updated map makes into one bucket, and prints the count per bucket and per theme:
+
+- **changed** — its words are new or rewritten. No earlier verdict can be about them.
+- **touched** — its words stand, but the code touched one of its boxes: a hit the gate counts, or
+  a box an entry names or a waiver covers. The earlier verdict was cast on code that has changed.
+- **rippled** — its words stand, but the change reached one of its boxes through the map, one hop
+  from a counted hit: a caller, a walk step, a rule site. The neighbour the verdict rested on moved.
+- **carried** — nothing about it moved. Its verdict stands and it is NOT re-voted. A statement
+  whose only change is a line number the re-anchor step moved is carried under its new text; the
+  tool replays that step in memory on the map as it was, so the two never disagree about which
+  links merely shifted. Measured on the dry run of 2026-09-15: 28 of the 206 statements in the
+  eight shifted files would otherwise have been re-voted for nothing, 17 of them access statements
+  that take three voters each.
+
+Do not hand-pick a subset, and do not add "just this one" from the carried set: the scope is a
+rule, and a rule is what makes the next reader able to trust it. If nothing is in scope the tool
+says so, and `changes ground` re-pins and carries without a wave.
+
+**The wave itself is Phase 4, scoped, and every rule of Phase 4 holds:** one fresh-context skeptic
+per batch, the security theme three-voted with an odd count, the batches at ~40, the barrier
+linted, the closer on every refutation, the note written from the printed facts. The differences:
+
+1. **The map the skeptics read is the applied copy**, `.coyomap/changes/<from>-<to>.applied.json`:
+   the log written into the map as it is, before anything on disk moves. Fill «MAP» with that
+   path. A refutation then amends the LOG, and the map on disk is untouched.
+2. **The batches sit beside the build's, under the wave's name:** `claims-<from>-<to>-<theme>.json`
+   in `.coyomap/verify/`. The briefs come from `coyomap contract skeptic --from-batches
+   .coyomap/verify --prefix <the prefix the challenge printed> --fill <slots.json> --out-dir
+   <scratch>/briefs --votes security=3` — `<from>-<to>-` for the first wave, `<from>-<to>-w2-` for
+   the next; without `--prefix` the generator writes a brief per BUILD batch too, and sends
+   skeptics at claims settled months ago. The skeptic ids are the batch ids, so the verdict files
+   land as `verdicts-<from>-<to>-<theme>.json`, beside the build's, and the barrier is `coyomap
+   grounding lint --verdicts <each wave file> --expect <every SKEPTIC id the brief generator
+   printed>` — the skeptic ids, not the batch ids: a three-voted batch `…-security` answers as
+   `…-security-a`, `-b` and `-c`, and the batch id fails the barrier (measured: one failed run).
+   Pass `--votes security=3` on EVERY `challenge` run, the second wave's included. A batch nobody
+   answered is REPLACED by the next `challenge` run (its statements go out again under the new
+   prefix); an answered batch is never rewritten.
+3. **The closer reads this wave only:** `coyomap contract closer --from-verdicts .coyomap/verify
+   --prefix <from>-<to>- --map <the applied copy> --fill <slots.json> --out <brief>`, its agent id
+   `<from>-<to>-closer`, so its file is `closer-<from>-<to>-closer.json` and counts with the wave.
+4. **An upheld refutation is a change to the log, not to the map.** Write the entry (or the edit,
+   or drop the waiver) and go back to step 4: lint, gate, `changes challenge` again. The tool
+   re-scopes; the statements the fix re-minted are the only new ones, and ONE more skeptic reads
+   them — a second wave over the re-minted statements alone. There is no third: a fix that needs a
+   third reading is a fix you have not understood, and the log's `notes` say so.
+5. **Nothing is dropped and nothing is skipped.** `changes ground` refuses a batch with no verdicts
+   file and an in-scope statement with no vote, in words, and writes nothing. There is no
+   `--partial` here: an update that could not finish its wave has not finished, and an unattended
+   run must fail loudly rather than re-pin a hole. A statement the BUILD never voted stays unvoted
+   and is said to be: the update reads no THEME the build did not (mcpolis pinned 949 step phrases
+   and voted none; they stay unvoted), and skips none it did. A map whose record says it was
+   challenged but whose `verify/` holds no verdicts is refused too — the warrant files are missing,
+   not absent — and a map with no record at all is left alone. `ground` may be run again, after a
+   crash or by mistake: it measures against the list the update replaced, moves no citation twice,
+   and keeps one ledger row per update.
+6. **The note is the wave's, and the facts are printed for it.** `changes ground --dry-run` prints
+   the `WAVE FACTS` of this wave — rows, distinct skeptic labels, the split, the multi-vote
+   agreement, what was superseded and how many of those had been confirmed — and one `MAP-WIDE`
+   line. Write the note from them, put it in a file, and pass `--note-file` (with `--dry-run` first,
+   to have the draft checked). A note whose numbers contradict the wave is refused, exactly as a
+   build's is; a note that cites the build's figures cites them as the build's.
+
+**What `changes ground` leaves behind, and why each part is there.** The record's counts now
+describe the map at its NEW pin: `claims_total` is every statement the map makes, `claims_challenged`
+the ones with a verdict — carried or cast — and the digest is taken over the live surface, so
+`validate` and the second `check` can see a map whose record does not describe it. One row is added
+to `grounding.history`: what this wave re-argued, confirmed and refuted, what it carried and retired,
+and why each statement was in scope. The first update seeds the ledger with the build's own row, so
+the build's note and counts are never lost. `worklist.json` is re-pinned and the old pin kept under
+the from-commit's name. The build's verdict rows are rewritten in place: a carried row keeps its
+verdict, its claim re-keyed across a line shift (the text it was cast on stays in `claim_was`), its
+cited line moved with the code (`evidence_was`); a row on a statement the wave re-voted or the map
+no longer makes goes to `retired-<from>-<to>.json`, because an old confirmation and a new refutation
+of one statement would otherwise tally as a tie and read as "unverifiable". The log gets a
+`challenge` block with the same facts, which is what the Update log draws on each row.
+
+**Analyze includes the wave.** A log handed to a reader before it lands is a log whose statements
+have been argued with; `accept` then runs `ground` and the gates on verdicts that already exist.
 
 ## Step 8 — hand the reader the Update log
 
@@ -111,7 +204,16 @@ small logs; one per week gives one log with more entries. Either way every entry
   the reading lands in the log: a link `reanchor` left behind is re-pointed by a `where` edit (on
   `flow:UC6`, key `steps[n=3].where`; on `BR168`, key `sites[0].where`) in the entry that read that
   code, so the move and its reason travel together. The log never carries a move `reanchor` made,
-  and `check` ignores link-only changes.
+  and `check` ignores link-only changes. **A left-behind link is never waived.** A waiver says the
+  box's meaning did not change; it says nothing about the link, which still points at a line the
+  code rewrote. No gate catches that until `validate` at step 7 — and only when the stale line
+  happens to be a comment or a header: the first real update shipped two such links behind
+  waivers. Re-point every link `reanchor` listed, or say in the entry why the old line still acts.
+- **Waive the BOX, not the row `impact` marks.** `impact`'s text marks rows such as `step:UC6:4`
+  or `edge:C15>calls>C13` with `*`; the gate counts them under the box that owns them (the use
+  case, the arrow's source component, the rule). A waiver on the row id is refused by `lint`
+  ("not in the map"); name the owning box. `impact --json` lists more rows at line or symbol
+  resolution than the text marks, because a way in (`ep:<file>:<line>`) belongs to no box.
 - **Per change.** Classify a box as modified / added / removed; **ripple** by following its
   relations (arrows, flows, Happy Path steps). Verify by reading the changed code; a pure refactor
   or move with no behaviour change is a **waiver**, not an entry (keep noise down).
@@ -223,3 +325,7 @@ the day it was written; `committed` in the map is the to-commit's date, which `a
   reading has a reader.
 - **Re-running tests.** An update reads code; it does not run it. A green run is a claim the log can
   quote from the repo's own record, never one it makes.
+- **A full re-vote.** The wave re-argues what the change reached, one hop through the map, and
+  carries the rest. A carried verdict is one cast on code that has not changed since; how much of
+  the map rests on carried verdicts is a number the record now shows (`grounding.history`), and a
+  rule that re-votes the whole map when that share thins is a later decision, made on that number.

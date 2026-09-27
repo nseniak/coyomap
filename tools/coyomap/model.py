@@ -743,6 +743,45 @@ class ExtraSection:
 
 
 @dataclass
+class GroundingWave:
+    """One round of skeptics in the map's life: the build's pass, then one per update that ran the
+    challenge step (`coyomap changes challenge` → `changes ground`).
+
+    WHY A LEDGER. The counts on `Grounding` describe the map at its CURRENT pin: after an update
+    they are re-measured over the re-pinned worklist, and a reader can no longer tell from them
+    how the map came to be warranted — how much of it a build's skeptics read against the code of
+    a pin months ago, and how much a later wave re-read. That is exactly what decides whether the
+    warrant is still worth its numbers, so each wave writes one row here and the rows are never
+    rewritten. `kind` is `build` or `update`; `at` is the build's pin or the update's
+    `<from>-<to>`."""
+    kind: str = "update"
+    at: str = ""
+    date: str = ""
+    #: What THIS wave decided: the statements it voted on and how the votes fell. `challenged` is
+    #: the wave's own count, not the map's; on an update it is the statements the change put in
+    #: scope (new or reworded words, a touched box, a box the change reached through the map).
+    challenged: int = 0
+    confirmed: int = 0
+    refuted: int = 0
+    unverifiable: int = 0
+    #: What the wave did NOT vote on: `carried` statements kept their earlier verdict because
+    #: neither their words nor their code changed; `retired` verdicts were dropped because their
+    #: statement is gone or was re-voted. Both zero on a build.
+    carried: int = 0
+    retired: int = 0
+    #: How the challenged statements came into scope, on an update: new or reworded words, a box
+    #: the code touched, a box the change reached through the map. They sum to `challenged`.
+    changed: int = 0
+    touched: int = 0
+    rippled: int = 0
+    closer_upheld: int = 0
+    closer_rejected: int = 0
+    closer_unsure: int = 0
+    skeptics: int = 0                #: distinct skeptic labels in the wave
+    note: str = ""
+
+
+@dataclass
 class Grounding:
     """How much of the map's L2 claim surface the Phase-4 skeptics actually challenged.
 
@@ -853,6 +892,11 @@ class Grounding:
     closer_disputed: int = 0
 
     note: str = ""                   # how claims were triaged when coverage is partial
+
+    #: THE WAVES, oldest first — see `GroundingWave`. Empty on a map no update has re-measured;
+    #: the first update seeds it with the build's own row from the counts above before adding its
+    #: own. The counts above always describe the current pin; this says how they got there.
+    history: list[GroundingWave] = field(default_factory=list)
 
 
 @dataclass

@@ -636,6 +636,7 @@ body:not(.served) #leftcol { flex: 1 1 auto; width: auto; }
    characters a line, twice the 45-75 that body text is readable at, and that width was the first reason
    the text read as one block (2026-09-11). */
 .view-lead { margin: 0 0 18px; }
+.warrant-line { margin: 0 0 18px; font-size: 13px; line-height: 1.5; color: #6b7280; }
 .view-lead-body { font-size: 14.5px; line-height: 1.6; color: #374151; }
 /* THE OVERVIEW IS ONE COLUMN OF TEXT, and its frame stops where the text does. A cap on the text
    alone left the frame running 450px past it, which read as a column missing its second half; the

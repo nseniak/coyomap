@@ -2219,7 +2219,8 @@
     "closer_rejected": 0,
     "closer_unsure": 0,
     "closer_disputed": 0,
-    "note": "Every backbone edge in this map was authored directly against the fixture's own source, which is 1.5 kLOC of hand-written code the author of the map also wrote. That makes the grounding complete but NOT independent — there was no fresh-context skeptic pass, and this map has not been through Phase 4. Treat the number as a statement about coverage, not about adversarial confidence."
+    "note": "Every backbone edge in this map was authored directly against the fixture's own source, which is 1.5 kLOC of hand-written code the author of the map also wrote. That makes the grounding complete but NOT independent — there was no fresh-context skeptic pass, and this map has not been through Phase 4. Treat the number as a statement about coverage, not about adversarial confidence.",
+    "history": []
   },
   "blocks": [],
   "rules": [],

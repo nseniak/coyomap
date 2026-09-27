@@ -97,11 +97,31 @@ def make_later_log(doc: dict[str, Any]) -> dict[str, Any]:
             "waived": [], "notes": ""}
 
 
+CHALLENGE = {"challenged": 9, "confirmed": 8, "refuted": 1, "unverifiable": 0, "carried": 31,
+             "retired": 4, "changed": 3, "touched": 4, "rippled": 2, "closer_upheld": 1,
+             "closer_rejected": 0, "closer_unsure": 0, "skeptics": 2, "superseded": 3, "unvoted": 0,
+             "shifted": 2, "batches": [f"{LOG}-rule", f"{LOG}-backbone"], "disputed": 0}
+WARRANT = {"claims_total": 40, "claims_challenged": 40, "claims_confirmed": 39, "claims_refuted": 1,
+           "claims_unverifiable": 0, "claims_superseded": 0, "claims_added_since": 0,
+           "live_claims_digest": "abc", "claims_live_challenged": 40,
+           "closer_upheld": 1, "closer_rejected": 0, "closer_unsure": 0, "closer_disputed": 0,
+           "note": "one wave", "history": [
+               {"kind": "build", "at": OLD_PIN, "date": "2026-09-01", "challenged": 35, "confirmed": 35,
+                "refuted": 0, "unverifiable": 0, "carried": 0, "retired": 0, "changed": 0, "touched": 0,
+                "rippled": 0, "closer_upheld": 0, "closer_rejected": 0, "closer_unsure": 0, "skeptics": 6,
+                "note": "the build"},
+               {"kind": "update", "at": LOG, "date": "2026-09-17", "challenged": 9, "confirmed": 8,
+                "refuted": 1, "unverifiable": 0, "carried": 31, "retired": 4, "changed": 3, "touched": 4,
+                "rippled": 2, "closer_upheld": 1, "closer_rejected": 0, "closer_unsure": 0, "skeptics": 2,
+                "note": "one wave"}]}
+
+
 @contextmanager
-def _served_update(git: bool = True, later: bool = False) -> Iterator[str]:
+def _served_update(git: bool = True, later: bool = False, challenged: bool = False) -> Iterator[str]:
     """The server over the updated map, with the map as it was committed behind it and the log beside
     it. `git=False`: no history at all, so the log has no evidence. `later`: a second update on top,
-    committed map in between, so the first log is no longer the latest."""
+    committed map in between, so the first log is no longer the latest. `challenged`: the update ran
+    its skeptic wave — the log carries the `challenge` block and the map the record with its ledger."""
     with tempfile.TemporaryDirectory() as td:
         folder = make_served_map(Path(td), "alpha")
         f = folder / ".coyomap" / "project-map.json"
@@ -112,6 +132,9 @@ def _served_update(git: bool = True, later: bool = False) -> Iterator[str]:
         if git:
             commit(folder, {".coyomap/project-map.json": json.dumps(old, indent=1)}, msg="Map the codebase")
         log = make_log(doc)
+        if challenged:
+            log["challenge"] = json.loads(json.dumps(CHALLENGE))
+            doc["grounding"] = json.loads(json.dumps(WARRANT))
         make_new_map(doc)
         doc["rules"][0]["risk"] = "a team is locked"
         doc["commit"] = NEW_PIN
@@ -177,6 +200,37 @@ def _open_update(page: Any) -> None:
     """From the Updates list, open the newest update."""
     page.click('#diagram .ecard[data-key]')
     _ready(page)
+
+
+def test_an_update_row_says_what_its_skeptics_decided_or_that_none_read_it() -> None:
+    """The wave's result on the row, and its absence said in as many words: a reader is told which
+    updates were argued with rather than left to assume all of them were."""
+    with _served_update() as url, _page(url + "#v=updates") as page:
+        _ready(page)
+        assert "no skeptic read this update" in _cards(page)[0]
+        assert not page.js_errors, page.js_errors
+    with _served_update(challenged=True) as url, _page(url + "#v=updates") as page:
+        _ready(page)
+        row = _cards(page)[0]
+        assert "9 statements re-argued by 2 skeptics, 1 refuted \u00b7 31 carried" in row, row
+        _open_update(page)
+        head = _text(page, ".cmp-head")
+        assert "9 statements re-argued by 2 skeptics, 1 refuted" in head, head
+        assert not page.js_errors, page.js_errors
+
+
+def test_the_overview_says_how_much_of_the_map_has_a_verdict() -> None:
+    """The map's warrant on the one screen meant to be read, and nothing when the map has no record:
+    a map nobody challenged must not read "0 of 0"."""
+    with _served_update() as url, _page(url + "#v=overview") as page:
+        _ready(page)
+        assert page.evaluate("() => document.querySelectorAll('[data-warrant]').length") == 0
+    with _served_update(challenged=True) as url, _page(url + "#v=overview") as page:
+        _ready(page)
+        line = _text(page, "[data-warrant]")
+        assert line.startswith("40 of 40 statements have a verdict from a fresh-context skeptic, 1 refuted"), line
+        assert "1 update wave since the build of 2026-09-01; the last re-argued 9 and carried 31" in line, line
+        assert not page.js_errors, page.js_errors
 
 
 def test_the_updates_list_holds_the_updates_and_nothing_else() -> None:

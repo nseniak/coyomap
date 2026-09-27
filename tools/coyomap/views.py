@@ -739,6 +739,19 @@ def model_to_markdown(m: ProjectModel) -> str:
                      "as it now stands.", ""]
         if g.note:
             body += [f"{g.note}", ""]
+        if g.history:
+            # THE WAVES. After an update the counts above describe the current pin, and a reader
+            # can no longer tell from them how much a build's skeptics read months ago and how
+            # much a later wave re-read: the ledger says. `re-argued` is the wave's own count.
+            body += ["How the warrant got here, one row per wave of skeptics:", ""]
+            body += _table(["Wave", "When", "Re-argued", "Confirmed", "Refuted", "Unverifiable",
+                            "Carried", "Retired", "Why in scope", "Skeptics"],
+                           [[f"{w.kind} {w.at}", w.date, str(w.challenged), str(w.confirmed),
+                             str(w.refuted), str(w.unverifiable), str(w.carried), str(w.retired),
+                             (f"{w.changed} changed · {w.touched} touched · {w.rippled} reached"
+                              if w.kind == "update" else "the whole map"), str(w.skeptics)]
+                            for w in g.history])
+            body += [""]
         section("Grounding — how much of this map was challenged", body[:-1] if body else body)
     # Notes about the CODE first; the map's own build record last, under one parent heading. Both
     # are kept verbatim — the records are machine-read and auditable — but a reader scrolling this
@@ -1059,6 +1072,29 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
     }
 
 
+def warrant_of(m: ProjectModel) -> dict[str, object] | None:
+    """The map's own statement of how much of it was argued with, for the screens: the counts
+    over the CURRENT pin and one row per wave (`grounding.history`), oldest first. None when the
+    map carries no record — the viewer then says nothing rather than "0 of 0"."""
+    g = m.grounding
+    if g is None or not (g.claims_total or g.claims_challenged):
+        return None
+    live_total = g.claims_total - g.claims_superseded + g.claims_added_since
+    return {
+        "total": g.claims_total, "challenged": g.claims_challenged,
+        "confirmed": g.claims_confirmed, "refuted": g.claims_refuted,
+        "unverifiable": g.claims_unverifiable,
+        # The SHIPPED map's coverage, exact when the record measured it, else the pinned figure.
+        "live_total": live_total if g.claims_live_challenged else g.claims_total,
+        "live_challenged": g.claims_live_challenged or g.claims_challenged,
+        "waves": [{"kind": w.kind, "at": w.at, "date": w.date, "challenged": w.challenged,
+                   "confirmed": w.confirmed, "refuted": w.refuted, "unverifiable": w.unverifiable,
+                   "carried": w.carried, "retired": w.retired, "changed": w.changed,
+                   "touched": w.touched, "rippled": w.rippled, "skeptics": w.skeptics,
+                   "closer_rejected": w.closer_rejected} for w in g.history],
+    }
+
+
 def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict:
     """The model as the viewer's GraphDict, the shape `gen_viewer.build_view_bundle` consumes. A
     component's drill file prefers its canonical `source` and falls back to its `entry_point`,
@@ -1304,6 +1340,7 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
         "format": m.format or None,
         "title": m.title or None,
         "goal": m.goal or None,
+        "warrant": warrant_of(m),
         "nodes": {nid: asdict(n) for nid, n in nodes.items()},
         "edges": [asdict(e) for e in edges],
         "happy_path": [asdict(GraphHappyStep(id=g.id, uc=g.uc, why=g.why or ""))

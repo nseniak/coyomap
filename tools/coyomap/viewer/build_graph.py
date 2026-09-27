@@ -121,6 +121,9 @@ class GraphDict(TypedDict):
     format: str | None     # schema/format tag (e.g. "coyomap-map"); shown in the header meta line
     title: str | None
     goal: str | None
+    #: The map's own warrant, for the Overview and the Update log: the grounding counts over the
+    #: current pin and one row per wave (`views.warrant_of`); None when the map has no record.
+    warrant: dict[str, object] | None
     nodes: dict[str, dict[str, object]]
     edges: list[dict[str, object]]
     happy_path: list[dict[str, object]]

@@ -640,6 +640,7 @@ def list_changes(proj: Project) -> dict[str, Any]:
     have been logs and could not be read."""
     heads: list[LogHead] = []
     headlines: dict[str, list[str]] = {}
+    challenges: dict[str, dict[str, Any] | None] = {}
     problems: list[str] = []
     folder = changes_dir(proj)
     if folder.is_dir():
@@ -654,11 +655,13 @@ def list_changes(proj: Project) -> dict[str, Any]:
                 continue
             heads.append(LogHead(name, log.from_commit, log.to_commit, log.date, len(log.entries)))
             headlines[name] = [e.headline for e in log.entries]
+            challenges[name] = log.challenge
     ordered = order_logs(heads, proj.commit or None)
     # `landed`: the commit that added the log file, which is the update's own commit — or null while
     # the update sits uncommitted on disk.
     return {"logs": [{"name": h.name, "from": h.from_commit, "to": h.to_commit, "date": h.date,
                       "entries": h.entries, "headlines": headlines.get(h.name, []),
+                      "challenge": challenges.get(h.name),
                       "latest": i == 0 and commit_matches(h.to_commit, proj.commit),
                       "landed": log_commit(proj, h.name)}
                      for i, h in enumerate(ordered)],

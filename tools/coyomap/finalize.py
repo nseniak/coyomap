@@ -43,6 +43,13 @@ import json
 import re
 import sys
 from dataclasses import asdict, dataclass, field
+
+from coyomap.challenge import (
+    batch_claims,
+    batch_theme,
+    verdict_files,
+    voted_claims,
+)
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -552,6 +559,112 @@ def _unasked_verdicts_leg(found: list[Path]) -> Leg:
                note="the leg was skipped because no --verdicts was passed")
 
 
+@dataclass
+class BatchPairing:
+    """What one look at a `verify/` directory found: every batch cut, and the ones nobody answered.
+
+    A dataclass, not a tuple: both slots are `list[Path]`, so a positional return lets a caller
+    unpack them the wrong way round and report "0 of 24 answered" as "24 of 0" with nothing able to
+    tell. `assemble.FragmentLoad` carries the same scar, and `test_cli_contract` refuses new ones."""
+
+    cut: list[Path]
+    unanswered: list[Path]
+
+
+def _unanswered_claim_batches(verify: Path) -> BatchPairing:
+    """Claim batches under `verify` that no skeptic answered. ANSWERED IS A CLAIM, NOT A FILE NAME.
+
+    The first version of this paired file names — `claims-«BATCH».json` against
+    `verdicts-«BATCH»*.json` — and an adversarial review broke it in both directions on real maps:
+
+    * **It absolved a batch nobody read.** The trailing `*` that absorbs a voter suffix absorbs
+      digits too, so `verdicts-behaviour-10.json` answered `claims-behaviour-1.json`. Builds
+      routinely cut two-digit batch counts (mcpolis 24, reminderrepo 16), and on a reminderrepo-
+      shaped layout with only batch 1 undispatched the gate reported CLEAN over 39 unread claims —
+      the exact failure it exists to catch.
+    * **It accused a batch that WAS read.** `method/templates/skeptic-contract.md` is explicit that
+      «BATCH» is the skeptic's own id and «CLAIMS» the file it reads, and that the two "are NOT the
+      same thing": one skeptic may answer several small batches in one file. On the argus map
+      `verdicts-smallmix.json` and `verdicts-description.json` answer 77 of 77 claims across seven
+      batches, all seven of which the name match called unread — and the remedy the message offered
+      ("delete them") would have destroyed seven warrant files whose verdicts were sitting beside
+      them.
+
+    Pairing on the claim strings fixes both, needs no new data, and cannot collide. It also closes
+    the `touch` hole: an empty, truncated or non-JSON verdict file contributes no claims, where a
+    name match counted it as a review.
+
+    EVERY claim must be voted, not one of them, and the verdict must be NEWER than the batch. Both
+    halves were found by review, both were exploitable, and they compound:
+
+    * **Any-one.** `claims & answered` let a single voted claim clear a 40-claim batch. Demonstrated
+      end to end: one hand-written verdict file of 24 rows, one claim lifted from each of
+      mcpolis-rehearsal's unread batches, moved the whole map from BLOCKED to ADVISORIES with 925
+      of 949 claims still unread. The docstring said no flag lifts this gate; a 24-line file did.
+    * **Staleness.** `write_theme_batches` unlinks its own `claims-*` before each cut, and NOTHING
+      anywhere unlinks `verdicts-*`. The directory is committed and long-lived, so a fresh build's
+      batches were being answered by the PREVIOUS build's verdicts. Demonstrated on two real
+      consecutive mcpolis builds: 43 old verdict files cleared 2 of 52 fresh batches with no skeptic
+      dispatched at all — and that pair was a near-total rewrite where only 5 claim strings of 1791
+      survived. A rebuild after a SMALL edit re-mints nearly identical claims, where the same hole
+      opens all the way.
+
+    Requiring every claim is safe here, and that is measured rather than hoped: two independent
+    reviews found 0 non-verbatim echoes across 3,302 skeptic votes on five maps, every batch matching
+    at either 100% or 0%. The pipeline enforces it — `skeptic-contract.md` says "character for
+    character" and `challenge.py` already REFUSES a reworded claim — so this gate reuses the key the
+    rest of the pipeline already runs on rather than inventing a looser one.
+
+    KNOWN LIMIT, deliberate: the answered set is every verdict in the directory, with no way to tell
+    which build wrote it. `verdicts-*` is never swept, so a rebuild's batches can be cleared by an
+    earlier build's votes. Two non-fixes were tried and rejected. File mtime looks exact — the cut
+    rewrites every `claims-*` file, so a real answer is newer — but mtime records checkout, not
+    authorship: on the argus and mcpolis trees every claims file carries one `git` timestamp and
+    18 of 18 and 38 of 38 verdict files read as older, so the rule mass-blocks maps whose every
+    claim was answered. A run token in the payload would be exact and is a format change across the
+    contract, the templates and every skeptic.
+
+    What is left after requiring EVERY claim is small, and is provenance rather than substance. On
+    the two real consecutive mcpolis builds, 5 claim strings of 1791 survived, and under any-one
+    those 5 cleared 2 whole batches; under all-claims they clear nothing, because a batch needs all
+    of its claims voted. The case that still passes is a batch every claim of which is character-
+    identical to one a skeptic already voted on — the same sentence about the same code, read by
+    somebody. Which BUILD read it is `grounding write`'s question: it pins a worklist per build and
+    records the counts. This leg's question is whether anyone did.
+
+    A batch whose own file cannot be read, or that holds no claims, is SKIPPED rather than accused.
+    Nothing about it says a skeptic was or was not called. Note that no other gate covers it either:
+    `validate` never reads `verify/claims-*.json`, so emptying a batch's `claims` array silences
+    this leg with nothing else objecting. Deleting the batch is the sanctioned remedy and costs
+    nothing, so there is little to gain by corrupting one instead."""
+    if not verify.is_dir():
+        return BatchPairing(cut=[], unanswered=[])
+    batches = sorted(verify.glob("claims-*.json"))
+    answered = voted_claims(verdict_files(verify))
+    unanswered = [b for b in batches
+                  if (claims := set(batch_claims(b))) and (claims - answered)]
+    return BatchPairing(cut=batches, unanswered=unanswered)
+
+
+def _unanswered_prose_batches(verify: Path) -> BatchPairing:
+    """Prose batches with no verdict file beside them.
+
+    Prose batches carry reader-facing FIELDS, not claims, so there is no claim text to pair on and
+    this one stays a file pair. What it does not keep is the collision: the candidates are the exact
+    name and a `-`-separated suffix, never `verdicts-<stem>*`, so `verdicts-prose-10.json` no longer
+    answers `prose-1.json`. The coyomap map itself runs `prose-1` … `prose-10`, so that was live
+    surface. A zero-byte file does not count, which is the cheap half of the `touch` hole."""
+    if not verify.is_dir():
+        return BatchPairing(cut=[], unanswered=[])
+    batches = sorted(verify.glob("prose-*.json"))
+    unanswered: list[Path] = []
+    for b in batches:
+        found = [verify / f"verdicts-{b.stem}.json", *verify.glob(f"verdicts-{b.stem}-*.json")]
+        if not any(f.is_file() and f.stat().st_size > 0 for f in found):
+            unanswered.append(b)
+    return BatchPairing(cut=batches, unanswered=unanswered)
+
+
 def _undispatched_prose_leg(map_path: Path) -> Leg | None:
     """Prose batches written and sent to nobody.
 
@@ -572,19 +685,65 @@ def _undispatched_prose_leg(map_path: Path) -> Leg | None:
     tells the lead to dispatch the read fan-out. Without that sentence, delete this leg rather than
     keeping an unsatisfiable one."""
     verify = map_path.parent / "verify"
-    if not verify.is_dir():
-        return None
-    batches = sorted(verify.glob("prose-*.json"))
-    if not batches:
-        return None
-    if sorted(verify.glob("verdicts-prose-*.json")):
+    found = _unanswered_prose_batches(verify)
+    batches, unpaired = found.cut, found.unanswered
+    if not batches or not unpaired:
         return None
     return Leg(name="prose review", status=RAN, blocking=[], advisory=[
-        f"{len(batches)} prose batch(es) sit in {verify} and NO `verdicts-prose-*.json` beside "
-        f"them — they were written and dispatched to nobody. This is the fourth build running: one "
-        f"produced 459 reader-facing fields across 12 batches that no agent read. Dispatch them, "
-        f"or delete the batches so the next reader is not told a review happened."],
-        note=f"{len(batches)} batch(es) written, 0 dispatched")
+        f"{len(unpaired)} of {len(batches)} prose batch(es) sit in {verify} with NO "
+        f"`verdicts-<batch>.json` beside them — they were written and dispatched to nobody. This is "
+        f"the fourth build running: one produced 459 reader-facing fields across 12 batches that no "
+        f"agent read. Dispatch them, or delete the batches so the next reader is not told a review "
+        f"happened."],
+        note=f"{len(batches)} batch(es) written, {len(batches) - len(unpaired)} dispatched")
+
+
+def _undispatched_claims_leg(map_path: Path) -> Leg | None:
+    """Claim batches written and sent to nobody. BLOCKING.
+
+    `audit --batches` cuts one claims file per theme for the Phase-4 skeptics. Cutting them is one
+    command; DISPATCHING them is the lead's next act, and until this leg nothing refused a map whose
+    skeptics were never called. The 2026-09-08 mcpolis build cut 24 behaviour batches holding 949
+    claims — every flow title and every step phrase, the half of the map a reader actually reads —
+    and dispatched none of them. The map shipped ADVISORIES, and one of those unchallenged steps
+    said an expired sign-in warns the team's ADMIN when the code warns the affected USER: a
+    two-armed `if` recorded as one arm, on the line the step itself anchors.
+
+    BLOCKING, where the prose leg beside it is advisory, and the difference is whether a remedy
+    exists that costs nothing. It does, and it is in the message: dispatch the batches, or DELETE
+    them. A build that deletes them loses no work and states the truth, because a batch file sitting
+    beside a map says a review happened. That is why this one has no recorded-exception route and
+    does not need one — every other blocking finding in this command is a contradiction the lead
+    must reason about, and this is a file that should not be there.
+
+    The no-escape argument only holds while the accusation is TRUE, and the first version's was not:
+    pairing file names, it blocked argus over seven batches whose 77 claims were all answered, and
+    "delete them" there would have deleted warrant files. `finalize.py`'s access-baseline leg is
+    advisory for exactly that reason — see "FAILED BOTH REFERENCE MAPS" — and this leg would have
+    earned the same downgrade. Pairing on claim text instead, the six local maps split 3 clean
+    (coyomap, fresque, argus) and 3 blocked (mcpolis, its rehearsal copy, reminderrepo), and all
+    three blocks are real: 949 and 304 claims respectively appear in no verdict file at all.
+
+    It is deliberately a SECOND gate over the same fact. `grounding write` already refuses a
+    worklist claim with no verdict, and `--partial` lifts that refusal by design, for a pass that
+    was knowingly cut short. The mcpolis build took that route and shipped. A partial pass is a
+    legitimate thing to record; a batch nobody answered is not, and no flag here lifts it."""
+    verify = map_path.parent / "verify"
+    found = _unanswered_claim_batches(verify)
+    batches, unpaired = found.cut, found.unanswered
+    if not batches or not unpaired:
+        return None
+    themes = sorted({batch_theme(b) for b in unpaired})
+    voted = voted_claims(verdict_files(verify))
+    unread = sum(len(set(batch_claims(b)) - voted) for b in unpaired)
+    return Leg(name="skeptic dispatch", status=RAN, advisory=[], blocking=[
+        f"{len(unpaired)} of {len(batches)} claim batch(es) in {verify} hold {unread} claim(s) "
+        f"that no verdict file in that directory votes on: {', '.join(themes)}. Every one of those "
+        f"is in the map unchecked. Dispatch those batches to skeptics, or delete them — a batch "
+        f"file beside a map says a review happened. WHICH file answers a batch does not matter "
+        f"(one skeptic may answer several); answering ALL of its claims does, so a verdict file "
+        f"covering one claim in forty clears nothing, and nor does `grounding write --partial`."],
+        note=f"{len(batches)} batch(es) cut, {len(batches) - len(unpaired)} answered")
 
 
 def _balance_leg(map_path: Path) -> Leg:
@@ -765,6 +924,7 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         *([_access_baseline_leg(map_path, access_baseline)] if access_baseline else []),
         *([leg for leg in (_budget_leg(map_path, repo),) if leg is not None]),
         *([leg for leg in (_undispatched_prose_leg(map_path),) if leg is not None]),
+        *([leg for leg in (_undispatched_claims_leg(map_path),) if leg is not None]),
         _balance_leg(map_path),
     ]
     blocking = sum(len(l.blocking) for l in legs)
