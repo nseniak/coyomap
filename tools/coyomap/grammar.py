@@ -40,9 +40,10 @@ DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "libr
 #: map, and none of the five overlaps: an interface's, a way in's, an actor's, a dependency's, this.
 #:   screen  a page a person uses              check   decides whether something is allowed
 #:   api     an entry the product's own         store   keeps records
-#:           screens or clients call            pipe    passes calls on, adding nothing
-#:   logic   does the work                      job     runs on its own schedule
+#:           screens or clients call            pipe    passes calls on and decides nothing
+#:   logic   does the work                      job     runs unasked: a timer, or each start
 #:                                              wiring  assembles and starts the product
+#: The harvest contract is where each word is defined for the agents that choose it.
 #: Measured on mcpolis before it existed: 8 of its 15 screens had a name that never said it was a
 #: screen ("Team MCPs"), and neither a story's shape nor a file's place could tell a screen from a
 #: pipe, so the kind is authored, never derived.

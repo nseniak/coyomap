@@ -74,10 +74,11 @@ lead; nothing above this line goes into an agent prompt.
 > subsystems and recurse into their units; far over, you are splitting module-sized units.
 > **Give every component a `kind`**, one word for what kind of thing it is: `screen` (a page a
 > person uses), `api` (an entry the product's own screens or clients call), `logic` (does the work),
-> `check` (decides whether something is allowed), `store` (keeps records), `pipe` (passes calls on,
-> adding nothing: an API client, a request helper), `job` (runs on its own schedule), `wiring`
-> (assembles and starts the product). One word from these eight, never another. The name stays free:
-> the kind is said here, once, and a reader sees it beside the name.
+> `check` (decides whether something is allowed), `store` (keeps records), `pipe` (passes calls on
+> and DECIDES nothing: an API client, a request helper; adding a cookie, a header or a retry on the
+> way is still a pipe), `job` (runs without being asked: on a timer, or once each time the product
+> starts), `wiring` (assembles and starts the product). One word from these eight, never another.
+> The name stays free: the kind is said here, once, and a reader sees it beside the name.
 > **Name a subsystem for its JOB**, the way its `purpose` opens ("Managing teams and members",
 > "Serving tools"), never a bare topic noun ("Teams and members"): a reader takes a topic for a
 > store of data. **Test code is not a component**: test cases, fixtures and test helpers are left to

@@ -100,7 +100,8 @@ lead; nothing above this line goes into an agent prompt.
 >   shows the phrase ON ITS OWN as the step's title, with no subject in front of it, so a third-person
 >   verb there reads as a sentence missing its start. It is also the form a use case's name and a
 >   shared sub-flow's name already take, which is what lets one line title either kind of step.
->   A condition or qualifier belongs in `note`, never in `phrase`.
+>   A condition or qualifier belongs in `note`, never in `phrase`, except the words that are the
+>   step's point: "delete the account for good" keeps "for good", because that is what the step does.
 > - **A step where the code DECIDES says its condition in `note`.** When the step checks a
 >   permission, a limit or an input and can refuse the story or send it another way, the note says
 >   when the story goes on or when it stops: "only when the role allows the tool", "refused once the
@@ -108,12 +109,15 @@ lead; nothing above this line goes into an agent prompt.
 >   the one place that says which way it goes.
 > - **Every element↔element step carries its own `where`** — the `path:line` in the `src` side's code
 >   where THIS step's action fires. Not the callee's definition. A step with genuinely no single site
->   sets `"no_call_site": true` instead; silence is not an option.
+>   sets `"no_call_site": true` instead; silence is not an option. A step FROM a door, a file or a
+>   command line has no code of its own: its `where` is the line where the receiving side takes it
+>   in (the route, the handler, the read).
 > - **Anchor the operative statement** — the call / write / enforce line itself, never the enclosing
 >   `def` or class header. That header is the most common drift the adversarial pass finds.
 > - **Four arrow mistakes, named**, because each one draws a story the code does not run:
->     1. **Reversed** — the step points from the called side to the caller. `src` is the side
->        whose code makes the call, at `where`.
+>     1. **Reversed** — a CALL drawn from the called side to the caller. `src` is the side whose
+>        code makes the call, at `where`. An answer is a step of its own going back the other way,
+>        and is not reversed.
 >     2. **An invented pipeline** — `A → B → C` when A calls B and then calls C itself. Chain two
 >        steps only when B's own code makes the second call.
 >     3. **A skipped middle** — `A → C` when A calls B and B calls C. Every box the call passes
