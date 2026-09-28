@@ -4392,31 +4392,34 @@ def make_whole_product_text(mutate: Any) -> dict[str, Any]:
     return gen_arch_views(model_to_graph(load_model(json.dumps(m))))[1]["all|"]
 
 
-def test_a_group_of_parts_counts_its_parts_shows_its_subsystem_and_keeps_its_own_steps() -> None:
-    """A group of parts is its subsystem's box on the layered picture. It counts only the parts it
-    holds; the box around the name selects it, shows the subsystem's card and keeps the group's own
-    steps in the text; the name opens the subsystem."""
+def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_steps() -> None:
+    """A group of parts is its subsystem's box on the layered picture. It names the parts it holds,
+    each a tag that opens that part, in place of the subsystem's sentence; the box around the name
+    selects it, shows the subsystem's card and keeps the group's own steps in the text; the name
+    opens the subsystem."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
     with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        # A GROUP BOX A READER CAN CLICK: its sentence on screen, and not under a line or a label.
+        # A GROUP BOX A READER CAN CLICK: a point inside the box, clear of its name, its tags and the
+        # drill icon on its top-left corner, and not under a line or a label: its bottom-right corner.
         spot = page.evaluate("""() => {
-            const hit = (n) => {
-                const w = n.querySelector('.ibox-what').getBoundingClientRect();
-                const el = document.elementFromPoint(w.left + w.width / 2, w.top + w.height / 2);
-                return !!el && n.contains(el);
-            };
+            const at = (n) => { const b = n.querySelector('.ibox').getBoundingClientRect();
+                                return { x: b.right - 4, y: b.bottom - 4 }; };
+            const hit = (n) => { const p = at(n); const el = document.elementFromPoint(p.x, p.y);
+                                 return !!el && n.contains(el); };
             const n = [...document.querySelectorAll('#diagram g.node')]
               .find((x) => [...x.classList].some((c) => c.startsWith('cy-CYG')) && hit(x));
-            const w = n.querySelector('.ibox-what').getBoundingClientRect();
             const l = n.querySelector('.ibox-name').getBoundingClientRect();
-            return { id: [...n.classList].find((c) => c.startsWith('cy-CYG')).slice(3),
-                     band: n.querySelector('.ibox-band').textContent,
-                     x: w.left + w.width / 2, y: w.top + w.height / 2,
+            return { id: [...n.classList].find((c) => c.startsWith('cy-CYG')).slice(3), ...at(n),
+                     tags: [...n.querySelectorAll('.item-pill')].map((t) => t.dataset.item),
+                     more: (n.querySelector('.ibox-band .ibox-count') || {}).textContent || '',
+                     sentence: !!n.querySelector('.ibox-what'),
                      nameX: l.left + l.width / 2, nameY: l.top + l.height / 2 };
         }""")
         group = groups[spot["id"]]
-        assert spot["band"].startswith(f"{len(group['parts'])} components"), (spot, group)
+        named = group["parts"] if len(group["parts"]) <= 4 else group["parts"][:3]
+        assert spot["tags"] == named and not spot["sentence"], (spot, group)
+        assert spot["more"] == ("" if len(group["parts"]) <= 4 else f"+{len(group['parts']) - 3} more"), spot
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({ hash: location.hash,
@@ -4425,6 +4428,11 @@ def test_a_group_of_parts_counts_its_parts_shows_its_subsystem_and_keeps_its_own
         assert "node%3A" + spot["id"] in seen["hash"], seen
         assert seen["card"] == group["sub"], seen
         assert seen["head"].startswith("Only the steps through") and "(Work)" in seen["head"], seen
+        # A TAG OPENS ITS PART, not the box around it.
+        page.evaluate(f"""() => document.querySelector('#diagram g.cy-{spot["id"]} .item-pill-door').click()""")
+        page.wait_for_function(f"() => location.hash.includes('node%3A{named[0]}')")
+        page.goto(url + "#v=arch&cap=all")
+        _arch_ready(page)
         page.mouse.click(spot["nameX"], spot["nameY"])
         page.wait_for_function("() => location.hash.includes('v=subsystem')")
         assert f"sid={group['sub']}" in page.evaluate("() => location.hash")

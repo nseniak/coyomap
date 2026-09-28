@@ -1401,7 +1401,7 @@ class _ArchCell(TypedDict):
     sit in one layer (`_arch_lift`)."""
     sub: str           # the top-level subsystem
     frame: int         # its layer: an index into `grammar.COMPONENT_KIND_FRAMES`, their count for none
-    parts: list[str]   # the components it holds, first met first
+    parts: list[str]   # the components it holds, the ones most stories pass through first
 
 
 class _ArchLifted(_ArchFlow):
@@ -1448,13 +1448,13 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
     the one every part's box already names in its pill, so a group is named by what the reader saw."""
     nodes = graph["nodes"]
     used: dict[str, set[str]] = {}
-    met: dict[str, None] = {}   # every component the stories use, first met first
-    for _, steps in flow["walks"]:
+    met: dict[str, set[str]] = {}   # every component the stories use, first met first -> those stories
+    for uc, steps in flow["walks"]:
         for s, d in steps:
             for x in (s, d):
                 if str(nodes.get(x, {}).get("kind")) == "component":
                     used.setdefault(str(nodes[x].get("parent") or x), set()).add(x)
-                    met.setdefault(x, None)
+                    met.setdefault(x, set()).add(uc)
     # A STORE AND A CHECK STAND ALONE (`grammar.COMPONENT_KINDS_STANDING_ALONE`): the records a
     # subsystem keeps and the gate a story passes are the two things a reader looks for inside it,
     # and inside the subsystem's box neither can be seen. The rest of the subsystem is still one box,
@@ -1470,7 +1470,11 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
             if area:
                 groups.setdefault((_arch_frame(graph, c), area), []).append(c)
         box_of = {c: c for c in met}
+        order = list(met)
         for (frame, area), parts in groups.items():
+            # A GROUP'S BOX NAMES ITS PARTS, and names only the first few when it holds many: those are
+            # the ones most of this picture's stories pass through.
+            parts.sort(key=lambda c: (-len(met[c]), order.index(c)))
             if len(parts) > 1:
                 cid = _arch_cell_id(frame, area)
                 cells[cid] = _ArchCell(sub=area, frame=frame, parts=parts)

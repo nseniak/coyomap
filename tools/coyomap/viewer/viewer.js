@@ -1159,7 +1159,9 @@ function itemBoxHtml(spec, variant, opts) {
       // to build one shipped a tag with no mark at all — which is what a shared sub-use case's box did
       // on the use case map, beside an interface's box whose tags had theirs. One place decides.
       + (spec.chips || []).map((c) => itemPillHtml(c.id || '', {
-          kind: c.kind, name: c.name, ikind: c.ikind, inBox: true, cls: c.cls })).join('');
+          kind: c.kind, name: c.name, ikind: c.ikind, inBox: true, cls: c.cls })).join('')
+      // …and how many a box holds past the tags it names (`spec.more`), after them.
+      + (spec.more ? `<span class="ibox-count">+${Number(spec.more)} more</span>` : '');
     if (bits) out.push(`<span class="ibox-band">${bits}</span>`);
   }
   // The THING's own last line before the CALLER's: a provider belongs to the door wherever it is
@@ -1253,14 +1255,22 @@ function componentKindsLabel(ids) {
   return COMPONENT_KIND_ORDER.filter((k) => ids.some((x) => ((GRAPH.nodes[x] || {}).component_kind || '') === k))
     .map((k) => COMPONENT_KIND_WORD[k] || k).join(' · ');
 }
-// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, counting only the parts
-// it holds there. The same subsystem has a group in each layer it has parts in, so the whole
-// subsystem's count would say the same number in every layer, and be true in none of them.
+// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, NAMING the parts it holds
+// there, each a tag that opens that part. The names take the place of the subsystem's sentence, which
+// is the same in every layer's box of one subsystem (4 boxes on mcpolis's Upstream MCPs) and so said
+// nothing about THIS box. Every name up to CELL_NAMES_ALL; past that the first CELL_NAMES_SHOWN,
+// which the generator orders by how many of the picture's stories pass through each part, then how
+// many more. No kind word either: the frame around the box already says the layer.
+const CELL_NAMES_ALL = 4;
+const CELL_NAMES_SHOWN = 3;
 function itemSpecCell(sid, parts) {
   const spec = itemSpecOf(sid);
   if (!spec) return null;
-  const kinds = componentKindsLabel(parts);
-  spec.band = [countLabel(parts.length, 'component'), ...(kinds ? [kinds] : [])];
+  const shown = parts.length <= CELL_NAMES_ALL ? parts : parts.slice(0, CELL_NAMES_SHOWN);
+  spec.what = '';
+  spec.band = [];
+  spec.chips = shown.map((p) => ({ id: p, kind: 'component', name: (GRAPH.nodes[p] || {}).name || p }));
+  spec.more = parts.length - shown.length;
   return spec;
 }
 // ── THE SLOT: how an item box gets onto a drawing ───────────────────────────────────────────────

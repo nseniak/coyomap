@@ -364,6 +364,18 @@ def test_the_parts_of_one_subsystem_in_one_layer_are_one_box():
                        ("Member", "I2"), ("I2", group)}
 
 
+def test_a_group_lists_first_the_parts_most_stories_pass_through():
+    """The Checker is met first, but two stories pass through the API and one through the Checker:
+    the box names the API first, and past a few names it names only the busiest."""
+    graph = make_graph(make_grouped_map())
+    flow = gv._ArchFlow(walks=[("UC1", [("C4", "C5")]), ("UC2", [("C3", "C5")]), ("UC3", [("C3", "C5")])],
+                        phrases={uc: ["x"] for uc in ("UC1", "UC2", "UC3")},
+                        keys={uc: [[]] for uc in ("UC1", "UC2", "UC3")},
+                        people=[], doors=[], stores=[], ends={})
+    lifted = gv._arch_lift(graph, flow, layered=True)
+    assert lifted["cells"][gv._arch_cell_id(2, "S2")]["parts"] == ["C3", "C4"]
+
+
 def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
     graph = make_graph(make_grouped_map())
     drawings, texts = gv.gen_arch_views(graph)
