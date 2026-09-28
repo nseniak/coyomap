@@ -527,12 +527,17 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   from the manifests, not a stack essay. Subsystem-only (`validate` blocks it on subdomains).
 - **T1 Components**: `Component | Kind | Subsystem | Purpose | Entry point | Depends on` (the
   `Subsystem` cell is the component's one parent `S`, or empty = ungrouped).
-  **`Kind` is one word for what kind of thing the component is**: `screen`, `api`, `logic`,
-  `check`, `store`, `pipe`, `job` or `wiring` (the harvest contract says what each means). The
-  name stays free, and the kind is shown beside it. The Architecture picture acts on it: it draws
+  **`Kind` is one word for what kind of thing the component is**: a known word, `screen`,
+  `command`, `script`, `api`, `logic`, `check`, `job`, `instructions`, `store`, `pipe` or `wiring`
+  (the harvest contract says what each means), or a word the map MINTS when none fits. A minted word
+  is declared once for the whole map in `component_kinds`, with one sentence saying what it is and
+  the known word it acts as, so it means one thing on every component that uses it. The name stays
+  free, and the kind is shown beside it. The Architecture picture acts on the known word: it draws
   through a `pipe` and the `wiring`, and draws a `store` and a `check` as boxes of their own inside
   their subsystem. Optional in the file, so a map built before it still loads; `validate` blocks a
-  word outside the eight and advises on a component with none once others have one. It also advises
+  word that is neither known nor declared and a declaration that cannot say how to draw it, advises
+  on a component with no kind once others have one, and on a minted word only one component uses
+  (usually a known word in other clothes). It also advises
   on a `pipe` that decides or is a way in (a rule enforced in its files, an entry point something
   outside calls), because the picture would hide it; one kept a pipe on purpose is recorded as
   `<Cn>: <why>` under the `Kind exceptions` extras heading.
