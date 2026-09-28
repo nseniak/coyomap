@@ -318,12 +318,13 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
     graph = make_graph(make_layered_map())
     drawings, _texts = gv.gen_arch_views(graph)
     drawing = drawings["all|CAP1"]
-    for label in ("UI", "APIs", "Work", "Storage", "Outside services"):
+    # the work layer names what it holds: here the Checker alone
+    for label in ("UI", "APIs", "Checks", "Storage", "Outside services"):
         assert f'["{label}"]' in drawing, label
     # on a feature's picture the door is in no frame: it sits between the people and the first
     # frame, tied above it
     assert frames_of(drawing, ("I1", "C1", "C3", "C4", "C5", "D1")) == {
-        "C1": "UI", "C3": "APIs", "C4": "Work", "C5": "Storage", "D1": "Outside services"}
+        "C1": "UI", "C3": "APIs", "C4": "Checks", "C5": "Storage", "D1": "Outside services"}
     assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
 
 
@@ -343,7 +344,7 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     assert frames_of(drawing, (who, "I1")) == {who: "People", "I1": "Interfaces"}
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     assert layer[("People", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
-    assert layer[("APIs", "Work")] == [["C3", "C4"]]
+    assert layer[("APIs", "Checks")] == [["C3", "C4"]]
     # no box's own line is drawn, and nothing ties one box to another: each frame is then laid out on
     # its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
@@ -425,11 +426,11 @@ def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
     drawing = drawings["all|"]
     assert (f'{group}["<span class=cyslot data-k=cell data-v=map data-id=S2 data-parts=C3%2CC4></span>"]'
             f":::cy-{group}") in drawing
-    work = drawing.split('["Work"]')[1].split("\n  end")[0]
+    work = drawing.split('["Logic and checks"]')[1].split("\n  end")[0]
     assert f"  {group}[" in work
     assert texts["all|"]["cells"] == {group: {"sub": "S2", "parts": ["C3", "C4"]}}
     line = next(e for e in texts["all|"]["lines"] if e["srcBox"] == "C1")
-    assert line["dstBox"] == group and line["dst"] == "Server (Work)"
+    assert line["dstBox"] == group and line["dst"] == "Server (Logic and checks)"
 
 
 def make_map_with_a_line_up() -> dict[str, Any]:

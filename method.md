@@ -528,8 +528,10 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
 - **T1 Components**: `Component | Kind | Subsystem | Purpose | Entry point | Depends on` (the
   `Subsystem` cell is the component's one parent `S`, or empty = ungrouped).
   **`Kind` is one word for what kind of thing the component is**: a known word, `screen`,
-  `command`, `script`, `api`, `logic`, `check`, `job`, `instructions`, `store`, `pipe` or `wiring`
-  (the harvest contract says what each means), or a word the map MINTS when none fits. A minted word
+  `command`, `script`, `api`, `logic`, `check`, `instructions`, `store`, `pipe` or `wiring`
+  (the harvest contract says what each means), or a word the map MINTS when none fits. It says
+  what the part DOES, never how it starts: a timer or the product's start is recorded by the part's
+  ways in, and `validate` refuses a minted word that names one. A minted word
   is declared once for the whole map in `component_kinds`, with one sentence saying what it is and
   the known word it acts as, so it means one thing on every component that uses it. The name stays
   free, and the kind is shown beside it. The Architecture picture acts on the known word: it draws

@@ -43,20 +43,29 @@ DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "libr
 #: interface's, a way in's, an actor's, a dependency's, this.
 #:   screen   a page a person uses                   logic         does the work
 #:   command  the product's own command line          check         decides whether something is allowed
-#:   script   a script a person runs by hand          job           runs unasked: a timer, or each start
-#:   api      an entry the product's own screens      instructions  text an agent follows: a skill, a prompt
-#:            or clients call                         store         keeps records
-#:                                                    pipe          passes calls on and decides nothing
+#:   script   a script a person runs by hand          instructions  text an agent follows: a skill, a prompt
+#:   api      an entry the product's own screens      store         keeps records
+#:            or clients call                         pipe          passes calls on and decides nothing
 #:                                                    wiring        assembles and starts the product
+#: HOW A PART STARTS IS NOT ITS KIND. `job` was a known word ("runs unasked: a timer, or each start")
+#: and it answered a different question from the rest: a part that runs on a timer still does work
+#: or decides. On mcpolis it named 1 of the 4 parts whose ways in start them on their own, and one it
+#: named had no such way in. The ways in hold that fact (`ENTRY_POINT_KINDS_SELF`), and the viewer
+#: shows it on the part.
 #: The harvest contract is where each word is defined for the agents that choose it.
 #: Measured on mcpolis before it existed: 8 of its 15 screens had a name that never said it was a
 #: screen ("Team MCPs"), and neither a story's shape nor a file's place could tell a screen from a
 #: pipe, so the kind is authored, never derived. `command`, `script` and `instructions` joined the
 #: first eight after partial runs found no word for coyomap's own command line, for an operator's
 #: hand-run script, and for the method files an agent follows.
-COMPONENT_KINDS = ("screen", "command", "script", "api", "logic", "check", "job", "instructions",
+COMPONENT_KINDS = ("screen", "command", "script", "api", "logic", "check", "instructions",
                    "store", "pipe", "wiring")
 COMPONENT_KIND_WORDS = {"api": "API", "screen": "UI"}   # how a kind is written on a box; every other word as stored
+#: How a kind is written in a layer's name, where the layer lists the kinds it holds ("UI and
+#: scripts", "Logic and checks"): the word a box shows, as many.
+COMPONENT_KIND_PLURALS = {"screen": "UI", "command": "commands", "script": "scripts", "api": "APIs",
+                          "logic": "logic", "check": "checks", "instructions": "instructions",
+                          "store": "stores", "pipe": "pipes", "wiring": "wiring"}
 COMPONENT_KINDS_DRAWN_THROUGH = ("pipe", "wiring")   # the Architecture picture joins the lines around them
 COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as boxes of their own
 #: THE LAYERS a component is drawn in, top to bottom, and the known words each holds. What people
@@ -66,7 +75,7 @@ COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as box
 COMPONENT_KIND_FRAMES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Screens and commands", ("screen", "command", "script")),
     ("APIs", ("api",)),
-    ("Work", ("logic", "check", "job", "instructions")),
+    ("Work", ("logic", "check", "instructions")),
     ("Storage", ("store",)),
 )
 

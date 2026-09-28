@@ -71,6 +71,26 @@ def test_every_known_word_is_accepted_the_three_new_ones_too():
     assert {"command", "script", "instructions"} <= set(grammar.COMPONENT_KINDS)
 
 
+def test_how_a_part_starts_is_not_a_kind():
+    """A timer or the product's start is what a part's ways in record: `job` is no known word, and a
+    word minted to say it is refused, whatever it acts as."""
+    assert "job" not in grammar.COMPONENT_KINDS
+    problems, _ = findings(make_map(C1="screen", C2="job"))
+    assert any(p.startswith("C2 (Team store) kind='job'") for p in problems), problems
+    for word in ("job", "cron"):
+        problems, _ = findings(make_minted_map(word=word, acts_as="logic", C1="screen", C2=word))
+        assert any(f"'{word}' names how a part starts" in p for p in problems), (word, problems)
+
+
+def test_a_part_whose_way_in_runs_on_its_own_says_it_starts_on_its_own():
+    doc = make_map(C1="screen", C2="logic")
+    doc["entry_points"] = [{"kind": "job", "trigger": "every hour", "component": "C2", "source": "src/store.py:9"},
+                           {"kind": "ui-route", "trigger": "open /team", "component": "C1", "source": "src/page.ts:1"}]
+    nodes = model_to_graph(load_model(json.dumps(doc)))["nodes"]
+    assert nodes["C2"]["fields"].get("Starts") == "on its own"
+    assert "Starts" not in nodes["C1"]["fields"]
+
+
 def test_a_declared_word_is_accepted_and_acts_as_its_known_word():
     problems, _ = findings(make_minted_map(C1="skill", C2="store"))
     assert not any("kind" in p for p in problems), problems

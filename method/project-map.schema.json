@@ -574,7 +574,6 @@
             "api",
             "logic",
             "check",
-            "job",
             "instructions",
             "store",
             "pipe",
@@ -611,7 +610,7 @@
         },
         "kind": {
           "type": "string",
-          "description": "what kind of thing the component is, in one word: a known word (screen, command, script, api, logic, check, job, instructions, store, pipe, wiring), or a word the map declares in component_kinds. '' = not stated (a map built before the field)."
+          "description": "what kind of thing the component is, in one word: a known word (screen, command, script, api, logic, check, instructions, store, pipe, wiring), or a word the map declares in component_kinds. '' = not stated (a map built before the field)."
         },
         "depends_on": {
           "type": "string"

@@ -1445,18 +1445,16 @@ def _arch_layer_label(layer: int) -> str:
 
 
 def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
-    """A layer's name ON ONE PICTURE. The first layer names only the kinds of part it holds there,
-    "UI" or "UI and scripts": its three kinds are what a person drives directly, and only 2 of
-    mcpolis's 11 pictures held more than one of them, under a name that promised all three. Each kind
-    is written as a box writes it (`grammar.COMPONENT_KIND_WORDS`), and a word in capitals takes no
-    plural."""
-    first = grammar.COMPONENT_KIND_FRAMES[0][1]
-    if layer != 0:
+    """A layer's name ON ONE PICTURE. A layer that can hold several kinds names only the kinds it
+    holds there: "UI" or "UI and scripts", "Logic" or "Logic and checks". Only 2 of mcpolis's 11
+    pictures held more than one kind in the first layer, under a name that promised all three, and
+    "Work" named no kind at all. Each kind is written as `grammar.COMPONENT_KIND_PLURALS` writes it."""
+    frames = grammar.COMPONENT_KIND_FRAMES
+    if not 0 <= layer < len(frames) or len(frames[layer][1]) < 2:
         return _arch_layer_label(layer)
-    held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == 0
+    held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == layer
             for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
-    shown = [grammar.COMPONENT_KIND_WORDS.get(w, w) for w in first if w in held]
-    names = [w if w.isupper() else f"{w}s" for w in shown]
+    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in frames[layer][1] if w in held]
     if not names:
         return _arch_layer_label(layer)
     said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"

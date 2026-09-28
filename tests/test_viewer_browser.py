@@ -4427,7 +4427,8 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
             head: document.querySelector('#archtext .archtext-filter').textContent })""")
         assert "node%3A" + spot["id"] in seen["hash"], seen
         assert seen["card"] == group["sub"], seen
-        assert seen["head"].startswith("Only the steps through") and "(Work)" in seen["head"], seen
+        # every part does work in this map, so the work layer names only "Logic"
+        assert seen["head"].startswith("Only the steps through") and "(Logic)" in seen["head"], seen
         # A TAG OPENS ITS PART, not the box around it.
         page.evaluate(f"""() => document.querySelector('#diagram g.cy-{spot["id"]} .item-pill-door').click()""")
         page.wait_for_function(f"() => location.hash.includes('node%3A{named[0]}')")

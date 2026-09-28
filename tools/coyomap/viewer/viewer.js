@@ -842,6 +842,9 @@ function cardFacts(id) {
   // A COMPONENT'S KIND beside its name ("Team MCPs · screen"): the name alone did not say whether a
   // box is a page, the logic or the data, and the kind says it once, as a dependency's does.
   if (n.kind === 'component' && f.Kind) pills.push({ text: f.Kind, cls: 'comp-kind' });
+  // …and whether it STARTS ON ITS OWN, a timer or the product's start: its kind says what it does,
+  // and this says what its ways in say about how it starts (views.py `Starts`).
+  if (n.kind === 'component' && f.Starts) pills.push({ text: 'starts on its own', cls: 'comp-starts' });
   return { id, kind: n.kind, name: n.name || id, type: elementLabel(n.kind), desc, pills };
 }
 
@@ -8096,7 +8099,7 @@ function archKeyHtml(layers) {
 const RULE_MARK = '⚖';
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
-const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'job', 'instructions',
+const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'instructions',
   'store', 'pipe', 'wiring'];
 const COMPONENT_KIND_WORD = { api: 'API', screen: 'UI' };
 const ARCH_STORE_LINE = '#0f766e';

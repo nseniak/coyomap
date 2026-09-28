@@ -7047,6 +7047,9 @@ def component_kind_problems(m: ProjectModel) -> list[str]:
         seen.add(word)
         if word in grammar.COMPONENT_KINDS:
             found.append(f"component_kinds: '{word}' is a known word — use it as it is, never declare it")
+        if grammar.canonical_entry_kind(word) in grammar.ENTRY_POINT_KINDS_SELF:
+            found.append(f"component_kinds: '{word}' names how a part starts, which its ways in record — "
+                         "give the part the kind of what it does (logic, check)")
         if k.acts_as.strip() not in grammar.COMPONENT_KINDS:
             found.append(f"component_kinds: '{word}' acts_as='{k.acts_as}' — must be one known word: {words}")
         if not k.meaning.strip():

@@ -76,11 +76,12 @@ lead; nothing above this line goes into an agent prompt.
 > one fits: `screen` (a page a person uses), `command` (the product's own command line, the commands
 > a person or an agent types), `script` (a script a person runs by hand to operate the product),
 > `api` (an entry the product's own screens or clients call), `logic` (does the work), `check`
-> (decides whether something is allowed), `job` (runs without being asked: on a timer, or once each
-> time the product starts), `instructions` (text an agent follows: a skill, a prompt, a method
-> document), `store` (keeps records), `pipe` (passes calls on and DECIDES nothing: an API client, a
-> request helper; adding a cookie, a header or a retry on the way is still a pipe), `wiring`
-> (assembles and starts the product). **When none fits, mint a word and declare it** in your
+> (decides whether something is allowed), `instructions` (text an agent follows: a skill, a prompt,
+> a method document), `store` (keeps records), `pipe` (passes calls on and DECIDES nothing: an API
+> client, a request helper; adding a cookie, a header or a retry on the way is still a pipe),
+> `wiring` (assembles and starts the product). **How a part STARTS is not its kind:** a part a timer
+> or the product's start runs takes the word for what it does (`logic`, `check`), and its way in
+> (`job`, `startup-hook`) says how it starts. **When none fits, mint a word and declare it** in your
 > fragment's `component_kinds`, once: `{"word": "<the word>", "meaning": "<one sentence: what a
 > component of this kind is>", "acts_as": "<the known word it is drawn as>"}`. Never mint a word for
 > a thing a known word already names ("service" is `logic`). Another slice may mint the same word:
