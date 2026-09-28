@@ -3604,12 +3604,19 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-following path.flowchart-link:not(.arch-story-on) { opacity: .18; }
 .arch-following g.edgeLabel:not(.arch-story-on) { opacity: .18; }
 .arch-following g.node:not(.arch-story-on) { opacity: .3; }
-/* A CROWDED PICTURE (viewer.js markLayerLines): its lines between layers show at rest; a box
-   line shows when its box or its layer line is picked, when its story is followed, or when its entry
-   in the text is. A layer line steps back while a box's lines show, and goes while a story is followed. */
-.arch-layers .arch-boxline:not(.arch-shown):not(.arch-story-on):not(.arch-hl) { display: none; }
+/* A CROWDED PICTURE (viewer.js markLayerLines) draws only its lines between layers. A box's own lines
+   are drawn on top when asked (archOverlay); a layer line steps back while they show, and goes while a
+   story is followed. */
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
+.arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
+.arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
+.arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
+.arch-ov-head { fill: #4f46e5; }
+.arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
+.arch-ov-num { font: 600 11px system-ui, sans-serif; fill: #312e81; text-anchor: middle;
+               dominant-baseline: middle; cursor: pointer; }
+.arch-ov-numbg { fill: #eef2ff; stroke: #c7d2fe; }
 .arch-following path.flowchart-link.arch-story-on { stroke: #4f46e5 !important; stroke-width: 2.2px !important; }
 .flow-rule-mark { color: #6d28d9; }

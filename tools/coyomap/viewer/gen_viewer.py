@@ -1848,9 +1848,11 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     is drawn only when a part of the picture is in it.
 
     `by_layer`: a CROWDED layered picture, one with more than `ARCH_CROWDED_LINES` lines, draws one
-    line per pair of layers (`_arch_layer_lines`). The people and the interfaces they come through sit
-    in frames of their own there, so a line can leave them too. Every box's own lines are still drawn,
-    after the boxes and before the layer lines, and the view shows them only on a click."""
+    line per pair of layers (`_arch_layer_lines`) and no box's own line. The people and the interfaces
+    they come through sit in frames of their own there, so a line can leave them too. With no line
+    touching a box, the drawing tool lays each frame out on its own, as one row of its boxes: drawn
+    even hidden, the box lines had spread mcpolis's frames until their boxes filled 6% to 19% of them.
+    The view draws a box's own lines on top of the picture when asked."""
     whole = by_layer and layered
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
     lines = [SLOT_MAP_INIT, "flowchart TB"]
@@ -1858,7 +1860,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     def framed(members: list[str], fid: str, label: str, framing: bool = True) -> None:
         if layered and framing and members:
             lines.append(f'  subgraph {fid}["{label}"]')
-            lines.append("    direction LR")
+            # A ROW: the tool places boxes with no line between them in one rank, and a rank is a row
+            # when the frame runs top to bottom. It honours this only in a frame no box line touches.
+            lines.append("    direction TB" if whole else "    direction LR")
 
     def unframed(members: list[str], framing: bool = True) -> None:
         if layered and framing and members:
@@ -1915,7 +1919,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         # work frame would otherwise be laid beside the frames above it.
         order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
                  for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members for b in nxt]
-        if not whole:   # on the whole picture the doors have a frame, and the ties above cover them
+        if whole:   # a crowded picture's frames are tied as frames: a tie is a line, and it touches no box
+            order = [f"  {f} ~~~ {g}" for (f, _m), (g, _n) in zip(drawn, drawn[1:])]
+        else:
             order += [f"  {d} ~~~ {_arch_box_id(model, b)}" for d in model["doors"] for b in drawn[0][1]]
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the
         # line styles below and the view's pairing of a line with its label count by that number.
@@ -1982,7 +1988,9 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     by_step = cast("dict[str, list[str]]", cast("dict[str, Any]", graph.get("rules_view") or {}).get("byStep") or {})
     folded: list[str] = []
     keeping: list[str] = []
-    for n_line, ln in enumerate(model["lines"]):
+    # A CROWDED PICTURE (`layer_lines`) draws none of its boxes' own lines: see `_arch_mermaid`.
+    box_lines = model["lines"] if layer_lines is None else []
+    for n_line, ln in enumerate(box_lines):
         # NO WORD IS PUT ON A STEP THAT HAS NO VERB. The step's own phrase is a sentence, too long
         # for a line, and the link list has none for this pair; a filler verb was tried and took
         # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries its number.
@@ -2006,9 +2014,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
             # frames stood side by side. The drawing tool has no way to put one head at the start.
             head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
         lines.append(f"  {a} {head}|{label}| {b}")
-    # THE LINES BETWEEN LAYERS come after every box's own line, so the view finds each kind by its
-    # number: a box line below `len(model["lines"])`, a layer line from there. Thick, and labelled with
-    # how many lines each stands for.
+    # THE LINES BETWEEN LAYERS, thick, and labelled with how many lines each stands for.
     thick: list[str] = []
     for k, ll in enumerate(layer_lines or []):
         a, b = _arch_frame_id(ll["src"]), _arch_frame_id(ll["dst"])
@@ -2016,7 +2022,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         if ll["up"]:   # drawn from the upper layer, for the reason a box line up the layers is
             head, a, b = "<-->", b, a
         lines.append(f"  {a} {head}|{_edge_label(str(len(ll['lines'])))}| {b}")
-        thick.append(str(len(model["lines"]) + k))
+        thick.append(str(len(box_lines) + k))
     if thick:
         lines.append(f"  linkStyle {','.join(thick)} stroke:#334155,stroke-width:2.6px,color:#334155")
     if folded:

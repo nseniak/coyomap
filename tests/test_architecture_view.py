@@ -336,11 +336,16 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     assert layer[("People", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
     assert layer[("APIs", "Work")] == [["C3", "C4"]]
-    # after every box line, so the view tells the two kinds apart by their number
-    links = [ln for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
-    assert len(links) == len(text["lines"]) + len(text["layerLines"])
-    assert links[len(text["lines"])].strip() == 'CYFP -->|"2"| CYFD'
-    assert all(not ln.strip().startswith("CYF") for ln in links[:len(text["lines"])])
+    # no box's own line is drawn, and nothing ties one box to another: each frame is then laid out on
+    # its own, as one row of its boxes
+    links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
+    assert len(links) == len(text["layerLines"]) and links[0] == 'CYFP -->|"2"| CYFD'
+    assert all(ln.startswith("CYF") for ln in links)
+    ties = [ln.strip() for ln in drawing.splitlines() if "~~~" in ln]
+    assert ties and all(a.startswith("CYF") and b.startswith("CYF") for a, _tie, b in (t.split() for t in ties))
+    assert "direction TB" in drawing and "direction LR" not in drawing
+    # the text still tells every box line, for the view to draw on demand
+    assert len(text["lines"]) == 8
 
 
 def test_a_picture_that_is_not_crowded_keeps_its_box_lines():

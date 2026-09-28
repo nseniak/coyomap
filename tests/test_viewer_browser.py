@@ -4446,18 +4446,20 @@ def make_parts_in_every_layer(m: dict[str, Any]) -> None:
         c["kind"] = ("screen", "api", "logic", "store")[i % 4]
 
 
+# The lines between layers the drawing shows, and the box lines the view draws on top of it.
 VISIBLE_LINES = """() => {
     const vis = (el) => getComputedStyle(el).display !== 'none';
     const ps = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
     return { layer: ps.filter((p) => p.classList.contains('arch-layerline') && vis(p)).length,
-             box: ps.filter((p) => p.classList.contains('arch-boxline') && vis(p)).length };
+             box: document.querySelectorAll('#diagram .arch-overlay .arch-ov-line').length };
 }"""
 
 
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
-    """A picture with more lines than a reader can follow draws one line per pair of layers. A click on
-    one draws the box lines it stands for and keeps them alone in the text; a click on a box draws its
-    own lines; a second click shows the picture at rest again."""
+    """A picture with more lines than a reader can follow draws one line per pair of layers, and none of
+    its boxes' own. A click on a layer line draws the box lines it stands for on top of the picture and
+    keeps them alone in the text; a click on a box draws its own lines; a second click shows the
+    picture at rest again."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
@@ -4482,6 +4484,10 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         page.wait_for_timeout(300)
         own = sum(1 for e in text["lines"] if box in (e["srcBox"], e["dstBox"]))
         assert own and page.evaluate(VISIBLE_LINES)["box"] == own, (box, own)
+        # the boxes at the other end of those lines stay lit, as a picked box's neighbours do
+        other = next(e["dstBox"] if e["srcBox"] == box else e["srcBox"] for e in text["lines"]
+                     if box in (e["srcBox"], e["dstBox"]) and not {e["srcBox"], e["dstBox"]} & people)
+        assert not page.evaluate(f"() => document.querySelector('#diagram g.cy-{other}').classList.contains('dim')")
         assert not page.js_errors, page.js_errors
 
 
