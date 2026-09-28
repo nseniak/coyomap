@@ -1138,15 +1138,20 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
     touch as a `Cn → En` step carrying that direction, in the flow where it happens. Measured on the
     live maps: 2 of 46 saved records, both argus's, each with a `writes` arrow and only ever read in
     a story. A record whose only arrow is a `reads` is correctly silent — someone else writes it.
-  - **Entity steps — author the flow's CENTRAL entity touches (1–2 per flow).** The entities whose
-    read/write IS the scenario's outcome or decision appear as their own steps — `C5 → E2 : upserts
-    the Membership document @ repo.py:155` — not only as backbone edges: the entity `Used in UC`
-    view and line-level diff impact derive from steps, so a flow that narrates only components
-    leaves the whole domain model untraceable while every gate stays green (`validate` warns when NO
-    flow touches any entity; a map whose flows legitimately touch none records the literal
-    `entity-flows` under `Balance exceptions`). *Central* means the join flow's Membership upsert or
-    the tool-call flow's RoleSettings decision + AuditEntry append — NOT every config read along the
-    way (those stay edges; tagging them all is the transitive smear again, hand-authored). Each
+  - **Entity steps — author EVERY central entity touch of the flow.** A touch is CENTRAL when the
+    use case's OUTCOME says the record is created, changed or removed, or when one of the flow's
+    DECISIONS reads it. Each appears as its own step — `C5 → E2 : upserts the Membership document @
+    repo.py:155` — not only as a backbone edge: the entity `Used in UC` view and line-level diff
+    impact derive from steps, so a flow that narrates only components leaves the whole domain model
+    untraceable while every gate stays green (`validate` warns when NO flow touches any entity; a
+    map whose flows legitimately touch none records the literal `entity-flows` under `Balance
+    exceptions`). **There is no count.** A limit of "1–2 per flow" stood here, and on mcpolis no
+    story drew more than 2 records, not even "Delete an organization", whose outcome purges every
+    server, role, credential and audit entry the team held. *Central* means the join flow's
+    Membership upsert, or the tool-call flow's RoleSettings decision + AuditEntry append. It does NOT
+    mean a read that only shows something on the way, like "Connect an AI client" reading the
+    member list to say who is already connected: that stays an edge (tagging every record a part
+    touches is the transitive smear again, hand-authored). Each
     entity step **rides an existing `C→E` backbone edge** (the edge is the aggregate claim, the step
     this scenario's instance). Author that edge in your slice with the right verb (`reads` /
     `writes` / `persists` — the ownership verbs are what the domain `persists/writes` view reads).

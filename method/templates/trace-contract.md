@@ -185,10 +185,12 @@ lead; nothing above this line goes into an agent prompt.
 >
 > `En` is a valid step endpoint. A flow that narrates only components leaves the whole domain model
 > untraceable — the "used in which use case" view and line-level diff impact both derive from STEPS,
-> not from edges — and every gate still passes, so nothing will tell you. *Central* means the join
-> flow's membership upsert or the tool-call flow's settings decision, NOT every config read along the
-> way. Each entity step also needs its `C→E` edge in `edges`, with the real verb (`reads` /
-> `writes` / `persists`).
+> not from edges — and every gate still passes, so nothing will tell you. **Draw EVERY central record
+> touch, with no count:** each record the use case's OUTCOME says is created, changed or removed, and
+> each record one of the flow's DECISIONS reads. The join flow's membership upsert is one; so is the
+> tool-call flow's settings decision. A read that only shows something on the way is not, like
+> reading the shop's name to put it in a page title: that stays an edge. Each entity step also
+> needs its `C→E` edge in `edges`, with the real verb (`reads` / `writes` / `persists`).
 >
 > ## Sub-flows
 >

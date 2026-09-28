@@ -306,8 +306,9 @@ SOURCE: [file](path/sub:1)
      holder is, so an embedded piece needs no step of its own. A read shape, a request object or a
      set of constants is not a saved record and owes nothing. `validate` reports the unstoried ones;
      the escape is `<En>: <why>` under a "Balance exceptions" extras heading.
-     ENTITY STEPS (required): author each flow's 1-2 CENTRAL entity touches as C→E steps — the
-     read/write that IS the scenario's outcome or decision (SF1 step 1 below is the shape:
+     ENTITY STEPS (required): author EVERY central entity touch of a flow as a C→E step, with no
+     count: each record the use case's outcome creates, changes or removes, and each record one of
+     its decisions reads (SF1 step 1 below is the shape:
      `C2 → E1 : upserts the <Entity> row @ repo.py:88`). The entity "Used in UC" view and diff
      impact derive from steps only; `validate` warns when no flow touches any entity. Every
      entity step rides an existing C→E backbone edge (validate warns otherwise). Fine-grain

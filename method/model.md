@@ -410,8 +410,9 @@ Semantics, stated on the fields:
   "no code call site here", never a silent null. Setting both `no_call_site` and a `where` is
   contradictory (an advisory warning).
 - **`flows[].steps`**: an endpoint is an element ID or a **Role id `Rn`** (an actor step). **Entity
-  endpoints are expected, not just allowed**: each flow authors its 1–2 CENTRAL entity touches as
-  `C→E` steps (method.md, T6 entity steps) — the entity `Used in UC` view and line-level diff
+  endpoints are expected, not just allowed**: each flow authors every CENTRAL entity touch, a record
+  its outcome creates, changes or removes or one of its decisions reads, as a `C→E` step, with no
+  count (method.md, T6 entity steps) — the entity `Used in UC` view and line-level diff
   impact derive from steps only, and `validate` warns when no flow touches any entity (escape:
   the literal `entity-flows` under 'Balance exceptions'). An entity step rides an existing `C→E`
   backbone edge — the edge is the aggregate claim, the step this scenario's instance; `validate`
