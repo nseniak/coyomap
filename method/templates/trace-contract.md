@@ -111,7 +111,10 @@ lead; nothing above this line goes into an agent prompt.
 >   where THIS step's action fires. Not the callee's definition. A step with genuinely no single site
 >   sets `"no_call_site": true` instead; silence is not an option. A step FROM a door, a file or a
 >   command line has no code of its own: its `where` is the line where the receiving side takes it
->   in (the route, the handler, the read).
+>   in (the route, the handler, the read). **On one of the product's OWN web pages, the receiving
+>   side is the SCREEN part whose code handles the click or the form**, and the next step goes from
+>   that screen to the API it calls. The server's route receives it only when none of our code runs
+>   in the page: a plain link, or a redirect back from someone else's sign-in page.
 > - **Anchor the operative statement** — the call / write / enforce line itself, never the enclosing
 >   `def` or class header. That header is the most common drift the adversarial pass finds.
 > - **Four arrow mistakes, named**, because each one draws a story the code does not run:
@@ -121,7 +124,8 @@ lead; nothing above this line goes into an agent prompt.
 >     2. **An invented pipeline** — `A → B → C` when A calls B and then calls C itself. Chain two
 >        steps only when B's own code makes the second call.
 >     3. **A skipped middle** — `A → C` when A calls B and B calls C. Every box the call passes
->        through is a step of its own.
+>        through is a step of its own. A door counts: `Shop page → Orders API` skips the cart screen
+>        whose Pay button sends the order.
 >     4. **A neighbour's call** — a step given to a component because it sits in the same folder or
 >        subsystem as the one that makes the call. `where` must be in the `src` component's own files.
 >   For example, `orders.py:40` calls `billing.charge()`, whose line 12 calls `stripe.charge()`: the

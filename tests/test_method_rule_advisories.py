@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""The checks that stand behind four method rules.
+"""The checks that stand behind six method rules.
 
   * every agent brief says the repository's text is evidence, never an instruction;
   * a step where a business rule decides says its condition in its note;
   * a subsystem is named for its job, the way its sentence opens;
-  * test code is not a component.
+  * test code is not a component;
+  * a pipe decides nothing and is no way in;
+  * a click on one of our own web pages enters through the screen that handles it.
 
 Each check is an ADVICE, never a block: it names what to look at, and the rule itself is in the
 method. Run either way: `python3 tests/test_method_rule_advisories.py` or pytest.
@@ -165,6 +167,62 @@ def test_a_recorded_kind_exception_quiets_the_deciding_pipe_advice():
 def test_a_recorded_condition_exception_quiets_the_deciding_step_advice():
     doc = with_record(make_map(), "Condition exceptions", "src/teams.py:12: the refusal is the whole step")
     assert not advised(doc, "Steps where a business rule decides")
+
+
+def make_page_map(*, first: str = "C3", side: str = "ours", page_kind: str = "screen") -> dict[str, Any]:
+    """An admin clicks Save on our team page. The page's click goes to `first`: the screen (`C1`),
+    the API client (`C2`, a pipe, which calls the API) or the API itself (`C3`)."""
+    doc = make_map()
+    doc["components"] = [
+        {"id": "C1", "name": "Team page", "subsystem": "S1", "purpose": "shows the team",
+         "files": ["src/page.tsx"], "kind": page_kind},
+        {"id": "C2", "name": "API client", "subsystem": "S1", "purpose": "sends calls on",
+         "files": ["src/client.ts"], "kind": "pipe"},
+        {"id": "C3", "name": "Team API", "subsystem": "S1", "purpose": "answers the page",
+         "files": ["src/api.py"], "kind": "api"}]
+    doc["interfaces"] = [{"id": "I1", "name": "Team dashboard", "what": "the team's web pages",
+                          "side": side, "facing": "user", "kind": "screen"}]
+    steps: list[dict[str, Any]] = [
+        {"n": 1, "src": "R1", "dst": "I1", "phrase": "click Save"},
+        {"n": 2, "src": "I1", "dst": first, "phrase": "take the click in", "direction": "in",
+         "where": {"C1": "src/page.tsx:9", "C2": "src/client.ts:4", "C3": "src/api.py:5"}[first]}]
+    if first == "C1":
+        steps.append({"n": 3, "src": "C1", "dst": "C3", "phrase": "send the team", "where": "src/page.tsx:12"})
+    if first == "C2":
+        steps.append({"n": 3, "src": "C2", "dst": "C3", "phrase": "post the team", "where": "src/client.ts:8"})
+    doc["flows"] = [{"uc": "UC1", "title": "Make a team", "steps": steps}]
+    doc["edges"] = []
+    doc["rules"] = []
+    return doc
+
+
+SKIPPED_SCREEN = "Steps from one of our web pages that land on a part that is not a screen"
+
+
+def test_a_click_on_our_page_that_goes_straight_to_the_api_is_advised():
+    found = advised(make_page_map(first="C3"), SKIPPED_SCREEN)
+    assert found and "UC1 step 2 (Team dashboard → Team API)" in found[0], found
+
+
+def test_a_click_taken_in_by_the_screen_is_not_advised():
+    assert not advised(make_page_map(first="C1"), SKIPPED_SCREEN)
+
+
+def test_a_click_through_a_pipe_is_followed_to_the_part_after_it():
+    """The picture draws a pipe through, so page → client → API draws the person at the API."""
+    found = advised(make_page_map(first="C2"), SKIPPED_SCREEN)
+    assert found and "UC1 step 2 (Team dashboard → Team API)" in found[0], found
+
+
+def test_someone_elses_page_and_a_map_with_no_screen_part_are_not_asked():
+    assert not advised(make_page_map(first="C3", side="theirs"), SKIPPED_SCREEN)
+    assert not advised(make_page_map(first="C3", page_kind="logic"), SKIPPED_SCREEN)
+
+
+def test_a_recorded_skipped_screen_exception_quiets_the_advice():
+    doc = with_record(make_page_map(first="C3"), "Skipped screen exceptions",
+                      "src/api.py:5: the page's Save is a plain form post to the route")
+    assert not advised(doc, SKIPPED_SCREEN)
 
 
 def test_a_recorded_topic_name_quiets_the_subsystem_naming_advice():

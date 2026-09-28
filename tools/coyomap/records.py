@@ -211,6 +211,9 @@ HEADINGS: tuple[HeadingSpec, ...] = (
     # A step where a rule decides whose note deliberately says no condition: keyed by the step's
     # own `path:line`, like 'Sweep debt', because that anchor is what names one step of one walk.
     HeadingSpec("Condition exceptions", True),      # key = a `path:line` anchor (free text)
+    # A step from one of our web pages that goes straight past every screen on purpose (a plain link,
+    # a redirect back from someone else's sign-in page): keyed by the step's own `path:line`.
+    HeadingSpec("Skipped screen exceptions", True),  # key = a `path:line` anchor (free text)
     # Notes: machine-read too, but what they SAY is about the code, not about the map's own checks.
     HeadingSpec("Entry-point coverage", False,      # key = a kind + a contract word
                 value=r"complete|sampled|partial"),

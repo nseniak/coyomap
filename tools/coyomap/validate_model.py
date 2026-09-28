@@ -7121,6 +7121,48 @@ def deciding_pipe_warnings(m: ProjectModel) -> list[str]:
             "heading"]
 
 
+def skipped_screen_warnings(m: ProjectModel) -> list[str]:
+    """A CLICK ON OUR OWN PAGE ENTERS THROUGH A SCREEN (method.md, the arrival door). A step from one
+    of our web pages that lands on a part that is not a screen skipped the screen part whose code
+    handles the click and makes the call, and the Architecture picture then draws the person reaching
+    that part directly. Measured on mcpolis: 6 of the 43 steps out of its dashboard went straight to
+    an API, and on 3 of them the API's answer went back to the very screen the way in had skipped.
+
+    A part the picture draws through (a pipe, the wiring) is followed to the part after it, the way
+    the picture follows it. A map with no screen part at all is not asked: its pages have nowhere
+    else to enter."""
+    declared = declared_kinds(m)
+    role = {c.id: grammar.component_role(c.kind, declared) for c in m.components}
+    pages = {i.id: i.name for i in m.interfaces
+             if i.side == "ours" and grammar.canonical_interface_kind(i.kind) == "screen"}
+    if "screen" not in role.values() or not pages:
+        return []
+    names = {c.id: c.name for c in m.components}
+    recorded = _recorded_line_keys(m, "skipped screen exceptions")
+    walks = [(f.uc, f.steps) for f in m.flows] + [(sf.id, sf.steps) for sf in m.subflows]
+    found: list[str] = []
+    for container, steps in walks:
+        for i, st in enumerate(steps):
+            if st.src not in pages or st.dst not in role:
+                continue
+            first, j = st.dst, i + 1
+            while role.get(first) in grammar.COMPONENT_KINDS_DRAWN_THROUGH and j < len(steps) \
+                    and steps[j].src == first:
+                first, j = steps[j].dst, j + 1
+            if role.get(first, "") in ("", "screen", *grammar.COMPONENT_KINDS_DRAWN_THROUGH):
+                continue
+            if _records_key(recorded, (st.where or "").strip()):
+                continue
+            found.append(f"{container} step {st.n} ({pages[st.src]} → {names[first]})")
+    if not found:
+        return []
+    return [f"Steps from one of our web pages that land on a part that is not a screen: "
+            f"{_shown(found, 8, unit='step(s)')} — a click or a form on our own page is taken in by "
+            "the screen part whose code handles it, so add that step before the call it makes, or "
+            "record '<path:line>: <why>' under a 'Skipped screen exceptions' extras heading for a "
+            "plain link or a redirect that runs none of our page's code"]
+
+
 def test_code_component_warnings(m: ProjectModel) -> list[str]:
     """TEST CODE IS NOT A COMPONENT (method.md, T1): one whose every file is test code and that no
     story reaches. A script in a test folder that a story runs is a component like any other."""
@@ -7349,6 +7391,7 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     warnings.extend(component_kind_warnings(m))
     warnings.extend(minted_kind_warnings(m))
     warnings.extend(deciding_pipe_warnings(m))
+    warnings.extend(skipped_screen_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —
     # sparse roots, over-dense screens, single-child wrapper levels. Model-only, so always on.
