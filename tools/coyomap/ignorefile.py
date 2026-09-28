@@ -36,7 +36,7 @@ that exists to find gaps. Concretely:
     `--check-coverage`, since the cheap `--check-sources` pass is the one a lead runs most and a
     disclosure it skips is a disclosure that does not exist;
   * `coyomap preindex` records the counts in `preindex.json` and prints them on stderr;
-    `preindex --report` prints the patterns;
+    `preindex --report` prints the patterns; both name any unusable line;
   * the viewer's file-browser tree (`viewer.filetree.build_file_tree`) carries an `ignored` note on
     its root node, so a renderer can never present a narrowed tree as the whole repo;
   * `coyomap scope` prints the per-pattern block in the briefing a build shows BEFORE it starts,
@@ -140,7 +140,8 @@ def ignore_report(spec: IgnoreSpec, hits: Sequence[int]) -> IgnoreReport:
 
 def bad_line_disclosure(bad_lines: Sequence[str]) -> list[str]:
     """The unusable-line report, worded ONCE for every surface that prints it (`validate`'s
-    advisory, `coyomap scope`'s briefing), so the two commands cannot describe one file two ways.
+    advisory, `coyomap scope`'s briefing, `coyomap preindex`'s summary and `--report`), so no two
+    commands can describe one file two ways.
     On its own, not inside `ignore_report`, so it can be emitted with or without a walk — a file
     whose every line is bad has no rules to walk with, and that is precisely the case worth
     reporting."""

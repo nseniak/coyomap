@@ -25,7 +25,7 @@ from coyomap.grammar import DEEP_NEST_WARN
 # Stdlib-only, and free of the pre-index code path, so importing it at module load keeps the core
 # gate's dependency firewall intact (tests/test_cli.py). The per-rule wording lives there so
 # validate, the pre-index and the viewer tell the SAME story about one ignore file, and so does the
-# unusable-line sentence, which `coyomap scope` prints too.
+# unusable-line sentence, which `coyomap scope` and `coyomap preindex` print too.
 from coyomap.ignorefile import bad_line_disclosure, ignore_report, load_ignore
 from coyomap.reporting import capped, shown
 
