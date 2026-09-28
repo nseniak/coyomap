@@ -108,6 +108,7 @@ KINDS: list[KindSpec] = [
     KindSpec("glossary", "glossary term", "glossary terms", "product", ("term",), ("term",), ("meaning",)),
     # Under the hood.
     KindSpec("subsystems", "subsystem", "subsystems", "hood", None, ("name",), ("purpose",)),
+    KindSpec("component_kinds", "component kind", "component kinds", "hood", ("word",), ("word",), ("meaning",)),
     KindSpec("components", "component", "components", "hood", None, ("name",), ("purpose",)),
     KindSpec("deps", "dependency", "dependencies", "hood", None, ("name",), ("used_for",)),
     KindSpec("edges", "arrow", "arrows", "hood", ("src", "verb", "dst"), (), ("why",)),

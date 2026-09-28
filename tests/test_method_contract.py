@@ -538,6 +538,10 @@ KNOWN_NO_ESCAPE: dict[str, str] = {
     # there is nothing to record: the fix is the word.
     "Components with no kind, on a map where {} others have one":
         "the finding IS a missing word; the fix is to write it",
+    # A declaration no component uses says nothing about the map: the fix is to delete it, and there
+    # is no reading of the map in which keeping an unused word is a decision worth recording.
+    "Minted component kinds that no component uses: {}":
+        "the finding IS a leftover declaration; the fix is to delete it",
     # There is no legitimate way to owe a direction and not give one, so there is nothing to
     # record. The field is owed only where the map's OWN CODE touches a surface or a record, and a
     # door — a role standing at a surface, a human action with no product end — is already exempt

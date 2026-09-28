@@ -226,6 +226,7 @@
       "tech_source": "web/package.json:2"
     }
   ],
+  "component_kinds": [],
   "components": [
     {
       "id": "C1",

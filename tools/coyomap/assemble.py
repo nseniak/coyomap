@@ -30,6 +30,7 @@ from coyomap.model import (
     FORMAT,
     ID_ARRAYS,
     ID_SHAPE,
+    ComponentKind,
     ConfigRow,
     Edge,
     EntryPoint,
@@ -609,7 +610,7 @@ class _KeyedSection:
     noun: str
 
 
-_KeyedRow = ConfigRow | ObservabilityRow
+_KeyedRow = ConfigRow | ObservabilityRow | ComponentKind
 
 #: The two top-level arrays whose rows are identified by the VALUE OF ONE FIELD and by nothing else:
 #: no id to collide on, no anchor to pin them, and no cross-reference pointing in. `config` and
@@ -638,9 +639,15 @@ _KeyedRow = ConfigRow | ObservabilityRow
 #:   security      0 rows authored in all four maps, and `duplicate_security_warnings` +
 #:                 `coyomap fix dedup-security` already own that shape.
 #:   glossary · non_entity_types · environments · subdomains   0 everywhere.
+#:
+#: `component_kinds` (by `word`) joined later, for a different reason than a measured duplicate: every
+#: harvest slice may mint a word, and two slices minting the same one is the EXPECTED case, not a
+#: defect. Merging them is what makes a word mean one thing on every component that uses it; two
+#: slices that disagree on what it acts as leave both answers in the cell, where `validate` blocks.
 _KEYED_SECTIONS: tuple[_KeyedSection, ...] = (
     _KeyedSection(attr="config", key_field="key", noun="config key"),
     _KeyedSection(attr="observability", key_field="signal", noun="observability signal"),
+    _KeyedSection(attr="component_kinds", key_field="word", noun="component kind"),
 )
 
 

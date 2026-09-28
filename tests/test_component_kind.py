@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""`Component.kind`: what kind of thing a component is, in one word of a closed list.
+"""`Component.kind`: what kind of thing a component is, in one word: a known word, or a word the
+map mints and declares once, with the known word it acts as.
 
-The kind is optional, so a map built before it loads and draws as it always did. A word outside the
-list blocks, because the Architecture picture acts on the kind; a missing kind is advised only on a
-map that states kinds for other components. Run either way: `python3 tests/test_component_kind.py`
-or pytest.
+The kind is optional, so a map built before it loads and draws as it always did. A word that is
+neither known nor declared blocks, because the Architecture picture places and draws a part by the
+known word; a missing kind is advised only on a map that states kinds for other components. Run
+either way: `python3 tests/test_component_kind.py` or pytest.
 """
 from __future__ import annotations
 
@@ -12,8 +13,11 @@ import json
 from typing import Any
 
 from coyomap import grammar
-from coyomap.model import FORMAT, load_model
+from coyomap.assemble import merge_fragments
+from coyomap.mapdiff import diff_maps
+from coyomap.model import FORMAT, ComponentKind, ProjectModel, load_model
 from coyomap.validate_model import validate_model
+from coyomap.viewer import gen_viewer as gv
 from coyomap.views import model_to_graph, model_to_markdown
 
 
@@ -37,6 +41,14 @@ def make_map(**kinds: str) -> dict[str, Any]:
     }
 
 
+def make_minted_map(word: str = "skill", acts_as: str = "instructions", **kinds: str) -> dict[str, Any]:
+    """The same map with one minted word declared."""
+    doc = make_map(**kinds)
+    doc["component_kinds"] = [{"word": word, "meaning": "instructions an agent loads by name",
+                               "acts_as": acts_as}]
+    return doc
+
+
 def findings(doc: dict[str, Any]) -> tuple[list[str], list[str]]:
     return validate_model(load_model(json.dumps(doc)), disclose_records=False)
 
@@ -47,9 +59,90 @@ def test_a_map_with_no_kinds_loads_and_is_not_advised():
     assert not any(w.startswith("Components with no kind") for w in warnings)
 
 
-def test_a_word_outside_the_list_blocks():
+def test_a_word_neither_known_nor_declared_blocks():
     problems, _ = findings(make_map(C1="page"))
-    assert any(p.startswith("C1 (Team page) kind='page'") for p in problems)
+    assert any(p.startswith("C1 (Team page) kind='page'") and "declare it" in p for p in problems)
+
+
+def test_every_known_word_is_accepted_the_three_new_ones_too():
+    for word in grammar.COMPONENT_KINDS:
+        problems, _ = findings(make_map(C1=word, C2="store"))
+        assert not any("kind=" in p for p in problems), (word, problems)
+    assert {"command", "script", "instructions"} <= set(grammar.COMPONENT_KINDS)
+
+
+def test_a_declared_word_is_accepted_and_acts_as_its_known_word():
+    problems, _ = findings(make_minted_map(C1="skill", C2="store"))
+    assert not any("kind" in p for p in problems), problems
+    graph = model_to_graph(load_model(json.dumps(make_minted_map(C1="skill", C2="store"))))
+    assert graph["nodes"]["C1"]["component_kind"] == "instructions"   # the picture acts on this
+    assert graph["nodes"]["C1"]["fields"]["Kind"] == "skill"            # the pill says the word
+
+
+def test_a_declaration_that_cannot_say_how_to_draw_its_word_blocks():
+    cases = {"known": (make_minted_map(word="logic", C1="logic"), "is a known word"),
+             "acts": (make_minted_map(acts_as="widget", C1="skill"), "must be one known word"),
+             "several": (make_minted_map(acts_as="more than one answer was found: logic; pipe",
+                                         C1="skill"), "must be one known word")}
+    for name, (doc, expected) in cases.items():
+        problems, _ = findings(doc)
+        assert any(expected in p for p in problems), (name, problems)
+    doc = make_minted_map(C1="skill")
+    doc["component_kinds"][0]["meaning"] = ""
+    assert any("has no meaning" in p for p in findings(doc)[0])
+    doc = make_minted_map(C1="skill")
+    doc["component_kinds"] *= 2
+    assert any("declared twice" in p for p in findings(doc)[0])
+
+
+def test_a_minted_word_one_component_uses_is_advised_and_can_be_recorded():
+    """One part with its own word is usually a known word in other clothes."""
+    _, warnings = findings(make_minted_map(C1="skill", C2="store"))
+    assert any(w.startswith("Minted component kinds that only one component uses: C1 'skill'")
+               for w in warnings), warnings
+    doc = make_minted_map(C1="skill", C2="store")
+    doc["extras"] = [{"heading": "Kind exceptions", "body": "C1: the product's one real skill"}]
+    assert not any(w.startswith("Minted component kinds that only one") for w in findings(doc)[1])
+    _, warnings = findings(make_minted_map(C1="skill", C2="skill"))
+    assert not any(w.startswith("Minted component kinds that only one") for w in warnings)
+
+
+def test_a_declared_word_no_component_uses_is_advised():
+    _, warnings = findings(make_minted_map(C1="logic", C2="store"))
+    assert any(w.startswith("Minted component kinds that no component uses: 'skill'") for w in warnings)
+
+
+def test_a_minted_word_acting_as_a_pipe_is_drawn_through():
+    """The picture acts on the known word, so a minted "relay" that acts as a pipe vanishes the
+    way a pipe does."""
+    doc = make_minted_map(word="relay", acts_as="pipe", C1="screen", C2="relay")
+    doc["components"].append({"id": "C3", "name": "Team logic", "purpose": "runs the team",
+                              "kind": "logic", "files": ["src/logic.py"]})
+    doc["flows"][0]["steps"].append({"n": 3, "src": "C2", "dst": "C3", "phrase": "pass it on",
+                                     "where": "src/store.py:9"})
+    graph = model_to_graph(load_model(json.dumps(doc)))
+    kept = gv._draw_through(graph, gv._arch_steps(graph, graph["flows"][0]))
+    assert ("C1", "C3") in [(st["src"], st["dst"]) for st in kept]
+
+
+def test_two_slices_minting_one_word_merge_into_one_declaration():
+    one = ProjectModel(component_kinds=[ComponentKind("skill", "instructions an agent loads", "instructions")])
+    two = ProjectModel(component_kinds=[ComponentKind("skill", "instructions an agent loads", "instructions")])
+    merged = merge_fragments([("a.json", one), ("b.json", two)])[0]
+    assert [(k.word, k.acts_as) for k in merged.component_kinds] == [("skill", "instructions")]
+    three = ProjectModel(component_kinds=[ComponentKind("skill", "instructions an agent loads", "logic")])
+    merged = merge_fragments([("a.json", one), ("c.json", three)])[0]
+    assert len(merged.component_kinds) == 1
+    assert merged.component_kinds[0].acts_as not in grammar.COMPONENT_KINDS   # both answers kept
+
+
+def test_a_changed_declaration_is_a_change_of_its_word():
+    before = make_minted_map(C1="skill", C2="skill")
+    after = json.loads(json.dumps(before))
+    after["component_kinds"][0]["meaning"] = "a named set of instructions an agent loads"
+    delta = diff_maps(before, after)
+    rows = [e for e in delta.elements if e.kind == "component_kinds"]
+    assert [(e.change, e.name_new) for e in rows] == [("modified", "skill")]
 
 
 def test_a_missing_kind_is_advised_once_other_components_state_one():

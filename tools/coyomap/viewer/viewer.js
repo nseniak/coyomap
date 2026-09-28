@@ -7900,7 +7900,8 @@ function archKeyHtml() {
 const RULE_MARK = '⚖';
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
-const COMPONENT_KIND_ORDER = ['screen', 'api', 'logic', 'check', 'store', 'pipe', 'job', 'wiring'];
+const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'job', 'instructions',
+  'store', 'pipe', 'wiring'];
 const COMPONENT_KIND_WORD = { api: 'API' };
 const ARCH_STORE_LINE = '#0f766e';
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to

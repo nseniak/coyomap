@@ -102,7 +102,8 @@ needs no escaping (the markdown-view generator escapes it when rendering tables)
   "subsystems":  [ { "id": "Sn",  "name", "purpose", "parent": "Sn|null", "source", "confidence",
                      "tech": "<one stack label, e.g. 'Python/FastAPI'>",   // subsystem-only; blocked on subdomains
                      "tech_source": "<bare path:line to the manifest line>" } ],
-  "components":  [ { "id": "Cn",  "name", "kind": "screen|api|logic|check|store|pipe|job|wiring", "subsystem": "Sn|null", "purpose",
+  "component_kinds": [ { "word": "<a word this map minted>", "meaning": "<one sentence>", "acts_as": "<a known kind word>" } ],
+  "components":  [ { "id": "Cn",  "name", "kind": "screen|command|script|api|logic|check|job|instructions|store|pipe|wiring|<a component_kinds word>", "subsystem": "Sn|null", "purpose",
                      "depends_on": "<derived summary text>",
                      "source": "<canonical source anchor|null>", "confidence",
                      "files": [ "<repo-relative path>", … ],

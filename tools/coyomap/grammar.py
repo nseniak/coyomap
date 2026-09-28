@@ -7,7 +7,7 @@ flow steps straight from the model, reusing this vocabulary rather than a second
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 # IDs by prefix. Multi-letter prefixes (UC, HP, SD, SF, BLK, BR) must precede the single-letter ones
@@ -34,23 +34,53 @@ CONFIDENCE_VALUES: tuple[str, ...] = ("verified", "inferred")
 
 DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "library")
 
-#: WHAT KIND OF THING A COMPONENT IS, in one word (`Component.kind`). CLOSED, because the Architecture
-#: picture acts on it: it draws THROUGH a pipe or the wiring, and lets a store or a check stand alone
-#: inside its subsystem. A word it does not know would silently do nothing. The fifth "kind" in the
-#: map, and none of the five overlaps: an interface's, a way in's, an actor's, a dependency's, this.
-#:   screen  a page a person uses              check   decides whether something is allowed
-#:   api     an entry the product's own         store   keeps records
-#:           screens or clients call            pipe    passes calls on and decides nothing
-#:   logic   does the work                      job     runs unasked: a timer, or each start
-#:                                              wiring  assembles and starts the product
+#: WHAT KIND OF THING A COMPONENT IS, in one word (`Component.kind`): the KNOWN words, in the order
+#: the Architecture picture's frames hold them. A build uses one when it fits. When none does, it
+#: mints a word and DECLARES it once for the whole map (`ProjectModel.component_kinds`) with the known
+#: word it acts as, and the picture places and draws the part by that one (`component_role`). So the
+#: list is open, and what the picture does with a word is not: a word nobody declared is a block, not
+#: a box the picture silently skips. The fifth "kind" in the map, and none of the five overlaps: an
+#: interface's, a way in's, an actor's, a dependency's, this.
+#:   screen   a page a person uses                   logic         does the work
+#:   command  the product's own command line          check         decides whether something is allowed
+#:   script   a script a person runs by hand          job           runs unasked: a timer, or each start
+#:   api      an entry the product's own screens      instructions  text an agent follows: a skill, a prompt
+#:            or clients call                         store         keeps records
+#:                                                    pipe          passes calls on and decides nothing
+#:                                                    wiring        assembles and starts the product
 #: The harvest contract is where each word is defined for the agents that choose it.
 #: Measured on mcpolis before it existed: 8 of its 15 screens had a name that never said it was a
 #: screen ("Team MCPs"), and neither a story's shape nor a file's place could tell a screen from a
-#: pipe, so the kind is authored, never derived.
-COMPONENT_KINDS = ("screen", "api", "logic", "check", "store", "pipe", "job", "wiring")
+#: pipe, so the kind is authored, never derived. `command`, `script` and `instructions` joined the
+#: first eight after partial runs found no word for coyomap's own command line, for an operator's
+#: hand-run script, and for the method files an agent follows.
+COMPONENT_KINDS = ("screen", "command", "script", "api", "logic", "check", "job", "instructions",
+                   "store", "pipe", "wiring")
 COMPONENT_KIND_WORDS = {"api": "API"}   # how a kind is written on a box; every other word as stored
 COMPONENT_KINDS_DRAWN_THROUGH = ("pipe", "wiring")   # the Architecture picture joins the lines around them
 COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as boxes of their own
+#: THE LAYERS a component is drawn in, top to bottom, and the known words each holds. What people
+#: use, then what the product's screens and clients call, then the work, then what keeps records.
+#: A pipe and the wiring are in none: lines go through them. What the product reaches outside is
+#: not a component at all, so it is not here either: the map's dependencies are the bottom layer.
+COMPONENT_KIND_FRAMES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Screens and commands", ("screen", "command", "script")),
+    ("APIs", ("api",)),
+    ("Work", ("logic", "check", "job", "instructions")),
+    ("Storage", ("store",)),
+)
+
+
+def component_role(kind: str, declared: Mapping[str, str]) -> str:
+    """The KNOWN word a component's kind acts as: the word itself when it is known, the known word
+    the map's declaration names when it was minted (`declared`: word -> the word it acts as), else
+    "" (unstated, or a word nobody declared, which `validate` blocks). The one reader every consumer
+    goes through, so the picture, the checks and the pills can never disagree about a minted word."""
+    word = (kind or "").strip()
+    if word in COMPONENT_KINDS:
+        return word
+    acts_as = (declared.get(word) or "").strip()
+    return acts_as if acts_as in COMPONENT_KINDS else ""
 DEP_KINDS_FOLDED = ("framework", "library")                          # in-process — fold into "Libraries"
 # The EXTERNAL (system) dep kinds — everything the project talks to across a boundary. A deployment
 # unit that hosts no code but name-matches one of these is that dep's own box, not a real process.

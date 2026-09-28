@@ -100,8 +100,9 @@ the code's names.
   ALWAYS SAY WHAT IT IS THE KIND OF. Five different things carry a kind and the
   vocabularies do not overlap: an interface's (11 words, above), a way in's (11
   words, the mechanism: `mcp-tool`, `http-route`), an actor's (human or software),
-  a dependency's (its context group), a component's (8 words: screen, API, logic,
-  check, store, pipe, job, wiring). A bare "kind" names none of them.
+  a dependency's (its context group), a component's (11 known words: screen, command,
+  script, API, logic, check, job, instructions, store, pipe, wiring, or a word the map
+  declares once, saying which known word it acts as). A bare "kind" names none of them.
 - **who is on the far side** — the people the map can show standing at an interface.
   Never written by hand: it is worked out from the flows. An interface with nobody
   on it is a normal answer, because the product itself is what reaches most of

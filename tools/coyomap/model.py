@@ -322,14 +322,23 @@ class Interface:                     # T2b — the product's outside edge
 
 
 @dataclass
+class ComponentKind:
+    """A word for what kind of thing a component is, that this map MINTED because none of the known
+    words (`grammar.COMPONENT_KINDS`) fits: declared once, for every component that uses it."""
+    word: str
+    meaning: str = ""        # one sentence: what a component of this kind is
+    acts_as: str = ""        # the known word the Architecture picture places and draws it by
+
+
+@dataclass
 class Component:
     id: str
     name: str
     subsystem: str | None = None
     purpose: str = ""
-    #: WHAT KIND OF THING IT IS, one word of `grammar.COMPONENT_KINDS`: screen, api, logic, check,
-    #: store, pipe, job, wiring. Optional so a map built before it loads unchanged; "" = not stated.
-    #: The name stays free: the kind is said once, here, and shown as a pill beside the name.
+    #: WHAT KIND OF THING IT IS, in one word: a known word (`grammar.COMPONENT_KINDS`), or a word the
+    #: map declares in `component_kinds`. Optional so a map built before it loads unchanged; "" = not
+    #: stated. The name stays free: the kind is said once, here, and shown as a pill beside the name.
     kind: str = ""
     depends_on: str = ""             # the coarse derived summary text (edge list is the source)
     source: str | None = None        # v2: the canonical source anchor — where the component LIVES
@@ -921,6 +930,7 @@ class ProjectModel:
     use_cases: list[UseCase] = field(default_factory=list)
     happy_path: list[HappyStep] = field(default_factory=list)
     subsystems: list[Group] = field(default_factory=list)
+    component_kinds: list[ComponentKind] = field(default_factory=list)   # the words this map minted
     components: list[Component] = field(default_factory=list)
     deps: list[Dep] = field(default_factory=list)
     interfaces: list[Interface] = field(default_factory=list)   # T2b — the outside edge
@@ -1596,3 +1606,8 @@ def resolve_map_path(path) -> Path:
 def load_model_path(path) -> ProjectModel:
     """`load_model` from a file path (the common CLI entry)."""
     return load_model(resolve_map_path(path).read_text(encoding="utf-8"))
+
+
+def declared_kinds(m: ProjectModel) -> dict[str, str]:
+    """The map's minted component-kind words, word -> the known word each acts as."""
+    return {k.word.strip(): k.acts_as.strip() for k in m.component_kinds if k.word.strip()}

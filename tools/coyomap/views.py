@@ -18,6 +18,7 @@ from dataclasses import asdict
 
 from coyomap import grammar, records
 from coyomap.model import (
+    declared_kinds,
     record_parents,
     BusinessRule,
     Component,
@@ -427,6 +428,10 @@ def model_to_markdown(m: ProjectModel) -> str:
             row += [_extra_str(c.extra.get(k, "")) for k in extra]
             rows.append(row)
         section("T1 — Components", _table(headers, rows))
+    if m.component_kinds:
+        section("Component kinds this map minted (each drawn as a known kind)",
+                _table(["Word", "Meaning", "Drawn as"],
+                       [[f"**{k.word}**", k.meaning, k.acts_as] for k in m.component_kinds]))
     if m.deps:
         headers, linked, extra = _dep_headers(m)
         rows = []
@@ -1191,6 +1196,7 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
                 {"kind": ep.kind, "trigger": ep.trigger, "source": ep.source,
                  "activation": activation})
         flat_entry_points.append(ep_dict)
+    minted = declared_kinds(m)
     for c in m.components:
         subsystem_name = subsystem_names.get(c.subsystem, c.subsystem) if c.subsystem else ""
         fields = {"Component": c.name, "Subsystem": subsystem_name, "Purpose": c.purpose,
@@ -1205,7 +1211,9 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
         node.files = _component_files(c)
         node.entry_points = eps_by_comp.get(c.id, [])
         node.runs_in = list(c.runs_in)
-        node.component_kind = c.kind
+        # The picture acts on the KNOWN word a kind acts as; the pill (`fields["Kind"]`) says the
+        # component's own word, minted or known.
+        node.component_kind = grammar.component_role(c.kind, minted)
         node.states_lines = _states_parts(c.states)   # a component lifecycle lists per line too
         nodes[c.id] = node
     # A dep's ROLE set is derived from the verbs of its incoming C→D edges (grammar.dep_roles), so a

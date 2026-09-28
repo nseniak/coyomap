@@ -230,9 +230,16 @@ FIELD_META: dict[tuple[str, str], dict] = {
     ("TestRow", "confidence"): {"enum": [*grammar.CONFIDENCE_VALUES, ""],
                              "description": "verified = read in the code; inferred = deduced. '' = unstated."},
 
-    ("Component", "kind"): {"enum": ["", *grammar.COMPONENT_KINDS], "description": "what kind of "
-                             "thing the component is, one word: screen, api, logic, check, store, pipe, "
-                             "job, wiring. '' = not stated (a map built before the field)."},
+    ("Component", "kind"): {"description": "what kind of thing the component is, in one word: a "
+                             "known word (" + ", ".join(grammar.COMPONENT_KINDS) + "), or a word the "
+                             "map declares in component_kinds. '' = not stated (a map built before "
+                             "the field)."},
+    ("ComponentKind", "word"): {"description": "a word this map minted because no known word fits; "
+                                "never a known word, and never a synonym of one"},
+    ("ComponentKind", "meaning"): {"description": "one sentence: what a component of this kind is"},
+    ("ComponentKind", "acts_as"): {"enum": [*grammar.COMPONENT_KINDS], "description": "the known word "
+                                   "the Architecture picture places and draws a component of this "
+                                   "kind by"},
     ("Dep", "id"): {"pattern": r"^D\d+$"},
     ("Dep", "kind"): {"enum": [*grammar.DEP_KINDS, None], "description": "closed Context "
                        "vocabulary; null → inferred from `type`."},

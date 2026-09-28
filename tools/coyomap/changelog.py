@@ -47,7 +47,8 @@ VERSION = 1
 #: Rows that carry no authored id get one from their key, so an entry can name them and `check`
 #: can gate them — the same ids the impact engine mints (`glossary:<term>`, `run:<action>`, `net:<name>`).
 SYNTH_PREFIX = {"glossary": "glossary:", "run_commands": "run:", "config": "config:",
-                "deployment": "deployment:", "observability": "observability:", "non_entity_types": "net:"}
+                "deployment": "deployment:", "observability": "observability:", "non_entity_types": "net:",
+                "component_kinds": "kind:"}
 #: The map's own header (title, goal, …) is a box too: `map`, with its scalar fields as keys.
 MAP_ID = "map"
 MAP_BOOKKEEPING = frozenset({"format", "version", "commit", "committed", "built"})

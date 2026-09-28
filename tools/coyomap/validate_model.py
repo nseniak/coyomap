@@ -67,6 +67,7 @@ from coyomap.model import (
     group_forests,
     is_saved,
     record_parents,
+    declared_kinds,
     load_model,
     subdomain_owners,
     use_case_interfaces,
@@ -7024,11 +7025,37 @@ def topic_named_subsystem_warnings(m: ProjectModel) -> list[str]:
 
 
 def component_kind_problems(m: ProjectModel) -> list[str]:
-    """A `Component.kind` outside the closed list BLOCKS: the Architecture picture acts on the kind,
-    and a word it does not know would silently do nothing."""
+    """A component's kind is a KNOWN word or one the map declares; anything else BLOCKS, because the
+    Architecture picture places and draws a part by the known word its kind acts as, and a word it
+    cannot resolve would silently place nothing.
+
+    A declaration blocks too when it cannot do that job: a known word declared again (the map would
+    say two things about one word), a word acting as nothing known (or as several, when two slices
+    minted it differently and the merge kept both answers), a word with no sentence saying what it
+    is, and one word declared twice."""
     words = ", ".join(grammar.COMPONENT_KINDS)
-    return [f"{c.id} ({c.name}) kind='{c.kind}' — must be one of {words}"
-            for c in m.components if c.kind and c.kind not in grammar.COMPONENT_KINDS]
+    declared = declared_kinds(m)
+    found: list[str] = []
+    seen: set[str] = set()
+    for k in m.component_kinds:
+        word = k.word.strip()
+        if not word:
+            found.append("component_kinds: a declaration with no word")
+            continue
+        if word in seen:
+            found.append(f"component_kinds: '{word}' is declared twice — keep one declaration")
+        seen.add(word)
+        if word in grammar.COMPONENT_KINDS:
+            found.append(f"component_kinds: '{word}' is a known word — use it as it is, never declare it")
+        if k.acts_as.strip() not in grammar.COMPONENT_KINDS:
+            found.append(f"component_kinds: '{word}' acts_as='{k.acts_as}' — must be one known word: {words}")
+        if not k.meaning.strip():
+            found.append(f"component_kinds: '{word}' has no meaning — one sentence saying what it is")
+    found += [f"{c.id} ({c.name}) kind='{c.kind}' — use a known word ({words}), or declare it in "
+            "component_kinds with the known word it acts as"
+            for c in m.components if c.kind and c.kind not in grammar.COMPONENT_KINDS
+            and c.kind not in declared]
+    return found
 
 
 def component_kind_warnings(m: ProjectModel) -> list[str]:
@@ -7039,7 +7066,31 @@ def component_kind_warnings(m: ProjectModel) -> list[str]:
     if not stated or not unstated:
         return []
     return [f"Components with no kind, on a map where {len(stated)} others have one: "
-            f"{_shown(unstated, 12)} — give each one word: {', '.join(grammar.COMPONENT_KINDS)}"]
+            f"{_shown(unstated, 12)} — give each one word: {', '.join(grammar.COMPONENT_KINDS)}, or "
+            "a word declared in component_kinds"]
+
+
+def minted_kind_warnings(m: ProjectModel) -> list[str]:
+    """A MINTED WORD ONE COMPONENT USES, OR NONE. A word minted for a single part is usually a
+    synonym of a known word ("service" for logic), which is the drift the declaration exists to stop;
+    one real skill in a product is a legitimate single use, recorded as `<Cn>: <why>` under 'Kind
+    exceptions'. A word no part uses is a declaration left behind, and the fix is to delete it."""
+    users: dict[str, list[str]] = {}
+    for c in m.components:
+        users.setdefault(c.kind, []).append(c.id)
+    kept = _recorded_ids(m, "kind exceptions", ("C",))
+    once = [f"{users[k.word][0]} '{k.word}'" for k in m.component_kinds
+            if len(users.get(k.word, [])) == 1 and users[k.word][0] not in kept]
+    unused = [f"'{k.word}'" for k in m.component_kinds if not users.get(k.word)]
+    out: list[str] = []
+    if once:
+        out.append(f"Minted component kinds that only one component uses: {_shown(once, 8)} — a word "
+                   "minted for one part is usually a known word in other clothes; use the known word "
+                   "it acts as, or record '<Cn>: <why>' under a 'Kind exceptions' extras heading")
+    if unused:
+        out.append(f"Minted component kinds that no component uses: {_shown(unused, 8)} — delete "
+                   "the declaration")
+    return out
 
 
 def deciding_pipe_warnings(m: ProjectModel) -> list[str]:
@@ -7048,7 +7099,8 @@ def deciding_pipe_warnings(m: ProjectModel) -> list[str]:
     the map already holds say a component is not a pipe: a business rule enforced in its own files
     (it decides), and an entry point it owns that something outside calls (it is an `api`). Measured
     on a partial run: 1 of 3 agents read mcpolis's "Service token check" as a pipe."""
-    pipes = {c.id for c in m.components if c.kind == "pipe"}
+    declared = declared_kinds(m)
+    pipes = {c.id for c in m.components if grammar.component_role(c.kind, declared) == "pipe"}
     if not pipes:
         return []
     kept = _recorded_ids(m, "kind exceptions", ("C",))
@@ -7295,6 +7347,7 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     warnings.extend(test_code_component_warnings(m))
     problems.extend(component_kind_problems(m))
     warnings.extend(component_kind_warnings(m))
+    warnings.extend(minted_kind_warnings(m))
     warnings.extend(deciding_pipe_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —

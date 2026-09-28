@@ -72,12 +72,19 @@ lead; nothing above this line goes into an agent prompt.
 > slice** (one component ≈ one module-/folder-sized unit, ≤ ~10 source files / ~3 kLOC). If you come
 > out far under, you are folding subsystem-shaped dirs into single components — make those
 > subsystems and recurse into their units; far over, you are splitting module-sized units.
-> **Give every component a `kind`**, one word for what kind of thing it is: `screen` (a page a
-> person uses), `api` (an entry the product's own screens or clients call), `logic` (does the work),
-> `check` (decides whether something is allowed), `store` (keeps records), `pipe` (passes calls on
-> and DECIDES nothing: an API client, a request helper; adding a cookie, a header or a retry on the
-> way is still a pipe), `job` (runs without being asked: on a timer, or once each time the product
-> starts), `wiring` (assembles and starts the product). One word from these eight, never another.
+> **Give every component a `kind`**, one word for what kind of thing it is. Use a known word when
+> one fits: `screen` (a page a person uses), `command` (the product's own command line, the commands
+> a person or an agent types), `script` (a script a person runs by hand to operate the product),
+> `api` (an entry the product's own screens or clients call), `logic` (does the work), `check`
+> (decides whether something is allowed), `job` (runs without being asked: on a timer, or once each
+> time the product starts), `instructions` (text an agent follows: a skill, a prompt, a method
+> document), `store` (keeps records), `pipe` (passes calls on and DECIDES nothing: an API client, a
+> request helper; adding a cookie, a header or a retry on the way is still a pipe), `wiring`
+> (assembles and starts the product). **When none fits, mint a word and declare it** in your
+> fragment's `component_kinds`, once: `{"word": "<the word>", "meaning": "<one sentence: what a
+> component of this kind is>", "acts_as": "<the known word it is drawn as>"}`. Never mint a word for
+> a thing a known word already names ("service" is `logic`). Another slice may mint the same word:
+> the merge keeps one declaration, so say what the word MEANS, not what your component does.
 > The name stays free: the kind is said here, once, and a reader sees it beside the name.
 > **Name a subsystem for its JOB**, the way its `purpose` opens ("Managing teams and members",
 > "Serving tools"), never a bare topic noun ("Teams and members"): a reader takes a topic for a

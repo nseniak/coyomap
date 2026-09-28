@@ -86,6 +86,12 @@
         "$ref": "#/$defs/Group"
       }
     },
+    "component_kinds": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ComponentKind"
+      }
+    },
     "components": {
       "type": "array",
       "items": {
@@ -548,6 +554,40 @@
       ],
       "additionalProperties": false
     },
+    "ComponentKind": {
+      "type": "object",
+      "properties": {
+        "word": {
+          "type": "string",
+          "description": "a word this map minted because no known word fits; never a known word, and never a synonym of one"
+        },
+        "meaning": {
+          "type": "string",
+          "description": "one sentence: what a component of this kind is"
+        },
+        "acts_as": {
+          "type": "string",
+          "enum": [
+            "screen",
+            "command",
+            "script",
+            "api",
+            "logic",
+            "check",
+            "job",
+            "instructions",
+            "store",
+            "pipe",
+            "wiring"
+          ],
+          "description": "the known word the Architecture picture places and draws a component of this kind by"
+        }
+      },
+      "required": [
+        "word"
+      ],
+      "additionalProperties": false
+    },
     "Component": {
       "type": "object",
       "properties": {
@@ -571,18 +611,7 @@
         },
         "kind": {
           "type": "string",
-          "enum": [
-            "",
-            "screen",
-            "api",
-            "logic",
-            "check",
-            "store",
-            "pipe",
-            "job",
-            "wiring"
-          ],
-          "description": "what kind of thing the component is, one word: screen, api, logic, check, store, pipe, job, wiring. '' = not stated (a map built before the field)."
+          "description": "what kind of thing the component is, in one word: a known word (screen, command, script, api, logic, check, job, instructions, store, pipe, wiring), or a word the map declares in component_kinds. '' = not stated (a map built before the field)."
         },
         "depends_on": {
           "type": "string"

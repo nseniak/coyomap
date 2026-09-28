@@ -295,33 +295,33 @@ def _entities_with_a_lifecycle(maps: dict) -> str:
 # live claim, and the report then told a reader to "repair" a sentence that was true.
 
 LEDGER: tuple[Claim, ...] = (
-    Claim(site="tools/coyomap/model.py:980", maps=("coyomap",),
+    Claim(site="tools/coyomap/model.py:990", maps=("coyomap",),
           quote="this repo's own map has 462 anchored expanded steps, 462 distinct "
                 "`(uc, container, n)` keys — and only 337 distinct `(uc, n)` keys.",
           measure=_anchored_expanded_steps,
           note="the argument that `(uc, n)` alone silently merges two rows"),
-    Claim(site="tools/coyomap/validate_model.py:1033", maps=("argus", "mcpolis"),
+    Claim(site="tools/coyomap/validate_model.py:1034", maps=("argus", "mcpolis"),
           quote="Measured across the two live maps: 135 entities, 45 of them saved.",
           measure=_saved_records_two_maps,
           note="why the check reads SAVED records and not every entity"),
-    Claim(site="tools/coyomap/validate_model.py:974", maps=("argus", "mcpolis"),
+    Claim(site="tools/coyomap/validate_model.py:975", maps=("argus", "mcpolis"),
           quote="Measured across the two live maps: 0 of 45 saved records, on neither map",
           measure=_record_direction_gaps,
           note="the map contradicting itself about a record's direction",
           data_words="'on neither map' names WHICH maps the gaps land on, read off the map the "
                      "same way the counts are. When a gap comes back the words change with it, and "
                      "that is the row saying the sentence needs rewriting, not renumbering"),
-    Claim(site="tools/coyomap/validate_model.py:1178", maps=("mcpolis",),
+    Claim(site="tools/coyomap/validate_model.py:1179", maps=("mcpolis",),
           quote="mcpolis's dashboard draws 141 steps from 31 different walks, and read as one list "
                 "they are noise.",
           measure=_dashboard_steps,
           note="why interface steps are grouped by story"),
-    Claim(site="tools/coyomap/validate_model.py:1305", maps=("coyomap",),
+    Claim(site="tools/coyomap/validate_model.py:1306", maps=("coyomap",),
           quote="On this repo's own map, 3 files are claimed by 3-4 components each and hold 5 "
                 "of its 245 call-site anchors (2%)",
           measure=_rule_sites_in_shared_files,
           note="one of two 'measured facts that must not be designed away'"),
-    Claim(site="tools/coyomap/views.py:586", maps=("coyomap",),
+    Claim(site="tools/coyomap/views.py:591", maps=("coyomap",),
           quote="on this repo's own map 2% of call-site anchors sit in a file 3-4 components "
                 "claim.",
           measure=_rule_sites_short,
