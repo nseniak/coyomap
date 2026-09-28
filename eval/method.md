@@ -368,7 +368,11 @@ For a map M:
    Leave `--spend` out when the candidate has no `spend.json`. When both maps have one, what the
    build cost per row is a rise-only band: a build that costs more than 25% more per row than the
    baseline's reads DRIFT, however its quality moved, so a change that gains a little quality and
-   doubles the bill cannot pass unseen.
+   doubles the bill cannot pass unseen. The 25% is wider than the noise measured so far: over the
+   last 4 mcpolis builds (2026-08-29 to 2026-09-08) the largest rise between two consecutive builds
+   was 12%, in seconds per row, and none crossed 25%. **Read the row count before blaming the
+   bill:** a change that REMOVES rows (test code leaving the map) raises the cost per row at the
+   same bill, so a spend DRIFT with fewer rows can be the map getting better.
    `--project` is the human label in the report (it names both sides); `--project-key` is what the
    thresholds file is looked up by, so per-project gates keep working. A hash-mismatch refusal means
    the candidate map was modified during the run — the run is void; restart from Step 1.

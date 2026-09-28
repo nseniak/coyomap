@@ -199,6 +199,8 @@ HEADINGS: tuple[HeadingSpec, ...] = (
     HeadingSpec("Naming exceptions", True, NAMING_KEY, scopes=("code-name", "topic")),
     # A component that is only test code, kept as a component on purpose: `<Cn>: <why>`.
     HeadingSpec("Test code exceptions", True, ID_KEY),
+    # A `pipe` that holds a rule site or a way in, kept a pipe on purpose: `<Cn>: <why>`.
+    HeadingSpec("Kind exceptions", True, ID_KEY),
     # Keyed by a repo PATH, not an id — the thing being adjudicated is a file that used to hold an
     # access rule and no longer does. It had been pointed at "Audit exceptions", whose key
     # vocabulary is `[A-Z]+\d+`: a path can never be a key there, so twenty records written on one

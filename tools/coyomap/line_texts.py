@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,9 +45,12 @@ KEY_DIGITS = 12
 #: The check's verdict word for a text it passed (`line-texts-check`). Anything else keeps nothing.
 VERDICT_OK = "ok"
 
-#: A dash inside a merged text: the em dash, the en dash, and a hyphen standing alone between words.
-_DASHES: tuple[str, ...] = ("—", "–", " - ")
-_THEN = re.compile(r"\bthen\b", re.IGNORECASE)
+#: A dash inside a merged text: the em dash, the en dash, and one or two hyphens standing alone.
+_DASHES: tuple[str, ...] = ("—", "–", " - ", " -- ")
+#: "then" or a semicolon with the word after it: the pair a source sentence must carry for the text
+#: to carry it, so one story's own "then" cannot license a "then" joining two stories.
+_THEN = re.compile(r"\bthen\b\s*(\w*)", re.IGNORECASE)
+_SEMICOLON = re.compile(r";\s*(\w*)")
 
 
 def wants_text(sentences: Iterable[str]) -> bool:
@@ -84,11 +89,31 @@ def load(folder: Path) -> dict[str, str]:
 
 
 def save(folder: Path, texts: Mapping[str, str]) -> Path:
-    """Write the kept texts beside the map, sorted by key so a rewrite changes only what changed."""
+    """Write the kept texts beside the map, sorted by key so a rewrite changes only what changed.
+
+    Written whole or not at all (a temporary file, then one rename): a running viewer re-reads the
+    file when it changes, and a half-written one would be cached as a view with no texts."""
     path = folder / FILE_NAME
-    path.write_text(json.dumps(dict(sorted(texts.items())), indent=1, ensure_ascii=False) + "\n",
-                    encoding="utf-8")
+    body = json.dumps(dict(sorted(texts.items())), indent=1, ensure_ascii=False) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{FILE_NAME}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return path
+
+
+def _pairs(pattern: re.Pattern[str], text: str) -> set[str]:
+    return {" ".join(m.group(0).lower().split()) for m in pattern.finditer(text)}
+
+
+def _as_token(token: str, said: str) -> bool:
+    """True when a code-shaped token of a text stands in a sentence as a whole token, not only as a
+    piece of a longer one (`save` inside `save_row`)."""
+    return re.search(rf"(?<![\w./-]){re.escape(token)}(?![\w/-])", said) is not None
 
 
 def text_faults(text: str, sentences: Iterable[str]) -> list[str]:
@@ -96,8 +121,10 @@ def text_faults(text: str, sentences: Iterable[str]) -> list[str]:
 
     A word or a mark the line's own sentences already carry is not held against the text: "then"
     inside one story's sentence is that story's own order, and a code-shaped name a sentence uses is
-    the map's word for it, not the writer's slip. The word limit and the opening pointer are
-    `prose`'s, so this check and the readability check can never disagree on what they count."""
+    the map's word for it, not the writer's slip. Each is matched as the sentence has it: "then" and
+    ";" with the word after them, a code word as a whole token. The word limit and the opening
+    pointer are `prose`'s, so this check and the readability check can never disagree on what they
+    count."""
     body = text.strip()
     if not body:
         return ["no text"]
@@ -110,14 +137,14 @@ def text_faults(text: str, sentences: Iterable[str]) -> list[str]:
         faults.append(f"{words} words, over {prose.SENTENCE_WORD_LIMIT}")
     if any(d in body and d not in said for d in _DASHES):
         faults.append("a dash")
-    if ";" in body and ";" not in said:
+    if _pairs(_SEMICOLON, body) - _pairs(_SEMICOLON, said):
         faults.append("a semicolon")
-    if _THEN.search(body) and not _THEN.search(said):
+    if _pairs(_THEN, body) - _pairs(_THEN, said):
         faults.append('"then" between stories, which are alternatives: join them with "or"')
     pointer = prose.opens_with_bare_pointer(body)
     if pointer:
         faults.append(f'opens with "{pointer}"')
-    code = [t for t in prose.code_tokens(body) if t not in said]
+    code = [t for t in prose.code_tokens(body) if not _as_token(t, said)]
     if code:
         faults.append("code-shaped words its sentences do not use: " + ", ".join(code[:3]))
     return faults
@@ -126,15 +153,35 @@ def text_faults(text: str, sentences: Iterable[str]) -> list[str]:
 @dataclass(frozen=True)
 class Line:
     """One line of an Architecture picture that needs a merged text: its key, its two boxes by name,
-    and its distinct sentences. `from` and `to` are what the agents read, so that is the JSON."""
+    and its distinct sentences. `from` and `to` are what the agents read, so that is the JSON.
+
+    `drawn_as` is every pair of boxes the line is drawn between. One key can be drawn on several
+    pictures, and a picture that shows a subsystem where another shows one of its components gives
+    the same line other ends (12 keys on mcpolis): an agent told only the first pair writes a text
+    that names a box another picture does not draw."""
 
     key: str
     src: str
     dst: str
     sentences: tuple[str, ...]
+    drawn_as: tuple[tuple[str, str], ...] = ()
 
     def to_json(self) -> dict[str, object]:
-        return {"key": self.key, "from": self.src, "to": self.dst, "sentences": list(self.sentences)}
+        out: dict[str, object] = {"key": self.key, "from": self.src, "to": self.dst,
+                                  "sentences": list(self.sentences)}
+        if len(self.drawn_as) > 1:
+            out["drawn_as"] = [list(pair) for pair in self.drawn_as]
+        return out
+
+
+def line_from_json(row: object) -> Line:
+    """One line as `Line.to_json` writes it, read back. ValueError when it has no key."""
+    if not isinstance(row, dict) or not isinstance(row.get("key"), str):
+        raise ValueError("every line needs a key")
+    pairs = tuple((str(p[0]), str(p[1])) for p in row.get("drawn_as") or []
+                  if isinstance(p, list) and len(p) == 2)
+    return Line(key=row["key"], src=str(row.get("from") or ""), dst=str(row.get("to") or ""),
+                sentences=tuple(str(s) for s in row.get("sentences") or []), drawn_as=pairs)
 
 
 def read_lines(path: Path) -> list[Line]:
@@ -142,21 +189,22 @@ def read_lines(path: Path) -> list[Line]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError(f"{path} must be a JSON list of lines")
-    out: list[Line] = []
-    for row in data:
-        if not isinstance(row, dict) or not isinstance(row.get("key"), str):
-            raise ValueError(f"{path}: every line needs a key")
-        out.append(Line(key=row["key"], src=str(row.get("from") or ""), dst=str(row.get("to") or ""),
-                        sentences=tuple(str(s) for s in row.get("sentences") or [])))
-    return out
+    try:
+        return [line_from_json(row) for row in data]
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
 
 
 def read_texts(path: Path) -> dict[str, str]:
-    """A writer's output: one JSON object of key to merged text."""
+    """A writer's output: one JSON object of key to merged text. A value that is not a string is
+    refused, naming its key: read as text, a `null` became the words "None", which lint passes."""
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path} must be one JSON object of key to text")
-    return {str(k): str(v) for k, v in data.items()}
+    wrong = [str(k) for k, v in data.items() if not isinstance(v, str)]
+    if wrong:
+        raise ValueError(f"{path}: the text of {', '.join(wrong[:5])} is not a string")
+    return {str(k): v for k, v in data.items()}
 
 
 def read_verdicts(path: Path) -> dict[str, dict[str, object]]:
@@ -215,8 +263,13 @@ def choose(lines: Iterable[Line], old: Mapping[str, str], texts: Mapping[str, st
 
     `lines` is EVERY line the pictures draw that wants a text, not only the pending ones: an old
     text is kept only while its line is still drawn, so the file never grows texts nobody can see.
-    A new text is kept when the check said `ok` AND it has no `text_faults`, and it replaces an old
-    one for the same key."""
+    A text of this run is kept when the check said `ok` AND it has no `text_faults`.
+
+    A KEY THIS RUN GAVE A TEXT FOR ENDS WITH THIS RUN'S OUTCOME: kept when it passed, gone when it did
+    not, whatever was kept for it before. That is what makes a re-check possible: hand the kept file
+    itself to the checker (`pending --all`, then `check-input --texts <the kept file>`), and a text
+    a weaker check once passed leaves the file when this one rejects it. A normal build never meets
+    the case, because `pending` lists only the lines with no text."""
     by_key = {ln.key: ln for ln in lines}
     out = Choice()
     for key, text in old.items():
@@ -229,6 +282,7 @@ def choose(lines: Iterable[Line], old: Mapping[str, str], texts: Mapping[str, st
         if ln is None:
             out.unknown.append(key)
             continue
+        out.kept.pop(key, None)
         faults = text_faults(text, ln.sentences)
         if faults:
             out.faulty[key] = faults

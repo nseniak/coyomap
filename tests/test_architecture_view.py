@@ -177,6 +177,18 @@ def test_via_ai_agent_is_said_only_of_a_person_who_comes_in_only_through_an_agen
     assert "data-pill=via" in member and "data-pill" not in admin
 
 
+def test_a_story_of_thousands_of_steps_is_numbered_without_running_out_of_stack():
+    chain = [(f"B{i}", f"B{i + 1}") for i in range(3000)]
+    numbers = gv._story_order_numbers([chain])
+    assert [numbers[a] for a in chain] == list(range(1, 3001))
+
+
+def test_arrows_two_stories_take_in_opposite_orders_share_one_number():
+    x, y, z = ("A", "B"), ("B", "C"), ("C", "D")
+    numbers = gv._story_order_numbers([[x, y, z], [y, x]])
+    assert numbers[x] == numbers[y] and numbers[z] == numbers[x] + 1
+
+
 def test_each_story_carries_its_trigger_outcome_and_its_own_lines():
     graph = make_graph()
     model = gv._arch_model(graph, "", "all")
@@ -214,6 +226,56 @@ def test_a_pipe_is_drawn_through():
     assert ("C1", "S2") in ln
     assert not any("C2" in pair for pair in ln)
     assert ln[("C1", "S2")]["sentences"] == [("UC1", "send the thing")]
+
+
+def make_two_server_pipe_map() -> dict[str, Any]:
+    """The Client is a pipe that calls two servers in one story: the API saves the thing, and a
+    Biller in a subsystem of its own charges for it. Each answer comes back through the pipe."""
+    doc = make_kinded_map(C2="pipe")
+    doc["subsystems"].append({"id": "S4", "name": "Billing things", "purpose": "bills"})
+    doc["components"].append({"id": "C6", "name": "Biller", "subsystem": "S4", "purpose": "bills",
+                              "files": ["src/bill.py"]})
+    doc["flows"][0]["steps"] = [
+        {"n": 1, "src": "R1", "dst": "I1", "phrase": "type the thing"},
+        {"n": 2, "src": "I1", "dst": "C1", "phrase": "carry the thing in", "where": "src/page.ts:3"},
+        {"n": 3, "src": "C1", "dst": "C2", "phrase": "send the thing", "where": "src/page.ts:9"},
+        {"n": 4, "src": "C2", "dst": "C3", "phrase": "post the thing", "where": "src/client.ts:4"},
+        {"n": 5, "src": "C3", "dst": "C2", "phrase": "return the saved thing", "where": "src/api.py:30"},
+        {"n": 6, "src": "C2", "dst": "C6", "phrase": "charge for the thing", "where": "src/client.ts:8"},
+        {"n": 7, "src": "C2", "dst": "C1", "phrase": "hand back the bill", "where": "src/client.ts:9"},
+        {"n": 8, "src": "C1", "dst": "I1", "phrase": "show the saved thing", "where": "src/page.ts:12"},
+        {"n": 9, "src": "I1", "dst": "R1", "phrase": "present the saved thing"}]
+    return doc
+
+
+def make_step(src: str, dst: str, key: str, phrase: str = "do it") -> gv._ArchStep:
+    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase,
+                        keys=[key], store="")
+
+
+def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
+    """The API's answer comes back into the pipe before the pipe calls the Biller. Taken for a new
+    call, it drew API -> Biller with the answer's sentence, and lost the page's own call."""
+    model = gv._arch_model(make_graph(make_two_server_pipe_map()), "", "all")
+    assert model is not None
+    ln = lines_of(model)
+    assert ("C3", "C6") not in ln and ("S2", "C6") not in ln
+    assert ln[("C1", "C6")]["sentences"] == [("UC1", "charge for the thing")]
+    assert [s for _, s in next(v for k, v in ln.items() if k[0] == "C1" and k[1] != "C6")["sentences"]] \
+        == ["send the thing"]
+
+
+def test_a_step_a_pipe_drops_hands_its_map_steps_to_the_line_before_it():
+    """An answer into a pipe, and a call into a pipe no step leaves, are not drawn. A rule decided on
+    either one must still mark the line the story took to get there."""
+    graph = make_graph(make_kinded_map(C2="pipe"))
+    kept = gv._draw_through(graph, [make_step("I1", "C1", "k1"), make_step("C1", "C2", "k2")])
+    assert [(s["src"], s["dst"]) for s in kept] == [("I1", "C1")]
+    assert kept[0]["keys"] == ["k1", "k2"]
+    kept = gv._draw_through(graph, [make_step("C1", "C2", "k1"), make_step("C2", "C3", "k2"),
+                                    make_step("C3", "C2", "k3"), make_step("C2", "C1", "k4")])
+    assert [(s["src"], s["dst"]) for s in kept] == [("C1", "C3")]
+    assert kept[0]["keys"] == ["k1", "k2", "k3", "k4"]
 
 
 def test_a_store_stands_alone_inside_its_subsystem():

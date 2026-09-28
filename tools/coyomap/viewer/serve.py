@@ -836,8 +836,14 @@ def project_view(proj: Project) -> ViewBundle:
     # The feature derivation needs the MODEL, not the graph projected from it, and both are already
     # in hand here — passing them keeps `build_view_bundle` from reading and parsing the same map a
     # second time on every cold request.
-    proj.view = build_view_bundle(graph, proj.map_json.parent, model=model, extents=extents)
-    return proj.view
+    texts_before = _texts_mtime(proj.map_json)
+    view = build_view_bundle(graph, proj.map_json.parent, model=model, extents=extents)
+    # A line-texts file written WHILE this view was built may or may not be in it, and caching it
+    # would keep the older texts after `ensure_fresh` has recorded the newer file. Serve it this once;
+    # the next request builds again.
+    if _texts_mtime(proj.map_json) == texts_before:
+        proj.view = view
+    return view
 
 
 def project_symbols(proj: Project) -> list[dict[str, object]]:

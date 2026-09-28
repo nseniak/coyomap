@@ -1018,3 +1018,4 @@ def test_a_missing_cost_leaves_only_the_time_band():
     p = make_profile()
     report = compare(p, p, baseline_spend=make_spend(None, 3.0), candidate_spend=make_spend(None, 3.3))
     assert [s.metric for s in report.spend_bands] == ["seconds_per_row"]
+    assert any(n.startswith("cost per row was not compared") for n in report.notes), report.notes

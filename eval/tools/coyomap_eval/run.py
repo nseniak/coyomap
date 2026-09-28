@@ -69,6 +69,12 @@ def run_eval(project: str, map_text: str, repo_root: Path | None = None, *,
     if baseline_profile is not None:
         delta = compare(baseline_profile, profile, thresholds, baseline_judge, jr, baseline_spend, spend)
         verdict = delta.verdict
+        if spend is None and baseline_spend is None:
+            # eval/method.md promises this note: a map with no transcript on this machine has no
+            # spend.json, and a run on two such maps compares no cost. Said here, not in `compare`,
+            # because only a RUN can carry spend; the bare `compare` command never takes it.
+            delta.notes.append("what the builds cost was measured on neither side: cost and time per "
+                               "row were not compared (no spend.json for either map)")
     return RunResult(project, profile, jr, delta, verdict, spend)
 
 

@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from coyomap import line_texts, subverb_help
 from coyomap.impact_git import load_map_extents
@@ -26,10 +28,11 @@ One merged sentence for each line of the Architecture pictures that several stor
 runs these at the end of a build (the closing sequence, step 5b) and change-impact.md at step 7 of
 an update.
 
-  pending [--map <map>] --out <file>
+  pending [--map <map>] --out <file> [--all]
       Every line the pictures draw with two or more different sentences and no merged text yet, as
-      a JSON list of {key, from, to, sentences}. The file the `line-texts` agent reads. An empty
-      list means there is nothing to write: skip both agents.
+      a JSON list of {key, from, to, sentences}, plus `drawn_as` when the line joins other boxes on
+      another picture. The file the `line-texts` agent reads. An empty list means there is nothing
+      to write: skip both agents. --all lists the lines that have a text too.
   lint --lines <file> <texts>
       The writer's own check before it returns: one text per line in <file>, none extra, and each
       one inside the rules no reader is needed for (one sentence, at most 20 words, no dash, no
@@ -41,7 +44,12 @@ an update.
   record --texts <texts> --verdicts <verdicts> [--map <map>]
       Keep every text the check passed and lint does not fault, in line-texts.json beside the map.
       A text whose line the pictures no longer draw is dropped from the file. A line with no kept
-      text shows its stories' own sentences, as before.
+      text shows its stories' own sentences, as before. A key <texts> names ends with this run's
+      outcome, whatever was kept for it before.
+
+  To re-check the kept texts (the check's rules changed): `pending --all --out <lines>`, then
+  `check-input --lines <lines> --texts <map folder>/line-texts.json --out <file>`, a fresh checker,
+  and `record --texts <map folder>/line-texts.json --verdicts <its verdicts>`.
 
   --map   the map (default: .coyomap/project-map.json)
 """
@@ -59,19 +67,26 @@ def drawn_lines(graph: GraphDict) -> list[Line]:
     order the pictures are drawn. A map without subsystems draws no Architecture picture at all."""
     if not has_grouping(graph):
         return []
-    _drawings, texts = gen_arch_views(graph)
-    seen: dict[str, Line] = {}
+    return lines_of_pictures(gen_arch_views(graph)[1])
+
+
+def lines_of_pictures(texts: dict[str, dict[str, Any]]) -> list[Line]:
+    """The lines of the pictures' texts (`gen_arch_views`), once per key, with every pair of boxes
+    each key is drawn between."""
+    first: dict[str, Line] = {}
+    ends: dict[str, dict[tuple[str, str], None]] = {}
     for picture in texts.values():
         for entry in picture.get("lines") or []:
             said = [str(x.get("text") or "") for x in entry.get("sentences") or []]
             if not line_texts.wants_text(said):
                 continue
             key = line_texts.line_key(said)
-            if key not in seen:
-                seen[key] = Line(key=key, src=str(entry.get("src") or ""),
-                                 dst=str(entry.get("dst") or ""),
-                                 sentences=tuple(dict.fromkeys(s for s in said if s)))
-    return list(seen.values())
+            pair = (str(entry.get("src") or ""), str(entry.get("dst") or ""))
+            ends.setdefault(key, {})[pair] = None
+            if key not in first:
+                first[key] = Line(key=key, src=pair[0], dst=pair[1],
+                                  sentences=tuple(dict.fromkeys(s for s in said if s)))
+    return [replace(ln, drawn_as=tuple(ends[ln.key])) for ln in first.values()]
 
 
 def _write_json(path: str, data: object) -> None:
@@ -81,7 +96,7 @@ def _write_json(path: str, data: object) -> None:
 def cmd_pending(args: argparse.Namespace) -> int:
     folder, graph = _map_graph(args.map)
     lines = drawn_lines(graph)
-    have = line_texts.load(folder)
+    have = {} if args.all else line_texts.load(folder)
     pending = [ln for ln in lines if ln.key not in have]
     _write_json(args.out, [ln.to_json() for ln in pending])
     if not pending:
@@ -127,11 +142,15 @@ def cmd_check_input(args: argparse.Namespace) -> int:
 def cmd_record(args: argparse.Namespace) -> int:
     folder, graph = _map_graph(args.map)
     lines = drawn_lines(graph)
-    choice = line_texts.choose(lines, line_texts.load(folder),
-                               line_texts.read_texts(Path(args.texts)),
+    old = line_texts.load(folder)
+    choice = line_texts.choose(lines, old, line_texts.read_texts(Path(args.texts)),
                                line_texts.read_verdicts(Path(args.verdicts)))
-    path = line_texts.save(folder, choice.kept)
-    print(f"line-texts: kept {len(choice.new)} new texts -> {path}. {len(choice.kept)} of "
+    # No file, and nothing to put in one: a map whose pictures draw no line several stories take
+    # gets no empty file beside it.
+    exists = (folder / line_texts.FILE_NAME).exists()
+    path = line_texts.save(folder, choice.kept) if (choice.kept or exists) else None
+    print(f"line-texts: kept {len(choice.new)} new texts -> {path or 'no file written'}. "
+          f"{len(choice.kept)} of "
           f"{len(lines)} lines with two or more sentences have one; the other "
           f"{len(lines) - len(choice.kept)} show their stories' own sentences.")
     if choice.rejected:
@@ -156,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     pending = sub.add_parser("pending", add_help=False)
     pending.add_argument("--map", default=None)
     pending.add_argument("--out", required=True)
+    pending.add_argument("--all", action="store_true")
     pending.set_defaults(func=cmd_pending)
 
     lint = sub.add_parser("lint", add_help=False)

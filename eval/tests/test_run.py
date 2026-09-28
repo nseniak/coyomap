@@ -365,3 +365,17 @@ def test_a_bill_missing_an_unpriced_model_is_not_compared():
 def test_a_cost_report_made_without_the_map_has_no_spend():
     from coyomap_eval.compare import Spend
     assert Spend.from_cost(0, {}, []) is None
+
+
+def test_a_run_with_no_spend_on_either_side_says_cost_was_not_compared():
+    """eval/method.md promises the note: with no transcript on this machine there is no spend.json,
+    and a comparison that silently skipped cost would read PASS on a band that never ran."""
+    from coyomap_eval.compare import Spend
+    base = build_profile(make_map())
+    r = run_eval("p", make_map(), None, baseline_profile=base)
+    assert r.delta is not None
+    assert any("measured on neither side" in n for n in r.delta.notes), r.delta.notes
+    spend = Spend.from_cost(500, {"cost": 0.1, "seconds": 1.2}, [])
+    r = run_eval("p", make_map(), None, baseline_profile=base, spend=spend, baseline_spend=spend)
+    assert r.delta is not None
+    assert not any("measured on neither side" in n for n in r.delta.notes), r.delta.notes

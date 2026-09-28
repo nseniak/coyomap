@@ -626,7 +626,11 @@ def is_empty_value(x: object) -> bool:
     """A field with nothing in it: absent (None), "", [] or {}. A MAP BUILT BEFORE A FIELD EXISTED
     DOES NOT CARRY ITS KEY, and the same map written again carries the field's empty default, so
     the two must compare equal. Measured when `kind` joined the components: without this, every
-    component of an older map read as modified, and every update of it failed the log's gate."""
+    component of an older map read as modified, and every update of it failed the log's gate.
+
+    NOT `False` AND NOT `0`: each is a value somebody chose, and "0 → absent" can be a real change.
+    So a future optional field whose default is `false` or `0` brings the old problem back, and
+    must either default to absent or be added here by name with its default."""
     return x is None or x == "" or x == [] or x == {}
 
 

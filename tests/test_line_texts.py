@@ -116,6 +116,16 @@ def test_a_word_its_own_sentences_use_is_not_held_against_it():
     assert line_texts.text_faults("check the token, then open the stream", said) == []
 
 
+def test_a_word_a_sentence_uses_elsewhere_does_not_license_it():
+    """One story's own "then open" does not let the text join two stories with "then close", and a
+    sentence's `save_row` does not make `save` a word the map uses."""
+    said = ["check the token, then open the stream", "call save_row on the store"]
+    assert any('"then"' in f for f in
+               line_texts.text_faults("check the token, then close the stream", said))
+    assert any("code-shaped" in f for f in line_texts.text_faults("call save() or open it", said))
+    assert any("a dash" in f for f in line_texts.text_faults("open it -- or close it", said))
+
+
 def test_lint_names_a_missing_text_and_a_text_for_no_line():
     faults = line_texts.lint([make_line("k1"), make_line("k2")], {"k1": "post or delete a thing",
                                                                    "k9": "something"})
@@ -143,6 +153,77 @@ def test_an_old_text_stays_while_its_line_is_drawn_and_goes_when_it_is_not():
     choice = line_texts.choose([make_line("k1")], {"k1": "old words", "gone": "older words"}, {}, {})
     assert choice.kept == {"k1": "old words"}
     assert choice.dropped == ["gone"]
+
+
+def test_a_recheck_that_rejects_a_kept_text_takes_it_out():
+    """The kept file handed back to a checker: a text a weaker check once passed must leave when this
+    one rejects it, or it stays forever, because its key only changes with its sentences."""
+    old = {"k1": "post the thing or send the delete", "k2": "post or delete the thing"}
+    verdicts: dict[str, dict[str, object]] = {"k1": {"verdict": "ok"},
+                                              "k2": {"verdict": "reject", "says_more": ["x"]}}
+    choice = line_texts.choose([make_line("k1"), make_line("k2")], old, old, verdicts)
+    assert choice.kept == {"k1": "post the thing or send the delete"}
+    assert list(choice.rejected) == ["k2"]
+
+
+def test_pending_all_lists_the_lines_that_have_a_text_too(tmp_path: Path):
+    folder = make_map_folder(tmp_path)
+    lines = line_texts_cmd.drawn_lines(make_graph())
+    line_texts.save(folder, {ln.key: "post the thing or send the delete" for ln in lines})
+    for flag, expected in (([], 0), (["--all"], len(lines))):
+        out = tmp_path / "pending.json"
+        assert line_texts_cmd.main(["pending", "--map", str(folder / "project-map.json"),
+                                    "--out", str(out), *flag]) == 0
+        assert len(json.loads(out.read_text())) == expected
+
+
+def make_picture(src: str, dst: str, *sentences: str) -> dict[str, Any]:
+    return {"lines": [{"src": src, "dst": dst, "sentences": [{"text": t} for t in sentences]}]}
+
+
+def test_a_line_drawn_between_other_boxes_on_another_picture_says_so():
+    """One picture draws the Client as itself; another folds it into its subsystem. The writer must
+    see both pairs, or it names a box one picture does not draw."""
+    said = ("post the thing", "send the delete")
+    lines = line_texts_cmd.lines_of_pictures({
+        "all|": make_picture("Screens", "Server", *said),
+        "all|CAP1": make_picture("Client", "Server", *said),
+        "happy|": make_picture("Screens", "Server", *said)})
+    assert len(lines) == 1
+    assert lines[0].drawn_as == (("Screens", "Server"), ("Client", "Server"))
+    assert lines[0].to_json()["drawn_as"] == [["Screens", "Server"], ["Client", "Server"]]
+    assert line_texts.line_from_json(lines[0].to_json()) == lines[0]
+    one = line_texts_cmd.lines_of_pictures({"all|": make_picture("Screens", "Server", *said)})
+    assert "drawn_as" not in one[0].to_json()
+
+
+def test_a_texts_file_with_a_value_that_is_not_text_is_refused(tmp_path: Path):
+    path = tmp_path / "written.json"
+    path.write_text(json.dumps({"k1": None}))
+    try:
+        line_texts.read_texts(path)
+    except ValueError as exc:
+        assert "k1" in str(exc)
+    else:
+        raise AssertionError("a null must not become the words None")
+
+
+def test_saving_leaves_one_whole_file_and_nothing_beside_it(tmp_path: Path):
+    line_texts.save(tmp_path, {"k2": "b", "k1": "a"})
+    assert [p.name for p in tmp_path.iterdir()] == [line_texts.FILE_NAME]
+    assert list(line_texts.load(tmp_path)) == ["k1", "k2"]
+
+
+def test_record_on_a_map_with_no_shared_line_writes_no_file(tmp_path: Path):
+    folder = tmp_path / ".coyomap"
+    folder.mkdir()
+    (folder / "project-map.json").write_text(json.dumps(make_arch_map()), encoding="utf-8")
+    (tmp_path / "written.json").write_text("{}")
+    (tmp_path / "verdicts.json").write_text("{}")
+    assert line_texts_cmd.main(["record", "--map", str(folder / "project-map.json"),
+                                "--texts", str(tmp_path / "written.json"),
+                                "--verdicts", str(tmp_path / "verdicts.json")]) == 0
+    assert not (folder / line_texts.FILE_NAME).exists()
 
 
 def test_record_writes_the_kept_texts_beside_the_map(tmp_path: Path):

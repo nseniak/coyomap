@@ -261,6 +261,29 @@ def test_a_reordered_list_is_not_a_change():
     assert field_deltas(a, b, {}) == []
 
 
+# --- nothing is nothing: an absent field and an empty one ------------------------------------
+
+def test_a_field_absent_on_one_side_and_empty_on_the_other_is_not_a_change():
+    """A map built before `kind` existed has no key; written again it has `kind: ""`. Every component
+    read as modified before this rule."""
+    for empty in ("", [], {}, None):
+        assert field_deltas({"id": "C1", "name": "A"}, {"id": "C1", "name": "A", "kind": empty}, {}) == []
+        assert field_deltas({"id": "C1", "name": "A", "kind": empty}, {"id": "C1", "name": "A"}, {}) == []
+
+
+def test_a_field_emptied_or_removed_on_purpose_is_still_a_change():
+    held = {"id": "C1", "name": "A", "files": ["x.py"], "kind": "pipe"}
+    assert [d.key for d in field_deltas(held, {**held, "files": []}, {})] == ["files"]
+    assert [d.key for d in field_deltas(held, {k: v for k, v in held.items() if k != "kind"}, {})] == ["kind"]
+    assert [d.key for d in field_deltas({**held, "kind": 0}, {**held, "kind": None}, {})] == ["kind"]
+
+
+def test_a_row_that_came_keeps_its_empty_fields():
+    """A row that came or went has a page listing what it held, the empty fields too."""
+    came = field_deltas({}, {"id": "C9", "name": "New", "kind": ""}, {})
+    assert "kind" in [d.key for d in came]
+
+
 # --- steps: aligned like lines of text -----------------------------------------------------
 
 def test_a_step_inserted_in_the_middle_is_one_addition_and_the_rest_renumbered():

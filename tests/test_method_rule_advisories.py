@@ -96,6 +96,24 @@ def test_a_subsystem_whose_sentence_names_no_job_is_not_advised():
     assert not advised(make_map(purpose="The teams and the people in them."), "Subsystems named for a topic")
 
 
+def test_a_topic_that_ends_in_ing_is_still_a_topic():
+    """"Billing", "Pricing", "Routing" name a topic when nothing follows them, and "Something" is
+    never a job: none may pass for the job the sentence names, nor open a sentence as one."""
+    for name in ("Billing", "Billing and invoices", "Routing", "Something for teams"):
+        assert advised(make_map(subsystem=name), "Subsystems named for a topic"), name
+    assert not advised(make_map(subsystem="Billing teams"), "Subsystems named for a topic")
+    assert not advised(make_map(purpose="Something about teams."), "Subsystems named for a topic")
+
+
+def test_test_files_are_known_by_the_names_their_languages_give_them():
+    from coyomap.validate_model import _is_test_path
+    for path in ("spec/models/team_spec.rb", "src/team_spec.rb", "src/main/java/TeamTest.java",
+                 "app/TeamTests.kt", "src/team_test.rs", "pkg/team_test.go", "web/team.test.ts"):
+        assert _is_test_path(path), path
+    for path in ("src/Latest.java", "src/contest.rs", "src/team.rb", "app/Manifest.kt"):
+        assert not _is_test_path(path), path
+
+
 # --- test code is not a component ----------------------------------------------------
 
 def test_a_component_of_test_files_that_no_story_reaches_is_advised():
@@ -116,6 +134,32 @@ def test_product_code_that_no_story_reaches_is_not_taken_for_test_code():
 
 def with_record(doc: dict[str, Any], heading: str, line: str) -> dict[str, Any]:
     return {**doc, "extras": [{"heading": heading, "body": f"{line}\n"}]}
+
+
+def test_a_pipe_that_enforces_a_rule_or_is_a_way_in_is_advised():
+    """The picture draws a pipe through, so a deciding pipe hides its decision. `Team logic` holds
+    the rule's site; given `pipe`, it is named."""
+    doc = make_map()
+    for c in doc["components"]:
+        c["kind"] = "pipe" if c["id"] == "C1" else "logic"
+    found = advised(doc, "Components marked `pipe` that decide")
+    assert found and "C1 (a rule is enforced in its files)" in found[0], found
+    doc["entry_points"] = [{"kind": "http-route", "trigger": "POST /teams", "source": "src/teams.py:3",
+                            "component": "C1", "activation": "external"}]
+    found = advised(doc, "Components marked `pipe` that decide")
+    assert "C1 (a rule is enforced in its files and something outside calls it)" in found[0], found
+    for c in doc["components"]:
+        c["kind"] = "check" if c["id"] == "C1" else "logic"
+    assert not advised(doc, "Components marked `pipe` that decide")
+
+
+def test_a_recorded_kind_exception_quiets_the_deciding_pipe_advice():
+    doc = make_map()
+    for c in doc["components"]:
+        c["kind"] = "pipe" if c["id"] == "C1" else "logic"
+    assert advised(doc, "Components marked `pipe` that decide")
+    doc = with_record(doc, "Kind exceptions", "C1: forwards the check it names to the rules engine")
+    assert not advised(doc, "Components marked `pipe` that decide")
 
 
 def test_a_recorded_condition_exception_quiets_the_deciding_step_advice():

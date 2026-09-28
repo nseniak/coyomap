@@ -4322,6 +4322,29 @@ def test_a_line_with_a_merged_text_shows_it_first_and_folds_every_storys_sentenc
         assert not page.js_errors, page.js_errors
 
 
+def test_following_a_story_on_a_merged_line_shows_that_storys_own_sentence() -> None:
+    """A merged text stands for every story on its line. Following ONE story must tell that story's
+    own sentence, and show no merged text at all."""
+    with _served_map(lambda m: None, beside=make_one_merged_text) as url, \
+            _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        said = page.evaluate("""() => {
+            const b = document.querySelector('#archtext .archtext-merged').closest('.archtext-line')
+              .querySelector('.archtext-more [data-archstory]');
+            const text = b.closest('.archtext-sent').firstChild.textContent.trim();
+            b.click();
+            return text;
+        }""")
+        page.wait_for_function("() => location.hash.includes('story=')")
+        _arch_ready(page)
+        seen = page.evaluate("""() => ({
+            merged: document.querySelectorAll('#archtext .archtext-merged').length,
+            sentences: [...document.querySelectorAll('#archtext .archtext-sent')].map((p) => p.textContent.trim()) })""")
+        assert seen["merged"] == 0, seen
+        assert said in seen["sentences"], (said, seen)
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
     """The box around the name selects it and keeps only the lines that touch it in the text; the
     text says whose steps these are, and one click shows every step again."""

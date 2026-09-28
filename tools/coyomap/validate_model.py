@@ -1315,23 +1315,52 @@ def element_capabilities(m: ProjectModel) -> dict[str, set[str]]:
 #      file alone is NOT a link. The weak strength needs a symbol table it cannot derive from the
 #      model, so it degrades to exact-only rather than silently widening to file equality.
 
+#: Words after which an -ing word names a TOPIC, not a job: "Billing and invoices" lists two topics.
+_NOT_AN_OBJECT = frozenset({"and", "or", "&", "/"})
+
+
+def _job_phrase(words: list[str], at: int) -> str:
+    """`words[at]` when it starts a job: an -ing word of five letters or more ("Creating",
+    "Serving"), not a -thing word ("Something"), and followed by what it acts on ("Billing
+    customers"). "Billing" alone, or "Billing and invoices", names a topic that happens to end in
+    -ing; "thing" and "ring" are too short to be one."""
+    word = words[at].strip(",.;:") if at < len(words) else ""
+    low = word.lower()
+    if len(word) < 5 or not low.endswith("ing") or low.endswith("thing"):
+        return ""
+    nxt = words[at + 1].strip(",.;:").lower() if at + 1 < len(words) else ""
+    return word if nxt and nxt not in _NOT_AN_OBJECT else ""
+
+
 def _job_word(text: str) -> str:
-    """The first word of `text` when it names an activity (an -ing word such as "Creating",
-    "Serving"), else "". Five letters at least, so "thing" and "ring" are not taken for one."""
-    first = (text.split() or [""])[0].strip(",.;:")
-    return first if len(first) >= 5 and first.lower().endswith("ing") else ""
+    """The first word of `text` when it opens with a job (`_job_phrase`), else ""."""
+    return _job_phrase(text.split(), 0)
 
 
+def _names_a_job(text: str) -> bool:
+    """Does a job start anywhere in `text`: a subsystem called "Team managing tools" names one."""
+    words = text.split()
+    return any(_job_phrase(words, i) for i in range(len(words)))
+
+
+#: Test code by its folder. `spec/` stays: it is where RSpec keeps its tests, and the one advisory that
+#: reads this also asks whether any story runs the files, so a folder of API specifications no story
+#: reaches is the only thing it could mislabel, and that is the advisory's question to raise anyway.
 _TEST_DIRS = frozenset({"test", "tests", "__tests__", "spec", "specs", "e2e"})
-_TEST_FILE = re.compile(r"^test_.*\.py$|_test\.(?:py|go)$|\.(?:test|spec)\.[jt]sx?$")
+#: Test code by its file name, lower-cased: Python, Go, JavaScript and TypeScript, Ruby, Rust.
+_TEST_FILE = re.compile(r"^test_.*\.py$|_test\.(?:py|go|rs)$|\.(?:test|spec)\.[jt]sx?$|_spec\.rb$")
+#: …and the names only their CASE tells apart: `FooTest.java`, `FooTests.kt`, never `Latest.java`.
+_TEST_CLASS_FILE = re.compile(r"[a-z0-9]Tests?\.(?:java|kt)$")
 
 
 def _is_test_path(path: str) -> bool:
     """Is this file (or folder) test code by its place or its name: a `tests/` folder, a
-    `test_*.py`, a `*.test.ts`. Where a file sits decides only whether it LOOKS like test code; the
-    advisory that reads this also asks whether any story runs it."""
-    parts = [x.lower() for x in path.replace("\\", "/").strip("/").split("/") if x]
-    return bool(set(parts) & _TEST_DIRS) or bool(parts and _TEST_FILE.search(parts[-1]))
+    `test_*.py`, a `*.test.ts`, a `*_spec.rb`, a `FooTest.java`. Where a file sits decides only
+    whether it LOOKS like test code; the advisory that reads this also asks whether any story runs it."""
+    raw = [x for x in path.replace("\\", "/").strip("/").split("/") if x]
+    parts = [x.lower() for x in raw]
+    return (bool(set(parts) & _TEST_DIRS) or bool(parts and _TEST_FILE.search(parts[-1]))
+            or bool(raw and _TEST_CLASS_FILE.search(raw[-1])))
 
 
 def element_sort_key(eid: str) -> tuple[str, int, str]:
@@ -1871,6 +1900,11 @@ def check_rules_model(m: ProjectModel,
     # mark such a step, and its note is the one place that says which way the story goes from it.
     # The steps are the rules view's own links from a rule to a step, so the advisory and the mark
     # name the same steps.
+    # ON A MAP BUILT BEFORE THE RULE, EVERY DECIDING STEP IS LISTED, and that is accepted on purpose:
+    # 192 steps on mcpolis and 19 on coyomap's own map when the rule arrived. It is one advisory line
+    # with a count, it never blocks, and the count IS the debt the next build or update pays down.
+    # Scoping it to new maps would need a build-date marker the map does not carry, and would hide the
+    # debt on exactly the maps that have it.
     anchored = anchored_flow_steps(m)
     written = {(f.uc, str(st.n)): st for f in m.flows for st in f.steps}
     written.update({(sf.id, str(st.n)): st for sf in m.subflows for st in sf.steps})
@@ -1886,7 +1920,8 @@ def check_rules_model(m: ProjectModel,
             f"Steps where a business rule decides say no condition in their note: "
             f"{_shown(silent, 12, unit='step(s)')} — say when the story goes on or when it stops "
             "(\"only when …\", \"refused when …\"), or record '<path:line>: <why>' under a "
-            "'Condition exceptions' extras heading")
+            "'Condition exceptions' extras heading. A map built before this rule lists every "
+            "deciding step; its next build or update writes the conditions")
 
     return problems, warnings
 
@@ -6980,7 +7015,7 @@ def topic_named_subsystem_warnings(m: ProjectModel) -> list[str]:
     named_on_purpose = _recorded_ids(m, "naming exceptions", ("S",))
     topic = [f"{s.id} '{s.name}' ('{_job_word(s.purpose)} …')" for s in m.subsystems
              if _job_word(s.purpose) and f"{s.id}/topic" not in named_on_purpose
-             and not any(_job_word(w) for w in re.findall(r"[A-Za-z]+", s.name))]
+             and not _names_a_job(s.name)]
     if not topic:
         return []
     return [f"Subsystems named for a topic while their sentence opens with their job: "
@@ -7005,6 +7040,33 @@ def component_kind_warnings(m: ProjectModel) -> list[str]:
         return []
     return [f"Components with no kind, on a map where {len(stated)} others have one: "
             f"{_shown(unstated, 12)} — give each one word: {', '.join(grammar.COMPONENT_KINDS)}"]
+
+
+def deciding_pipe_warnings(m: ProjectModel) -> list[str]:
+    """A PIPE THAT DECIDES OR IS A WAY IN. The Architecture picture draws THROUGH a `pipe`, so a
+    component wrongly given that word disappears from it, and whatever it decides with it. Two things
+    the map already holds say a component is not a pipe: a business rule enforced in its own files
+    (it decides), and an entry point it owns that something outside calls (it is an `api`). Measured
+    on a partial run: 1 of 3 agents read mcpolis's "Service token check" as a pipe."""
+    pipes = {c.id for c in m.components if c.kind == "pipe"}
+    if not pipes:
+        return []
+    kept = _recorded_ids(m, "kind exceptions", ("C",))
+    owners = component_file_owners(m)
+    deciding = {c for r in m.rules for c in rule_components(m, r, owners)} & pipes
+    entered = {ep.component for ep in m.entry_points if ep.component in pipes
+               and grammar.effective_activation(ep.activation, ep.kind) == "external"}
+    found: list[str] = []
+    for cid in sorted((deciding | entered) - kept, key=element_sort_key):
+        why = [w for w, hit in (("a rule is enforced in its files", cid in deciding),
+                                ("something outside calls it", cid in entered)) if hit]
+        found.append(f"{cid} ({' and '.join(why)})")
+    if not found:
+        return []
+    return [f"Components marked `pipe` that decide or are a way in: {_shown(found, 8)} — the "
+            "Architecture picture draws a pipe through and hides it, so give each the kind it has "
+            "(`check`, `api` or `logic`), or record '<Cn>: <why>' under a 'Kind exceptions' extras "
+            "heading"]
 
 
 def test_code_component_warnings(m: ProjectModel) -> list[str]:
@@ -7233,6 +7295,7 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     warnings.extend(test_code_component_warnings(m))
     problems.extend(component_kind_problems(m))
     warnings.extend(component_kind_warnings(m))
+    warnings.extend(deciding_pipe_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —
     # sparse roots, over-dense screens, single-child wrapper levels. Model-only, so always on.

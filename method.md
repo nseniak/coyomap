@@ -532,7 +532,10 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   name stays free, and the kind is shown beside it. The Architecture picture acts on it: it draws
   through a `pipe` and the `wiring`, and draws a `store` and a `check` as boxes of their own inside
   their subsystem. Optional in the file, so a map built before it still loads; `validate` blocks a
-  word outside the eight and advises on a component with none once others have one.
+  word outside the eight and advises on a component with none once others have one. It also advises
+  on a `pipe` that decides or is a way in (a rule enforced in its files, an entry point something
+  outside calls), because the picture would hide it; one kept a pipe on purpose is recorded as
+  `<Cn>: <why>` under the `Kind exceptions` extras heading.
   **Test code is not a component, and never a product area.** Test cases, fixtures and test helpers
   belong in the test-completeness table, never in a component or a subsystem. What decides is what
   the code does, not where it sits: a script in a test folder that a person runs to operate the
@@ -2965,6 +2968,9 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
       does not fault; every other line shows its stories' own sentences, as it did before.
     - **The texts are keyed by their sentences**, so a text is never shown beside sentences it was
       not written for. The next build or update lists only the lines whose sentences changed.
+    - **To re-check the kept texts** after the check's own rules change: `line-texts pending --all`,
+      then `check-input` with the kept `line-texts.json` as its texts, a fresh checker, and `record`
+      with the same two files. A kept text the new check rejects leaves the file.
 
     **Steps 5, 8, 9 and 12 are here because the list without them cost real builds.** `grounding
     report` used to live only in prose 74 lines above, so a build that followed this block literally

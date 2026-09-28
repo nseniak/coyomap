@@ -373,16 +373,23 @@ def _load_profile(text: str) -> MapProfile:
         raise SystemExit(f"ERROR: {e}")
 
 
-def _compare_spend(baseline: Spend, candidate: Spend, t: Thresholds) -> list[SpendBand]:
-    """Rise-only bands on what a build cost per row: a rise past the allowance breaches (→ DRIFT)."""
+def _compare_spend(baseline: Spend, candidate: Spend,
+                   t: Thresholds) -> tuple[list[SpendBand], list[str]]:
+    """Rise-only bands on what a build cost per row: a rise past the allowance breaches (→ DRIFT).
+
+    Also the metrics it could NOT compare, because a side has no number for it: a build on a model
+    with no list price has no cost. Returned so the report can say so, instead of reading PASS on a
+    band that never ran."""
     out: list[SpendBand] = []
+    skipped: list[str] = []
     for metric, allowed in sorted(t.spend_bands.items()):
         b, c = getattr(baseline, metric, None), getattr(candidate, metric, None)
         if not isinstance(b, (int, float)) or not isinstance(c, (int, float)) or b <= 0:
+            skipped.append(metric)
             continue
         rise = (c - b) / b
         out.append(SpendBand(metric, float(b), float(c), rise, allowed, rise <= allowed))
-    return out
+    return out, skipped
 
 
 def compare(baseline: MapProfile, candidate: MapProfile, thresholds: Thresholds | None = None,
@@ -655,8 +662,13 @@ def compare(baseline: MapProfile, candidate: MapProfile, thresholds: Thresholds 
                          "were skipped; judge the baseline map (method.md Step 4) into its "
                          ".coyomap-eval/cache/<map sha12>/judge.json and re-run")
 
-    sbands = _compare_spend(baseline_spend, candidate_spend, t) \
-        if baseline_spend is not None and candidate_spend is not None else []
+    sbands: list[SpendBand] = []
+    if baseline_spend is not None and candidate_spend is not None:
+        sbands, unmeasured = _compare_spend(baseline_spend, candidate_spend, t)
+        for metric in unmeasured:
+            notes.append(f"{metric.replace('_', ' ')} was not compared: one side has no number for it "
+                         f"(a build on a model with no list price has no cost), so the verdict says "
+                         f"nothing about it")
     if (baseline_spend is None) != (candidate_spend is None):
         # A NOTE, not a breach: what a build cost is measured from its transcript, and a baseline
         # blessed before this band existed has none. It would DRIFT every run until re-blessed.

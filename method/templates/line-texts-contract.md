@@ -24,7 +24,8 @@ from a long line, and rules 1 and 2 below name both. The merged texts are checke
 >
 > **The lines are at «LINES»**: a JSON list of `{"key", "from", "to", "sentences"}`. `from` and
 > `to` are the two boxes the line joins. `sentences` are the step sentences of the stories that take
-> the line, one per distinct sentence.
+> the line, one per distinct sentence. `drawn_as`, when present, is every pair of boxes the same
+> line joins: one picture can show a whole subsystem where another shows one of its parts.
 >
 > **Rules for the merged text**
 >
@@ -42,8 +43,9 @@ from a long line, and rules 1 and 2 below name both. The merged texts are checke
 >    "add a server", never "adds a server" or "the admin adds a server".
 > 5. **One sentence, at most 20 words, plain words.** No dash, no semicolon, no code-shaped word
 >    (no function, file or field names), and never start with "It" or "This".
-> 6. **Do not name the two boxes of the line.** The picture already shows them. Keep another name
->    only when a sentence needs it to make sense.
+> 6. **Do not name a box of the line, on any picture.** The picture already shows it, and on
+>    another picture the same line can join a different box. Keep another name only when a sentence
+>    needs it to make sense.
 > 7. **When the sentences share nothing**, name the two or three main actions joined with "or", and
 >    keep each one short.
 >

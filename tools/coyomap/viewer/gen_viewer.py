@@ -35,6 +35,7 @@ import subprocess
 import sys
 from html import escape as html_escape
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, TypedDict, cast
 from urllib.parse import quote
 
@@ -1241,23 +1242,66 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
     sentence and the map steps of both. A pipe is plumbing: drawn, it stood between every screen and
     the server it calls ("Admin API Calls" on 7 of the team admin's stories), and said nothing either
     end did not. A pipe no step enters, the wiring that starts a story, stays drawn; one no step
-    leaves is where that story's line stops."""
+    leaves is where that story's line stops.
+
+    ANSWERS STAY ANSWERS. A step into a pipe from a box the pipe called is that box's answer, not a
+    new call: it never replaces the step that came in from outside, so a pipe that calls two servers
+    in one story draws A -> B and A -> C, never B -> C. The second call out says its own sentence and
+    carries its own map steps, because A's were told on the first. A step left out, an answer or a call into a pipe no step
+    leaves, still hands its map steps to the kept step before it, so a rule decided there keeps its
+    mark on the line the story took."""
     def through(x: str) -> bool:
         return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH
 
-    waiting: dict[str, _ArchStep] = {}   # a pipe -> the step that went into it last
+    waiting: dict[str, tuple[_ArchStep, int]] = {}   # a pipe -> the step that came in from outside,
+                                                     # and the index of the kept step before it
+    used: set[int] = set()                           # id() of the waiting steps a step out has joined
+    called: dict[str, set[str]] = {}                 # a pipe -> the boxes it called in this walk
     out: list[_ArchStep] = []
+    early: list[str] = []                            # map steps left out before the first kept step
+
+    def keep_keys(keys: list[str], before: int) -> None:
+        if before >= 0:
+            out[before]["keys"].extend(keys)
+        else:
+            early.extend(keys)
+
+    def let_go(pipe: str) -> None:
+        held = waiting.pop(pipe, None)
+        if held is not None and id(held[0]) not in used:
+            keep_keys(held[0]["keys"], held[1])
+
     for st in steps:
-        came = waiting.get(st["src"]) if through(st["src"]) else None
-        if came is not None:
-            st = _ArchStep(src=came["src"], dst=st["dst"], from_person=came["from_person"],
-                           to_person=st["to_person"], phrase=came["phrase"],
-                           keys=[*came["keys"], *st["keys"]], store=st["store"])
-        if through(st["dst"]) and not st["to_person"]:
-            waiting[st["dst"]] = st
+        src, dst = st["src"], st["dst"]
+        held = waiting.get(src) if through(src) else None
+        if held is not None:
+            came = held[0]
+            if through(dst) and src in called.get(dst, set()):   # one pipe answering the one that called it
+                keep_keys(st["keys"], len(out) - 1)
+                continue
+            first = id(came) not in used
+            used.add(id(came))
+            called.setdefault(src, set()).add(dst)
+            st = _ArchStep(src=came["src"], dst=dst, from_person=came["from_person"],
+                           to_person=st["to_person"], phrase=came["phrase"] if first else st["phrase"],
+                           keys=[*(came["keys"] if first else []), *st["keys"]], store=st["store"])
+            src = st["src"]
+        if through(dst) and not st["to_person"]:
+            if src in called.get(dst, set()):   # the answer of a box this pipe called
+                keep_keys(st["keys"], len(out) - 1)
+                continue
+            let_go(dst)
+            waiting[dst] = (st, len(out) - 1)
             continue
-        if st["src"] != st["dst"]:
-            out.append(st)
+        if src == dst:   # an answer that came back through a pipe to the box that called it
+            keep_keys(st["keys"], len(out) - 1)
+            continue
+        out.append(_ArchStep(src=src, dst=dst, from_person=st["from_person"],
+                             to_person=st["to_person"], phrase=st["phrase"],
+                             keys=[*early, *st["keys"]], store=st["store"]))
+        early = []
+    for pipe in list(waiting):
+        let_go(pipe)
     return out
 
 
@@ -1395,7 +1439,9 @@ def _story_order_numbers(sequences: list[list[tuple[str, str]]]) -> dict[tuple[s
     the team member's 32 arrows, 26 of the team admin's 58, 34 of everyone's 94.
 
     Longest path over the arrows, loops merged first (Tarjan's strongly connected components, which
-    come out in reverse order, so walking them backwards visits every arrow after all before it)."""
+    come out in reverse order, so walking them backwards visits every arrow after all before it).
+    Walked with a stack of its own rather than by recursion: a story of a thousand arrows would
+    otherwise reach Python's recursion limit and take the whole view down with it."""
     arrows = list(dict.fromkeys(a for seq in sequences for a in seq))
     succ: dict[tuple[str, str], set[tuple[str, str]]] = {a: set() for a in arrows}
     for seq in sequences:
@@ -1409,30 +1455,44 @@ def _story_order_numbers(sequences: list[list[tuple[str, str]]]) -> dict[tuple[s
     stack: list[tuple[str, str]] = []
     on_stack: set[tuple[str, str]] = set()
 
-    def visit(v: tuple[str, str]) -> None:
+    work: list[tuple[tuple[str, str], Iterator[tuple[str, str]]]] = []   # the arrows being visited
+
+    def enter(v: tuple[str, str]) -> None:
         index[v] = low[v] = len(index)
         stack.append(v)
         on_stack.add(v)
-        for w in succ[v]:
-            if w not in index:
-                visit(w)
-                low[v] = min(low[v], low[w])
-            elif w in on_stack:
-                low[v] = min(low[v], index[w])
-        if low[v] == index[v]:
-            group: list[tuple[str, str]] = []
-            while True:
-                w = stack.pop()
-                on_stack.discard(w)
-                group_of[w] = len(groups)
-                group.append(w)
-                if w == v:
-                    break
-            groups.append(group)
+        work.append((v, iter(succ[v])))
 
     for a in arrows:
-        if a not in index:
-            visit(a)
+        if a in index:
+            continue
+        enter(a)
+        while work:
+            v, following = work[-1]
+            deeper = False
+            for w in following:
+                if w not in index:
+                    enter(w)
+                    deeper = True
+                    break
+                if w in on_stack:
+                    low[v] = min(low[v], index[w])
+            if deeper:
+                continue
+            work.pop()
+            if work:
+                caller = work[-1][0]
+                low[caller] = min(low[caller], low[v])
+            if low[v] == index[v]:
+                group: list[tuple[str, str]] = []
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    group_of[w] = len(groups)
+                    group.append(w)
+                    if w == v:
+                        break
+                groups.append(group)
     level = [1] * len(groups)
     for g in reversed(range(len(groups))):
         for a in groups[g]:

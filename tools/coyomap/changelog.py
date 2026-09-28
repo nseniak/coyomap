@@ -912,12 +912,15 @@ def edit_view(ed: FieldEdit, names: dict[str, str]) -> dict[str, Any]:
     if "[" in parts[-1] and not isinstance(was, list) and not isinstance(now, list):
         was, now = ([] if was is None else [was]), ([] if now is None else [now])
     rows = field_deltas({leaf: was}, {leaf: now}, {}, frozenset(), names, names)
-    # The engine says nothing for the same words, or the same items in another order: `reordered`
-    # is the one word left. A list whose items only moved in the code is NOT that: the engine hands
-    # it back as a code-link row with no words on either side, and the viewer draws it as one.
-    view: dict[str, Any] = asdict(rows[0]) if rows else {
-        "cls": field_spec(leaf).cls, "old": None, "new": None, "spans": [], "added": [], "removed": [],
-        "reordered": True}
+    # The engine says nothing for the same items in another order: `reordered` is the one word left.
+    # A list whose items only moved in the code is NOT that: the engine hands it back as a code-link
+    # row with no words on either side, and the viewer draws it as one. And nothing on either side
+    # (absent, "", [] or {}), or the same words, is no change at all, never "reordered".
+    empty = {"cls": field_spec(leaf).cls, "old": None, "new": None, "spans": [], "added": [],
+             "removed": []}
+    view: dict[str, Any] = (asdict(rows[0]) if rows
+                            else {**empty, "reordered": True} if isinstance(was, list) and isinstance(now, list) and was
+                            else {**empty, "unchanged": True})
     view.update({"key": ed.key, "label": _edit_label(ed.key)})
     return view
 
@@ -928,6 +931,8 @@ def _edit_text(ed: FieldEdit, names: dict[str, str]) -> str:
     view = edit_view(ed, names)
     if view.get("reordered"):
         return "reordered"
+    if view.get("unchanged"):
+        return "no change"
     if view["added"] or view["removed"]:
         return "; ".join([f"+ {x}" for x in view["added"]] + [f"− {x}" for x in view["removed"]])
     if view["cls"] == "link" and view["old"] is None and view["new"] is None:

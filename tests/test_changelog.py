@@ -302,6 +302,27 @@ def test_a_list_whose_items_only_moved_in_the_code_is_a_link_move_and_a_step_rea
     assert changelog.edit_view(swapped, {})["reordered"] is True and changelog._edit_text(swapped, {}) == "reordered"
 
 
+def test_an_edit_from_nothing_to_empty_reads_no_change_never_reordered():
+    """Absent and "" are both nothing (`mapdiff.is_empty_value`), so the engine says nothing about
+    the edit, and the fallback used to call it "reordered"."""
+    for was, now in ((None, ""), ("", None), ([], None)):
+        view = changelog.edit_view(FieldEdit("C1", "kind", was, now), {})
+        assert view.get("unchanged") is True and not view.get("reordered"), (was, now, view)
+        assert changelog._edit_text(FieldEdit("C1", "kind", was, now), {}) == "no change"
+
+
+def test_the_gate_takes_an_absent_header_field_and_an_empty_one_for_the_same():
+    """A map written before a header field existed does not carry it; the same map written again
+    carries it empty. The gate must not call that a change of the map."""
+    old = make_doc()
+    old.pop("goal", None)
+    new = copy(old)
+    new["goal"] = ""
+    assert check(make_log(), old, new).ok, check(make_log(), old, new).errors
+    new["goal"] = "a real goal"
+    assert "map modified (goal) in the map, and no entry names it" in check(make_log(), old, new).errors
+
+
 def test_a_use_case_named_by_its_flow_keys_the_use_case_and_the_map_and_a_role_have_their_place():
     doc = make_doc()
     log = make_log(make_entry(elements=["flow:UC1", "map", "R1"],

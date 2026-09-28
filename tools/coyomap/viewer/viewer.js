@@ -17509,6 +17509,7 @@ function logFootHtml(log) {
 // field row, so the one renderer draws both: the story's edit and the evidence under it.
 function logEditHtml(x) {
   if (x.reordered) return '<span class="muted">reordered</span>';   // the same items, in another order
+  if (x.unchanged) return '<span class="muted">no change</span>';   // nothing on either side, or the same words
   return cmpFieldHtml(x);   // a code-link row with no words on either side reads "code links moved" here
 }
 // The story of one box: each entry naming it — why it changed, in the entry's words — and the
