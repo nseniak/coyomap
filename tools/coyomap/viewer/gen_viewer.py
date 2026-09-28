@@ -1444,6 +1444,22 @@ def _arch_layer_label(layer: int) -> str:
     return ARCH_EDGE_FRAMES[layer][1] if layer in ARCH_EDGE_FRAMES else _arch_frame_label(layer)
 
 
+def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
+    """A layer's name ON ONE PICTURE. The first layer names only the kinds of part it holds there,
+    "Screens" or "Screens and scripts": its three kinds are what a person drives directly, and only 2
+    of mcpolis's 11 pictures held more than one of them, under a name that promised all three."""
+    first = grammar.COMPONENT_KIND_FRAMES[0][1]
+    if layer != 0:
+        return _arch_layer_label(layer)
+    held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == 0
+            for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
+    names = [f"{w}s" for w in first if w in held]
+    if not names:
+        return _arch_layer_label(layer)
+    said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return said[0].upper() + said[1:]
+
+
 def _arch_cell_id(frame: int, sub: str) -> str:
     """The id a group of parts is drawn under: its layer and its subsystem. No underscore, because the
     view splits a line's id at its underscores to find the line's two ends (`eachEdge`)."""
@@ -1886,7 +1902,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         for n_frame in range(len(grammar.COMPONENT_KIND_FRAMES) + 1):
             members = [b for b in model["inside"] if _arch_layer(graph, model, b) == n_frame]
             # The last one holds the parts whose kind is unstated: no layer to put them in, so it says so.
-            frames.append((_arch_frame_id(n_frame), _arch_layer_label(n_frame), members))
+            frames.append((_arch_frame_id(n_frame), _arch_frame_title(graph, model, n_frame), members))
     else:
         frames.append(("", "", list(model["inside"])))
     for fid, label, members in frames:
@@ -2081,7 +2097,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
         # can have a group in two layers of one picture.
         cell = model["cells"].get(x)
         if cell is not None:
-            return f"{nodes[cell['sub']]['name']} ({_arch_frame_label(cell['frame'])})"
+            return f"{nodes[cell['sub']]['name']} ({_arch_frame_title(graph, model, cell['frame'])})"
         return str(nodes[x]["name"]) if x in nodes else subflow_names.get(x, x)
 
     out: list[dict[str, Any]] = []
@@ -2177,7 +2193,8 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
             texts[f"{scope}|{feature}"] = {
                 "lines": _arch_text(graph, model, merged), "stories": _arch_stories(graph, model),
                 "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()},
-                **({"layerLines": [{"src": _arch_layer_label(ll["src"]), "dst": _arch_layer_label(ll["dst"]),
+                **({"layerLines": [{"src": _arch_frame_title(graph, model, ll["src"]),
+                                    "dst": _arch_frame_title(graph, model, ll["dst"]),
                                     "lines": [list(pair) for pair in ll["lines"]],
                                     **({"up": True} if ll["up"] else {})}
                                    for ll in _arch_layer_lines(graph, model)]} if whole else {})}

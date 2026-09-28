@@ -318,13 +318,21 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
     graph = make_graph(make_layered_map())
     drawings, _texts = gv.gen_arch_views(graph)
     drawing = drawings["all|CAP1"]
-    for label in ("Screens and commands", "APIs", "Work", "Storage", "Outside services"):
+    for label in ("Screens", "APIs", "Work", "Storage", "Outside services"):
         assert f'["{label}"]' in drawing, label
     # on a feature's picture the door is in no frame: it sits between the people and the first
     # frame, tied above it
     assert frames_of(drawing, ("I1", "C1", "C3", "C4", "C5", "D1")) == {
-        "C1": "Screens and commands", "C3": "APIs", "C4": "Work", "C5": "Storage", "D1": "Outside services"}
+        "C1": "Screens", "C3": "APIs", "C4": "Work", "C5": "Storage", "D1": "Outside services"}
     assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
+
+
+def test_the_first_layer_names_only_the_kinds_it_holds():
+    """The page is a screen and the client a script: the first frame holds both, and says both."""
+    graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))
+    drawing = gv.gen_arch_views(graph)[0]["all|"]
+    assert '["Screens and scripts"]' in drawing and '["Screens"]' not in drawing
+    assert frames_of(drawing, ("C1", "C2")) == {"C1": "Screens and scripts", "C2": "Screens and scripts"}
 
 
 def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
