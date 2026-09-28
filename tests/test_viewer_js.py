@@ -354,7 +354,7 @@ def test_flow_map_boxes_locate_the_element_in_its_structural_diagram() -> None:
     assert "if (isFlowState(s) || isDataPicture(s) || isStructurePicture(s) || (s && PAIR_PAGE[s.kind])) return;" in locate_code   # no icons on a walk, a Data or a structure picture, or a pair page
     # No icons on a walk at all — the box's NAME opens what it names. Off a walk, the icon is the
     # element's own primary action.
-    assert "const action = primaryActionFor(id);" in locate_code
+    assert "const action = primaryActionFor(sceneElementOf(scene, id));" in locate_code
     assert "if (locate && isDrillClick(ev)) { locate.run(); return; }" in js
     assert "action-icon is-' + action.kind" in js
     assert "Lucide LocateFixed" in js
@@ -3840,10 +3840,10 @@ def test_an_arrow_from_a_box_to_itself_is_one_arrow_made_of_three_pieces() -> No
         "function eachEdge(root, fn) {",
         "// Stroke an edge's path + glow its label",
         """
-const mk = (id) => ({ id, style: {} });
-const paths = ['g-C50-cyclic-special-1', 'g-C50-cyclic-special-mid', 'g-C50-cyclic-special-2',
-               'g-L_C50_E55_0', 'g-L_U_0_U_15_0'].map(mk);
-const labels = ['', '6', '', '7', '8'].map((text) => ({ text }));
+const mk = (id, flipped) => ({ id, style: {}, hasAttribute: (a) => !!flipped && a === 'data-cy-flip' });
+const paths = [...['g-C50-cyclic-special-1', 'g-C50-cyclic-special-mid', 'g-C50-cyclic-special-2',
+                   'g-L_C50_E55_0', 'g-L_U_0_U_15_0'].map((id) => mk(id)), mk('g-L_C5_C4_0', true)];
+const labels = ['', '6', '', '7', '8', '9'].map((text) => ({ text }));
 const root = { querySelectorAll: (sel) => (sel.includes('edgePaths') ? paths : labels) };
 const seen = [];
 eachEdge(root, (p, label, m) => seen.push(
@@ -3852,13 +3852,15 @@ console.log(JSON.stringify(seen));
 """,
     )
     seen = json.loads(out)
-    assert [(s["src"], s["dst"]) for s in seen] == [("C50", "C50"), ("C50", "E55"), ("U_0", "U_15")]
+    assert [(s["src"], s["dst"]) for s in seen][:3] == [("C50", "C50"), ("C50", "E55"), ("U_0", "U_15")]
     loop = seen[0]
     assert loop["label"] == "6" and loop["i"] == "0"
     assert loop["segs"] == ["g-C50-cyclic-special-1", "g-C50-cyclic-special-mid",
                             "g-C50-cyclic-special-2"], "all three pieces travel with the arrow"
     # The arrows drawn AFTER the loop still get their own labels — the pairing counted three, not one.
-    assert [s["label"] for s in seen[1:]] == ["7", "8"]
+    assert [s["label"] for s in seen[1:]] == ["7", "8", "9"]
+    # A line drawn FLIPPED (written from the box it goes to) is reported the way it runs.
+    assert (seen[3]["src"], seen[3]["dst"]) == ("C4", "C5")
     # An ordinary arrow is still one piece, so nothing else pays for the loop.
     assert seen[1]["segs"] == ["g-L_C50_E55_0"]
 

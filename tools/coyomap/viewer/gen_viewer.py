@@ -1098,14 +1098,17 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a component standing alone
 ARCH_OUTSIDE_MAX = 6
 ARCH_STORES_MAX = 4     # the databases behind the records the stories reach
-ARCH_STORE_LINE = "#0f766e"
+ARCH_STORE_LINE = "#0f766e"   # the colour of a line into a database, on the picture and in its key
 #: THE LAYERED PICTURE'S FRAMES: a pale fill and a quiet border, so a frame reads as a band behind
 #: its parts and never as a box of its own.
 ARCH_FRAME_FILL = "#f8fafc"
 ARCH_FRAME_STROKE = "#cbd5e1"
-#: How many parts the layered picture draws at most: gitdiagram's own picture of mcpolis drew 23, and
-#: a trial of our map drawn its way stayed readable at 24. The rest are drawn through, as grey lines.
-ARCH_LAYER_BUDGET = 24   # the colour of a line into a database, on the picture and in its key
+#: The frame of the parts whose kind places them in no layer.
+ARCH_NO_KIND_FRAME = "Parts with no kind"
+#: How many boxes the layered picture draws at most, a group of parts or a part alone: gitdiagram's
+#: own picture of mcpolis drew 23, and a trial of our map drawn its way stayed readable at 24. The
+#: rest are drawn through, as grey lines.
+ARCH_LAYER_BUDGET = 24
 #: THE MARK FOR "A BUSINESS RULE DECIDES HERE", on an Architecture line and a use case map arrow alike. A
 #: character, not the rule's drawn glyph, because it rides inside the arrow's label text, where the drawing
 #: engine measures it before it lays the picture out; a glyph added afterwards would be cut off by the label.
@@ -1392,8 +1395,37 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                      stores=list(stores), ends=ends)
 
 
+class _ArchCell(TypedDict):
+    """ONE BOX OF THE LAYERED PICTURE HOLDING SEVERAL PARTS: the parts of one top-level subsystem that
+    sit in one layer (`_arch_lift`)."""
+    sub: str           # the top-level subsystem
+    frame: int         # its layer: an index into `grammar.COMPONENT_KIND_FRAMES`, their count for none
+    parts: list[str]   # the components it holds, first met first
+
+
 class _ArchLifted(_ArchFlow):
-    box_of: dict[str, str]   # each component the stories use -> the box that draws it
+    box_of: dict[str, str]         # each component the stories use -> the box that draws it
+    cells: dict[str, _ArchCell]    # the layered picture's boxes holding several parts, by box id
+
+
+def _arch_frame(graph: GraphDict, x: str) -> int:
+    """The layer a part sits in on the layered picture: its kind's place in
+    `grammar.COMPONENT_KIND_FRAMES`, or one past the last when its kind places it in none."""
+    kind = _component_kind(graph, x)
+    return next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words),
+                len(grammar.COMPONENT_KIND_FRAMES))
+
+
+def _arch_frame_label(frame: int) -> str:
+    """A layer's name, as its frame on the picture says it."""
+    labels = [label for label, _words in grammar.COMPONENT_KIND_FRAMES]
+    return labels[frame] if frame < len(labels) else ARCH_NO_KIND_FRAME
+
+
+def _arch_cell_id(frame: int, sub: str) -> str:
+    """The id a group of parts is drawn under: its layer and its subsystem. No underscore, because the
+    view splits a line's id at its underscores to find the line's two ends (`eachEdge`)."""
+    return f"CYG{frame}{sub}"
 
 
 def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _ArchLifted:
@@ -1407,15 +1439,21 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
     then calls a different member of the first draws a line back up that no story meant as a call.
     A dropped step's map steps join the kept step before it, as in `_arch_flow`.
 
-    `layered`: every part is its own box. The layered picture groups parts by LAYER, in frames drawn
-    around them, so no part is folded into its subsystem there."""
+    `layered`: the layered picture groups parts by LAYER, in frames drawn around them, and inside a
+    layer by subsystem. The parts of one top-level subsystem that sit in one layer are ONE box, a
+    `_ArchCell`, and a part with no other part of its subsystem in its layer stays itself. Measured on
+    mcpolis with a kind on every part: the whole-product picture went from 71 boxes to 24 and from 191
+    lines to 107, and a feature's from 13 boxes to 8 at the median. The subsystem is the TOP-LEVEL one,
+    the one every part's box already names in its pill, so a group is named by what the reader saw."""
     nodes = graph["nodes"]
     used: dict[str, set[str]] = {}
+    met: dict[str, None] = {}   # every component the stories use, first met first
     for _, steps in flow["walks"]:
         for s, d in steps:
             for x in (s, d):
                 if str(nodes.get(x, {}).get("kind")) == "component":
                     used.setdefault(str(nodes[x].get("parent") or x), set()).add(x)
+                    met.setdefault(x, None)
     # A STORE AND A CHECK STAND ALONE (`grammar.COMPONENT_KINDS_STANDING_ALONE`): the records a
     # subsystem keeps and the gate a story passes are the two things a reader looks for inside it,
     # and inside the subsystem's box neither can be seen. The rest of the subsystem is still one box,
@@ -1423,8 +1461,22 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
     def alone(c: str) -> bool:
         return _component_kind(graph, c) in grammar.COMPONENT_KINDS_STANDING_ALONE
 
-    box_of = {c: (c if layered or alone(c) or len([x for x in members if not alone(x)]) < 2 else sid)
-              for sid, members in used.items() for c in members}
+    cells: dict[str, _ArchCell] = {}
+    if layered:
+        groups: dict[tuple[int, str], list[str]] = {}
+        for c in met:
+            area = _top_subsystem(graph, c)
+            if area:
+                groups.setdefault((_arch_frame(graph, c), area), []).append(c)
+        box_of = {c: c for c in met}
+        for (frame, area), parts in groups.items():
+            if len(parts) > 1:
+                cid = _arch_cell_id(frame, area)
+                cells[cid] = _ArchCell(sub=area, frame=frame, parts=parts)
+                box_of.update(dict.fromkeys(parts, cid))
+    else:
+        box_of = {c: (c if alone(c) or len([x for x in members if not alone(x)]) < 2 else sid)
+                  for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
     keys: dict[str, list[list[str]]] = {}
@@ -1449,7 +1501,7 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
         keys[uc] = held
     ends = {uc: box_of.get(x, x) for uc, x in flow["ends"].items()}
     return _ArchLifted(walks=walks, phrases=phrases, keys=keys, people=flow["people"], doors=flow["doors"],
-                       stores=flow["stores"], ends=ends, box_of=box_of)
+                       stores=flow["stores"], ends=ends, box_of=box_of, cells=cells)
 
 
 def _story_order_numbers(sequences: list[list[tuple[str, str]]]) -> dict[tuple[str, str], int]:
@@ -1540,18 +1592,22 @@ class _ArchLine(TypedDict):
     keys: list[str]  # the map's steps behind the line, the folded ones too (`_step_key`)
     story_keys: dict[str, list[str]]   # …and per story taking it, for the view that follows one story
     store: bool      # a line into a database: where a box keeps what it saves, not a step of the flow
+    up: bool         # the layered picture only: it runs from a lower layer up to a higher one, so it
+                     # is drawn from the upper box (see `_arch_lines_mermaid`)
 
 
 class _ArchModel(TypedDict):
     people: list[str]
     doors: list[str]
     inside: list[str]        # the boxes kept inside the product, first met first: a subsystem, a
-                             # component standing alone (see the rule above), or a shared sub-use case
+                             # component standing alone (see the rule above), or a shared sub-use case;
+                             # on the layered picture a part, or a group of parts (`cells`)
     outside: list[str]
     stores: list[str]        # the databases behind the records the stories reach
     lines: list[_ArchLine]   # in reading order: by number, then first met
     stories: dict[str, list[tuple[str, str]]]   # use case -> the lines it takes, in its own order
     ends: dict[str, str]     # use case -> the box its result comes out of (see `_arch_flow`)
+    cells: dict[str, _ArchCell]   # the kept boxes holding several parts, on the layered picture
 
 
 def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
@@ -1562,11 +1618,12 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     lets the numbering be checked on the flow itself instead of by reading a drawing back."""
     nodes = graph["nodes"]
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
+    flow = _arch_lift(graph, _arch_flow(graph, _arch_walks(graph, feature, scope), layered), layered)
+    cells = flow["cells"]
 
     def kind_of(i: str) -> str:
-        return "subflow" if i in subflows else str(nodes.get(i, {}).get("kind"))
+        return "subflow" if i in subflows else "cell" if i in cells else str(nodes.get(i, {}).get("kind"))
 
-    flow = _arch_lift(graph, _arch_flow(graph, _arch_walks(graph, feature, scope), layered), layered)
     people, doors, store_ids = set(flow["people"]), set(flow["doors"]), set(flow["stores"])
     passing: dict[str, set[str]] = {}   # inside box -> the stories passing through it, first met first
     reach: dict[str, set[str]] = {}     # outside system -> the stories reaching it
@@ -1574,7 +1631,7 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     for uc, steps in flow["walks"]:
         for s, d in steps:
             for x in (s, d):
-                if kind_of(x) in ("component", "subsystem", "subflow"):
+                if kind_of(x) in ("component", "subsystem", "subflow", "cell"):
                     passing.setdefault(x, set()).add(uc)
                 elif x in store_ids:
                     kept_at.setdefault(x, set()).add(uc)
@@ -1685,15 +1742,34 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
                                hidden=len(via), via=via, verb=verb, number=numbers.get((a, b), 0),
                                sentences=list(said.get((a, b), {}).items()), keys=list(keys_of[(a, b)]),
                                story_keys={uc: list(ks) for uc, ks in story_keys[(a, b)].items()},
-                               store=(a, b) in kept_lines))
+                               store=(a, b) in kept_lines, up=False))
     # Reading order: the flow's lines by number, then the lines into a database, each in first-met order.
     lines.sort(key=lambda ln: (ln["store"], ln["number"], first[(ln["src"], ln["dst"])]))
     # WHERE EACH STORY ENDS: the box that hands its last result to a person, when the picture draws
     # it; else the last box the story reaches on the picture.
     ends = {uc: (flow["ends"][uc] if flow["ends"].get(uc) in kept else seq[-1][1])
             for uc, seq in stories.items()}
-    return _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
-                      stores=stores, lines=lines, stories=stories, ends=ends)
+    model = _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
+                       stores=stores, lines=lines, stories=stories, ends=ends,
+                       cells={b: cells[b] for b in inside if b in cells})
+    if layered:
+        for ln in model["lines"]:
+            ln["up"] = _arch_layer(graph, model, ln["src"]) > _arch_layer(graph, model, ln["dst"])
+    return model
+
+
+def _arch_layer(graph: GraphDict, model: _ArchModel, x: str) -> int:
+    """Where a box sits on the layered picture, top to bottom: the people above every frame, a part or
+    a group of parts in its layer's frame (`_arch_frame`), and what the product reaches outside in the
+    last frame, below the parts with no kind."""
+    if x in model["people"]:
+        return -1
+    cell = model["cells"].get(x)
+    if cell is not None:
+        return cell["frame"]
+    if x in model["inside"]:
+        return _arch_frame(graph, x)
+    return len(grammar.COMPONENT_KIND_FRAMES) + 1
 
 
 def gen_overview_mermaid(graph: GraphDict, feature: str = "", scope: str = "all") -> str:
@@ -1739,7 +1815,8 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
 
     `layered`: the parts sit in FRAMES, one per layer (`grammar.COMPONENT_KIND_FRAMES`), top to bottom
     from what people use down to what keeps records, and what the product reaches outside sits in a
-    last frame at the bottom. A frame is drawn only when a part of the picture is in it."""
+    last frame at the bottom. Inside a frame, the parts of one subsystem are one box (`_arch_lift`). A
+    frame is drawn only when a part of the picture is in it."""
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
     lines = [SLOT_MAP_INIT, "flowchart TB"]
     for p in model["people"]:
@@ -1762,20 +1839,17 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
 
     frames: list[tuple[str, str, list[str]]] = []
     if layered:
-        placed: set[str] = set()
-        for n_frame, (label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES):
-            members = [b for b in model["inside"] if _component_kind(graph, b) in words]
-            placed.update(members)
-            frames.append((f"CYF{n_frame}", label, members))
-        rest = [b for b in model["inside"] if b not in placed]
-        if rest:   # a part whose kind is unstated: no layer to put it in, so it says so
-            frames.append(("CYFX", "Parts with no kind", rest))
+        for n_frame in range(len(grammar.COMPONENT_KIND_FRAMES) + 1):
+            members = [b for b in model["inside"] if _arch_layer(graph, model, b) == n_frame]
+            # The last one holds the parts whose kind is unstated: no layer to put them in, so it says so.
+            fid = f"CYF{n_frame}" if n_frame < len(grammar.COMPONENT_KIND_FRAMES) else "CYFX"
+            frames.append((fid, _arch_frame_label(n_frame), members))
     else:
         frames.append(("", "", list(model["inside"])))
     for fid, label, members in frames:
         framed(members, fid, label)
         for bid in members:
-            _arch_inside_box(graph, lines, bid, subflows)
+            _arch_inside_box(graph, lines, bid, subflows, model["cells"])
         unframed(members)
     outer = [*model["outside"], *model["stores"]]
     framed(outer, "CYFO", "Outside services")
@@ -1789,27 +1863,34 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
         for fid, _members in drawn:
             lines.append(f"  style {fid} fill:{ARCH_FRAME_FILL},stroke:{ARCH_FRAME_STROKE},color:#475569")
         # THE FRAMES STACK TOP TO BOTTOM. The layout places a frame by the lines into it, so without
-        # this the work frame landed beside the APIs it is called from. An invisible link from the
-        # first part of each frame to the first part of the next is the drawing tool's own way to say
-        # "below": a link between the frames themselves was measured and ignored. It draws nothing.
-        # Every part of a frame is tied to the first part of the next one: one tie per frame was
-        # measured too weak, the work frame still landed beside the APIs.
-        order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, nxt[0])}"
-                 for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members]
+        # this the work frame landed beside the APIs it is called from. An invisible link is the
+        # drawing tool's own way to say "below": a link between the frames themselves was measured
+        # and ignored. It draws nothing. Every box of a frame is tied to EVERY box of the next one:
+        # one tie per frame, and then a tie from each box to the next frame's first box only, were
+        # both measured too weak (mcpolis's "Running the service" still had its frames overlapping).
+        # A line up the layers is drawn flipped for the same reason (`_arch_lines_mermaid`).
+        order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
+                 for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members for b in nxt]
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the
         # line styles below and the view's pairing of a line with its label count by that number.
         return _arch_lines_mermaid(graph, model, lines, layered, order)
     return _arch_lines_mermaid(graph, model, lines, layered)
 
 
-def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set[str]) -> None:
+def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set[str],
+                     cells: dict[str, _ArchCell]) -> None:
     """One box inside the product on an Architecture picture."""
     # EVERY BOX INSIDE THE PRODUCT CARRIES ITS OWN SENTENCE, cut to 2 lines (`map`): the name
     # alone did not say what a box is ("Team MCPs" is a set of screens, "Plan caps" both the
     # limits and the prompt). A subsystem keeps its component count in the band; a box names the
     # top-level area it sits in, unless it IS that area. A shared sub-use case is its dashed box.
+    # A GROUP OF PARTS is its subsystem's box, and it counts only the parts it holds here: the
+    # same subsystem has a group in each layer it has parts in.
+    cell = cells.get(bid)
     if bid in subflows:
         lines.append(f'  {bid}["{_slot("subflow", "map", bid)}"]:::cy-{bid}')
+    elif cell is not None:
+        lines.append(f'  {bid}["{_slot("cell", "map", cell["sub"], parts=cell["parts"])}"]:::cy-{bid}')
     else:
         kind = str(graph["nodes"].get(bid, {}).get("kind"))
         area = _top_subsystem(graph, bid) or ""
@@ -1845,7 +1926,15 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         if ln["hidden"]:
             folded.append(str(n_line))
         head = "-.->" if ln["store"] or (not ln["always"] and not layered) else "-->"
-        lines.append(f"  {box_id(ln['src'])} {head}|{label}| {box_id(ln['dst'])}")
+        a, b = box_id(ln["src"]), box_id(ln["dst"])
+        if ln["up"]:
+            # A LINE UP THE LAYERS is written from the upper box, with a head at both ends, and the
+            # view takes away the head at the box it comes from (`markFlippedLines`). Written the way
+            # it runs, it made a loop with the ties that stack the frames, and the layout broke the
+            # loop by dropping ties: on mcpolis's whole-product picture 6 lines of 107 ran up, and the
+            # frames stood side by side. The drawing tool has no way to put one head at the start.
+            head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
+        lines.append(f"  {a} {head}|{label}| {b}")
     if folded:
         lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
     if keeping:
@@ -1898,6 +1987,11 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
     notes = _step_notes(graph)
 
     def name(x: str) -> str:
+        # A group of parts is its subsystem in one layer, and the layer is said: the same subsystem
+        # can have a group in two layers of one picture.
+        cell = model["cells"].get(x)
+        if cell is not None:
+            return f"{nodes[cell['sub']]['name']} ({_arch_frame_label(cell['frame'])})"
         return str(nodes[x]["name"]) if x in nodes else subflow_names.get(x, x)
 
     out: list[dict[str, Any]] = []
@@ -1922,6 +2016,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
             "srcBox": _arch_box_id(model, ln["src"]), "dstBox": _arch_box_id(model, ln["dst"]),
             "hidden": ln["hidden"],
             "store": ln["store"],
+            **({"up": True} if ln["up"] else {}),
             "via": [name(x) for x in ln["via"]],
             "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}
                           for t, ucs in by_text.items()],
@@ -1970,8 +2065,10 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
     feature over the happy path alone. Pre-rendered side by side, the way every other per-element
     drawing already is, from ONE model per key so the text can never describe another drawing.
 
-    The text is `{lines, stories}`: the flow told step by step (`_arch_text`), and each story on its
-    own (`_arch_stories`). `merged` is the map's kept line texts (`line_texts.load`), key to text.
+    The text is `{lines, stories, cells}`: the flow told step by step (`_arch_text`), each story on
+    its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
+    it holds, which the view opens and marks through. `merged` is the map's kept line texts
+    (`line_texts.load`), key to text.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -1985,8 +2082,9 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
             if model is None:
                 continue
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered)
-            texts[f"{scope}|{feature}"] = {"lines": _arch_text(graph, model, merged),
-                                           "stories": _arch_stories(graph, model)}
+            texts[f"{scope}|{feature}"] = {
+                "lines": _arch_text(graph, model, merged), "stories": _arch_stories(graph, model),
+                "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()}}
     return drawings, texts
 
 
@@ -3919,9 +4017,12 @@ ITEM_SLOT_STYLE = "fill:none,stroke:none"
 SLOT_MAP_INIT = "%%{init: {'flowchart': {'padding': 2}}}%%"
 
 
-def _slot(kind: str, variant: str, ident: str, pill: str = "") -> str:
-    """One item-box slot, as a mermaid node label body."""
+def _slot(kind: str, variant: str, ident: str, pill: str = "", parts: list[str] | None = None) -> str:
+    """One item-box slot, as a mermaid node label body. `parts`: the components a group of parts
+    holds on this picture, which the box counts."""
     extra = f" data-pill={quote(pill, safe='')}" if pill else ""
+    if parts:
+        extra += f" data-parts={quote(','.join(parts), safe='')}"
     return (f"<span class=cyslot data-k={kind} data-v={variant} "
             f"data-id={quote(ident, safe='')}{extra}></span>")
 

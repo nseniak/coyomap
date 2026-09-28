@@ -1240,13 +1240,27 @@ function itemSpecOf(id) {
     const kids = members.length;
     // …and WHAT it holds, once its components say what they are: "screen · API · logic · store"
     // answers "is this the data or the logic?" on the box itself, where a count could not.
-    const kinds = n.kind === 'subsystem' ? COMPONENT_KIND_ORDER.filter((k) =>
-      members.some((x) => (GRAPH.nodes[x].component_kind || '') === k)) : [];
-    if (kinds.length) spec.band.push(kinds.map((k) => COMPONENT_KIND_WORD[k] || k).join(' · '));
+    const kinds = n.kind === 'subsystem' ? componentKindsLabel(members) : '';
+    if (kinds) spec.band.push(kinds);
     else if (kids) spec.band.push(kids + (n.kind === 'subsystem' ? ' components' : ' entities'));
     // A CONTAINER IS DASHED, as a shared sub-use case is: a dashed line says "there is more inside".
     spec.dashed = true;
   }
+  return spec;
+}
+// What a set of components is made of, in the kinds' own order: "screen · API · logic · store".
+function componentKindsLabel(ids) {
+  return COMPONENT_KIND_ORDER.filter((k) => ids.some((x) => ((GRAPH.nodes[x] || {}).component_kind || '') === k))
+    .map((k) => COMPONENT_KIND_WORD[k] || k).join(' · ');
+}
+// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, counting only the parts
+// it holds there. The same subsystem has a group in each layer it has parts in, so the whole
+// subsystem's count would say the same number in every layer, and be true in none of them.
+function itemSpecCell(sid, parts) {
+  const spec = itemSpecOf(sid);
+  if (!spec) return null;
+  const kinds = componentKindsLabel(parts);
+  spec.band = [countLabel(parts.length, 'component'), ...(kinds ? [kinds] : [])];
   return spec;
 }
 // ── THE SLOT: how an item box gets onto a drawing ───────────────────────────────────────────────
@@ -1264,7 +1278,7 @@ function itemSpecOf(id) {
 //   3. after the drawing is in the page, swap the real box into each slot.
 // The label the engine parses therefore holds NO markup of ours beyond one sized span — no quotes, no
 // angle brackets, nothing its own label syntax could choke on.
-const SLOT_RE = /<span class=cyslot data-k=([a-zA-Z-]*) data-v=([a-z]+) data-id=([^ >]*)(?: data-pill=([^ >]*))?><\/span>/g;
+const SLOT_RE = /<span class=cyslot data-k=([a-zA-Z-]*) data-v=([a-z]+) data-id=([^ >]*)(?: data-pill=([^ >]*))?(?: data-parts=([^ >]*))?><\/span>/g;
 let slotBoxes = [];        // [{html}] — index is the `data-i` written into the sized span
 // The off-screen node boxes are measured in. It is a plain absolutely-positioned div, NOT inside
 // `#diagram`: a box measured under the diagram's own rules would pick up its font sizing and come out
@@ -1280,8 +1294,13 @@ function slotRulerEl() {
   return slotRuler;
 }
 // A slot's box, built from the map's own data. `k` is the kind the generator recorded, `id` the
-// element (or a shared sub-use case's `SFn`, or an actor's name), `v` the variant that picture wants.
-function slotSpec(k, id) {
+// element (or a shared sub-use case's `SFn`, or an actor's name), `v` the variant that picture wants,
+// and `parts` the components a group of parts holds (`k` is `cell`, and `id` its subsystem).
+function slotSpec(k, id, parts) {
+  if (k === 'cell') {
+    const spec = itemSpecCell(id, parts || []);
+    if (spec) return spec;
+  }
   if (k === 'subflow') {
     const sf = SUBFLOW_BY_ID[id] || {};
     return { id, k: 'subflow', name: sf.name || id, word: 'shared sub-use case', dashed: true,
@@ -1306,8 +1325,8 @@ function expandItemSlots(src) {
   if (!src || src.indexOf('cyslot') < 0) return src;
   const ruler = slotRulerEl();
   const built = [];
-  const out = String(src).replace(SLOT_RE, (_m, k, v, id, pill) => {
-    const spec = slotSpec(k, decodeURIComponent(id));
+  const out = String(src).replace(SLOT_RE, (_m, k, v, id, pill, parts) => {
+    const spec = slotSpec(k, decodeURIComponent(id), parts ? decodeURIComponent(parts).split(',') : []);
     // A pill the PICTURE knows and the thing itself does not — today only `via AI agent`, which is
     // true of a person in one walk and not in the next, so it cannot live on the role.
     if (pill) spec.pills = (spec.pills || []).concat([{ text: decodeURIComponent(pill), cls: '' }]);
@@ -2554,7 +2573,7 @@ function decorateActionIcons(scene, s) {
   if (isFlowState(s) || isDataPicture(s) || isStructurePicture(s) || (s && PAIR_PAGE[s.kind])) return;
   for (const id in scene.nodeEls) {
     if (scene.noAction.has(id)) continue;  // the box you're already zoomed into — no self-drill icon
-    const action = primaryActionFor(id);
+    const action = primaryActionFor(sceneElementOf(scene, id));
     if (action) addActionIcon(scene.nodeEls[id], id, action);
   }
 }
@@ -4440,9 +4459,14 @@ function syncZoomControls() {
 // box anywhere to badge.
 function subsystemDiffState(sid) {
   if (DIFF_STATE[sid]) return DIFF_STATE[sid];     // the subsystem itself changed
+  return rolledUpDiffState(Object.keys(DIFF_STATE).filter((id) => isAncestorOf(sid, id)));  // only changes inside this box's subtree
+}
+// A box holding several elements, marked by what happened to them: changed if one changed, touched
+// only in passing if that is all that happened to them.
+function rolledUpDiffState(ids) {
   let changed = false, rippled = false;
-  for (const id in DIFF_STATE) {
-    if (!isAncestorOf(sid, id)) continue;          // only changes inside this box's subtree
+  for (const id of ids) {
+    if (!DIFF_STATE[id]) continue;
     if (DIFF_STATE[id] === 'rippled') rippled = true; else changed = true;
   }
   return changed ? 'modified' : (rippled ? 'rippled' : null);
@@ -4459,8 +4483,11 @@ function applyDiffOverlay(s) {
       if (DIFF_STATE[id]) addBadge(mainScene.nodeEls[id], DIFF_STATE[id]);
     }
   } else if (IMPACT || CMP) {  // impact and change mode span every view: badge whatever this diagram draws
+    // …and a group of parts on the Architecture picture by the parts it holds.
+    const cells = ((archTextOf(s) || {}).cells) || {};
     for (const id in mainScene.nodeEls) {
-      if (DIFF_STATE[id]) addBadge(mainScene.nodeEls[id], DIFF_STATE[id]);
+      const st = DIFF_STATE[id] || (cells[id] ? rolledUpDiffState(cells[id].parts) : null);
+      if (st) addBadge(mainScene.nodeEls[id], st);
     }
   }
 }
@@ -4553,8 +4580,11 @@ function nodeFocus(scene, id) {
 // into the file browser / code viewer when it's the primary card).
 function nodeDesc(scene, el, id) {
   return { key: 'node:' + id, glow: (reveal) => glowNode(el, reveal),
-           focus: nodeFocus(scene, id), show: () => showNodeDetailSynced(id) };
+           focus: nodeFocus(scene, id), show: () => showNodeDetailSynced(sceneElementOf(scene, id)) };
 }
+// The map element a drawn box stands for (see `bindNodes`): the box's own id, unless the scene says
+// otherwise.
+function sceneElementOf(scene, id) { return (scene && scene.standsFor && scene.standsFor(id)) || id; }
 // Select a normal node within a scene: REPLACE the selection with just this node (glow + dim + panel).
 // Used by every non-modifier select path (tree click, search hit, history restore's single-key case).
 function selectNode(scene, el, id) { selReplace(scene, nodeDesc(scene, el, id)); }
@@ -4737,10 +4767,15 @@ function tryDataDrillClick(id, e) {
   return true;
 }
 
-function bindNodes(scene, onActivate) {
+// `standsFor(id)`: the map element a drawn box stands for, when that is not the box's own id. Only the
+// layered Architecture picture has such boxes: a group of parts is drawn under an id of its own, since
+// its subsystem can have a group in several layers, and it opens and shows that subsystem.
+function bindNodes(scene, onActivate, standsFor) {
+  scene.standsFor = standsFor || null;
   scene.root.querySelectorAll('g.node').forEach((el) => {
     const id = idOf(el);
-    if (!id || !GRAPH.nodes[id]) return;
+    const elem = sceneElementOf(scene, id);
+    if (!id || !GRAPH.nodes[elem]) return;
     // Every drawn box joins the focus set, so selecting a node keeps only its connected boxes lit and
     // dims the rest — collapsed neighbour boxes (subsystems/subdomains) included, the same as the
     // members. (Their bridge/cross arrows are registered as edges, so focus resolves the connection.)
@@ -4750,13 +4785,13 @@ function bindNodes(scene, onActivate) {
     // itself, the Libraries drill, a bucket drill) and is a no-op on the rest.
     if (el.classList.contains('human')) stickFigureNode(el);
     else if (el.classList.contains('agent')) botFigureNode(el);
-    markOpenSrc(el, id);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
+    markOpenSrc(el, elem);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
     bindHoverGlow(scene, el, id);  // hover affordance — skip while this node is the active selection, so HILITE wins
-    attachTip(el, () => actionTipNode(id));  // ⌘-hover shows the open-source action
+    attachTip(el, () => actionTipNode(elem));  // ⌘-hover shows the open-source action
     el.addEventListener('click', (e) => {
       if (isDrag(e)) return;  // tail of a drag-pan, not a real click
       e.stopPropagation();
-      if (openSrcClick(id, e)) return;  // ⌘-click a leaf with a source ref opens it instead of selecting
+      if (openSrcClick(elem, e)) return;  // ⌘-click a leaf with a source ref opens it instead of selecting
       onActivate(id, el, e);
     });
     // Diff badges are NOT added here: applyDiffOverlay() owns them, so they appear only on the
@@ -4913,7 +4948,22 @@ function eachEdge(root, fn) {
       return;
     }
     const m = p.id.match(/L_(U_\d+|[^_]+)_(U_\d+|[^_]+)_(\d+)$/);
-    if (m) fn(p, labels[i] || null, m);
+    // A line drawn FLIPPED (markFlippedLines) is reported the way it runs, not the way it is written.
+    if (m) fn(p, labels[i] || null, p.hasAttribute('data-cy-flip') ? [m[0], m[2], m[1], m[3]] : m);
+  });
+}
+// A LINE UP THE LAYERS of the layered Architecture picture is written from the box it goes TO, with a
+// head at both ends, so the layout keeps the layers stacked (gen_viewer `_arch_lines_mermaid`). The
+// text beside the picture flags each one (`up`), in the order the lines are drawn. Here each loses the
+// head at the box it comes from, and is marked so every reader of the drawing's lines (eachEdge) takes
+// it the way it runs.
+function markFlippedLines(root, t) {
+  const up = new Set(((t && t.lines) || []).flatMap((e, i) => (e.up ? [i] : [])));
+  if (!up.size) return;
+  [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
+    if (!up.has(i)) return;
+    p.setAttribute('data-cy-flip', '');
+    p.removeAttribute('marker-end');
   });
 }
 // Every path that makes up ONE drawn arrow: three for a self-arrow, one for every other arrow. Everything
@@ -7770,17 +7820,23 @@ archtext.addEventListener('click', (e) => {
 // the rest of the box selects it, and the text beside the picture keeps that box's steps alone (a
 // second click on the same box shows them all again). The generic binder it used before only selected,
 // so a subsystem box standing for 5 components offered no way to see them.
+// A GROUP OF PARTS (the layered picture's `cells`) opens and shows the subsystem it stands for, and
+// keeps its own id for the steps: two groups of one subsystem are two different boxes on the picture.
 function bindArch() {
   const s = (hi >= 0 && history[hi]) || {};
   const t = archTextOf(s);
   const story = archStoryOf(s, t);
+  const cells = (t && t.cells) || {};
+  const standsFor = (id) => (cells[id] ? cells[id].sub : id);
+  markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   bindNodes(mainScene, (id, el, ev) => {
-    const locate = locateActionFor(id);
+    const elem = standsFor(id);
+    const locate = locateActionFor(elem);
     if (locate && isDrillClick(ev)) { locate.run(); return; }
-    if (nameClick(ev)) { drillInto(id); return; }
+    if (nameClick(ev)) { drillInto(elem); return; }
     selectNodeFromCanvas(el, id, ev);
     if (!story) archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id));
-  });
+  }, standsFor);
   bindEdges(mainScene, resolveComponentEdge);
   bindArchText();   // …and every arrow finds its line in the text
   if (story) archFollow(story);

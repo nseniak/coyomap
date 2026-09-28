@@ -4369,3 +4369,87 @@ def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
         page.evaluate("() => document.querySelector('#archtext [data-archfilter-clear]').click()")
         assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == before
         assert not page.js_errors, page.js_errors
+
+
+def make_every_part_do_work(m: dict[str, Any]) -> None:
+    """Every component doing the work: the Architecture picture is then layered, and each subsystem's
+    parts are one box of the work layer."""
+    for c in m["components"]:
+        c["kind"] = "logic"
+
+
+def make_one_part_a_screen(m: dict[str, Any]) -> None:
+    """Every component doing the work but the dashboard's API router, kinded a screen: the work layer
+    then calls up into the top layer."""
+    for c in m["components"]:
+        c["kind"] = "screen" if c["id"] == "C14" else "logic"
+
+
+def make_whole_product_text(mutate: Any) -> dict[str, Any]:
+    """The text beside the whole-product picture, for the fixture map changed by `mutate`."""
+    m = json.loads(_FIXTURE_MAP.read_text())
+    mutate(m)
+    return gen_arch_views(model_to_graph(load_model(json.dumps(m))))[1]["all|"]
+
+
+def test_a_group_of_parts_counts_its_parts_shows_its_subsystem_and_keeps_its_own_steps() -> None:
+    """A group of parts is its subsystem's box on the layered picture. It counts only the parts it
+    holds; the box around the name selects it, shows the subsystem's card and keeps the group's own
+    steps in the text; the name opens the subsystem."""
+    groups = make_whole_product_text(make_every_part_do_work)["cells"]
+    with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        # A GROUP BOX A READER CAN CLICK: its sentence on screen, and not under a line or a label.
+        spot = page.evaluate("""() => {
+            const hit = (n) => {
+                const w = n.querySelector('.ibox-what').getBoundingClientRect();
+                const el = document.elementFromPoint(w.left + w.width / 2, w.top + w.height / 2);
+                return !!el && n.contains(el);
+            };
+            const n = [...document.querySelectorAll('#diagram g.node')]
+              .find((x) => [...x.classList].some((c) => c.startsWith('cy-CYG')) && hit(x));
+            const w = n.querySelector('.ibox-what').getBoundingClientRect();
+            const l = n.querySelector('.ibox-name').getBoundingClientRect();
+            return { id: [...n.classList].find((c) => c.startsWith('cy-CYG')).slice(3),
+                     band: n.querySelector('.ibox-band').textContent,
+                     x: w.left + w.width / 2, y: w.top + w.height / 2,
+                     nameX: l.left + l.width / 2, nameY: l.top + l.height / 2 };
+        }""")
+        group = groups[spot["id"]]
+        assert spot["band"].startswith(f"{len(group['parts'])} components"), (spot, group)
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(700)
+        seen = page.evaluate("""() => ({ hash: location.hash,
+            card: (document.querySelector('#panel .ecard[data-id]') || { dataset: {} }).dataset.id || '',
+            head: document.querySelector('#archtext .archtext-filter').textContent })""")
+        assert "node%3A" + spot["id"] in seen["hash"], seen
+        assert seen["card"] == group["sub"], seen
+        assert seen["head"].startswith("Only the steps through") and "(Work)" in seen["head"], seen
+        page.mouse.click(spot["nameX"], spot["nameY"])
+        page.wait_for_function("() => location.hash.includes('v=subsystem')")
+        assert f"sid={group['sub']}" in page.evaluate("() => location.hash")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_line_up_the_layers_points_the_way_it_runs_and_finds_its_text() -> None:
+    """A line from a lower layer up to a higher one is written the other way round, so the layers stay
+    stacked. On screen it keeps one head, at the box it goes to, and a click on it marks its own line
+    in the text, the way it runs."""
+    up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen)["lines"]
+          if e.get("up")]
+    assert up, "the changed map must draw a line up the layers"
+    with _served_map(make_one_part_a_screen) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => {
+            const flipped = [...document.querySelectorAll('#diagram .edgePaths path[data-cy-flip]')];
+            return { n: flipped.length,
+                     heads: flipped.map((p) => [!!p.getAttribute('marker-start'), !!p.getAttribute('marker-end')]) };
+        }""")
+        assert seen["n"] == len(up), (seen, up)
+        assert all(h == [True, False] for h in seen["heads"]), seen
+        page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        on = page.evaluate("""() => { const el = document.querySelector('#archtext .archtext-on');
+            return el ? [el.dataset.src, el.dataset.dst] : null; }""")
+        assert on is not None and tuple(on) in up, (on, up)
+        assert not page.js_errors, page.js_errors

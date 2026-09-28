@@ -330,6 +330,66 @@ def test_the_layered_picture_draws_parts_goes_through_doors_and_pipes_and_writes
     assert ("Member", "C3") in ln
 
 
+def make_grouped_map() -> dict[str, Any]:
+    """The layered map with the API doing the work: the API and the Checker are then two parts of the
+    Server in one layer, and the Saver the Server's only part in the storage layer."""
+    return make_kinded_map(C1="screen", C2="pipe", C3="logic", C4="check", C5="store")
+
+
+def test_the_parts_of_one_subsystem_in_one_layer_are_one_box():
+    model = gv._arch_model(make_graph(make_grouped_map()), "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    group = gv._arch_cell_id(2, "S2")
+    assert model["cells"] == {group: {"sub": "S2", "frame": 2, "parts": ["C3", "C4"]}}
+    assert model["inside"] == ["C1", group, "C5"]
+    ln = lines_of(model)
+    # the check runs inside the group, so no line is drawn for it
+    assert set(ln) == {("Admin", "C1"), ("C1", group), (group, "C5"), ("C5", "D1"), ("Member", group)}
+
+
+def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
+    graph = make_graph(make_grouped_map())
+    drawings, texts = gv.gen_arch_views(graph)
+    group = gv._arch_cell_id(2, "S2")
+    drawing = drawings["all|"]
+    assert (f'{group}["<span class=cyslot data-k=cell data-v=map data-id=S2 data-parts=C3%2CC4></span>"]'
+            f":::cy-{group}") in drawing
+    work = drawing.split('["Work"]')[1].split("\n  end")[0]
+    assert f"  {group}[" in work
+    assert texts["all|"]["cells"] == {group: {"sub": "S2", "parts": ["C3", "C4"]}}
+    line = next(e for e in texts["all|"]["lines"] if e["srcBox"] == "C1")
+    assert line["dstBox"] == group and line["dst"] == "Server (Work)"
+
+
+def make_map_with_a_line_up() -> dict[str, Any]:
+    """The layered map with the Saver kinded a screen: the Checker, in the work layer, then calls up
+    into the top layer."""
+    return make_kinded_map(C1="screen", C2="pipe", C3="api", C4="check", C5="screen")
+
+
+def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_runs():
+    graph = make_graph(make_map_with_a_line_up())
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [("C4", "C5")]
+    drawings, texts = gv.gen_arch_views(graph)
+    drawing = drawings["all|"]
+    assert '  C5 <-->|"4"| C4' in drawing and "C4 -->" not in drawing
+    up = [(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"] if e.get("up")]
+    assert up == [("C4", "C5")]
+
+
+def test_the_picture_over_subsystems_draws_no_line_flipped():
+    model = make_model()
+    assert not any(ln["up"] for ln in model["lines"])
+
+
+def test_the_picture_over_subsystems_has_no_groups_of_parts():
+    _drawings, texts = gv.gen_arch_views(make_graph())
+    assert texts["all|"]["cells"] == {}
+    assert "data-k=cell" not in _drawings["all|"]
+
+
 def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
     graph = make_graph(make_layered_map())
     _drawings, texts = gv.gen_arch_views(graph)
