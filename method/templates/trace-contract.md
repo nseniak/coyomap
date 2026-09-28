@@ -113,8 +113,8 @@ lead; nothing above this line goes into an agent prompt.
 >   command line has no code of its own: its `where` is the line where the receiving side takes it
 >   in (the route, the handler, the read). **On one of the product's OWN web pages, the receiving
 >   side is the SCREEN part whose code handles the click or the form**, and the next step goes from
->   that screen to the API it calls. The server's route receives it only when none of our code runs
->   in the page: a plain link, or a redirect back from someone else's sign-in page.
+>   that screen to what it calls. It goes straight to the server only when none of our code runs in
+>   the page: a plain link, or a redirect back from someone else's sign-in page.
 > - **Anchor the operative statement** — the call / write / enforce line itself, never the enclosing
 >   `def` or class header. That header is the most common drift the adversarial pass finds.
 > - **Four arrow mistakes, named**, because each one draws a story the code does not run:

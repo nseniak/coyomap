@@ -785,9 +785,9 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   shape. The three places it happens:
   **(1) The ARRIVAL.** The flow's FIRST step names the surface the actor comes in by: `R1 → I3`, then
   `I3 → C12`. `C12` is the part whose code takes the actor's action in. On one of the product's own
-  web pages that is the SCREEN part that handles the click or the form, never the server API the
-  screen then calls; the route is right only when none of our code runs in the page (a plain link, a
-  redirect back from someone else's sign-in page). `validate` advises on a step from one of our web
+  web pages that is the SCREEN part that handles the click or the form, never what the screen then
+  calls on the server; the request goes straight to the server only when none of our code runs in
+  the page (a plain link, a redirect back from someone else's sign-in page). `validate` advises on a step from one of our web
   pages that lands on a part that is not a screen. One that is right as it is is recorded as
   `<path:line>: <why>`, the step's own anchor, under the `Skipped screen exceptions` extras heading.
   Measured on mcpolis: 6 of the 43 steps out of its dashboard went straight to an API, and on 3 of
