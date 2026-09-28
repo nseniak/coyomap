@@ -313,21 +313,37 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
             current = head.split('["')[1].rstrip('"]')
         elif head == "end":
             current = ""
-        elif current and head.split("[")[0] in ("C1", "C3", "C4", "C5", "D1"):
+        elif current and head.split("[")[0] in ("I1", "C1", "C3", "C4", "C5", "D1"):
             frame_of[head.split("[")[0]] = current
+    # the door is in no frame: it sits between the people and the first frame, tied above it
     assert frame_of == {"C1": "Screens and commands", "C3": "APIs", "C4": "Work",
                         "C5": "Storage", "D1": "Outside services"}, frame_of
+    assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
 
 
-def test_the_layered_picture_draws_parts_goes_through_doors_and_pipes_and_writes_out_sub_flows():
+def test_the_layered_picture_draws_parts_and_doors_goes_through_pipes_and_writes_out_sub_flows():
     graph = make_graph(make_layered_map())
     model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None
     ln = lines_of(model)
-    assert model["doors"] == [] and "SF1" not in model["inside"] and "C2" not in model["inside"]
-    assert ("Admin", "C1") in ln   # the person goes straight to the page: the door is drawn through
+    assert model["doors"] == ["I1", "I2"] and "SF1" not in model["inside"] and "C2" not in model["inside"]
+    assert ("Admin", "I1") in ln and ("I1", "C1") in ln   # the person comes in through the door
     assert ("C1", "C3") in ln and ("C3", "C4") in ln and ("C4", "C5") in ln
-    assert ("Member", "C3") in ln
+    assert ("Member", "I2") in ln and ("I2", "C3") in ln
+
+
+def test_the_layered_picture_keeps_the_outside_services_in_the_last_frame():
+    doc = make_layered_map()
+    doc["interfaces"].append({"id": "I3", "name": "Mailer", "what": "sends receipts", "side": "theirs",
+                              "facing": "user", "kind": "api"})
+    next(f for f in doc["flows"] if f["uc"] == "UC1")["steps"].append(
+        {"n": 11, "src": "C5", "dst": "I3", "phrase": "send a receipt", "where": "src/save.py:9",
+         "direction": "out"})
+    graph = make_graph(doc)
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None and model["outside"] == ["I3"]
+    outside = gv.gen_arch_views(graph)[0]["all|"].split('["Outside services"]')[1].split("\n  end")[0]
+    assert "  I3[" in outside
 
 
 def make_grouped_map() -> dict[str, Any]:
@@ -344,7 +360,8 @@ def test_the_parts_of_one_subsystem_in_one_layer_are_one_box():
     assert model["inside"] == ["C1", group, "C5"]
     ln = lines_of(model)
     # the check runs inside the group, so no line is drawn for it
-    assert set(ln) == {("Admin", "C1"), ("C1", group), (group, "C5"), ("C5", "D1"), ("Member", group)}
+    assert set(ln) == {("Admin", "I1"), ("I1", "C1"), ("C1", group), (group, "C5"), ("C5", "D1"),
+                       ("Member", "I2"), ("I2", group)}
 
 
 def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
@@ -374,7 +391,7 @@ def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_ru
     assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [("C4", "C5")]
     drawings, texts = gv.gen_arch_views(graph)
     drawing = drawings["all|"]
-    assert '  C5 <-->|"4"| C4' in drawing and "C4 -->" not in drawing
+    assert '  C5 <-->|"5"| C4' in drawing and "C4 -->" not in drawing
     up = [(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"] if e.get("up")]
     assert up == [("C4", "C5")]
 
@@ -394,7 +411,7 @@ def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
     graph = make_graph(make_layered_map())
     _drawings, texts = gv.gen_arch_views(graph)
     story = next(x for x in texts["all|"]["stories"] if x["uc"] == "UC1")
-    assert story["lines"][0][0] == gv._person_id("Admin") and story["lines"][0][1] == "C1"
+    assert story["lines"][:2] == [[gv._person_id("Admin"), "I1"], ["I1", "C1"]]
     assert all(e["n"] >= 1 for e in texts["all|"]["lines"] if not e["store"])
 
 

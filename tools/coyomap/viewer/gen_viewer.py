@@ -1255,7 +1255,7 @@ def _component_kind(graph: GraphDict, x: str) -> str:
     return str(graph["nodes"].get(x, {}).get("component_kind") or "")
 
 
-def _draw_through(graph: GraphDict, steps: list[_ArchStep], layered: bool = False) -> list[_ArchStep]:
+def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
     """PIPES AND THE WIRING ARE DRAWN THROUGH (`grammar.COMPONENT_KINDS_DRAWN_THROUGH`). A step into
     one waits; a step out of it joins the step that came in, so A -> pipe -> B draws A -> B, with A's
     sentence and the map steps of both. A pipe is plumbing: drawn, it stood between every screen and
@@ -1270,11 +1270,12 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep], layered: bool = Fals
     leaves, still hands its map steps to the kept step before it, so a rule decided there keeps its
     mark on the line the story took.
 
-    `layered`: a door is drawn through too. The layered picture goes from a person straight to the
-    part they reach, the way its frames go from what people use down to what keeps records."""
+    A DOOR IS NEVER DRAWN THROUGH, on either picture. The layered picture once went from a person
+    straight to the part they reach, and lost the product's whole edge: on mcpolis's whole-product
+    picture all 9 doors went, and with them all 5 outside services, because those are interfaces
+    too. The view's own question asks what people come through."""
     def through(x: str) -> bool:
-        return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH or (
-            layered and str(graph["nodes"].get(x, {}).get("kind")) == "interface")
+        return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH
 
     waiting: dict[str, tuple[_ArchStep, int]] = {}   # a pipe -> the step that came in from outside,
                                                      # and the index of the kept step before it
@@ -1353,7 +1354,7 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
     on an answer is still marked on the line the story took to get there."""
     nodes = graph["nodes"]
     flows = {str(f.get("uc")): f for f in graph["flows"]}
-    stepped = [(uc, _draw_through(graph, _arch_steps(graph, flows[uc], layered), layered))
+    stepped = [(uc, _draw_through(graph, _arch_steps(graph, flows[uc], layered)))
                for uc in walks if uc in flows]
     people: dict[str, None] = {}
     doors: dict[str, None] = {}
@@ -1759,10 +1760,12 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
 
 
 def _arch_layer(graph: GraphDict, model: _ArchModel, x: str) -> int:
-    """Where a box sits on the layered picture, top to bottom: the people above every frame, a part or
-    a group of parts in its layer's frame (`_arch_frame`), and what the product reaches outside in the
-    last frame, below the parts with no kind."""
+    """Where a box sits on the layered picture, top to bottom: the people, then the doors they come
+    through, above every frame; a part or a group of parts in its layer's frame (`_arch_frame`); and
+    what the product reaches outside in the last frame, below the parts with no kind."""
     if x in model["people"]:
+        return -2
+    if x in model["doors"]:
         return -1
     cell = model["cells"].get(x)
     if cell is not None:
@@ -1815,8 +1818,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
 
     `layered`: the parts sit in FRAMES, one per layer (`grammar.COMPONENT_KIND_FRAMES`), top to bottom
     from what people use down to what keeps records, and what the product reaches outside sits in a
-    last frame at the bottom. Inside a frame, the parts of one subsystem are one box (`_arch_lift`). A
-    frame is drawn only when a part of the picture is in it."""
+    last frame at the bottom. The people and the doors they come through sit above every frame, in no
+    frame of their own. Inside a frame, the parts of one subsystem are one box (`_arch_lift`). A frame
+    is drawn only when a part of the picture is in it."""
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
     lines = [SLOT_MAP_INIT, "flowchart TB"]
     for p in model["people"]:
@@ -1869,8 +1873,11 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
         # one tie per frame, and then a tie from each box to the next frame's first box only, were
         # both measured too weak (mcpolis's "Running the service" still had its frames overlapping).
         # A line up the layers is drawn flipped for the same reason (`_arch_lines_mermaid`).
+        # THE DOORS ARE TIED ABOVE THE FIRST FRAME the same way: a door whose only line goes into the
+        # work frame would otherwise be laid beside the frames above it.
         order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
                  for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members for b in nxt]
+        order += [f"  {d} ~~~ {_arch_box_id(model, b)}" for d in model["doors"] for b in drawn[0][1]]
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the
         # line styles below and the view's pairing of a line with its label count by that number.
         return _arch_lines_mermaid(graph, model, lines, layered, order)
