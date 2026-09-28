@@ -286,6 +286,58 @@ def test_a_store_stands_alone_inside_its_subsystem():
     assert ("SF1", "C5") in lines_of(model)   # the save after the check, hidden inside S2 before
 
 
+# --- the layered picture: parts in frames by their kind ------------------------------------
+
+def make_layered_map() -> dict[str, Any]:
+    """The map with every component's kind stated: the page is a screen, the client a pipe, the API
+    an api, the checker a check, the saver a store."""
+    return make_kinded_map(C1="screen", C2="pipe", C3="api", C4="check", C5="store")
+
+
+def test_a_map_without_kinds_keeps_the_picture_over_subsystems():
+    assert not gv.arch_layered(make_graph())
+    assert gv.arch_layered(make_graph(make_layered_map()))
+
+
+def test_the_layered_picture_frames_each_part_by_its_kind():
+    graph = make_graph(make_layered_map())
+    drawings, _texts = gv.gen_arch_views(graph)
+    drawing = drawings["all|"]
+    for label in ("Screens and commands", "APIs", "Work", "Storage", "Outside services"):
+        assert f'["{label}"]' in drawing, label
+    frame_of = {}
+    current = ""
+    for line in drawing.splitlines():
+        head = line.strip()
+        if head.startswith("subgraph "):
+            current = head.split('["')[1].rstrip('"]')
+        elif head == "end":
+            current = ""
+        elif current and head.split("[")[0] in ("C1", "C3", "C4", "C5", "D1"):
+            frame_of[head.split("[")[0]] = current
+    assert frame_of == {"C1": "Screens and commands", "C3": "APIs", "C4": "Work",
+                        "C5": "Storage", "D1": "Outside services"}, frame_of
+
+
+def test_the_layered_picture_draws_parts_goes_through_doors_and_pipes_and_writes_out_sub_flows():
+    graph = make_graph(make_layered_map())
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    ln = lines_of(model)
+    assert model["doors"] == [] and "SF1" not in model["inside"] and "C2" not in model["inside"]
+    assert ("Admin", "C1") in ln   # the person goes straight to the page: the door is drawn through
+    assert ("C1", "C3") in ln and ("C3", "C4") in ln and ("C4", "C5") in ln
+    assert ("Member", "C3") in ln
+
+
+def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
+    graph = make_graph(make_layered_map())
+    _drawings, texts = gv.gen_arch_views(graph)
+    story = next(x for x in texts["all|"]["stories"] if x["uc"] == "UC1")
+    assert story["lines"][0][0] == gv._person_id("Admin") and story["lines"][0][1] == "C1"
+    assert all(e["n"] >= 1 for e in texts["all|"]["lines"] if not e["store"])
+
+
 # --- the use case map marks the same things ---------------------------------------------
 
 def test_a_use_case_map_marks_the_arrow_that_runs_a_deciding_sub_use_case():
