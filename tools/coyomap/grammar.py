@@ -56,7 +56,7 @@ DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "libr
 #: hand-run script, and for the method files an agent follows.
 COMPONENT_KINDS = ("screen", "command", "script", "api", "logic", "check", "job", "instructions",
                    "store", "pipe", "wiring")
-COMPONENT_KIND_WORDS = {"api": "API"}   # how a kind is written on a box; every other word as stored
+COMPONENT_KIND_WORDS = {"api": "API", "screen": "UI"}   # how a kind is written on a box; every other word as stored
 COMPONENT_KINDS_DRAWN_THROUGH = ("pipe", "wiring")   # the Architecture picture joins the lines around them
 COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as boxes of their own
 #: THE LAYERS a component is drawn in, top to bottom, and the known words each holds. What people

@@ -1446,14 +1446,17 @@ def _arch_layer_label(layer: int) -> str:
 
 def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
     """A layer's name ON ONE PICTURE. The first layer names only the kinds of part it holds there,
-    "Screens" or "Screens and scripts": its three kinds are what a person drives directly, and only 2
-    of mcpolis's 11 pictures held more than one of them, under a name that promised all three."""
+    "UI" or "UI and scripts": its three kinds are what a person drives directly, and only 2 of
+    mcpolis's 11 pictures held more than one of them, under a name that promised all three. Each kind
+    is written as a box writes it (`grammar.COMPONENT_KIND_WORDS`), and a word in capitals takes no
+    plural."""
     first = grammar.COMPONENT_KIND_FRAMES[0][1]
     if layer != 0:
         return _arch_layer_label(layer)
     held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == 0
             for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
-    names = [f"{w}s" for w in first if w in held]
+    shown = [grammar.COMPONENT_KIND_WORDS.get(w, w) for w in first if w in held]
+    names = [w if w.isupper() else f"{w}s" for w in shown]
     if not names:
         return _arch_layer_label(layer)
     said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"

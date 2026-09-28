@@ -8098,7 +8098,7 @@ const RULE_MARK = '⚖';
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
 const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'job', 'instructions',
   'store', 'pipe', 'wiring'];
-const COMPONENT_KIND_WORD = { api: 'API' };
+const COMPONENT_KIND_WORD = { api: 'API', screen: 'UI' };
 const ARCH_STORE_LINE = '#0f766e';
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
 // the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.
