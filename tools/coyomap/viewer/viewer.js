@@ -4962,13 +4962,44 @@ function eachEdge(root, fn) {
     if (m) fn(p, labels[i] || null, p.hasAttribute('data-cy-flip') ? [m[0], m[2], m[1], m[3]] : m);
   });
 }
+// A CROWDED PICTURE DRAWS ONE LINE PER PAIR OF LAYERS (gen_viewer `_arch_layer_lines`), one with more
+// lines than gen_viewer's ARCH_CROWDED_LINES, which is the whole product's on a big map. Every
+// box's own line is still in the drawing, and the layer lines come after them, so the two kinds are
+// told apart by their number. At rest only the layer lines show; a box's own lines show when the box
+// is picked, a layer line's when it is (archShowLines), and a story's when it is followed. Run after
+// the lines' hit areas exist, so a hidden line cannot be clicked either.
+function markLayerLines(root, t) {
+  const layers = (t && t.layerLines) || [];
+  root.classList.toggle('arch-layers', layers.length > 0);
+  if (!layers.length) return;
+  const n = (t.lines || []).length;
+  const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
+  [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
+    const cls = i < n ? 'arch-boxline' : (i < n + layers.length ? 'arch-layerline' : '');
+    if (!cls) return;
+    for (const el of [p, ...(p.__cyHits || []), labels[i]].filter(Boolean)) el.classList.add(cls);
+    if (cls === 'arch-layerline') p.dataset.layer = String(i - n);
+  });
+}
+// Draw the box lines of a crowded picture that pass `test`, or none again when it is null.
+function archShowLines(test) {
+  if (!mainScene || !mainScene.root.classList.contains('arch-layers')) return;
+  mainScene.root.classList.toggle('arch-picking', !!test);
+  eachEdge(mainScene.root, (p, label, m) => {
+    if (!p.classList.contains('arch-boxline')) return;
+    const on = !!test && test(m[1], m[2]);
+    for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.classList.toggle('arch-shown', on);
+  });
+}
 // A LINE UP THE LAYERS of the layered Architecture picture is written from the box it goes TO, with a
 // head at both ends, so the layout keeps the layers stacked (gen_viewer `_arch_lines_mermaid`). The
 // text beside the picture flags each one (`up`), in the order the lines are drawn. Here each loses the
 // head at the box it comes from, and is marked so every reader of the drawing's lines (eachEdge) takes
 // it the way it runs.
 function markFlippedLines(root, t) {
-  const up = new Set(((t && t.lines) || []).flatMap((e, i) => (e.up ? [i] : [])));
+  const n = ((t && t.lines) || []).length;
+  const up = new Set([...((t && t.lines) || []).flatMap((e, i) => (e.up ? [i] : [])),
+                      ...((t && t.layerLines) || []).flatMap((e, k) => (e.up ? [n + k] : []))]);
   if (!up.size) return;
   [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
     if (!up.has(i)) return;
@@ -7631,7 +7662,7 @@ function archFeatureHtml() {
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
-    + archKeyHtml();
+    + archKeyHtml(!!((archTextOf({ ...s, kind: 'arch' }) || {}).layerLines || []).length);
 }
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
@@ -7770,21 +7801,36 @@ function archStoryTextHtml(t, story) {
     + (story.outcome ? '<p class="archtext-end"><span class="ucm-key-end" aria-hidden="true"></span>'
       + `Ends with: ${esc(story.outcome)}</p>` : '');
 }
-// ONE BOX'S STEPS: the text keeps the lines with this box at either end, and the steps holding them.
-// An empty id shows every line again.
-function archFilterBox(id, name) {
-  archBoxFilter = id || '';
+// ONE BOX'S STEPS, or one layer line's: the text keeps the lines that pass `test`, and the steps
+// holding them, and a crowded picture draws those lines (archShowLines). `key` names what is
+// picked, so a second click on it shows every line again; an empty key does that too.
+function archFilterLines(key, test, headHtml) {
+  archBoxFilter = key || '';
+  const on = archBoxFilter ? test : null;
   archtext.querySelectorAll('.archtext-line').forEach((el) => {
-    el.hidden = !!archBoxFilter && el.dataset.src !== archBoxFilter && el.dataset.dst !== archBoxFilter;
+    el.hidden = !!on && !on(el.dataset.src, el.dataset.dst);
   });
   archtext.querySelectorAll('.archtext-step, .archtext-keepsec').forEach((el) => {
-    el.hidden = !!archBoxFilter && !el.querySelector('.archtext-line:not([hidden])');
+    el.hidden = !!on && !el.querySelector('.archtext-line:not([hidden])');
   });
+  archShowLines(on);
   const head = archtext.querySelector('.archtext-filter');
   if (!head) return;
-  head.hidden = !archBoxFilter;
-  head.innerHTML = archBoxFilter ? `Only the steps through <b>${esc(name || archBoxFilter)}</b> `
+  head.hidden = !on;
+  head.innerHTML = on ? `${headHtml} `
     + '<button type="button" class="archtext-all" data-archfilter-clear>Show every step</button>' : '';
+}
+// ONE BOX'S STEPS: the lines with this box at either end. An empty id shows every line again.
+function archFilterBox(id, name) {
+  archFilterLines(id, (a, b) => a === id || b === id, `Only the steps through <b>${esc(name || id)}</b>`);
+}
+// ONE LAYER LINE'S STEPS: the box lines it stands for.
+function archFilterLayerLine(k, t) {
+  const ll = ((t && t.layerLines) || [])[k];
+  if (!ll) return;
+  const pairs = new Set(ll.lines.map(([a, b]) => a + '>' + b));
+  archFilterLines('layer:' + k, (a, b) => pairs.has(a + '>' + b),
+    `Only the steps from <b>${esc(ll.src)}</b> to <b>${esc(ll.dst)}</b>`);
 }
 function archBoxName(t, id) {
   for (const e of (t && t.lines) || []) {
@@ -7848,13 +7894,21 @@ function bindArch() {
     if (!story) archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id));
   }, standsFor);
   bindEdges(mainScene, resolveComponentEdge);
-  bindArchText();   // …and every arrow finds its line in the text
+  markLayerLines(mainScene.root, t);
+  bindArchText(t, story);   // …and every arrow finds its line in the text
   if (story) archFollow(story);
 }
-function bindArchText() {
+function bindArchText(t, story) {
   if (!mainScene) return;
   eachEdge(mainScene.root, (p, label, m) => {
-    const find = () => { archMarkText(m[1], m[2], true); archMarkArrow(m[1], m[2]); };
+    // A LAYER LINE draws the box lines it stands for, and keeps them alone in the text.
+    const layer = p.classList.contains('arch-layerline') ? p.dataset.layer : '';
+    const find = !layer ? () => { archMarkText(m[1], m[2], true); archMarkArrow(m[1], m[2]); }
+      : () => {
+        if (story) return;
+        if (archBoxFilter === 'layer:' + layer) archFilterBox('');
+        else archFilterLayerLine(+layer, t);
+      };
     for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.addEventListener('click', find);
   });
 }
@@ -7947,10 +8001,12 @@ function archState(scope, cap, story) {
 // THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
 // than they decode a word for one. Solid = every story through that box goes this way, so two solid
 // lines out of one box read "and"; dashed = only some do, so read "or".
-function archKeyHtml() {
-  const line = (dash, stroke) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
-    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="1.6"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
+function archKeyHtml(layers) {
+  const line = (dash, stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
+    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
   return '<div class="archkey">'
+    + (layers ? `<span>${line(false, '#334155', 2.6)} every line between two layers; the number says how many.`
+      + ' Click it, or a box, to see them</span>' : '')
     + `<span>${line(false, '#475569')} every story through that box goes this way</span>`
     + `<span>${line(true, '#475569')} only some do</span>`
     + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`

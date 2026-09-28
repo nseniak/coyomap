@@ -299,13 +299,9 @@ def test_a_map_without_kinds_keeps_the_picture_over_subsystems():
     assert gv.arch_layered(make_graph(make_layered_map()))
 
 
-def test_the_layered_picture_frames_each_part_by_its_kind():
-    graph = make_graph(make_layered_map())
-    drawings, _texts = gv.gen_arch_views(graph)
-    drawing = drawings["all|"]
-    for label in ("Screens and commands", "APIs", "Work", "Storage", "Outside services"):
-        assert f'["{label}"]' in drawing, label
-    frame_of = {}
+def frames_of(drawing: str, ids: tuple[str, ...]) -> dict[str, str]:
+    """Which frame each of `ids` is drawn in, read back from a drawing."""
+    frame_of: dict[str, str] = {}
     current = ""
     for line in drawing.splitlines():
         head = line.strip()
@@ -313,12 +309,45 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
             current = head.split('["')[1].rstrip('"]')
         elif head == "end":
             current = ""
-        elif current and head.split("[")[0] in ("I1", "C1", "C3", "C4", "C5", "D1"):
+        elif current and head.split("[")[0] in ids:
             frame_of[head.split("[")[0]] = current
-    # the door is in no frame: it sits between the people and the first frame, tied above it
-    assert frame_of == {"C1": "Screens and commands", "C3": "APIs", "C4": "Work",
-                        "C5": "Storage", "D1": "Outside services"}, frame_of
+    return frame_of
+
+
+def test_the_layered_picture_frames_each_part_by_its_kind():
+    graph = make_graph(make_layered_map())
+    drawings, _texts = gv.gen_arch_views(graph)
+    drawing = drawings["all|CAP1"]
+    for label in ("Screens and commands", "APIs", "Work", "Storage", "Outside services"):
+        assert f'["{label}"]' in drawing, label
+    # on a feature's picture the door is in no frame: it sits between the people and the first
+    # frame, tied above it
+    assert frames_of(drawing, ("I1", "C1", "C3", "C4", "C5", "D1")) == {
+        "C1": "Screens and commands", "C3": "APIs", "C4": "Work", "C5": "Storage", "D1": "Outside services"}
     assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
+
+
+def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
+    graph = make_graph(make_layered_map())
+    drawings, texts = gv.gen_arch_views(graph, crowded=0)
+    drawing, text = drawings["all|"], texts["all|"]
+    who = gv._person_id("Admin")
+    assert frames_of(drawing, (who, "I1")) == {who: "People", "I1": "Interfaces"}
+    layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
+    assert layer[("People", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
+    assert layer[("APIs", "Work")] == [["C3", "C4"]]
+    # after every box line, so the view tells the two kinds apart by their number
+    links = [ln for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
+    assert len(links) == len(text["lines"]) + len(text["layerLines"])
+    assert links[len(text["lines"])].strip() == 'CYFP -->|"2"| CYFD'
+    assert all(not ln.strip().startswith("CYF") for ln in links[:len(text["lines"])])
+
+
+def test_a_picture_that_is_not_crowded_keeps_its_box_lines():
+    drawings, texts = gv.gen_arch_views(make_graph(make_layered_map()))
+    assert len(texts["all|"]["lines"]) <= gv.ARCH_CROWDED_LINES
+    assert all("layerLines" not in t for t in texts.values())
+    assert all("CYFP" not in d for d in drawings.values())
 
 
 def test_the_layered_picture_draws_parts_and_doors_goes_through_pipes_and_writes_out_sub_flows():

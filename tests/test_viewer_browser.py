@@ -4439,6 +4439,52 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
         assert not page.js_errors, page.js_errors
 
 
+def make_parts_in_every_layer(m: dict[str, Any]) -> None:
+    """Each component in turn a screen, an API, logic and a store: the whole-product picture then has
+    more lines than a picture draws one by one."""
+    for i, c in enumerate(m["components"]):
+        c["kind"] = ("screen", "api", "logic", "store")[i % 4]
+
+
+VISIBLE_LINES = """() => {
+    const vis = (el) => getComputedStyle(el).display !== 'none';
+    const ps = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
+    return { layer: ps.filter((p) => p.classList.contains('arch-layerline') && vis(p)).length,
+             box: ps.filter((p) => p.classList.contains('arch-boxline') && vis(p)).length };
+}"""
+
+
+def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
+    """A picture with more lines than a reader can follow draws one line per pair of layers. A click on
+    one draws the box lines it stands for and keeps them alone in the text; a click on a box draws its
+    own lines; a second click shows the picture at rest again."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": 0}
+        k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
+        under = len(text["layerLines"][k]["lines"])
+        click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')
+            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
+        page.evaluate(click)
+        assert page.evaluate(VISIBLE_LINES)["box"] == under
+        assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == under
+        page.evaluate(click)
+        assert page.evaluate(VISIBLE_LINES)["box"] == 0
+        # THE BOX WITH THE MOST LINES, clicked on its body: the picture is wider than the window, so a
+        # point on screen cannot be counted on, and a click on the box's body is what a reader makes.
+        people = {e["srcBox"] for e in text["lines"] if e["srcBox"].startswith("CYP")}
+        ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if x not in people]
+        box = max(set(ends), key=ends.count)
+        page.evaluate(f"""() => document.querySelector('#diagram g.cy-{box} .ibox')
+            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
+        page.wait_for_timeout(300)
+        own = sum(1 for e in text["lines"] if box in (e["srcBox"], e["dstBox"]))
+        assert own and page.evaluate(VISIBLE_LINES)["box"] == own, (box, own)
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_line_up_the_layers_points_the_way_it_runs_and_finds_its_text() -> None:
     """A line from a lower layer up to a higher one is written the other way round, so the layers stay
     stacked. On screen it keeps one head, at the box it goes to, and a click on it marks its own line

@@ -3604,5 +3604,12 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-following path.flowchart-link:not(.arch-story-on) { opacity: .18; }
 .arch-following g.edgeLabel:not(.arch-story-on) { opacity: .18; }
 .arch-following g.node:not(.arch-story-on) { opacity: .3; }
+/* A CROWDED PICTURE (viewer.js markLayerLines): its lines between layers show at rest; a box
+   line shows when its box or its layer line is picked, when its story is followed, or when its entry
+   in the text is. A layer line steps back while a box's lines show, and goes while a story is followed. */
+.arch-layers .arch-boxline:not(.arch-shown):not(.arch-story-on):not(.arch-hl) { display: none; }
+.arch-layers.arch-picking .arch-layerline { opacity: .2; }
+.arch-layers.arch-following .arch-layerline { display: none; }
+.arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
 .arch-following path.flowchart-link.arch-story-on { stroke: #4f46e5 !important; stroke-width: 2.2px !important; }
 .flow-rule-mark { color: #6d28d9; }

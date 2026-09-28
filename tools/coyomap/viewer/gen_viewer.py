@@ -1109,6 +1109,10 @@ ARCH_NO_KIND_FRAME = "Parts with no kind"
 #: own picture of mcpolis drew 23, and a trial of our map drawn its way stayed readable at 24. The
 #: rest are drawn through, as grey lines.
 ARCH_LAYER_BUDGET = 24
+#: A layered picture with more lines than this draws one line per pair of layers instead
+#: (`_arch_layer_lines`). On mcpolis the pictures had 116, 84 and 51 lines, then 30 and fewer; the 3
+#: biggest were the unreadable ones.
+ARCH_CROWDED_LINES = 40
 #: THE MARK FOR "A BUSINESS RULE DECIDES HERE", on an Architecture line and a use case map arrow alike. A
 #: character, not the rule's drawn glyph, because it rides inside the arrow's label text, where the drawing
 #: engine measures it before it lays the picture out; a glyph added afterwards would be cut off by the label.
@@ -1421,6 +1425,23 @@ def _arch_frame_label(frame: int) -> str:
     """A layer's name, as its frame on the picture says it."""
     labels = [label for label, _words in grammar.COMPONENT_KIND_FRAMES]
     return labels[frame] if frame < len(labels) else ARCH_NO_KIND_FRAME
+
+
+#: The frames above and below the parts' layers, by their place in `_arch_layer`'s order.
+ARCH_EDGE_FRAMES = {-2: ("CYFP", "People"), -1: ("CYFD", "Interfaces"),
+                    len(grammar.COMPONENT_KIND_FRAMES) + 1: ("CYFO", "Outside services")}
+
+
+def _arch_frame_id(layer: int) -> str:
+    """The id a layer's frame is drawn under, for every layer `_arch_layer` knows."""
+    if layer in ARCH_EDGE_FRAMES:
+        return ARCH_EDGE_FRAMES[layer][0]
+    return f"CYF{layer}" if layer < len(grammar.COMPONENT_KIND_FRAMES) else "CYFX"
+
+
+def _arch_layer_label(layer: int) -> str:
+    """A layer's name, for every layer `_arch_layer` knows."""
+    return ARCH_EDGE_FRAMES[layer][1] if layer in ARCH_EDGE_FRAMES else _arch_frame_label(layer)
 
 
 def _arch_cell_id(frame: int, sub: str) -> str:
@@ -1796,7 +1817,7 @@ def gen_overview_mermaid(graph: GraphDict, feature: str = "", scope: str = "all"
     with no happy-path story gets no happy-path picture."""
     layered = arch_layered(graph)
     model = _arch_model(graph, feature, scope, ARCH_LAYER_BUDGET if layered else ARCH_BOX_BUDGET, layered)
-    return _arch_mermaid(graph, model, layered) if model is not None else ""
+    return _arch_mermaid(graph, model, layered, len(model["lines"]) > ARCH_CROWDED_LINES) if model is not None else ""
 
 
 def _arch_box_id(model: _ArchModel, x: str) -> str:
@@ -1817,41 +1838,51 @@ def _arch_through_client(graph: GraphDict, model: _ArchModel, person: str) -> bo
     return bool(doors) and all(person in flow_client_roles(graph, [{"src": person, "dst": d}]) for d in doors)
 
 
-def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) -> str:
+def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by_layer: bool = False) -> str:
     """Draw an Architecture model (see `gen_overview_mermaid` for how it reads).
 
     `layered`: the parts sit in FRAMES, one per layer (`grammar.COMPONENT_KIND_FRAMES`), top to bottom
     from what people use down to what keeps records, and what the product reaches outside sits in a
     last frame at the bottom. The people and the doors they come through sit above every frame, in no
     frame of their own. Inside a frame, the parts of one subsystem are one box (`_arch_lift`). A frame
-    is drawn only when a part of the picture is in it."""
+    is drawn only when a part of the picture is in it.
+
+    `by_layer`: a CROWDED layered picture, one with more than `ARCH_CROWDED_LINES` lines, draws one
+    line per pair of layers (`_arch_layer_lines`). The people and the interfaces they come through sit
+    in frames of their own there, so a line can leave them too. Every box's own lines are still drawn,
+    after the boxes and before the layer lines, and the view shows them only on a click."""
+    whole = by_layer and layered
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
     lines = [SLOT_MAP_INIT, "flowchart TB"]
+
+    def framed(members: list[str], fid: str, label: str, framing: bool = True) -> None:
+        if layered and framing and members:
+            lines.append(f'  subgraph {fid}["{label}"]')
+            lines.append("    direction LR")
+
+    def unframed(members: list[str], framing: bool = True) -> None:
+        if layered and framing and members:
+            lines.append("  end")
+
+    framed(model["people"], _arch_frame_id(-2), _arch_layer_label(-2), whole)
     for p in model["people"]:
         via = "via AI agent" if _arch_through_client(graph, model, p) else ""
         # `cy-` names the box for the view, as on every other picture: following a story marks where
         # it starts, and a person is where most start.
         lines.append(f'  {_person_id(p)}["{_slot("role", "figure", p, via)}"]:::cy-{_person_id(p)}')
         lines.append(f"  class {_person_id(p)} itembox")
+    unframed(model["people"], whole)
+    framed(model["doors"], _arch_frame_id(-1), _arch_layer_label(-1), whole)
     for iid in model["doors"]:
         lines.append(f'  {iid}["{_slot("interface", "tight", iid)}"]:::cy-{iid}')
         lines.append(f"  class {iid} itembox")
-    def framed(members: list[str], fid: str, label: str) -> None:
-        if layered and members:
-            lines.append(f'  subgraph {fid}["{label}"]')
-            lines.append("    direction LR")
-
-    def unframed(members: list[str]) -> None:
-        if layered and members:
-            lines.append("  end")
-
+    unframed(model["doors"], whole)
     frames: list[tuple[str, str, list[str]]] = []
     if layered:
         for n_frame in range(len(grammar.COMPONENT_KIND_FRAMES) + 1):
             members = [b for b in model["inside"] if _arch_layer(graph, model, b) == n_frame]
             # The last one holds the parts whose kind is unstated: no layer to put them in, so it says so.
-            fid = f"CYF{n_frame}" if n_frame < len(grammar.COMPONENT_KIND_FRAMES) else "CYFX"
-            frames.append((fid, _arch_frame_label(n_frame), members))
+            frames.append((_arch_frame_id(n_frame), _arch_layer_label(n_frame), members))
     else:
         frames.append(("", "", list(model["inside"])))
     for fid, label, members in frames:
@@ -1860,14 +1891,17 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
             _arch_inside_box(graph, lines, bid, subflows, model["cells"])
         unframed(members)
     outer = [*model["outside"], *model["stores"]]
-    framed(outer, "CYFO", "Outside services")
+    outside = len(grammar.COMPONENT_KIND_FRAMES) + 1
+    framed(outer, _arch_frame_id(outside), _arch_layer_label(outside))
     for oid in outer:   # an interface or a dependency, in its own box
         kind = str(graph["nodes"].get(oid, {}).get("kind"))
         lines.append(f'  {oid}["{_slot(kind, "tight", oid)}"]:::cy-{oid}')
         lines.append(f"  class {oid} itembox")
     unframed(outer)
     if layered:
-        drawn = [(fid, members) for fid, _label, members in [*frames, ("CYFO", "", outer)] if members]
+        tops = [(_arch_frame_id(-2), "", model["people"]), (_arch_frame_id(-1), "", model["doors"])] if whole else []
+        drawn = [(fid, members) for fid, _label, members
+                 in [*tops, *frames, (_arch_frame_id(outside), "", outer)] if members]
         for fid, _members in drawn:
             lines.append(f"  style {fid} fill:{ARCH_FRAME_FILL},stroke:{ARCH_FRAME_STROKE},color:#475569")
         # THE FRAMES STACK TOP TO BOTTOM. The layout places a frame by the lines into it, so without
@@ -1881,10 +1915,12 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False) ->
         # work frame would otherwise be laid beside the frames above it.
         order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
                  for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members for b in nxt]
-        order += [f"  {d} ~~~ {_arch_box_id(model, b)}" for d in model["doors"] for b in drawn[0][1]]
+        if not whole:   # on the whole picture the doors have a frame, and the ties above cover them
+            order += [f"  {d} ~~~ {_arch_box_id(model, b)}" for d in model["doors"] for b in drawn[0][1]]
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the
         # line styles below and the view's pairing of a line with its label count by that number.
-        return _arch_lines_mermaid(graph, model, lines, layered, order)
+        return _arch_lines_mermaid(graph, model, lines, layered, order,
+                                   _arch_layer_lines(graph, model) if whole else None)
     return _arch_lines_mermaid(graph, model, lines, layered)
 
 
@@ -1910,8 +1946,32 @@ def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set
     lines.append(f"  class {bid} itembox")
 
 
+class _ArchLayerLine(TypedDict):
+    """ONE LINE OF A CROWDED PICTURE BETWEEN TWO LAYERS: every line of the picture from a box
+    in one layer to a box in another, drawn as one (`_arch_layer_lines`)."""
+    src: int                       # the layer it leaves (`_arch_layer`)
+    dst: int                       # the layer it reaches
+    lines: list[tuple[str, str]]   # the picture's lines it stands for, as drawn box ids
+    up: bool                       # it climbs the layers, so it is drawn from the upper one
+
+
+def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLine]:
+    """A CROWDED PICTURE'S LINES: one per pair of layers, standing for every line of the
+    picture from a box in the one to a box in the other. Measured on mcpolis with a kind on every
+    part: 116 lines between boxes became 18 between layers, and a line inside one layer (8 of the
+    116) is not drawn at all. Each box's own lines are one click away in the view, and the text
+    beside the picture still tells every one of them."""
+    out: dict[tuple[int, int], list[tuple[str, str]]] = {}
+    for ln in model["lines"]:
+        a, b = _arch_layer(graph, model, ln["src"]), _arch_layer(graph, model, ln["dst"])
+        if a != b:
+            out.setdefault((a, b), []).append((_arch_box_id(model, ln["src"]), _arch_box_id(model, ln["dst"])))
+    return [_ArchLayerLine(src=a, dst=b, lines=pairs, up=a > b) for (a, b), pairs in sorted(out.items())]
+
+
 def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
-                        layered: bool = False, last: list[str] | None = None) -> str:
+                        layered: bool = False, last: list[str] | None = None,
+                        layer_lines: list[_ArchLayerLine] | None = None) -> str:
     """The lines of an Architecture picture, after its boxes (`_arch_mermaid`). In the layered
     picture every line is solid: "only some stories go this way" was drawn on 100 of 115 lines of
     the picture over subsystems, so it told a reader nothing, and the trials drew none."""
@@ -1946,6 +2006,19 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
             # frames stood side by side. The drawing tool has no way to put one head at the start.
             head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
         lines.append(f"  {a} {head}|{label}| {b}")
+    # THE LINES BETWEEN LAYERS come after every box's own line, so the view finds each kind by its
+    # number: a box line below `len(model["lines"])`, a layer line from there. Thick, and labelled with
+    # how many lines each stands for.
+    thick: list[str] = []
+    for k, ll in enumerate(layer_lines or []):
+        a, b = _arch_frame_id(ll["src"]), _arch_frame_id(ll["dst"])
+        head = "-->"
+        if ll["up"]:   # drawn from the upper layer, for the reason a box line up the layers is
+            head, a, b = "<-->", b, a
+        lines.append(f"  {a} {head}|{_edge_label(str(len(ll['lines'])))}| {b}")
+        thick.append(str(len(model["lines"]) + k))
+    if thick:
+        lines.append(f"  linkStyle {','.join(thick)} stroke:#334155,stroke-width:2.6px,color:#334155")
     if folded:
         lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
     if keeping:
@@ -2069,7 +2142,7 @@ def arch_layered(graph: GraphDict) -> bool:
                for n in graph["nodes"].values())
 
 
-def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
+def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowded: int = ARCH_CROWDED_LINES
                    ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
     """Every Architecture drawing the view's two toggles can ask for, and the flow text beside each,
     keyed `<scope>|<feature id>`: `all|` is the whole product over every walk, `happy|CAP3` is one
@@ -2079,7 +2152,8 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
     The text is `{lines, stories, cells}`: the flow told step by step (`_arch_text`), each story on
     its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
     it holds, which the view opens and marks through. `merged` is the map's kept line texts
-    (`line_texts.load`), key to text.
+    (`line_texts.load`), key to text. A layered picture with more than `crowded` lines also carries
+    its lines between layers (`layerLines`), which it draws instead of its boxes' own.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -2092,10 +2166,15 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None
             model = _arch_model(graph, feature, scope, budget, layered)
             if model is None:
                 continue
-            drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered)
+            whole = layered and len(model["lines"]) > crowded
+            drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered, whole)
             texts[f"{scope}|{feature}"] = {
                 "lines": _arch_text(graph, model, merged), "stories": _arch_stories(graph, model),
-                "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()}}
+                "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()},
+                **({"layerLines": [{"src": _arch_layer_label(ll["src"]), "dst": _arch_layer_label(ll["dst"]),
+                                    "lines": [list(pair) for pair in ll["lines"]],
+                                    **({"up": True} if ll["up"] else {})}
+                                   for ll in _arch_layer_lines(graph, model)]} if whole else {})}
     return drawings, texts
 
 
