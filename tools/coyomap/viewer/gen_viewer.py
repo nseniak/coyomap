@@ -1232,16 +1232,25 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
 
 def _arch_walks(graph: GraphDict, feature: str = "", scope: str = "all") -> list[str]:
     """The use cases an Architecture picture is built from: the happy path's first, in its order,
-    then every other use case in the map's order — or, with `scope="happy"`, the happy path's alone.
-    With a `feature` (its id), only that feature's use cases.
+    then every other use case feature by feature, in the Features page's order — or, with
+    `scope="happy"`, the happy path's alone. With a `feature` (its id), only that feature's use cases.
+
+    THE ORDER IS THE ONE A READER ALREADY KNOWS, because the picture's rows follow it left to right
+    (`_ArchModel.rank`). The map file's own order jumped between features: on mcpolis 149 of the 435
+    pairs of stories off the happy path came out of feature order. Within a feature, the map's order.
 
     ONE PICTURE PER FEATURE, not per person. A person's stories span features, and that was what
     made their pictures unreadable: the team admin's 30 stories cross 8 features and drew 26 boxes
     and 66 lines. Cut by feature, mcpolis's pictures measured a median of 14 boxes and about 15
     lines, with no grey line on any of them. A use case's feature is its node's `parent`."""
     hp = [str(h["uc"]) for h in graph["happy_path"] if h.get("uc")]
-    ucs = hp if scope == "happy" else hp + [str(f.get("uc")) for f in graph["flows"]
-                                            if str(f.get("uc")) not in hp]
+    features = {i: k for k, i in enumerate(i for i, v in graph["nodes"].items() if str(v.get("kind")) == "capability")}
+
+    def feature_place(uc: str) -> int:
+        return features.get(str(graph["nodes"].get(uc, {}).get("parent") or ""), len(features))
+
+    rest = sorted((str(f.get("uc")) for f in graph["flows"] if str(f.get("uc")) not in hp), key=feature_place)
+    ucs = hp if scope == "happy" else hp + rest
     if not feature:
         return ucs
     return [uc for uc in ucs if str(graph["nodes"].get(uc, {}).get("parent") or "") == feature]
@@ -1669,6 +1678,8 @@ class _ArchModel(TypedDict):
     ends: dict[str, str]     # use case -> the box its result comes out of (see `_arch_flow`)
     cells: dict[str, _ArchCell]   # the kept boxes holding several parts, on the layered picture
     timers: list[str]        # the people that are the product's own scheduled work (`grammar.is_inside_role`)
+    rank: dict[str, int]     # every box's place LEFT TO RIGHT in its row: the order the stories first
+                             # reach it, the stories in `_arch_walks`'s order and each in its steps'
 
 
 def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
@@ -1703,8 +1714,21 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     met = list(passing)
     inside = sorted(met, key=lambda c: (-len(passing[c]), met.index(c)))[:budget]
     inside.sort(key=met.index)
-    outside = sorted(reach, key=lambda o: (-len(reach[o]), str(nodes[o]["name"])))[:ARCH_OUTSIDE_MAX]
-    stores = sorted(kept_at, key=lambda o: (-len(kept_at[o]), str(nodes[o]["name"])))[:ARCH_STORES_MAX]
+    # EVERY ROW LEFT TO RIGHT IN THE ORDER THE STORIES FIRST REACH ITS BOXES: a reader reads a row that
+    # way, so its order has to mean something. Which boxes are kept is still the busiest; where each
+    # sits is when the stories reach it. The picture writes each row in this order (`_arch_mermaid`).
+    reached: dict[str, None] = {}
+    for _uc, steps in flow["walks"]:
+        for s, d in steps:
+            reached.setdefault(s, None)
+            reached.setdefault(d, None)
+    rank = {x: i for i, x in enumerate(reached)}
+
+    def by_rank(xs: list[str]) -> list[str]:
+        return sorted(xs, key=lambda x: rank.get(x, len(rank)))
+
+    outside = by_rank(sorted(reach, key=lambda o: (-len(reach[o]), str(nodes[o]["name"])))[:ARCH_OUTSIDE_MAX])
+    stores = by_rank(sorted(kept_at, key=lambda o: (-len(kept_at[o]), str(nodes[o]["name"])))[:ARCH_STORES_MAX])
     kept = people | doors | set(inside) | set(outside) | set(stores)
 
     # The merged flow over the kept boxes. From each kept box, a step to a kept box is a line of its
@@ -1813,7 +1837,7 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     model = _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
                        stores=stores, lines=lines, stories=stories, ends=ends,
                        cells={b: cells[b] for b in inside if b in cells},
-                       timers=[p for p in flow["people"] if p in _arch_inside_people(graph)])
+                       timers=[p for p in flow["people"] if p in _arch_inside_people(graph)], rank=rank)
     if layered:
         for ln in model["lines"]:
             ln["up"] = _arch_layer(graph, model, ln["src"]) > _arch_layer(graph, model, ln["dst"])
@@ -1907,9 +1931,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     when it is a rule of the architecture; the view draws the exceptions box to box, on top of the
     picture, where they cannot spread the frames. The people and the interfaces
     they come through sit in frames of their own there, so a line can leave them too. With no line
-    touching a box, the drawing tool lays each frame out on its own, as one row of its boxes: drawn
-    even hidden, the box lines had spread mcpolis's frames until their boxes filled 6% to 19% of them.
-    The view draws a box's own lines on top of the picture when asked."""
+    touching a box from outside its frame, the drawing tool lays each frame out on its own, as one row
+    of its boxes: drawn even hidden, the box lines had spread mcpolis's frames until their boxes filled
+    6% to 19% of them. The view draws a box's own lines on top of the picture when asked."""
     whole = by_layer and layered
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
     lines = [SLOT_MAP_INIT, "flowchart TB"]
@@ -1917,9 +1941,16 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     def framed(members: list[str], fid: str, label: str, framing: bool = True) -> None:
         if layered and framing and members:
             lines.append(f'  subgraph {fid}["{label}"]')
-            # A ROW: the tool places boxes with no line between them in one rank, and a rank is a row
-            # when the frame runs top to bottom. It honours this only in a frame no box line touches.
-            lines.append("    direction TB" if whole else "    direction LR")
+            # A ROW, IN THE WRITTEN ORDER. A crowded picture ties each box of a frame to the next one
+            # (`order` below) and the frame runs left to right, so its boxes stand in one row, in the
+            # order the stories reach them (`_ArchModel.rank`). Both layout engines keep that. Untied in
+            # a frame running top to bottom, dagre made a row, in its own order, and ELK a grid.
+            # ANY OTHER FRAME SAYS NO DIRECTION. Lines reach into it, so dagre never honoured one, and
+            # ELK lays a frame that says one out on its own, packing its boxes in no set order: 7 box
+            # pairs of mcpolis's pictures stood the wrong way round. Said by no frame, the whole picture
+            # is one layout, whose rows keep the written order.
+            if whole:
+                lines.append("    direction LR")
 
     def unframed(members: list[str], framing: bool = True) -> None:
         if layered and framing and members:
@@ -1942,7 +1973,8 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     frames: list[tuple[str, str, list[str]]] = []
     if layered:
         for n_frame in range(len(grammar.COMPONENT_KIND_FRAMES) + 1):
-            members = [b for b in [*model["timers"], *model["inside"]] if _arch_layer(graph, model, b) == n_frame]
+            members = sorted((b for b in [*model["timers"], *model["inside"]] if _arch_layer(graph, model, b) == n_frame),
+                             key=lambda b: model["rank"].get(b, len(model["rank"])))
             # The last one holds the parts whose kind is unstated: no layer to put them in, so it says so.
             frames.append((_arch_frame_id(n_frame), _arch_frame_title(graph, model, n_frame), members))
     else:
@@ -1956,7 +1988,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
             else:
                 _arch_inside_box(graph, lines, bid, subflows, model["cells"])
         unframed(members)
-    outer = [*model["outside"], *model["stores"]]
+    outer = sorted([*model["outside"], *model["stores"]], key=lambda b: model["rank"].get(b, len(model["rank"])))
     outside = len(grammar.COMPONENT_KIND_FRAMES) + 1
     framed(outer, _arch_frame_id(outside), _arch_layer_label(outside))
     for oid in outer:   # an interface or a dependency, in its own box
@@ -1981,8 +2013,10 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         # work frame would otherwise be laid beside the frames above it.
         order = [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
                  for (_f, members), (_g, nxt) in zip(drawn, drawn[1:]) for a in members for b in nxt]
-        if whole:   # a crowded picture's frames are tied as frames: a tie is a line, and it touches no box
+        if whole:   # a crowded picture's frames are tied as frames, and each frame's boxes in a row
             order = [f"  {f} ~~~ {g}" for (f, _m), (g, _n) in zip(drawn, drawn[1:])]
+            order += [f"  {_arch_box_id(model, a)} ~~~ {_arch_box_id(model, b)}"
+                      for _f, members in drawn for a, b in zip(members, members[1:])]
         else:
             order += [f"  {d} ~~~ {_arch_box_id(model, b)}" for d in model["doors"] for b in drawn[0][1]]
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the

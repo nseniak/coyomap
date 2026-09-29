@@ -378,6 +378,44 @@ def test_a_part_that_runs_before_the_apis_is_drawn_with_them():
     assert gv._arch_frame(graph, "C4") != gv.ARCH_API_LAYER
 
 
+def rows_of(drawing: str) -> dict[str, list[str]]:
+    """Each frame of a drawing, by its title, with the boxes it writes, in the order it writes them."""
+    rows: dict[str, list[str]] = {}
+    current = ""
+    for line in drawing.splitlines():
+        head = line.strip()
+        if head.startswith("subgraph "):
+            current = head.split('["')[1].rstrip('"]')
+            rows[current] = []
+        elif head == "end":
+            current = ""
+        elif current and ":::cy-" in head:
+            rows[current].append(head.split("[")[0])
+    return rows
+
+
+def test_the_stories_come_in_the_order_a_reader_knows_and_every_row_follows_them():
+    """The happy path's stories first, then the others feature by feature in the Features page's order,
+    whatever order the map file keeps them in. Each row is written in the order the stories reach its
+    boxes, so it reads left to right."""
+    doc = make_map_with_a_third_door()
+    doc["capabilities"].insert(0, {"id": "CAP2", "name": "Counting", "purpose": "counts",
+                                   "happy_path": "expected"})
+    doc["use_cases"][-1]["capability"] = "CAP2"   # the operator's count, last in the file
+    graph = make_graph(doc)
+    assert gv._arch_walks(graph) == ["UC1", "UC3", "UC2"]
+    rows = rows_of(gv.gen_arch_views(graph, crowded=0)[0]["all|"])
+    assert rows["People"] == [gv._person_id(p) for p in ("Admin", "Operator", "Member")]
+    assert rows["Interfaces"] == ["I1", "I3", "I2"]
+
+
+def test_the_products_own_timer_takes_its_place_in_its_row_by_when_it_is_reached():
+    """The nightly clock starts the last story, so it sits after the Checker, which the first story
+    reaches."""
+    rows = rows_of(gv.gen_arch_views(make_graph(make_map_with_a_timer()), crowded=0)[0]["all|"])
+    assert rows["Checks"] == ["C4", gv._person_id("Nightly clock")]
+
+
 def test_the_first_layer_names_only_the_kinds_it_holds():
     """The page is a screen and the client a script: the first frame holds both, and says both."""
     graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))
@@ -395,14 +433,20 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     assert layer[("People", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
     assert layer[("APIs", "Checks")] == [["C3", "C4"]]
-    # no box's own line is drawn, and nothing ties one box to another: each frame is then laid out on
-    # its own, as one row of its boxes
+    # no box's own line is drawn: each frame is then laid out on its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
     assert len(links) == len(text["layerLines"]) and links[0] == 'CYFP -->|"2"| CYFD'
     assert all(ln.startswith("CYF") for ln in links)
-    ties = [ln.strip() for ln in drawing.splitlines() if "~~~" in ln]
-    assert ties and all(a.startswith("CYF") and b.startswith("CYF") for a, _tie, b in (t.split() for t in ties))
-    assert "direction TB" in drawing and "direction LR" not in drawing
+    # the frames are tied one below the other, and inside a frame each box to the next, in the order
+    # the frame writes them: a row, left to right
+    ties = [tuple(t.split()[::2]) for t in (ln.strip() for ln in drawing.splitlines() if "~~~" in ln)]
+    frame_ties = [t for t in ties if t[0].startswith("CYF")]
+    assert frame_ties[:2] == [("CYFP", "CYFD"), ("CYFD", "CYF0")]
+    rows = rows_of(drawing)
+    row_ties = [t for t in ties if not t[0].startswith("CYF")]
+    assert row_ties == [pair for row in rows.values() for pair in zip(row, row[1:])]
+    assert (who, gv._person_id("Member")) in row_ties
+    assert "direction LR" in drawing and "direction TB" not in drawing
     # the text still tells every box line, for the view to draw on demand
     assert len(text["lines"]) == 8
 

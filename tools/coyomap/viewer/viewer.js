@@ -220,8 +220,62 @@ const EMPTY_PANEL = '<p class="empty">Nothing recorded for this.</p>';
 // wrapper element. An ITEM BOX may be 300px wide, so the cap squeezed it, wrapped its name and made
 // the box taller than the size the engine had just been told — the box and its own node disagreed.
 // 320 is the widest box plus its border, so the cap never bites and the measurement always holds.
+//
+// THE LAYOUT ENGINE, ON TRIAL. `?layout=elk` in the address draws every picture with ELK's layered
+// method instead of Mermaid's own engine (dagre): each line at right angles in a lane of its own, and
+// the boxes KEPT IN THE ORDER EACH PICTURE WRITES THEM. That order is the generator's to make
+// meaningful: the person first, a row in the order the stories reach it. Measured on mcpolis's 9
+// Architecture pictures that are not crowded, dagre drew 15 of 58 box pairs the other way round, since
+// it moves boxes to cut crossings. Off unless asked, so the two engines can be compared on one map.
+// ELK comes as an add-on, loaded only then; if it cannot load, Mermaid falls back to dagre by itself.
+const ELK_ON = new URLSearchParams(location.search).get('layout') === 'elk';
+const ELK_ADDON = 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs';
+// The written order holds in a row (`forceNodeModelOrder`), and a loop is cut depth first from the box
+// written first, so the flow starts there: the person, on a use case map. Left to its own choice, ELK
+// started mcpolis's UC29 at the Dashboard the person comes back to. Cut in the written order instead,
+// a picture whose people stand in no frame came out upside down: Mermaid hands ELK every frame before
+// any box outside one. A picture's own setting for this is not read, so it is set here for all.
+const ELK_SETTINGS = { considerModelOrder: 'NODES_AND_EDGES', forceNodeModelOrder: true,
+  cycleBreakingStrategy: 'DEPTH_FIRST' };
+// MERMAID HANDS ELK A PICTURE'S FRAMES IN REVERSE: its flowchart data lists them last-written first, at
+// every level (`getData`, Mermaid 11.15), and ELK keeps the order it is handed. So with ELK on, sibling
+// frames are written in reverse here, and reach ELK in the order the picture wrote them: the groups of
+// outside services on the Dependencies view stood upside down. A frame holds only box declarations
+// (checked on all 337 of mcpolis's pictures), so no line changes place and no line's number changes.
+function elkFrameOrder(src) {
+  if (!ELK_ON || isClassDiagramSrc(src)) return src;
+  const lines = String(src).split('\n');
+  let at = 0;
+  const parse = (depth) => {
+    const items = [];
+    while (at < lines.length) {
+      const t = lines[at].trim();
+      if (/^subgraph\b/.test(t)) {
+        const head = lines[at++];
+        const body = parse(depth + 1);
+        items.push({ head, body, end: at < lines.length ? lines[at++] : '' });
+      } else if (t === 'end' && depth > 0) return items;
+      else items.push(lines[at++]);
+    }
+    return items;
+  };
+  const write = (items) => {
+    const frames = items.filter((x) => typeof x !== 'string').reverse();
+    let k = 0;
+    return items.flatMap((x) => {
+      if (typeof x === 'string') return [x];
+      const f = frames[k++];
+      return [f.head, ...write(f.body), f.end];
+    });
+  };
+  return write(parse(0)).join('\n');
+}
+const layoutReady = ELK_ON
+  ? import(ELK_ADDON).then((m) => { mermaid.registerLayoutLoaders(m.default); return true; }, () => false)
+  : Promise.resolve(false);
 mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default',
-  flowchart: { curve: 'basis', wrappingWidth: 320 }, class: { hideEmptyMembersBox: true } });
+  flowchart: { curve: 'basis', wrappingWidth: 320 }, class: { hideEmptyMembersBox: true },
+  ...(ELK_ON ? { layout: 'elk', elk: ELK_SETTINGS } : {}) });
 
 const diagram = document.getElementById('diagram');
 const stage = document.getElementById('stage');
@@ -4928,11 +4982,9 @@ function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actio
 // A self-arrow keeps the engine's place: its three pieces are not one curve, and the loop's label
 // already stands clear of its box. An arrow with an empty label has nothing to move.
 function centreEdgeLabels(root) {
-  const paths = [...root.querySelectorAll('.edgePaths path.flowchart-link')];
-  const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
-  const loops = selfArrowParts(paths);
-  paths.forEach((p, i) => {
-    const label = labels[i];
+  const links = drawnLinks(root);
+  const loops = selfArrowParts(links.map((x) => x.p));
+  links.forEach(({ p, label }, i) => {
     if (loops[i] || !edgeLabelHasContent(label)) return;
     let len, mid;
     try { len = p.getTotalLength(); mid = len && p.getPointAtLength(len / 2); } catch (_) { return; }
@@ -4942,14 +4994,12 @@ function centreEdgeLabels(root) {
   });
 }
 
-// Iterate a diagram's edges, pairing each path with its label by index. Mermaid emits one label
-// element per edge in path order (an empty one for an unlabelled arrow), so the index pairing stays
-// aligned even when some arrows carry no label. `fn(path, label, match)` gets the L_<src>_<dst>_<i>.
+// Iterate a diagram's edges, each with its label (drawnLinks). `fn(path, label, match)` gets the
+// L_<src>_<dst>_<i>.
 function eachEdge(root, fn) {
-  const paths = [...root.querySelectorAll('.edgePaths path.flowchart-link')];
-  const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
-  const loops = selfArrowParts(paths);
-  paths.forEach((p, i) => {
+  const links = drawnLinks(root);
+  const loops = selfArrowParts(links.map((x) => x.p));
+  links.forEach(({ p, label }, i) => {
     // Mermaid edge id: `<graph>-L_<src>_<dst>_<index>` — so the pattern stays UNANCHORED at the front
     // (the diagram-name prefix is not ours to match). Both endpoints are spelled out as EITHER a
     // process id (`U_<n>` — the only ids carrying an underscore) or an underscore-free id, so the
@@ -4957,18 +5007,18 @@ function eachEdge(root, fn) {
     // view draws process->process channel arrows, `L_U_0_U_15_0` -> (U_0, U_15, 0). A greedy `.+`
     // source would mis-split the latter into src=`U_0_U`, dst=`15`. A lane-to-lane arrow
     // (`L_L_proc_L_subs_0`) matches nothing and is skipped — scaffolding with no node behind it.
-    // A self-arrow: report it ONCE, on the `-mid` piece — the one Mermaid keeps the label on, so the
-    // index pairing hands it the right label. Its two siblings ride along on `_segs`.
+    // A self-arrow: report it ONCE, on the `-mid` piece — the one Mermaid keeps the label on. Its two
+    // siblings ride along on `_segs`.
     const loop = loops[i];
     if (loop) {
       if (loop.part !== 'mid') return;
       p._segs = loop.segs;
-      fn(p, labels[i] || null, [p.id, loop.node, loop.node, '0']);
+      fn(p, label, [p.id, loop.node, loop.node, '0']);
       return;
     }
     const m = p.id.match(/L_(U_\d+|[^_]+)_(U_\d+|[^_]+)_(\d+)$/);
     // A line drawn FLIPPED (markFlippedLines) is reported the way it runs, not the way it is written.
-    if (m) fn(p, labels[i] || null, p.hasAttribute('data-cy-flip') ? [m[0], m[2], m[1], m[3]] : m);
+    if (m) fn(p, label, p.hasAttribute('data-cy-flip') ? [m[0], m[2], m[1], m[3]] : m);
   });
 }
 // A CROWDED PICTURE DRAWS ONE LINE PER PAIR OF LAYERS (gen_viewer `_arch_layer_lines`), one with more
@@ -4982,10 +5032,9 @@ function markLayerLines(root, t) {
   const layers = (t && t.layerLines) || [];
   root.classList.toggle('arch-layers', archIsCrowded(t));
   if (!layers.length) return;
-  const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
-  [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
+  drawnLinks(root).forEach(({ p, label }, i) => {
     if (i >= layers.length) return;
-    for (const el of [p, ...(p.__cyHits || []), labels[i]].filter(Boolean)) el.classList.add('arch-layerline');
+    for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.classList.add('arch-layerline');
     p.dataset.layer = String(i);
   });
 }
@@ -5088,10 +5137,30 @@ function markFlippedLines(root, t) {
   const up = new Set([...((t && t.lines) || []).slice(0, n).flatMap((e, i) => (e.up ? [i] : [])),
                       ...((t && t.layerLines) || []).flatMap((e, k) => (e.up ? [n + k] : []))]);
   if (!up.size) return;
-  [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
+  drawnLinks(root).forEach(({ p }, i) => {
     if (!up.has(i)) return;
     p.setAttribute('data-cy-flip', '');
     p.removeAttribute('marker-end');
+  });
+}
+// A DRAWING'S LINES, each with its label, in the order the picture writes them. Mermaid's own engine
+// (dagre) groups the lines under `edgePaths` and ELK under `edgePath`; both mark a line
+// `flowchart-link`. dagre writes a label for every line, the invisible ties too, and ELK only for the
+// lines it draws, so a label is found by NAME: each names its line (`data-id`, the line's own id
+// without the picture's), a loop's three pieces too. By position only when no label carries a name.
+function drawnLinks(root) {
+  const paths = [...root.querySelectorAll('.edgePaths path.flowchart-link, .edgePath path.flowchart-link')];
+  const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
+  const named = new Map();
+  for (const l of labels) {
+    const n = l.querySelector && l.querySelector('[data-id]');
+    if (n) named.set(n.getAttribute('data-id'), l);
+  }
+  return paths.map((p, i) => {
+    if (!named.size) return { p, label: labels[i] || null };
+    const svg = p.ownerSVGElement;
+    const own = svg && svg.id && p.id.startsWith(svg.id + '-') ? p.id.slice(svg.id.length + 1) : p.id;
+    return { p, label: named.get(own) || null };
   });
 }
 // Every path that makes up ONE drawn arrow: three for a self-arrow, one for every other arrow. Everything
@@ -5105,8 +5174,8 @@ function edgeSegs(p) { return (p && p._segs) || [p]; }
 // for both diagram types: per path, null for an ordinary arrow, or { node, part, segs } for a piece of
 // a loop. The node id is matched strictly (letters/digits/underscore — every id this viewer draws) so a
 // diagram name carrying a dash cannot be swallowed into it. Mermaid emits one label per PATH, two of
-// them empty, so pairing labels by index stays right for the arrows AFTER a loop only if all three
-// pieces are counted — which is why this walks the path list rather than filtering it.
+// them empty, each named after its piece (drawnLinks). This walks the whole path list, so its answer
+// lines up with it by position.
 function selfArrowParts(paths) {
   const segsByNode = {};
   const parts = paths.map((p) => {
@@ -12982,7 +13051,7 @@ function dvRenderChannels(pane) {  // lazily render each broker flowchart in a s
     ph.dataset.rendered = '1';
     const seq = renderSeq;
     let svg;
-    try { ({ svg } = await mermaid.render('dvChan' + (rc++), src)); }
+    try { await layoutReady; ({ svg } = await mermaid.render('dvChan' + (rc++), elkFrameOrder(src))); }
     catch (_) { return; }
     if (seq !== renderSeq || !document.body.contains(ph)) return;  // navigated away mid-layout — drop
     ph.innerHTML = svg;
@@ -14764,8 +14833,9 @@ async function renderView(sArg, transient, seq) {
     // ITEM SLOTS ARE FILLED BEFORE THE ENGINE SEES THE SOURCE, and sized before it measures — see
     // expandItemSlots. A source carrying none passes through untouched, so a picture that has not
     // been moved onto the item box is unaffected.
-    const src = expandItemSlots(mermaidFor(s));
+    const src = elkFrameOrder(expandItemSlots(mermaidFor(s)));
     if (!src) throw new Error('no diagram for ' + JSON.stringify(s));
+    await layoutReady;   // the engine asked for is registered before the first drawing
     ({ svg } = await mermaid.render('coyomapGraph' + (rc++), src));
   } catch (_) {
     if (seq !== renderSeq) return;
