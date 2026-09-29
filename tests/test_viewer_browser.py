@@ -4457,15 +4457,17 @@ VISIBLE_LINES = """() => {
 
 
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
-    """A picture with more lines than a reader can follow draws one line per pair of layers, and none of
-    its boxes' own. A click on a layer line draws the box lines it stands for on top of the picture and
-    keeps them alone in the text; a click on a box draws its own lines; a second click shows the
-    picture at rest again."""
+    """A picture with more lines than a reader can follow draws one line per pair of layers that most of
+    its layer takes, and none of its boxes' own but the exceptions to those, box to box. A click on a
+    layer line draws the box lines it stands for on top of the picture and keeps them alone in the
+    text; a click on a box draws its own lines; a second click shows the picture at rest again."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
+    assert text["exceptions"], "the changed map must have a layer line too few boxes take"
+    rest = len(text["exceptions"])
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": 0}
+        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": rest}
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')
@@ -4474,7 +4476,7 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         assert page.evaluate(VISIBLE_LINES)["box"] == under
         assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == under
         page.evaluate(click)
-        assert page.evaluate(VISIBLE_LINES)["box"] == 0
+        assert page.evaluate(VISIBLE_LINES)["box"] == rest
         # THE BOX WITH THE MOST LINES, clicked on its body: the picture is wider than the window, so a
         # point on screen cannot be counted on, and a click on the box's body is what a reader makes.
         people = {e["srcBox"] for e in text["lines"] if e["srcBox"].startswith("CYP")}
@@ -4489,6 +4491,22 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         other = next(e["dstBox"] if e["srcBox"] == box else e["srcBox"] for e in text["lines"]
                      if box in (e["srcBox"], e["dstBox"]) and not {e["srcBox"], e["dstBox"]} & people)
         assert not page.evaluate(f"() => document.querySelector('#diagram g.cy-{other}').classList.contains('dim')")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_story_followed_from_its_address_draws_its_lines_on_a_crowded_picture() -> None:
+    """A crowded picture draws a followed story's lines on top of itself, and hides its layer lines. The
+    picture is bound before its pan and zoom exists, so a story opened from its address once drew no
+    line at all: an empty picture."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    story = max(text["stories"], key=lambda x: len(x["lines"]))
+    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&story={story['uc']}") as page:
+        _arch_ready(page)
+        page.wait_for_timeout(300)
+        seen = page.evaluate(VISIBLE_LINES)
+        assert seen == {"layer": 0, "box": len(story["lines"])}, (seen, len(story["lines"]))
+        # the lines move with the boxes: they sit inside the pan and zoom's own group
+        assert page.evaluate("() => !!document.querySelector('#diagram .svg-pan-zoom_viewport .arch-overlay')")
         assert not page.js_errors, page.js_errors
 
 

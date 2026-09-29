@@ -35,6 +35,7 @@ import subprocess
 import sys
 from html import escape as html_escape
 from pathlib import Path
+from collections import Counter
 from collections.abc import Iterator
 from typing import Any, TypedDict, cast
 from urllib.parse import quote
@@ -1113,6 +1114,12 @@ ARCH_LAYER_BUDGET = 24
 #: (`_arch_layer_lines`). On mcpolis the pictures had 116, 84 and 51 lines, then 30 and fewer; the 3
 #: biggest were the unreadable ones.
 ARCH_CROWDED_LINES = 40
+#: A LINE BETWEEN TWO LAYERS SAYS SOMETHING ABOUT A LAYER only when enough of the layer's boxes have a
+#: line to the other one: more than one box in this many, of the layer it leaves. Under that, its lines
+#: are the exceptions, and the view draws them box to box (`_arch_layer_lines`). On mcpolis's
+#: whole-product picture 5 of 16 layer lines came from a third of their layer's boxes or fewer (UI to
+#: Storage from 1 box of 6), and the next lowest from 4 of 9: the cut sits in that gap.
+ARCH_LAYER_LINE_ONE_IN = 3
 #: THE MARK FOR "A BUSINESS RULE DECIDES HERE", on an Architecture line and a use case map arrow alike. A
 #: character, not the rule's drawn glyph, because it rides inside the arrow's label text, where the drawing
 #: engine measures it before it lays the picture out; a glyph added afterwards would be cut off by the label.
@@ -1884,7 +1891,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     is drawn only when a part of the picture is in it.
 
     `by_layer`: a CROWDED layered picture, one with more than `ARCH_CROWDED_LINES` lines, draws one
-    line per pair of layers (`_arch_layer_lines`) and no box's own line. The people and the interfaces
+    line per pair of layers (`_arch_layer_lines`) and no box's own line. It draws a layer line only
+    when it is a rule of the architecture; the view draws the exceptions box to box, on top of the
+    picture, where they cannot spread the frames. The people and the interfaces
     they come through sit in frames of their own there, so a line can leave them too. With no line
     touching a box, the drawing tool lays each frame out on its own, as one row of its boxes: drawn
     even hidden, the box lines had spread mcpolis's frames until their boxes filled 6% to 19% of them.
@@ -1967,7 +1976,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         # AFTER every real line: Mermaid numbers links in the order they are written, and both the
         # line styles below and the view's pairing of a line with its label count by that number.
         return _arch_lines_mermaid(graph, model, lines, layered, order,
-                                   _arch_layer_lines(graph, model) if whole else None)
+                                   [ll for ll in _arch_layer_lines(graph, model) if ll["rule"]] if whole else None)
     return _arch_lines_mermaid(graph, model, lines, layered)
 
 
@@ -2000,6 +2009,8 @@ class _ArchLayerLine(TypedDict):
     dst: int                       # the layer it reaches
     lines: list[tuple[str, str]]   # the picture's lines it stands for, as drawn box ids
     up: bool                       # it climbs the layers, so it is drawn from the upper one
+    rule: bool                     # enough of its layer's boxes take part to draw it between the
+                                   # layers; else its lines are drawn box to box (`ARCH_LAYER_LINE_ONE_IN`)
 
 
 def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLine]:
@@ -2007,13 +2018,23 @@ def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLin
     picture from a box in the one to a box in the other. Measured on mcpolis with a kind on every
     part: 116 lines between boxes became 18 between layers, and a line inside one layer (8 of the
     116) is not drawn at all. Each box's own lines are one click away in the view, and the text
-    beside the picture still tells every one of them."""
+    beside the picture still tells every one of them.
+
+    A LAYER LINE IS A RULE of the architecture only when enough of the boxes of the layer it leaves
+    have a line to the other layer (`ARCH_LAYER_LINE_ONE_IN`). A layer holding boxes that go
+    different ways otherwise had a line to every layer any one of them reached, and each line said
+    nothing about the layer. Its lines are then the exceptions, and the view draws them box to box:
+    a screen that reaches storage on its own is a fact a reader wants."""
     out: dict[tuple[int, int], list[tuple[str, str]]] = {}
     for ln in model["lines"]:
         a, b = _arch_layer(graph, model, ln["src"]), _arch_layer(graph, model, ln["dst"])
         if a != b:
             out.setdefault((a, b), []).append((_arch_box_id(model, ln["src"]), _arch_box_id(model, ln["dst"])))
-    return [_ArchLayerLine(src=a, dst=b, lines=pairs, up=a > b) for (a, b), pairs in sorted(out.items())]
+    boxes = {*model["people"], *model["doors"], *model["inside"], *model["outside"], *model["stores"]}
+    in_layer = Counter(_arch_layer(graph, model, x) for x in boxes)
+    return [_ArchLayerLine(src=a, dst=b, lines=pairs, up=a > b,
+                           rule=len({src for src, _dst in pairs}) * ARCH_LAYER_LINE_ONE_IN > in_layer[a])
+            for (a, b), pairs in sorted(out.items())]
 
 
 def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
@@ -2200,7 +2221,8 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
     its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
     it holds, which the view opens and marks through. `merged` is the map's kept line texts
     (`line_texts.load`), key to text. A layered picture with more than `crowded` lines also carries
-    its lines between layers (`layerLines`), which it draws instead of its boxes' own.
+    its lines between layers (`layerLines`), which it draws instead of its boxes' own, and the box
+    lines that are exceptions to them (`exceptions`), which the view draws box to box.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -2214,6 +2236,7 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
             if model is None:
                 continue
             whole = layered and len(model["lines"]) > crowded
+            layer_lines = _arch_layer_lines(graph, model) if whole else []
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered, whole)
             texts[f"{scope}|{feature}"] = {
                 "lines": _arch_text(graph, model, merged), "stories": _arch_stories(graph, model),
@@ -2222,7 +2245,9 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
                                     "dst": _arch_frame_title(graph, model, ll["dst"]),
                                     "lines": [list(pair) for pair in ll["lines"]],
                                     **({"up": True} if ll["up"] else {})}
-                                   for ll in _arch_layer_lines(graph, model)]} if whole else {})}
+                                   for ll in layer_lines if ll["rule"]],
+                    "exceptions": [list(pair) for ll in layer_lines if not ll["rule"] for pair in ll["lines"]]}
+                   if whole else {})}
     return drawings, texts
 
 

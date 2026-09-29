@@ -4971,12 +4971,13 @@ function eachEdge(root, fn) {
 // A CROWDED PICTURE DRAWS ONE LINE PER PAIR OF LAYERS (gen_viewer `_arch_layer_lines`), one with more
 // lines than gen_viewer's ARCH_CROWDED_LINES, which is the whole product's on a big map. None of its
 // boxes' own lines is in the drawing: drawn, even hidden, they spread the frames until their boxes
-// filled 6% to 19% of them. So every drawn line is a layer line, and the view draws a box's own lines
-// on top of the picture when asked (archOverlay): a picked box's, a picked layer line's, a followed
-// story's, or the one picked in the text.
+// filled 6% to 19% of them. So every drawn line is a layer line, and the view draws box lines on top
+// of the picture (archOverlay): at rest the exceptions to the layer lines (archRestItems), and when
+// asked a picked box's, a picked layer line's, a followed story's, or the one picked in the text.
+function archIsCrowded(t) { return !!(t && t.layerLines); }
 function markLayerLines(root, t) {
   const layers = (t && t.layerLines) || [];
-  root.classList.toggle('arch-layers', layers.length > 0);
+  root.classList.toggle('arch-layers', archIsCrowded(t));
   if (!layers.length) return;
   const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
   [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
@@ -4987,26 +4988,46 @@ function markLayerLines(root, t) {
 }
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
-// Draw the box lines of a crowded picture that pass `test`, each with its step number, or none again
-// when it is null.
+// One line of the text, as the overlay draws it: its step number, or none on a line into a database.
+function archOverlayItem(e) {
+  return { src: e.srcBox, dst: e.dstBox, label: e.store ? '' : String(e.n), store: !!e.store };
+}
+// A CROWDED PICTURE AT REST draws the lines that are exceptions to its layer lines, box to box: too few
+// boxes of their layer have a line to the other layer for a layer line to say it (gen_viewer
+// `_arch_layer_lines`).
+function archRestItems(t) {
+  const want = new Set(((t && t.exceptions) || []).map(([a, b]) => a + '>' + b));
+  return ((t && t.lines) || []).filter((e) => want.has(e.srcBox + '>' + e.dstBox))
+    .map((e) => ({ ...archOverlayItem(e), rest: true }));
+}
+// Draw the box lines of a crowded picture that pass `test`, each with its step number, or the picture's
+// resting lines again when it is null.
 function archShowLines(test) {
   if (!archCrowded()) return;
   mainScene.root.classList.toggle('arch-picking', !!test);
   const t = archCurrentText();
-  archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox))
-    .map((e) => ({ src: e.srcBox, dst: e.dstBox, label: e.store ? '' : String(e.n), store: !!e.store })) : []);
+  archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox)).map(archOverlayItem)
+    : archRestItems(t));
 }
-// THE LINES A CROWDED PICTURE DRAWS ON DEMAND, on top of the drawing and inside its pan and zoom: one
-// curve per line from the box it leaves to the box it reaches, a head at that end, and its number at
-// the middle. A click on one finds its entry in the text, as a drawn line's does.
+// THE BOX LINES A CROWDED PICTURE DRAWS, on top of the drawing and inside its pan and zoom: one curve
+// per line from the box it leaves to the box it reaches, a head at that end, and its number at the
+// middle. A click on one finds its entry in the text, as a drawn line's does. A resting line (`rest`)
+// is drawn as the picture's own lines are; a line drawn when asked stands out.
+let archOverlayShown = [];
 function archOverlay(items) {
-  const host = diagram.querySelector('.svg-pan-zoom_viewport');
+  archOverlayShown = items;
+  // THE PAN AND ZOOM'S OWN GROUP, so the lines move with the boxes. The picture is bound BEFORE the pan
+  // and zoom is set up, and a line drawn then (a crowded picture at rest, a story followed from its
+  // address) found no such group and drew nothing: it goes in the drawing's own group instead, which
+  // the pan and zoom then moves into its group.
+  const host = diagram.querySelector('.svg-pan-zoom_viewport') || diagram.querySelector('svg > g');
   diagram.querySelectorAll('.arch-overlay').forEach((g) => g.remove());
   if (!host || !items.length) return;
   const g = document.createElementNS(SVGNS, 'g');
   g.setAttribute('class', 'arch-overlay');
-  g.innerHTML = '<defs><marker id="arch-ov-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"'
-    + ' markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-ov-head"/></marker></defs>';
+  const head = (id, cls) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"`
+    + ` markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="${cls}"/></marker>`;
+  g.innerHTML = `<defs>${head('arch-ov-head', 'arch-ov-head')}${head('arch-ov-head-rest', 'arch-ov-head arch-ov-rest')}</defs>`;
   host.appendChild(g);
   const rectOf = (id) => {
     const el = [...diagram.querySelectorAll('g.node')].find((x) => idOf(x) === id);
@@ -5024,8 +5045,9 @@ function archOverlay(items) {
     const ym = (y1 + y2) / 2;
     const line = document.createElementNS(SVGNS, 'path');
     line.setAttribute('d', `M${x1},${y1} C${x1},${ym} ${x2},${ym} ${x2},${y2}`);
-    line.setAttribute('class', 'arch-ov-line' + (it.store ? ' arch-ov-store' : '') + (it.hl ? ' arch-ov-hl' : ''));
-    line.setAttribute('marker-end', 'url(#arch-ov-head)');
+    const rest = it.rest ? ' arch-ov-rest' : '';
+    line.setAttribute('class', 'arch-ov-line' + rest + (it.store ? ' arch-ov-store' : '') + (it.hl ? ' arch-ov-hl' : ''));
+    line.setAttribute('marker-end', `url(#${it.rest ? 'arch-ov-head-rest' : 'arch-ov-head'})`);
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
     hit.setAttribute('class', 'arch-ov-hit'); hit.removeAttribute('marker-end');
@@ -5035,14 +5057,14 @@ function archOverlay(items) {
     if (it.label) {
       const tx = document.createElementNS(SVGNS, 'text');
       tx.setAttribute('x', String((x1 + x2) / 2)); tx.setAttribute('y', String(ym));
-      tx.setAttribute('class', 'arch-ov-num');
+      tx.setAttribute('class', 'arch-ov-num' + rest);
       tx.textContent = it.label;
       g.appendChild(tx);
       const bb = tx.getBBox();
       const bg = document.createElementNS(SVGNS, 'rect');
       bg.setAttribute('x', String(bb.x - 3)); bg.setAttribute('y', String(bb.y - 1));
       bg.setAttribute('width', String(bb.width + 6)); bg.setAttribute('height', String(bb.height + 2));
-      bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg');
+      bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg' + rest);
       g.insertBefore(bg, tx);
       tx.addEventListener('click', find);
     }
@@ -5056,7 +5078,7 @@ function archOverlay(items) {
 // How many of a picture's lines the drawing itself holds, before its lines between layers: every one,
 // except on a crowded picture, which draws none of them (see markLayerLines).
 function archDrawnBoxLines(t) {
-  return t && (t.layerLines || []).length ? 0 : ((t && t.lines) || []).length;
+  return archIsCrowded(t) ? 0 : ((t && t.lines) || []).length;
 }
 function markFlippedLines(root, t) {
   const n = archDrawnBoxLines(t);
@@ -7724,7 +7746,7 @@ function archFeatureHtml() {
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
-    + archKeyHtml(!!((archTextOf({ ...s, kind: 'arch' }) || {}).layerLines || []).length);
+    + archKeyHtml(archTextOf({ ...s, kind: 'arch' }));
 }
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
@@ -7906,15 +7928,13 @@ function archBoxName(t, id) {
 function archMarkArrow(src, dst) {
   if (!mainScene) return;
   // A CROWDED PICTURE draws the line it is asked about: marked among the lines already on top of it,
-  // or alone when none is.
+  // or added to them when it is not one of them. Only one line is added at a time.
   if (archCrowded()) {
-    const drawn = [...diagram.querySelectorAll('.arch-ov-line')];
-    if (drawn.some((l) => l.dataset.src === src && l.dataset.dst === dst)) {
-      drawn.forEach((l) => l.classList.toggle('arch-ov-hl', l.dataset.src === src && l.dataset.dst === dst));
-    } else {
-      const e = (((archCurrentText() || {}).lines) || []).find((x) => x.srcBox === src && x.dstBox === dst);
-      archOverlay(e ? [{ src, dst, label: e.store ? '' : String(e.n), store: !!e.store, hl: true }] : []);
-    }
+    const same = (it) => it.src === src && it.dst === dst;
+    const base = archOverlayShown.filter((it) => !it.added);
+    const e = (((archCurrentText() || {}).lines) || []).find((x) => x.srcBox === src && x.dstBox === dst);
+    const added = base.some(same) || !e ? [] : [{ ...archOverlayItem(e), added: true }];
+    archOverlay([...base, ...added].map((it) => ({ ...it, hl: same(it) })));
     return;
   }
   mainScene.root.querySelectorAll('.arch-hl').forEach((el) => el.classList.remove('arch-hl'));
@@ -7972,6 +7992,7 @@ function bindArch() {
   markLayerLines(mainScene.root, t);
   bindArchText(t, story);   // …and every arrow finds its line in the text
   if (story) archFollow(story);
+  else archShowLines(null);   // a crowded picture's exceptions to its layer lines
 }
 function bindArchText(t, story) {
   if (!mainScene) return;
@@ -8078,14 +8099,19 @@ function archState(scope, cap, story) {
 // THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
 // than they decode a word for one. Solid = every story through that box goes this way, so two solid
 // lines out of one box read "and"; dashed = only some do, so read "or".
-function archKeyHtml(layers) {
+function archKeyHtml(t) {
   const line = (dash, stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
     + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
+  // A CROWDED PICTURE draws no box line of its own but the exceptions to its layer lines, so those two
+  // take the place of the two box line styles.
+  const crowded = archIsCrowded(t) ? (((t.layerLines || []).length ? `<span>${line(false, '#334155', 2.6)}`
+      + ' every line from one layer to another, when more than a third of the first layer\'s boxes have one;'
+      + ' the number says how many. Click it, or a box, to see them</span>' : '')
+    + ((t.exceptions || []).length ? `<span>${line(false, '#475569')} a line from one box to another, when a`
+      + ' third or fewer of its layer\'s boxes have a line to that layer</span>' : '')) : '';
   return '<div class="archkey">'
-    + (layers ? `<span>${line(false, '#334155', 2.6)} every line between two layers; the number says how many.`
-      + ' Click it, or a box, to see them</span>' : '')
-    + `<span>${line(false, '#475569')} every story through that box goes this way</span>`
-    + `<span>${line(true, '#475569')} only some do</span>`
+    + (crowded || `<span>${line(false, '#475569')} every story through that box goes this way</span>`
+      + `<span>${line(true, '#475569')} only some do</span>`)
     + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
     + `<span>${line(true, ARCH_STORE_LINE)} where a box keeps its records</span>`
     + `<span><b class="archkey-num">${RULE_MARK}</b> a business rule decides on this line</span>`

@@ -383,10 +383,48 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     assert len(text["lines"]) == 8
 
 
+def make_map_with_a_third_door() -> dict[str, Any]:
+    """The layered map plus an operator who counts the things through a command line, straight into
+    the API. Of the 3 doors, only the web page leads to a screen."""
+    doc = make_layered_map()
+    doc["roles"].append({"id": "R3", "name": "Operator", "kind": "human", "audience": "internal",
+                         "wants": "z", "drives": "UC3"})
+    doc["use_cases"].append({"id": "UC3", "name": "Count the things", "actors": ["R3"], "capability": "CAP1",
+                             "trigger": "The operator asks for a count.", "outcome": "The operator has the count."})
+    doc["interfaces"].append({"id": "I3", "name": "Command line", "what": "the command line", "side": "ours",
+                              "facing": "operator", "kind": "cli"})
+    doc["flows"].append({"uc": "UC3", "title": "Count the things", "steps": [
+        {"n": 1, "src": "R3", "dst": "I3", "phrase": "run the count"},
+        {"n": 2, "src": "I3", "dst": "C3", "phrase": "carry the count in", "where": "src/api.py:50"},
+        {"n": 3, "src": "C3", "dst": "I3", "phrase": "print the count", "where": "src/api.py:52"},
+        {"n": 4, "src": "I3", "dst": "R3", "phrase": "show the count"}]})
+    return doc
+
+
+def test_a_layer_line_few_boxes_of_its_layer_take_is_drawn_box_to_box():
+    """A line between two layers is drawn only when more than a third of the boxes of the layer it
+    leaves have a line to the other layer. Under that, its lines are exceptions: the drawing leaves
+    them out, and the text lists them for the view to draw from box to box."""
+    graph = make_graph(make_map_with_a_third_door())
+    drawings, texts = gv.gen_arch_views(graph, crowded=0)
+    drawing, text = drawings["all|"], texts["all|"]
+    layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
+    # 2 of the 3 doors lead to the API: a rule of the picture
+    assert layer[("Interfaces", "APIs")] == [["I2", "C3"], ["I3", "C3"]]
+    assert '  CYFD -->|"2"| CYF1' in drawing
+    # 1 of the 3 leads to a screen: an exception, drawn by the view, never between the layers
+    assert ("Interfaces", "UI") not in layer and "CYFD -->|\"1\"| CYF0" not in drawing
+    assert text["exceptions"] == [["I1", "C1"]]
+    # every person comes in through a door: 3 of 3
+    assert len(layer[("People", "Interfaces")]) == 3
+    links = [ln for ln in drawing.splitlines() if "-->" in ln]
+    assert len(links) == len(text["layerLines"])
+
+
 def test_a_picture_that_is_not_crowded_keeps_its_box_lines():
     drawings, texts = gv.gen_arch_views(make_graph(make_layered_map()))
     assert len(texts["all|"]["lines"]) <= gv.ARCH_CROWDED_LINES
-    assert all("layerLines" not in t for t in texts.values())
+    assert all("layerLines" not in t and "exceptions" not in t for t in texts.values())
     assert all("CYFP" not in d for d in drawings.values())
 
 
