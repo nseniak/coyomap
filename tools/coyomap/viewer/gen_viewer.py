@@ -1116,7 +1116,7 @@ ARCH_LAYER_BUDGET = 24
 ARCH_CROWDED_LINES = 40
 #: A LINE BETWEEN TWO LAYERS SAYS SOMETHING ABOUT A LAYER only when enough of the layer's boxes have a
 #: line to the other one: more than one box in this many, of the layer it leaves. Under that, its lines
-#: are the exceptions, and the view draws them box to box (`_arch_layer_lines`). On mcpolis's
+#: are exceptions, drawn only when a reader asks for a box's lines (`_arch_layer_lines`). On mcpolis's
 #: whole-product picture 5 of 16 layer lines came from a third of their layer's boxes or fewer (UI to
 #: Storage from 1 box of 6), and the next lowest from 4 of 9: the cut sits in that gap.
 ARCH_LAYER_LINE_ONE_IN = 3
@@ -1508,8 +1508,17 @@ def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
     """A layer's name ON ONE PICTURE. A layer that can hold several kinds names only the kinds it
     holds there: "UI" or "UI and scripts", "Logic" or "Logic and checks". Only 2 of mcpolis's 11
     pictures held more than one kind in the first layer, under a name that promised all three, and
-    "Work" named no kind at all. Each kind is written as `grammar.COMPONENT_KIND_PLURALS` writes it."""
+    "Work" named no kind at all. Each kind is written as `grammar.COMPONENT_KIND_PLURALS` writes it.
+
+    THE LAST FRAME NAMES WHAT IT HOLDS the same way: the outside services the product reaches, the
+    databases its records live in, or both. The product's own database is no outside service: the
+    glossary's interface leaves out "data the product writes only to read back". It is a database,
+    and not "storage", which is the layer of the parts that keep records."""
     frames = grammar.COMPONENT_KIND_FRAMES
+    if layer == len(frames) + 1:
+        said = [name for name, there in (("outside services", model["outside"]), ("databases", model["stores"]))
+                if there]
+        return " and ".join(said).capitalize() if said else _arch_layer_label(layer)
     if not 0 <= layer < len(frames) or len(frames[layer][1]) < 2:
         return _arch_layer_label(layer)
     held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == layer
@@ -1964,8 +1973,8 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
 
     `by_layer`: a CROWDED layered picture, one with more than `ARCH_CROWDED_LINES` lines, draws one
     line per pair of layers (`_arch_layer_lines`) and no box's own line. It draws a layer line only
-    when it is a rule of the architecture; the view draws the exceptions box to box, on top of the
-    picture, where they cannot spread the frames. The people and the interfaces
+    when it is a rule of the architecture, and with no number: on a picture that is not crowded a
+    number on a line is its step, and a count there read as one. The people and the interfaces
     they come through sit in frames of their own there, so a line can leave them too. With no line
     touching a box from outside its frame, the drawing tool lays each frame out on its own, as one row
     of its boxes: drawn even hidden, the box lines had spread mcpolis's frames until their boxes filled
@@ -2026,7 +2035,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         unframed(members)
     outer = sorted([*model["outside"], *model["stores"]], key=lambda b: model["rank"].get(b, len(model["rank"])))
     outside = len(grammar.COMPONENT_KIND_FRAMES) + 1
-    framed(outer, _arch_frame_id(outside), _arch_layer_label(outside))
+    framed(outer, _arch_frame_id(outside), _arch_frame_title(graph, model, outside))
     for oid in outer:   # an interface or a dependency, in its own box
         kind = str(graph["nodes"].get(oid, {}).get("kind"))
         lines.append(f'  {oid}["{_slot(kind, "tight", oid)}"]:::cy-{oid}')
@@ -2092,7 +2101,7 @@ class _ArchLayerLine(TypedDict):
     lines: list[tuple[str, str]]   # the picture's lines it stands for, as drawn box ids
     up: bool                       # it climbs the layers, so it is drawn from the upper one
     rule: bool                     # enough of its layer's boxes take part to draw it between the
-                                   # layers; else its lines are drawn box to box (`ARCH_LAYER_LINE_ONE_IN`)
+                                   # layers; else it is not drawn (`ARCH_LAYER_LINE_ONE_IN`)
 
 
 def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLine]:
@@ -2105,8 +2114,9 @@ def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLin
     A LAYER LINE IS A RULE of the architecture only when enough of the boxes of the layer it leaves
     have a line to the other layer (`ARCH_LAYER_LINE_ONE_IN`). A layer holding boxes that go
     different ways otherwise had a line to every layer any one of them reached, and each line said
-    nothing about the layer. Its lines are then the exceptions, and the view draws them box to box:
-    a screen that reaches storage on its own is a fact a reader wants."""
+    nothing about the layer. Its lines are then exceptions, and drawn only when a reader asks for a
+    box's own lines: at rest, drawn box to box, they crossed boxes, and at least 2 of the whole
+    product's 4 came from mistakes in the map (a screen calling logic past its API)."""
     out: dict[tuple[int, int], list[tuple[str, str]]] = {}
     for ln in model["lines"]:
         a, b = _arch_layer(graph, model, ln["src"]), _arch_layer(graph, model, ln["dst"])
@@ -2158,14 +2168,14 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
             # frames stood side by side. The drawing tool has no way to put one head at the start.
             head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
         lines.append(f"  {a} {head}|{label}| {b}")
-    # THE LINES BETWEEN LAYERS, thick, and labelled with how many lines each stands for.
+    # THE LINES BETWEEN LAYERS, thick, and with no number (see `_arch_mermaid`).
     thick: list[str] = []
     for k, ll in enumerate(layer_lines or []):
         a, b = _arch_frame_id(ll["src"]), _arch_frame_id(ll["dst"])
         head = "-->"
         if ll["up"]:   # drawn from the upper layer, for the reason a box line up the layers is
             head, a, b = "<-->", b, a
-        lines.append(f"  {a} {head}|{_edge_label(str(len(ll['lines'])))}| {b}")
+        lines.append(f"  {a} {head} {b}")
         thick.append(str(len(box_lines) + k))
     if thick:
         lines.append(f"  linkStyle {','.join(thick)} stroke:#334155,stroke-width:2.6px,color:#334155")
@@ -2303,8 +2313,7 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
     its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
     it holds, which the view opens and marks through. `merged` is the map's kept line texts
     (`line_texts.load`), key to text. A layered picture with more than `crowded` lines also carries
-    its lines between layers (`layerLines`), which it draws instead of its boxes' own, and the box
-    lines that are exceptions to them (`exceptions`), which the view draws box to box.
+    its lines between layers (`layerLines`), which it draws instead of its boxes' own.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -2327,8 +2336,7 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
                                     "dst": _arch_frame_title(graph, model, ll["dst"]),
                                     "lines": [list(pair) for pair in ll["lines"]],
                                     **({"up": True} if ll["up"] else {})}
-                                   for ll in layer_lines if ll["rule"]],
-                    "exceptions": [list(pair) for ll in layer_lines if not ll["rule"] for pair in ll["lines"]]}
+                                   for ll in layer_lines if ll["rule"]]}
                    if whole else {})}
     return drawings, texts
 

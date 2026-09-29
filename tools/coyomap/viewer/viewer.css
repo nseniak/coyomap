@@ -3604,19 +3604,13 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-following path.flowchart-link:not(.arch-story-on) { opacity: .18; }
 .arch-following g.edgeLabel:not(.arch-story-on) { opacity: .18; }
 .arch-following g.node:not(.arch-story-on) { opacity: .3; }
-/* A CROWDED PICTURE (viewer.js markLayerLines) draws only its lines between layers, and on top of them
-   the box lines that are exceptions to them (archOverlay). A box's own lines replace those when asked;
-   a layer line steps back while they show, and goes while a story is followed. */
+/* A CROWDED PICTURE (viewer.js markLayerLines) draws only its lines between layers. A box's own lines
+   are drawn on top when asked (archOverlay); a layer line steps back while they show, and goes while a
+   story is followed. */
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
-/* A resting line, an exception to the layer lines, is drawn as a box line of a picture that is not
-   crowded: the same grey, the same width, its number on white. Only a line drawn when asked stands out. */
-.arch-ov-line.arch-ov-rest { stroke: #475569; stroke-width: 1.6px; }
-.arch-ov-head.arch-ov-rest { fill: #475569; }
-.arch-ov-num.arch-ov-rest { fill: #334155; }
-.arch-ov-numbg.arch-ov-rest { fill: #ffffff; stroke: #cbd5e1; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
 .arch-ov-head { fill: #4f46e5; }

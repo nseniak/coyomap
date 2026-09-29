@@ -4458,16 +4458,19 @@ VISIBLE_LINES = """() => {
 
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
     """A picture with more lines than a reader can follow draws one line per pair of layers that most of
-    its layer takes, and none of its boxes' own but the exceptions to those, box to box. A click on a
-    layer line draws the box lines it stands for on top of the picture and keeps them alone in the
-    text; a click on a box draws its own lines; a second click shows the picture at rest again."""
+    its layer takes, with no number, and none of its boxes' own. A click on a layer line draws the box
+    lines it stands for on top of the picture and keeps them alone in the text; a click on a box draws
+    its own lines; a second click shows the picture at rest again."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
-    assert text["exceptions"], "the changed map must have a layer line too few boxes take"
-    rest = len(text["exceptions"])
+    rest = 0
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
         assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": rest}
+        # a layer line carries no number: on a picture that is not crowded, a number is a step
+        labels = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgeLabel.arch-layerline')]
+            .map((l) => l.textContent.trim())""")
+        assert labels and not any(labels), labels
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')

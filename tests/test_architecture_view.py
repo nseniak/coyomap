@@ -353,12 +353,13 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
     drawings, _texts = gv.gen_arch_views(graph)
     drawing = drawings["all|CAP1"]
     # the work layer names what it holds: here the Checker alone
-    for label in ("UI", "APIs", "Checks", "Storage", "Outside services"):
+    # the last frame holds the database alone, and says so
+    for label in ("UI", "APIs", "Checks", "Storage", "Databases"):
         assert f'["{label}"]' in drawing, label
     # on a feature's picture the door is in no frame: it sits between the people and the first
     # frame, tied above it
     assert frames_of(drawing, ("I1", "C1", "C3", "C4", "C5", "D1")) == {
-        "C1": "UI", "C3": "APIs", "C4": "Checks", "C5": "Storage", "D1": "Outside services"}
+        "C1": "UI", "C3": "APIs", "C4": "Checks", "C5": "Storage", "D1": "Databases"}
     assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
 
 
@@ -469,7 +470,7 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     assert layer[("APIs", "Checks")] == [["C3", "C4"]]
     # no box's own line is drawn: each frame is then laid out on its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
-    assert len(links) == len(text["layerLines"]) and links[0] == 'CYFP -->|"2"| CYFD'
+    assert len(links) == len(text["layerLines"]) and links[0] == "CYFP --> CYFD"
     assert all(ln.startswith("CYF") for ln in links)
     # the frames are tied one below the other, and inside a frame each box to the next, in the order
     # the frame writes them: a row, left to right
@@ -503,20 +504,21 @@ def make_map_with_a_third_door() -> dict[str, Any]:
     return doc
 
 
-def test_a_layer_line_few_boxes_of_its_layer_take_is_drawn_box_to_box():
+def test_a_layer_line_few_boxes_of_its_layer_take_is_not_drawn():
     """A line between two layers is drawn only when more than a third of the boxes of the layer it
-    leaves have a line to the other layer. Under that, its lines are exceptions: the drawing leaves
-    them out, and the text lists them for the view to draw from box to box."""
+    leaves have a line to the other layer, and with no number. Under that, its lines are exceptions:
+    the drawing leaves them out, and the text still tells them, for a click on a box to draw."""
     graph = make_graph(make_map_with_a_third_door())
     drawings, texts = gv.gen_arch_views(graph, crowded=0)
     drawing, text = drawings["all|"], texts["all|"]
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     # 2 of the 3 doors lead to the API: a rule of the picture
     assert layer[("Interfaces", "APIs")] == [["I2", "C3"], ["I3", "C3"]]
-    assert '  CYFD -->|"2"| CYF1' in drawing
-    # 1 of the 3 leads to a screen: an exception, drawn by the view, never between the layers
-    assert ("Interfaces", "UI") not in layer and "CYFD -->|\"1\"| CYF0" not in drawing
-    assert text["exceptions"] == [["I1", "C1"]]
+    assert "  CYFD --> CYF1" in drawing
+    # 1 of the 3 leads to a screen: an exception, not drawn, and still told in the text
+    assert ("Interfaces", "UI") not in layer and "CYFD --> CYF0" not in drawing
+    assert "exceptions" not in text
+    assert any(e["srcBox"] == "I1" and e["dstBox"] == "C1" for e in text["lines"])
     # every person comes in through a door: 3 of 3
     assert len(layer[("People", "Interfaces")]) == 3
     links = [ln for ln in drawing.splitlines() if "-->" in ln]
@@ -526,7 +528,7 @@ def test_a_layer_line_few_boxes_of_its_layer_take_is_drawn_box_to_box():
 def test_a_picture_that_is_not_crowded_keeps_its_box_lines():
     drawings, texts = gv.gen_arch_views(make_graph(make_layered_map()))
     assert len(texts["all|"]["lines"]) <= gv.ARCH_CROWDED_LINES
-    assert all("layerLines" not in t and "exceptions" not in t for t in texts.values())
+    assert all("layerLines" not in t for t in texts.values())
     assert all("CYFP" not in d for d in drawings.values())
 
 
@@ -551,8 +553,12 @@ def test_the_layered_picture_keeps_the_outside_services_in_the_last_frame():
     graph = make_graph(doc)
     model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None and model["outside"] == ["I3"]
-    outside = gv.gen_arch_views(graph)[0]["all|"].split('["Outside services"]')[1].split("\n  end")[0]
-    assert "  I3[" in outside
+    # an outside service and the database the records live in: the frame names both, and the
+    # product's own database is never called an outside service
+    drawing = gv.gen_arch_views(graph)[0]["all|"]
+    assert '["Outside services"]' not in drawing
+    outside = drawing.split('["Outside services and databases"]')[1].split("\n  end")[0]
+    assert "  I3[" in outside and "  D1[" in outside
 
 
 def make_grouped_map() -> dict[str, Any]:
