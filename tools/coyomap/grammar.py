@@ -650,6 +650,19 @@ def canonical_entry_kind(kind: str) -> str:
     return _ENTRY_KIND_CANON.get(s.lower(), s)
 
 
+#: THE WAY IN OF A PART THAT RUNS BEFORE THE APIS ANSWER: code the web server runs on a request on its
+#: way in, before the route that answers it. It says WHERE a part runs, never what it does: that is
+#: still its kind, and on mcpolis, with a kind on every part, the 4 parts with such a way in were 4
+#: different kinds (wiring, logic, check, API). So it is no kind of its own. The card says it ("runs before the APIs", views.py
+#: `Runs`), and the Architecture picture draws a part doing work with the APIs (gen_viewer `_arch_frame`).
+ENTRY_POINT_KIND_BEFORE_APIS = "middleware"
+
+
+def runs_before_apis(entry_kinds: Iterable[str]) -> bool:
+    """Does one of a part's ways in, given by their kinds, run on requests before the APIs answer?"""
+    return any(canonical_entry_kind(k) == ENTRY_POINT_KIND_BEFORE_APIS for k in entry_kinds)
+
+
 def classify_activation(kind: str) -> str:
     """The entry point's activation (one of ACTIVATIONS): "self" if it starts itself
     (timer/loop/boot/signal/queue consumer), else "external" (route/CLI/callback/webhook — something

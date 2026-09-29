@@ -845,6 +845,9 @@ function cardFacts(id) {
   // …and whether it STARTS ON ITS OWN, a timer or the product's start: its kind says what it does,
   // and this says what its ways in say about how it starts (views.py `Starts`).
   if (n.kind === 'component' && f.Starts) pills.push({ text: 'starts on its own', cls: 'comp-starts' });
+  // …and whether it RUNS BEFORE THE APIS, on a request on its way in: where its ways in put it, which
+  // is why the Architecture picture draws it with them (views.py `Runs`).
+  if (n.kind === 'component' && f.Runs) pills.push({ text: 'runs before the APIs', cls: 'comp-before' });
   return { id, kind: n.kind, name: n.name || id, type: elementLabel(n.kind), desc, pills };
 }
 

@@ -91,6 +91,16 @@ def test_a_part_whose_way_in_runs_on_its_own_says_it_starts_on_its_own():
     assert "Starts" not in nodes["C1"]["fields"]
 
 
+def test_a_part_whose_way_in_filters_requests_says_it_runs_before_the_apis():
+    doc = make_map(C1="screen", C2="check")
+    doc["entry_points"] = [{"kind": "middleware", "trigger": "every request", "component": "C2", "source": "src/store.py:3"},
+                           {"kind": "ui-route", "trigger": "open /team", "component": "C1", "source": "src/page.ts:1"}]
+    nodes = model_to_graph(load_model(json.dumps(doc)))["nodes"]
+    assert nodes["C2"]["fields"].get("Runs") == "before the APIs"
+    assert nodes["C2"]["fields"].get("Kind") == "check"   # what it does is still its kind
+    assert "Runs" not in nodes["C1"]["fields"]
+
+
 def test_a_declared_word_is_accepted_and_acts_as_its_known_word():
     problems, _ = findings(make_minted_map(C1="skill", C2="store"))
     assert not any("kind" in p for p in problems), problems

@@ -354,6 +354,30 @@ def test_the_products_own_timer_sits_in_the_work_layer_not_with_the_people():
     assert gv._arch_layer(graph, model, "Nightly clock") == gv.ARCH_WORK_LAYER
 
 
+def make_map_with_a_request_filter(kind: str) -> dict[str, Any]:
+    """The layered map where the Checker is a part of `kind` that also runs on every request before
+    the API answers it, as a request filter does."""
+    doc = make_kinded_map(C1="screen", C2="pipe", C3="api", C4=kind, C5="store")
+    doc["entry_points"] = [{"kind": "middleware", "trigger": "Every request arrives.", "component": "C4",
+                            "source": "src/check.py:1"}]
+    return doc
+
+
+def test_a_part_that_runs_before_the_apis_is_drawn_with_them():
+    """A part doing work whose way in filters requests sits with the APIs, not below them; the wiring
+    keeps its place."""
+    for kind in ("check", "logic"):
+        drawings, texts = gv.gen_arch_views(make_graph(make_map_with_a_request_filter(kind)))
+        drawing = drawings["all|"]
+        # it joins the API of its own subsystem, in one group box in the APIs layer
+        assert texts["all|"]["cells"] == {"CYG1S2": {"sub": "S2", "parts": ["C3", "C4"]}}, kind
+        assert frames_of(drawing, ("CYG1S2",)) == {"CYG1S2": "APIs"}, kind
+        # the work layer held the Checker alone: it is not drawn at all now
+        assert '["Checks"]' not in drawing and '["Logic"]' not in drawing, kind
+    graph = make_graph(make_map_with_a_request_filter("wiring"))
+    assert gv._arch_frame(graph, "C4") != gv.ARCH_API_LAYER
+
+
 def test_the_first_layer_names_only_the_kinds_it_holds():
     """The page is a screen and the client a script: the first frame holds both, and says both."""
     graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))

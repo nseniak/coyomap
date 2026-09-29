@@ -1202,9 +1202,13 @@ def model_to_graph(m: ProjectModel, extents: Extents | None = None) -> GraphDict
         # STARTS ON ITS OWN when one of its ways in runs with no caller (a timer, the product's
         # start): derived, because the ways in already say it, and a kind answers what a part does.
         starts = any(e["activation"] != "external" for e in eps_by_comp.get(c.id, []))
+        # RUNS BEFORE THE APIS when one of its ways in is a request filter (`grammar.runs_before_apis`),
+        # derived for the same reason.
+        before = grammar.runs_before_apis(e["kind"] for e in eps_by_comp.get(c.id, []))
         fields = {"Component": c.name, "Subsystem": subsystem_name, "Purpose": c.purpose,
                   **({"Kind": grammar.COMPONENT_KIND_WORDS.get(c.kind, c.kind)} if c.kind else {}),
                   **({"Starts": "on its own"} if starts else {}),
+                  **({"Runs": "before the APIs"} if before else {}),
                   **({"Runs in": ", ".join(c.runs_in)} if c.runs_in else {}),
                   **({"States": _states_str(c.states)} if c.states else {}),
                   **{k: _extra_str(v) for k, v in c.extra.items()}}

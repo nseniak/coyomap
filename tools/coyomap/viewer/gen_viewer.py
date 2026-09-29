@@ -1422,10 +1422,20 @@ class _ArchLifted(_ArchFlow):
 
 def _arch_frame(graph: GraphDict, x: str) -> int:
     """The layer a part sits in on the layered picture: its kind's place in
-    `grammar.COMPONENT_KIND_FRAMES`, or one past the last when its kind places it in none."""
+    `grammar.COMPONENT_KIND_FRAMES`, or one past the last when its kind places it in none.
+
+    A PART THAT RUNS BEFORE THE APIS ANSWER sits with them, when its kind puts it with the work or
+    nowhere (`grammar.runs_before_apis`). Drawn with the work, a request filter made a line from a door
+    down past the APIs and back up to them: on mcpolis, with a kind on every part, its 2 filters were
+    6 of the whole product's 11 exception lines. A pipe and the wiring keep their place: lines go
+    through them."""
     kind = _component_kind(graph, x)
-    return next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words),
-                len(grammar.COMPONENT_KIND_FRAMES))
+    frame = next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words),
+                 len(grammar.COMPONENT_KIND_FRAMES))
+    ways_in = cast("list[dict[str, Any]]", graph["nodes"].get(x, {}).get("entry_points") or [])
+    if (frame == ARCH_WORK_LAYER or not kind) and grammar.runs_before_apis(str(e.get("kind") or "") for e in ways_in):
+        return ARCH_API_LAYER
+    return frame
 
 
 def _arch_frame_label(frame: int) -> str:
@@ -1812,6 +1822,8 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
 
 #: The layer the product's own work sits in: the frame that holds `logic`.
 ARCH_WORK_LAYER = next(i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if "logic" in words)
+#: The layer of the APIs: the frame that holds `api`, and the one a part running before them joins.
+ARCH_API_LAYER = next(i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if "api" in words)
 
 
 def _arch_inside_people(graph: GraphDict) -> set[str]:
