@@ -917,9 +917,7 @@ def outside_actor_ids(m: ProjectModel) -> set[str]:
     that dropped the `service` half and survived the whole suite, hiding 46 of the 140 findings on
     this repo's own map — internal HUMAN roles stopped owing doors. Hence one function, and hence the
     normalisation: this was the only un-normalised role-kind read in the file."""
-    return {r.id for r in m.roles
-            if not ((r.kind or "").strip().lower() == "service"
-                    and (r.audience or "").strip().lower() == "internal")}
+    return {r.id for r in m.roles if not grammar.is_inside_role(r.kind, r.audience)}
 
 
 def person_role_ids(m: ProjectModel) -> set[str]:

@@ -319,6 +319,14 @@ ROLE_KINDS = ("human", "service", "ai-agent")
 ROLE_AUDIENCE = ("user", "internal")
 
 
+def is_inside_role(kind: str, audience: str) -> bool:
+    """Is a role the product's OWN scheduled work, a timer, a boot hook or a signal handler in the
+    process? A `service` that is `internal`, both read normalised, and never an `ai-agent` (see
+    above). The one test: the validator's `outside_actor_ids` and the Architecture picture's layers
+    both read it, because two copies of it once disagreed."""
+    return (kind or "").strip().lower() == "service" and (audience or "").strip().lower() == "internal"
+
+
 def is_machine_role(kind: str) -> bool:
     """Is this actor a program rather than a person?
 

@@ -328,6 +328,32 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
     assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
 
 
+def make_map_with_a_timer() -> dict[str, Any]:
+    """The layered map plus the product's own nightly clock, which sweeps old things away."""
+    doc = make_layered_map()
+    doc["roles"].append({"id": "R3", "name": "Nightly clock", "kind": "service", "audience": "internal",
+                         "wants": "old things gone", "drives": "UC3"})
+    doc["use_cases"].append({"id": "UC3", "name": "Sweep old things", "actors": ["R3"], "capability": "CAP1",
+                             "trigger": "Every night.", "outcome": "Old things are gone."})
+    doc["flows"].append({"uc": "UC3", "title": "Sweep old things", "steps": [
+        {"n": 1, "src": "R3", "dst": "C4", "phrase": "start the sweep"},
+        {"n": 2, "src": "C4", "dst": "C5", "phrase": "delete the old things", "where": "src/check.py:20"}]})
+    return doc
+
+
+def test_the_products_own_timer_sits_in_the_work_layer_not_with_the_people():
+    graph = make_graph(make_map_with_a_timer())
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None and model["timers"] == ["Nightly clock"]
+    clock = gv._person_id("Nightly clock")
+    drawings, _texts = gv.gen_arch_views(graph, crowded=0)
+    assert frames_of(drawings["all|"], (clock, gv._person_id("Admin"))) == {
+        clock: "Checks", gv._person_id("Admin"): "People"}
+    # a person is still drawn with the people, on a picture with no people frame too
+    assert gv._arch_layer(graph, model, "Admin") == -2
+    assert gv._arch_layer(graph, model, "Nightly clock") == gv.ARCH_WORK_LAYER
+
+
 def test_the_first_layer_names_only_the_kinds_it_holds():
     """The page is a screen and the client a script: the first frame holds both, and says both."""
     graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))

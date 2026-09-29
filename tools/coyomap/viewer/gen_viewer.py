@@ -1651,6 +1651,7 @@ class _ArchModel(TypedDict):
     stories: dict[str, list[tuple[str, str]]]   # use case -> the lines it takes, in its own order
     ends: dict[str, str]     # use case -> the box its result comes out of (see `_arch_flow`)
     cells: dict[str, _ArchCell]   # the kept boxes holding several parts, on the layered picture
+    timers: list[str]        # the people that are the product's own scheduled work (`grammar.is_inside_role`)
 
 
 def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
@@ -1794,17 +1795,35 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
             for uc, seq in stories.items()}
     model = _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
                        stores=stores, lines=lines, stories=stories, ends=ends,
-                       cells={b: cells[b] for b in inside if b in cells})
+                       cells={b: cells[b] for b in inside if b in cells},
+                       timers=[p for p in flow["people"] if p in _arch_inside_people(graph)])
     if layered:
         for ln in model["lines"]:
             ln["up"] = _arch_layer(graph, model, ln["src"]) > _arch_layer(graph, model, ln["dst"])
     return model
 
 
+#: The layer the product's own work sits in: the frame that holds `logic`.
+ARCH_WORK_LAYER = next(i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if "logic" in words)
+
+
+def _arch_inside_people(graph: GraphDict) -> set[str]:
+    """The roles, by name, that are the product's OWN scheduled work: a timer, a boot hook, a signal
+    handler in the process (`grammar.is_inside_role`, the validator's own test)."""
+    return {str(r.get("name")) for r in cast("list[dict[str, Any]]", graph.get("roles") or [])
+            if grammar.is_inside_role(str(r.get("kind") or ""), str(r.get("audience") or ""))}
+
+
 def _arch_layer(graph: GraphDict, model: _ArchModel, x: str) -> int:
     """Where a box sits on the layered picture, top to bottom: the people, then the doors they come
     through, above every frame; a part or a group of parts in its layer's frame (`_arch_frame`); and
-    what the product reaches outside in the last frame, below the parts with no kind."""
+    what the product reaches outside in the last frame, below the parts with no kind.
+
+    THE PRODUCT'S OWN TIMER sits in the work layer, not with the people: it is inside the product,
+    as the method says, and drawn with the people it made lines no person could take (mcpolis's
+    "Upkeep job" ran from the people's layer straight to storage)."""
+    if x in model["timers"]:
+        return ARCH_WORK_LAYER
     if x in model["people"]:
         return -2
     if x in model["doors"]:
@@ -1885,14 +1904,15 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         if layered and framing and members:
             lines.append("  end")
 
-    framed(model["people"], _arch_frame_id(-2), _arch_layer_label(-2), whole)
-    for p in model["people"]:
+    outsiders = [p for p in model["people"] if p not in model["timers"]]
+    framed(outsiders, _arch_frame_id(-2), _arch_layer_label(-2), whole)
+    for p in outsiders:
         via = "via AI agent" if _arch_through_client(graph, model, p) else ""
         # `cy-` names the box for the view, as on every other picture: following a story marks where
         # it starts, and a person is where most start.
         lines.append(f'  {_person_id(p)}["{_slot("role", "figure", p, via)}"]:::cy-{_person_id(p)}')
         lines.append(f"  class {_person_id(p)} itembox")
-    unframed(model["people"], whole)
+    unframed(outsiders, whole)
     framed(model["doors"], _arch_frame_id(-1), _arch_layer_label(-1), whole)
     for iid in model["doors"]:
         lines.append(f'  {iid}["{_slot("interface", "tight", iid)}"]:::cy-{iid}')
@@ -1901,7 +1921,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     frames: list[tuple[str, str, list[str]]] = []
     if layered:
         for n_frame in range(len(grammar.COMPONENT_KIND_FRAMES) + 1):
-            members = [b for b in model["inside"] if _arch_layer(graph, model, b) == n_frame]
+            members = [b for b in [*model["timers"], *model["inside"]] if _arch_layer(graph, model, b) == n_frame]
             # The last one holds the parts whose kind is unstated: no layer to put them in, so it says so.
             frames.append((_arch_frame_id(n_frame), _arch_frame_title(graph, model, n_frame), members))
     else:
@@ -1909,7 +1929,11 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
     for fid, label, members in frames:
         framed(members, fid, label)
         for bid in members:
-            _arch_inside_box(graph, lines, bid, subflows, model["cells"])
+            if bid in model["timers"]:   # the product's own timer, drawn as the actor it is in the map
+                lines.append(f'  {_person_id(bid)}["{_slot("role", "figure", bid)}"]:::cy-{_person_id(bid)}')
+                lines.append(f"  class {_person_id(bid)} itembox")
+            else:
+                _arch_inside_box(graph, lines, bid, subflows, model["cells"])
         unframed(members)
     outer = [*model["outside"], *model["stores"]]
     outside = len(grammar.COMPONENT_KIND_FRAMES) + 1
@@ -1920,7 +1944,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         lines.append(f"  class {oid} itembox")
     unframed(outer)
     if layered:
-        tops = [(_arch_frame_id(-2), "", model["people"]), (_arch_frame_id(-1), "", model["doors"])] if whole else []
+        tops = [(_arch_frame_id(-2), "", outsiders), (_arch_frame_id(-1), "", model["doors"])] if whole else []
         drawn = [(fid, members) for fid, _label, members
                  in [*tops, *frames, (_arch_frame_id(outside), "", outer)] if members]
         for fid, _members in drawn:
