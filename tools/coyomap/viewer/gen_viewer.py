@@ -36,7 +36,7 @@ import sys
 from html import escape as html_escape
 from pathlib import Path
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, TypedDict, cast
 from urllib.parse import quote
 
@@ -1293,10 +1293,38 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
     A DOOR IS NEVER DRAWN THROUGH, on either picture. The layered picture once went from a person
     straight to the part they reach, and lost the product's whole edge: on mcpolis's whole-product
     picture all 9 doors went, and with them all 5 outside services, because those are interfaces
-    too. The view's own question asks what people come through."""
-    def through(x: str) -> bool:
-        return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH
+    too. The view's own question asks what people come through.
 
+    NOTHING CROSSES FROM ONE EDGE OF THE PRODUCT TO ANOTHER WITHOUT CODE. A pipe or the wiring is
+    drawn as a box, in the walk that needs it, when drawing through it would join a person or an
+    interface straight to a database or an outside service. On mcpolis the command line went straight
+    to MongoDB, through the container stack that runs the deploy: 2 lines of its 11 pictures, both
+    through that one part. A chain of them keeps the last one, the part next to the far edge."""
+    nodes = graph["nodes"]
+
+    def edge(x: str) -> bool:   # a person, named by the walk and no node of the map, or an interface
+        return x not in nodes or str(nodes[x].get("kind")) == "interface"
+
+    def beyond(x: str) -> bool:   # a database, an outside service, or another interface
+        return str(nodes.get(x, {}).get("kind")) in ("dep", "interface")
+
+    kept: set[str] = set()
+    while True:
+        out, needed = _draw_through_walk(graph, steps, kept, edge, beyond)
+        if needed <= kept:
+            return out
+        kept |= needed
+
+
+def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
+                       edge: Callable[[str], bool], beyond: Callable[[str], bool]
+                       ) -> tuple[list[_ArchStep], set[str]]:
+    """One pass of `_draw_through`, drawing every pipe and wiring part through but the `kept` ones.
+    Also says which parts it drew through that joined an edge of the product to another."""
+    def through(x: str) -> bool:
+        return _component_kind(graph, x) in grammar.COMPONENT_KINDS_DRAWN_THROUGH and x not in kept
+
+    needed: set[str] = set()
     waiting: dict[str, tuple[_ArchStep, int]] = {}   # a pipe -> the step that came in from outside,
                                                      # and the index of the kept step before it
     used: set[int] = set()                           # id() of the waiting steps a step out has joined
@@ -1323,6 +1351,8 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
             if through(dst) and src in called.get(dst, set()):   # one pipe answering the one that called it
                 keep_keys(st["keys"], len(out) - 1)
                 continue
+            if edge(came["src"]) and beyond(dst) and dst != came["src"]:
+                needed.add(src)   # the edge straight to the edge: this part is drawn after all
             first = id(came) not in used
             used.add(id(came))
             called.setdefault(src, set()).add(dst)
@@ -1346,7 +1376,7 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
         early = []
     for pipe in list(waiting):
         let_go(pipe)
-    return out
+    return out, needed
 
 
 class _ArchFlow(TypedDict):
@@ -1439,6 +1469,10 @@ def _arch_frame(graph: GraphDict, x: str) -> int:
     6 of the whole product's 11 exception lines. A pipe and the wiring keep their place: lines go
     through them."""
     kind = _component_kind(graph, x)
+    # A PIPE OR THE WIRING DRAWN AS A BOX sits in the first layer, with what people run: it is drawn
+    # where an interface leads straight into it (`_draw_through`), or where it starts a story.
+    if kind in grammar.COMPONENT_KINDS_DRAWN_THROUGH:
+        return 0
     frame = next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words),
                  len(grammar.COMPONENT_KIND_FRAMES))
     ways_in = cast("list[dict[str, Any]]", graph["nodes"].get(x, {}).get("entry_points") or [])
@@ -1480,7 +1514,9 @@ def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
         return _arch_layer_label(layer)
     held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == layer
             for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
-    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in frames[layer][1] if w in held]
+    # The first layer also holds a pipe or the wiring drawn as a box (`_arch_frame`), and says so.
+    words = [*frames[layer][1], *(grammar.COMPONENT_KINDS_DRAWN_THROUGH if layer == 0 else ())]
+    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in words if w in held]
     if not names:
         return _arch_layer_label(layer)
     said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"

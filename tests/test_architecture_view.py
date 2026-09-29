@@ -228,6 +228,40 @@ def test_a_pipe_is_drawn_through():
     assert ln[("C1", "S2")]["sentences"] == [("UC1", "send the thing")]
 
 
+def make_map_with_a_deploy() -> dict[str, Any]:
+    """The layered map plus an operator who deploys from the command line: the container stack, the
+    product's wiring, seeds the thing's record when it is missing. The stack is the only code between
+    the command line and the database."""
+    doc = make_layered_map()
+    doc["roles"].append({"id": "R3", "name": "Operator", "kind": "human", "audience": "internal",
+                         "wants": "z", "drives": "UC3"})
+    doc["use_cases"].append({"id": "UC3", "name": "Deploy", "actors": ["R3"], "capability": "CAP1",
+                             "trigger": "A change is ready.", "outcome": "The change is live."})
+    doc["interfaces"].append({"id": "I3", "name": "Command line", "what": "the command line", "side": "ours",
+                              "facing": "operator", "kind": "cli"})
+    doc["components"].append({"id": "C6", "name": "Container stack", "subsystem": "S3", "kind": "wiring",
+                              "purpose": "starts the product", "files": ["deploy/compose.yml"]})
+    doc["flows"].append({"uc": "UC3", "title": "Deploy", "steps": [
+        {"n": 1, "src": "R3", "dst": "I3", "phrase": "run the deploy"},
+        {"n": 2, "src": "I3", "dst": "C6", "phrase": "start the containers", "where": "deploy/compose.yml:1"},
+        {"n": 3, "src": "C6", "dst": "E1", "phrase": "seed the thing when it is missing", "where": "deploy/compose.yml:9"},
+        {"n": 4, "src": "C6", "dst": "I3", "phrase": "report the containers up", "where": "deploy/compose.yml:12"}]})
+    return doc
+
+
+def test_a_part_skipped_between_an_interface_and_a_database_is_drawn():
+    """Nothing crosses from one edge of the product to another without code: the container stack is the
+    only part between the command line and the database, so it is drawn, in the first layer, which then
+    names it. A pipe between two parts is still skipped."""
+    graph = make_graph(make_map_with_a_deploy())
+    ln = lines_of(gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True) or make_model())
+    assert ("I3", "C6") in ln and ("C6", "D1") in ln
+    assert ("I3", "D1") not in ln
+    assert not any("C2" in pair for pair in ln), "the pipe between the page and the API is still skipped"
+    drawing = gv.gen_arch_views(graph)[0]["all|"]
+    assert frames_of(drawing, ("C6", "C1")) == {"C6": "UI and wiring", "C1": "UI and wiring"}
+
+
 def make_two_server_pipe_map() -> dict[str, Any]:
     """The Client is a pipe that calls two servers in one story: the API saves the thing, and a
     Biller in a subsystem of its own charges for it. Each answer comes back through the pipe."""
