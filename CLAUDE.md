@@ -181,6 +181,9 @@ the code's names.
   its reason, never by its key. The audit's paid reading agents judge two more things,
   an unknown word and a sentence that says nothing specific, on a smaller set of
   fields.
+- **unusable line** — a line of `.coyomap/.ignore` that ignores nothing: a pattern with a
+  comment after it, or a line made only of slashes. `scope`, `preindex` and `validate` all
+  name them.
 - **Coyote Effect** — the situation coyomap exists for: your agent wrote a lot
   of code, it runs, and you have lost track of what is under your feet.
 
