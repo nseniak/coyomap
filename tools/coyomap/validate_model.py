@@ -6683,13 +6683,53 @@ def check_anchor_existence_model(m: ProjectModel, roots: list[Path]) -> list[str
 _PROSE_SUFFIXES = frozenset({".md", ".markdown", ".rst", ".txt", ".adoc"})
 
 
-def call_site_anchors(m: ProjectModel) -> list[tuple[str, str]]:
+def door_arrival_sources(m: ProjectModel) -> dict[str, set[tuple[str, int | None]]]:
+    """`{interface id: the (path, line) of each of its ways in's own source}` — where a step
+    ARRIVING through that door is anchored (`method/templates/door-anchor-rule.md`)."""
+    src: dict[str, tuple[str, int | None]] = {}
+    for ep in m.entry_points:
+        loc = parse_anchor(ep.source or "") if ep.id else None
+        if loc is not None:
+            src[ep.id] = (loc.path, loc.lo)
+    return {i.id: {src[w] for w in i.ways_in if w in src} for i in m.interfaces}
+
+
+#: An interface id — the `src` of a step that ARRIVES through a door.
+_INTERFACE_ID = re.compile(r"^I\d+$")
+
+
+def is_door_arrival_anchor(src: str, where: str,
+                           arrivals: dict[str, set[tuple[str, int | None]]],
+                           unknown_doors_pass: bool = False) -> bool:
+    """Is `where` the source line of one of the ways in of the door `src` a step arrives through?
+
+    `unknown_doors_pass` is for a FRAGMENT: a doors or trace agent's fragment carries no ways in, so
+    an arrival through a door the fragment cannot see is left to `validate`, which sees them all."""
+    if not _INTERFACE_ID.match(src or ""):
+        return False
+    if src not in arrivals:
+        return unknown_doors_pass
+    loc = parse_anchor(where or "")
+    return loc is not None and (loc.path, loc.lo) in arrivals[src]
+
+
+def call_site_anchors(m: ProjectModel,
+                      arrivals: dict[str, set[tuple[str, int | None]]] | None = None,
+                      unknown_doors_pass: bool = False) -> list[tuple[str, str]]:
     """(label, anchor) for every anchor that claims AN ACTION FIRES AT THAT LINE.
 
     Deliberately NOT every anchor: a component/entity/entry-point `source` is supposed to point at a
     definition, so running the operative-line check over those would flag correct anchors. Only four
     families make a "this line acts" claim — backbone edge `where`, flow/sub-flow step `where`, a
-    security surface's enforcement `source`, and a business rule's enforcement SITE."""
+    security surface's enforcement `source`, and a business rule's enforcement SITE.
+
+    ONE STEP IS NOT AN ACTING LINE: a step ARRIVING through a door (`In → Cn`) is anchored at the
+    source of the way in it comes through (`door-anchor-rule.md`), and a gateway's way in is its tool
+    handler's `def`. This check called that line drift while the doors contract required it, and on
+    the 2026-09-30 mcpolis build the lead moved 8 such anchors by hand to lines nothing asked for.
+    `arrivals` is `door_arrival_sources`, computed from `m` when not given; `lint-fragment` passes
+    one built from the sibling fragments, because a doors fragment carries no ways in."""
+    doors = door_arrival_sources(m) if arrivals is None else arrivals
     out: list[tuple[str, str]] = []
     for e in m.edges:
         # `extends`/`implements` are DECLARED by the definition header — `class Sub(Base):` IS the
@@ -6698,11 +6738,13 @@ def call_site_anchors(m: ProjectModel) -> list[tuple[str, str]]:
             out.append((f"edge {e.src} —{e.verb}→ {e.dst} `where`", e.where))
     for f in m.flows:
         for st in f.steps:
-            if st.where:
+            if st.where and not is_door_arrival_anchor(st.src, st.where, doors,
+                                                       unknown_doors_pass):
                 out.append((f"{f.uc} flow step {st.n} `where`", st.where))
     for sf in m.subflows:
         for st in sf.steps:
-            if st.where:
+            if st.where and not is_door_arrival_anchor(st.src, st.where, doors,
+                                                       unknown_doors_pass):
                 out.append((f"{sf.id} step {st.n} `where`", st.where))
     for s in m.security:
         if s.source:
@@ -6716,7 +6758,9 @@ def call_site_anchors(m: ProjectModel) -> list[tuple[str, str]]:
     return out
 
 
-def check_operative_lines_model(m: ProjectModel, roots: list[Path]) -> list[str]:
+def check_operative_lines_model(m: ProjectModel, roots: list[Path],
+                                arrivals: dict[str, set[tuple[str, int | None]]] | None = None,
+                                unknown_doors_pass: bool = False) -> list[str]:
     """ADVISORY: a call-site anchor pointing at a line that cannot be the acting statement.
 
     The deterministic half of what the Phase-4 skeptics find by reading (see
@@ -6725,7 +6769,7 @@ def check_operative_lines_model(m: ProjectModel, roots: list[Path]) -> list[str]
     not fail the build."""
     out: list[str] = []
     cache: dict[str, list[str] | None] = {}
-    for label, anchor in call_site_anchors(m):
+    for label, anchor in call_site_anchors(m, arrivals, unknown_doors_pass):
         loc = parse_anchor(anchor)
         if loc is None or loc.lo is None:
             continue                       # a whole-file/dir anchor claims no single line

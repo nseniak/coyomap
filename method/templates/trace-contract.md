@@ -109,9 +109,9 @@ lead; nothing above this line goes into an agent prompt.
 >   the one place that says which way it goes.
 > - **Every element↔element step carries its own `where`** — the `path:line` in the `src` side's code
 >   where THIS step's action fires. Not the callee's definition. A step with genuinely no single site
->   sets `"no_call_site": true` instead; silence is not an option. A step FROM a door, a file or a
->   command line has no code of its own: its `where` is the line where the receiving side takes it
->   in (the route, the handler, the read). **On one of the product's OWN web pages, the receiving
+>   sets `"no_call_site": true` instead; silence is not an option. A step FROM an interface (a door,
+>   a file, a command line) has no code of its own: the door-anchor rule at the end of this brief
+>   says which line anchors it. **On one of the product's OWN web pages, the receiving
 >   side is the SCREEN part whose code handles the click or the form**, and the next step goes from
 >   that screen to what it calls. It goes straight to the server only when none of our code runs in
 >   the page: a plain link, or a redirect back from someone else's sign-in page.

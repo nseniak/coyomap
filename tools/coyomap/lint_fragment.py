@@ -17,12 +17,14 @@ is a map missing one slice with every gate green.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from pathlib import Path
 
 from coyomap import grammar, prose, provenance
+from coyomap.anchors import parse_anchor
 from coyomap.reporting import shown
 from coyomap.assemble import load_fragment
 from coyomap.model import ID_SHAPE, ModelError, ProjectModel, access_rules, all_elements
@@ -43,6 +45,7 @@ from coyomap.validate_model import (
     check_anchor_existence_model,
     check_operative_lines_model,
     check_domain_relations,
+    door_arrival_sources,
     check_entity_sources_model,
     rule_row_problems,
     domain_card_shape_problems,
@@ -52,6 +55,35 @@ from coyomap.validate_model import (
     subflow_refcount_warnings,
     walk_jumps,
 )
+
+def arrivals_from(sources: list[Path]) -> dict[str, set[tuple[str, int | None]]]:
+    """`{interface id: its ways in's source lines}` from the JSON files `--ids` names — the
+    sibling fragments or the assembled map. A doors fragment carries no ways in, and without them
+    every arrival anchored on its way in's own line reads as drift (`door_arrival_sources`)."""
+    sources_of: dict[str, str] = {}
+    ways: dict[str, list[str]] = {}
+    for src in sources:
+        if src.suffix != ".json":
+            continue
+        try:
+            doc = json.loads(src.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for ep in doc.get("entry_points") or []:
+            if isinstance(ep, dict) and ep.get("id") and ep.get("source"):
+                sources_of[str(ep["id"])] = str(ep["source"])
+        for iface in doc.get("interfaces") or []:
+            if isinstance(iface, dict) and iface.get("id"):
+                ways.setdefault(str(iface["id"]), []).extend(
+                    str(w) for w in iface.get("ways_in") or [])
+    out: dict[str, set[tuple[str, int | None]]] = {}
+    for iid, ws in ways.items():
+        locs = [parse_anchor(sources_of.get(w, "")) for w in ws]
+        out[iid] = {(loc.path, loc.lo) for loc in locs if loc is not None}
+    return out
+
 
 # id-SHAPED but unknown-prefix tokens ('SEC1') can never resolve — catchable per-fragment, unlike a
 # full undefined-reference check (which needs the whole map, or the --ids universe below).
@@ -505,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ("-h" in argv or "--help" in argv) else 2
     repo_root: Path | None = None
     known_ids: set[str] | None = None
+    sibling_arrivals: dict[str, set[tuple[str, int | None]]] = {}
     expect: int | None = None
     finalize = False
     frags: list[Path] = []
@@ -535,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
             known_ids = {t for src in sources
                          for t in re.findall(r"\b[A-Z]+\d+\b", src.read_text(encoding="utf-8"))
                          if ID_SHAPE.match(t)}
+            sibling_arrivals = arrivals_from(sources)
         elif a == "--expect":
             i += 1
             if i >= len(argv) or not argv[i].lstrip("+").isdigit():
@@ -620,7 +654,13 @@ def main(argv: list[str] | None = None) -> int:
             # `validate_model` documents the check as "non-blocking on purpose" because a drifted
             # anchor does not refute the relationship, only its `where`. Promoting it here would
             # have failed six fragments on a build that shipped a clean map.
-            drift = check_operative_lines_model(m, [repo_root.resolve()])
+            # A STEP ARRIVING THROUGH A DOOR sits on its way in's own line, often a handler's
+            # `def` (door-anchor-rule.md). The fragment rarely carries the ways in, so the doors
+            # the sibling fragments or the map name are read from `--ids`, and an arrival through
+            # a door nothing here names is left to `validate`.
+            arrivals = {**sibling_arrivals, **door_arrival_sources(m)}
+            drift = check_operative_lines_model(m, [repo_root.resolve()], arrivals,
+                                                unknown_doors_pass=True)
         for w in lint_fragment_warnings(m) + budget + drift:
             say(f"{p.name}: warning: {w}", kind="warning")
         n_drift += len(drift)

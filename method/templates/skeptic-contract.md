@@ -72,7 +72,9 @@ For each claim, decide whether the CODE supports it, and return one row per clai
 - `evidence` is the ONE `path:line` where the thing actually happens — the true call site. If the
   claim is true but the map's stored anchor points at the wrong LINE OF A FILE THAT EXISTS, still say
   `true` and give the line YOU found: a drifted anchor does not refute a true relationship, and the
-  drift check exists to reconcile exactly that difference.
+  drift check exists to reconcile exactly that difference. A step ARRIVING through a door
+  (`In → Cn`) is the one exception: the door-anchor rule at the end of this brief says its anchor is
+  the way in's own line, so when the arrival is real, that line is your `evidence`.
 - **An anchor whose FILE is not in the repo is `false`, not drift.** This is the one exception to the
   rule above, and it needs saying because the two look alike from inside it. A wrong line inside a
   real file is a pointer that slipped. A path that does not exist is the map citing evidence that was

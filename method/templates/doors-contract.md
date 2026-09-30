@@ -162,19 +162,18 @@ lead; nothing above this line goes into an agent prompt.
 > element-to-element and `validate` BLOCKS without a `where` or a `no_call_site`, so the rewritten
 > step needs one and often did not have one before.
 >
-> **USE THE WAY IN'S OWN `source` LINE.** Pick the way in THIS STEP comes through and take its
-> `source`. That works on every shape: a web page's way in IS its route line, a gateway's is its tool
-> handler, a command line's is its command. Take the way in this step comes through, not the use
-> case's own entry point, when a story moves between two of them.
+> **USE THE WAY IN'S OWN `source` LINE, as the door-anchor rule at the end of this brief says.** A
+> web page's way in is its route line, a gateway's is its tool handler, a command line's is its
+> command. It is the one step anchor that may sit on a handler's definition, and the checks accept it
+> there: leave it there even though a definition anywhere else reads as drift.
 >
 > **This BEATS "keep the anchor it had" when they disagree**, and they disagree often: the old
 > step's anchor is usually the CLICKED WIDGET, which describes the ACTOR step — and the actor step
 > takes no anchor at all. On an INBOUND crossing, DISCARD that widget line. An anchor that was
 > ALREADY on an actor step before you started is harmless; leave it.
 >
-> **Going OUT (`Cn → In`), anchor the line where the component DELIVERS to the surface** — the
-> return, the render, the write — not the route. Use `no_call_site` when the wiring is genuinely
-> event-driven or config-wired.
+> **Going OUT (`Cn → In`)**, the same rule: the line where the component delivers, never the
+> route. Use `no_call_site` when the wiring is genuinely event-driven or config-wired.
 >
 > ## Length
 >

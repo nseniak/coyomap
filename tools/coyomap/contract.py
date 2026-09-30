@@ -110,6 +110,12 @@ AUTHORING: frozenset[str] = frozenset({"harvest", "rules", "tests"})   # a gap r
 
 WRITING_RULES = "writing-rules.md"
 REPO_TEXT_RULE = "repo-text-rule.md"   # appended to EVERY brief (see the module docstring)
+#: Where a step arriving through a door is anchored: ONE rule, appended to every brief that writes
+#: or reads such a step. The doors contract, the skeptic contract and the operative-line check said
+#: three different things, and on the 2026-09-30 mcpolis build 8 anchors were moved by hand and 51
+#: confirmed door steps shipped at a line their skeptic had replaced (retro finding 25).
+DOOR_ANCHOR_RULE = "door-anchor-rule.md"
+DOOR_ANCHOR: frozenset[str] = frozenset({"doors", "trace", "skeptic"})
 _TEMPLATES = "method/templates"
 _DIVIDER = "---"
 
@@ -169,18 +175,34 @@ def _unquote(line: str) -> str:
     return line[1:] if line.startswith(">") else line
 
 
+def _shared_rules(names: list[str], base: Path) -> list[str]:
+    """The rule files a brief made of `names` carries, EACH ONCE: the repository-text rule always,
+    the door-anchor rule when any of them writes or reads a step at a door, the writing rules when
+    any of them authors prose a reader meets. Composed per brief, not per contract: under `--append`
+    a trace-plus-doors brief used to carry the repository-text rule twice."""
+    files = [REPO_TEXT_RULE]
+    if any(n in DOOR_ANCHOR for n in names):
+        files.append(DOOR_ANCHOR_RULE)
+    if any(n in AUTHORING for n in names):
+        files.append(WRITING_RULES)
+    return [(base / f).read_text(encoding="utf-8").strip("\n") for f in files]
+
+
 def render(name: str, root: Path | None = None) -> str:
-    """The full text to hand one agent: the contract's agent half, plus the writing rules when this
-    contract's agents author prose a reader meets."""
-    if name not in CONTRACTS:
-        raise KeyError(name)
+    """The full text to hand one agent: the contract's agent half, plus the rules every brief of its
+    kind carries (`_shared_rules`)."""
+    return _compose([name], root)
+
+
+def _compose(names: list[str], root: Path | None = None) -> str:
+    """The agent halves of `names`, in order, then their shared rules once."""
+    for name in names:
+        if name not in CONTRACTS:
+            raise KeyError(name)
     base = (root or home()) / _TEMPLATES
-    body = agent_half((base / CONTRACTS[name]).read_text(encoding="utf-8"))
-    body += "\n\n" + (base / REPO_TEXT_RULE).read_text(encoding="utf-8").strip("\n")
-    if name not in AUTHORING:
-        return body + "\n"
-    rules = (base / WRITING_RULES).read_text(encoding="utf-8").strip("\n")
-    return f"{body}\n\n{rules}\n"
+    halves = [agent_half((base / CONTRACTS[n]).read_text(encoding="utf-8")).strip("\n")
+              for n in names]
+    return "\n\n".join(halves + _shared_rules(names, base)) + "\n"
 
 
 #: A slot in the agent half: the text between the guillemets is the key `--fill` looks up.
@@ -427,7 +449,7 @@ def fill(name: str, values: dict[str, str], root: Path | None = None,
     every fault at once: a lead that has to re-run this three times to learn three missing slots is
     the brief→re-read loop this verb exists to end."""
     names = [name, *(append or [])]
-    text = "\n\n".join(render(n, root).strip("\n") for n in names) + "\n"
+    text = _compose(names, root)
     present = union_slots(names, root)
     values = {k: v for k, v in values.items() if not k.startswith(_COMMENT_KEY)}
     faults: list[str] = []

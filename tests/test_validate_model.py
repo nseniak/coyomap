@@ -6497,3 +6497,60 @@ def test_a_scoped_use_case_record_is_disclosed_under_its_gate_and_a_stray_key_as
     assert "the doors gate: UC1" in line and "reached by no use case: I2" in line, line
     stale = next(w for w in ws if "silence nothing" in w)
     assert "C9" in stale and "UC1" not in stale and "I2" not in stale, stale
+
+
+# --- a step arriving through a door sits on its way in's own line (retro 2026-09-30, finding 25) --
+# The doors contract anchors an arrival at its way in's `source`, and a gateway's way in is its tool
+# handler's `def`; the operative-line check called that line drift. On the 2026-09-30 mcpolis build
+# the lead moved 8 such anchors by hand to lines nothing asked for.
+
+def make_door_repo(td: Path) -> Path:
+    """A repo whose `src/tools.py` line 3 is a tool handler's definition and line 7 another one."""
+    (td / "src").mkdir()
+    (td / "src" / "tools.py").write_text(
+        "import x\n\ndef list_servers(ctx):\n    return x.servers(ctx)\n\n\ndef delete_server(ctx):\n"
+        "    return x.delete(ctx)\n", encoding="utf-8")
+    return td
+
+
+def make_door_map(arrival_where: str) -> ProjectModel:
+    """A tool door `I1` whose way in `EP1` is the handler at `src/tools.py:3`, and one walk arriving
+    through it at `arrival_where`, then a step inside the product anchored at a definition."""
+    m = ProjectModel(title="t", goal="g")
+    m.entry_points = [EntryPoint(id="EP1", kind="mcp-tool", trigger="list_servers",
+                                 source="src/tools.py:3", component="C1")]
+    m.interfaces = [Interface(id="I1", name="Admin tools", side="ours", ways_in=["EP1"])]
+    m.flows = [Flow(uc="UC1", title="List servers", steps=[
+        FlowStep(n=1, src="I1", dst="C1", phrase="asks for the servers", where=arrival_where),
+        FlowStep(n=2, src="C1", dst="C2", phrase="reads them", where="src/tools.py:7")])]
+    return m
+
+
+def test_an_arrival_on_its_way_ins_own_definition_line_is_not_drift():
+    with tempfile.TemporaryDirectory() as td:
+        root = make_door_repo(Path(td))
+        warnings = validate_model_mod.check_operative_lines_model(make_door_map("src/tools.py:3"),
+                                                                  [root])
+    assert not [w for w in warnings if "UC1 flow step 1" in w], warnings
+    assert [w for w in warnings if "UC1 flow step 2" in w], "a definition elsewhere is still drift"
+
+
+def test_an_arrival_on_some_other_definition_line_is_still_drift():
+    with tempfile.TemporaryDirectory() as td:
+        root = make_door_repo(Path(td))
+        warnings = validate_model_mod.check_operative_lines_model(make_door_map("src/tools.py:7"),
+                                                                  [root])
+    assert [w for w in warnings if "UC1 flow step 1" in w], warnings
+
+
+def test_a_doors_fragment_with_no_ways_in_leaves_its_arrivals_to_validate():
+    """A doors agent's fragment carries the walks and not the ways in, so the fragment check cannot
+    tell the right definition line from a wrong one; `validate` on the assembled map can."""
+    m = make_door_map("src/tools.py:3")
+    m.entry_points, m.interfaces = [], []
+    with tempfile.TemporaryDirectory() as td:
+        root = make_door_repo(Path(td))
+        warnings = validate_model_mod.check_operative_lines_model(m, [root], {},
+                                                                  unknown_doors_pass=True)
+    assert not [w for w in warnings if "UC1 flow step 1" in w], warnings
+    assert [w for w in warnings if "UC1 flow step 2" in w], warnings
