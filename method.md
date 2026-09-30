@@ -3135,6 +3135,8 @@ script it names:
   alone when the folder is far wider (a file in FILES counts);
 - or, when it is neither a way in nor a command a person types (a fake server a test starts, a test
   file that can also run itself), say so on the `Entry-point coverage` line for its kind, with why.
+  Before the harvest is back that line says `partial`; once it is, correct the word with `record
+  --replace '<kind>:'`, so the kind keeps one line.
 
 Then delete the briefs of the slices you changed and run the batch form again: it never rewrites a
 brief, and it prints pointer prompts only for the briefs it wrote that time. A script you stated
