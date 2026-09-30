@@ -73,7 +73,7 @@ import re
 import sys
 from pathlib import Path
 
-from coyomap import records
+from coyomap import prose, records
 from coyomap.access_surface import baseline_beside, held, load_claims
 from coyomap.anchor_drift import DRIFT_EXCEPTIONS_HEADING
 from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
@@ -202,14 +202,25 @@ def inert_lines(assembled: ProjectModel, map_path: Path, heading: str, lines: li
                                extras=[dataclasses.replace(x) for x in assembled.extras])
     if replace_prefix:
         remove_line(base, heading, replace_prefix)
-    before = validate_model(base, map_path, disclose_records=False, model_is_edited=True)
+    before = _findings(base, map_path)
     inert: list[str] = []
     for ln in lines:
         trial = dataclasses.replace(base, extras=[dataclasses.replace(x) for x in base.extras])
         append_line(trial, heading, ln)
-        if validate_model(trial, map_path, disclose_records=False, model_is_edited=True) == before:
+        if _findings(trial, map_path) == before:
             inert.append(ln)
     return inert
+
+
+def _findings(m: ProjectModel, map_path: Path) -> list[str]:
+    """What `validate` reports on `m`, problems and advisories tagged in one list, its readability
+    report aside. That report reads every recorded line's reason, so a line with an em dash or a
+    25-word why changed the output by its own words and was kept though it silenced nothing: the
+    review got four such lines past this check on the real map."""
+    problems, warnings = validate_model(m, map_path, disclose_records=False, model_is_edited=True)
+    readability = set(prose.advisory_lines(m))
+    return ([f"problem: {p}" for p in problems]
+            + [f"advisory: {w}" for w in warnings if w not in readability])
 
 
 def _inert_reason(line: str, heading: str, map_path: Path) -> str:

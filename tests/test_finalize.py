@@ -1971,3 +1971,59 @@ def test_a_key_in_a_dissent_note_never_reaches_the_report() -> None:
                       for ext in ("md", "json"))
     assert value not in out.getvalue() and value not in written
     assert "credential-shaped value" in written
+
+
+
+# --- after the review of finding 13 ---------------------------------------------------------------
+
+def test_a_budget_line_with_the_right_numbers_in_another_sentence_does_not_settle() -> None:
+    for record in ("component-budget: 5 budgeted and 10 shipped, because the slices were cut early",
+                   "component-budget: 11 shipped of 6 budgeted, because the slices were cut early"):
+        root, p = make_budget_repo(record)
+        report = finalize.build_report(p, root, [])
+        rows = [d for d, _h, a in finalize.advisory_disposition(p, report)
+                if "shipped against" in a]
+        assert rows == ["UNRECORDED"], (record, rows)
+
+
+def test_the_budget_template_followed_word_for_word_settles_the_leg_and_draws_no_advisory() -> None:
+    root, p = make_budget_repo(None)
+    report = finalize.build_report(p, root, [])
+    leg = _budget_leg_of(report)
+    assert leg is not None and leg.advisory and "\u2014" not in leg.advisory[0].split("record")[1]
+    root, p = make_budget_repo("component-budget: 10 shipped of 5 budgeted, because the slices "
+                               "were cut before the adapters were counted")
+    report = finalize.build_report(p, root, [])
+    assert [d for d, _h, a in finalize.advisory_disposition(p, report)
+            if "shipped against" in a] == ["disclosure"]
+
+
+def test_the_other_silenced_lines_wording_is_a_disclosure() -> None:
+    changed = ("3 advisory line(s) read differently because of this map's recorded lines, which "
+               "sit under: Sweep debt.")
+    assert _disposition_for(None, changed)[0] == "disclosure"
+
+
+def test_an_inert_drift_record_and_an_unread_excuse_are_carried() -> None:
+    inert = ("1 recorded drift exception(s) matched no finding: `C9 calls C8` — the anchor was "
+             "fixed or the claim changed.")
+    unread = (f"2 of 3 access path(s) {finalize.UNREAD_EXCUSES}: the lead's transcript (lead.jsonl) "
+              f"shows no tool call reading a.py; b.py.")
+    assert _disposition_for(None, inert)[0] == "carried (no escape)"
+    assert _disposition_for(None, unread)[0] == "carried (no escape)"
+
+
+def test_a_note_on_the_recorded_lines_is_not_counted_as_a_drifted_anchor() -> None:
+    root, p = make_repo()
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["extras"] = [{"heading": "Drift exceptions",
+                      "body": "anchor-drift `C9 calls C8`: the call moved into a helper on purpose"}]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    v = verify / "verdicts-backbone-1.json"
+    v.write_text(json.dumps({"grounding": [{"claim": "C1 calls C2", "grounded": True,
+                                            "evidence": "src/a.py:2", "skeptic": "b1"}]}),
+                 encoding="utf-8")
+    leg = finalize._drift_leg(p, root, [v])
+    assert leg.note is not None and leg.note.startswith("no drifted anchors"), leg.note

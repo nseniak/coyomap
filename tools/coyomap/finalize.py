@@ -395,13 +395,16 @@ def _drift_leg(map_path: Path, repo: Path, verdicts: list[Path],
         argv.append("--with-behavioural")
     code, out, err = _run_leg("anchor-drift", argv)
     text = (out or "") + (err or "")
-    rows = [ln.strip()[2:] for ln in text.splitlines() if ln.startswith("  - ")]
+    drifts = [ln.strip()[2:] for ln in text.splitlines() if ln.startswith("  - ")]
     # WHAT anchor-drift SAID ABOUT THE RECORDED LINES, carried beside its findings: a line that
     # does not parse, a line that matched no finding, and what the lines suppressed. Only the
     # verdict-based pass: the recorded lines answer verdict findings, so the shape-only pass would
     # call every one of them idle. They used to be dropped with every line not shaped `  - `.
-    if verdicts:
-        rows += [ln.strip() for ln in text.splitlines() if _DRIFT_RECORD_NOTE.search(ln)]
+    # COUNTED APART from the drifts: counted with them, the real map's gate block said "1 drifted
+    # anchor(s)" over a pass that found none and one suppression note.
+    notes = ([ln.strip() for ln in text.splitlines() if _DRIFT_RECORD_NOTE.search(ln)]
+             if verdicts else [])
+    rows = drifts + notes
     kind = "verdict-based" if verdicts else "shape-only"
     # Carry the COVERAGE line into the report and the gate block. Without it the leg printed
     # "no drifted anchors" off a pass that had seen 31 of 404 claims — the same "the gate did not
@@ -413,9 +416,10 @@ def _drift_leg(map_path: Path, repo: Path, verdicts: list[Path],
     # this command was written for all 17 confirmed rows were entry-point cadence claims it cannot
     # apply. A gate on a finding with no remedy is a false failure.
     return Leg(f"anchor-drift ({kind})", RAN if code in (0, 1) else FAILED, advisory=rows,
-               note=((f"{len(rows)} drifted anchor(s) — reconcile each (fix the `where`, or record "
-                      f"why it stands); `fix apply-drift` covers edge + security anchors only"
-                      if rows else "no drifted anchors")
+               note=((f"{len(drifts)} drifted anchor(s) — reconcile each (fix the `where`, or "
+                      f"record why it stands); `fix apply-drift` covers edge + security anchors only"
+                      if drifts else "no drifted anchors")
+                     + (f" · {len(notes)} note(s) on the recorded lines" if notes else "")
                      + (f" · {coverage}" if coverage else "")))
 
 
@@ -985,11 +989,11 @@ BUDGET_KEY = "component-budget"
 
 def budget_record(m: "ProjectModel", shipped: int, budgeted: int) -> str:
     """The 'Balance exceptions' line that answers the budget leg for THESE counts, or ""."""
+    # THE COUNTS AS THE ADVISORY WRITES THEM, never two numbers anywhere: a line holding the band's
+    # bounds, E or a date answered it too, whatever it said about the size.
+    said = re.compile(rf"(?<![\w.]){shipped} shipped of {budgeted} budgeted(?![\w.])")
     for line in records.lines(m, "Balance exceptions"):
-        if not line.lower().startswith(BUDGET_KEY):
-            continue
-        numbers = {int(n) for n in re.findall(r"(?<![\w.])(\d+)(?![\w.])", line)}
-        if {shipped, budgeted} <= numbers:
+        if line.lower().startswith(BUDGET_KEY) and said.search(line):
             return line
     return ""
 
@@ -1056,8 +1060,8 @@ def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
             advisory.append(f"{shipped} component(s) shipped against {total} budgeted across "
                             f"{len(budgets)} harvest brief(s) (band {low}-{high}{e_note}{uncounted}). "
                             f"Every slice can be inside its own band while the sum is not; record "
-                            f"'{BUDGET_KEY}: {shipped} shipped of {total} budgeted — <why the map is "
-                            f"this size>' under 'Balance exceptions', or re-cut the slices.")
+                            f"'{BUDGET_KEY}: {shipped} shipped of {total} budgeted, because <why the "
+                            f"map is this size>' under 'Balance exceptions', or re-cut the slices.")
     return Leg("component budget", RAN, advisory=advisory,
                note=f"{shipped} shipped / {total} budgeted across {len(budgets)} brief(s), "
                     f"band {low}-{high}{e_note}{uncounted}")
@@ -1281,6 +1285,7 @@ _ADVISORY_IDS = re.compile(
 _DISCLOSURE = re.compile(
     r"suppressed by (?:a )?recorded|counted as (?:CLAIMED|SWEPT)|and NOT re-nudged|"
     r"is NOT re-reported above|advisory line\(s\) are silenced by this map's recorded lines|"
+    r"advisory line\(s\) read differently because of this map's recorded lines|"
     r"^DISCLOSURE, not a request|"
     # The refutation gate saying what it did NOT block on. Asking whether that is "recorded under a
     # heading" is a category error: it reports a thing the map is right to carry.

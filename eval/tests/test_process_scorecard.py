@@ -2030,6 +2030,11 @@ def test_24_reads_every_wording_validate_gives_an_idle_record():
         "1 recorded 'Interface exceptions' id(s) silence nothing: C9. A record with no finding "
         "under it is stale",))
     assert P.assert_24_no_inert_recorded_exception((), idle).observed == 0
+    # and the two wordings the review found it missing (validate_model's upper-case NOTHING)
+    for line in ("1 recorded scope word(s) silences NOTHING: C1/article.",
+                 "2 recorded 'Unclaimed surfaces' line(s) silence NOTHING: C3, C4."):
+        loud = P.ScoreContext(map_warnings=1, map_warning_lines=(line,))
+        assert P.assert_24_no_inert_recorded_exception((), loud).observed == 0, line
 
 
 def test_25_flags_a_to_reconcile_run_that_recorded_nothing():

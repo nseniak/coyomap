@@ -2447,7 +2447,7 @@ def assert_23_the_build_saw_the_whole_gate(turns: Sequence[Turn],
 
 
 #: What `validate` says about a recorded line no check honours, in each of its wordings.
-_INERT_RECORD = re.compile(r"currently suppressing nothing|\bsilence nothing\b")
+_INERT_RECORD = re.compile(r"currently suppressing nothing|\bsilences? nothing\b", re.I)
 
 
 def assert_24_no_inert_recorded_exception(turns: Sequence[Turn],

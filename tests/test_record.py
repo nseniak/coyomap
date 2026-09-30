@@ -343,3 +343,29 @@ def test_a_free_text_line_that_silences_nothing_is_refused(tmp_path, capsys):
     assert main(["--map", str(frag), "--heading", "Sweep debt", "--line",
                  "src/admin.py:4: an admin override, not a business rule"]) == 0
     assert "src/admin.py:4: an admin override" in frag.read_text(encoding="utf-8")
+
+
+
+def test_a_line_that_silences_nothing_is_refused_whatever_its_reason_says(tmp_path):
+    """Review of finding 17: the readability check reads a recorded line's reason, so an em dash
+    in the why changed validate's output and the line was kept though it silenced nothing."""
+    frag = make_sweep_repo(tmp_path)
+    before = frag.read_text(encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Sweep debt", "--line",
+                 "src/nothing_here.py:1: made up \u2014 nothing reads this line"]) == 1
+    assert frag.read_text(encoding="utf-8") == before
+
+
+def test_replacing_a_live_line_under_sweep_debt_is_accepted(tmp_path):
+    frag = make_sweep_repo(tmp_path)
+    assert main(["--map", str(frag), "--heading", "Sweep debt", "--line",
+                 "src/admin.py:4: an admin override, not a business rule"]) == 0
+    # the assembled map carries the line too, as the next assemble would make it
+    mp = tmp_path / ".coyomap" / "project-map.json"
+    doc = json.loads(mp.read_text(encoding="utf-8"))
+    doc.setdefault("extras", []).append({"heading": "Sweep debt",
+                                         "body": "src/admin.py:4: an admin override, not a business rule\n"})
+    mp.write_text(json.dumps(doc), encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Sweep debt", "--replace", "src/admin.py:4",
+                 "--line", "src/admin.py:4: an override an admin makes, not a rule"]) == 0
+    assert "an override an admin makes" in frag.read_text(encoding="utf-8")
