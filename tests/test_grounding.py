@@ -12,7 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from coyomap import grounding as G  # noqa: E402
-from coyomap.audit_model import l2_worklist_model  # noqa: E402
+from coyomap import audit_model  # noqa: E402
+from coyomap.audit_model import WorkItem, l2_worklist_model  # noqa: E402
 from coyomap.grounding import build_record, main  # noqa: E402
 from coyomap.model import load_model  # noqa: E402
 
@@ -1755,3 +1756,58 @@ def test_a_test_whose_body_was_printed_passes_the_lint():
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = main(["lint", "--tests", str(frag), "--agent-transcripts", str(agents)], env={})
     assert code == 0 and "TESTS OK — 1 of 1" in out.getvalue(), out.getvalue()
+
+
+# --- the cut pins the second wave (review of retro 2026-09-30 finding 4) ---------------------------
+# Folded at FINISH from the claims the map made then, a wave claim the reconcile corrected after its
+# vote held verdicts on a text neither the pin nor the map carried: `write` refused them.
+
+def test_the_cut_pins_the_second_wave_so_a_claim_corrected_after_its_vote_keeps_its_votes() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        wl, _vd, mp, live = make_second_wave(tmp)
+        verify = tmp / "verify"
+        verify.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert audit_model.main([str(mp), "--batches", str(verify), "--since", str(wl)]) == 0
+        assert "C3 reads E1" in G._worklist_claims(wl), "the cut did not pin its claims"
+        assert (tmp / G.FIRST_PIN).exists()
+        # the second wave's skeptic refuted the claim, and the reconcile corrected the edge
+        rows = [{"claim": c, "grounded": c != "C3 reads E1", "evidence": "b.py:2", "skeptic": "s1"}
+                for c in live]
+        vd = tmp / "verdicts-added-backbone-1.json"
+        vd.write_text(json.dumps({"grounding": rows}), encoding="utf-8")
+        doc = json.loads(mp.read_text(encoding="utf-8"))
+        doc["edges"][0]["verb"] = "writes"
+        mp.write_text(json.dumps(doc), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = main(["write", "--worklist", str(wl), "--verdicts", str(vd), "--map", str(mp),
+                         "--out", str(tmp / "g.json"), "--note", "the edge was corrected"])
+        assert code == 0, err.getvalue()
+        record = json.loads((tmp / "g.json").read_text(encoding="utf-8"))["grounding"]
+        assert record["claims_refuted"] == 1 and record["claims_superseded"] == 1, record
+
+
+def test_a_second_fold_keeps_the_first_pin() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        wl = Path(td) / "worklist.json"
+        wl.write_text(json.dumps({"worklist": [{"claim": "a", "theme": "backbone"}]}),
+                      encoding="utf-8")
+        first = wl.read_text(encoding="utf-8")
+        G.repin_second_wave(wl, [WorkItem(claim="b", anchor=None, why_risky="r")])
+        G.repin_second_wave(wl, [WorkItem(claim="c", anchor=None, why_risky="r")])
+        assert (Path(td) / G.FIRST_PIN).read_text(encoding="utf-8") == first
+        assert G._worklist_claims(wl) == ["a", "b", "c"]
+
+
+def test_a_first_pin_another_build_left_is_replaced() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        wl = Path(td) / "worklist.json"
+        wl.write_text(json.dumps({"worklist": [{"claim": "a", "theme": "backbone"}]}),
+                      encoding="utf-8")
+        first = wl.read_text(encoding="utf-8")
+        (Path(td) / G.FIRST_PIN).write_text(json.dumps({"worklist": [{"claim": "z"}]}),
+                                            encoding="utf-8")
+        G.repin_second_wave(wl, [WorkItem(claim="b", anchor=None, why_risky="r")])
+        assert (Path(td) / G.FIRST_PIN).read_text(encoding="utf-8") == first

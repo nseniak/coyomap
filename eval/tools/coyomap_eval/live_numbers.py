@@ -326,7 +326,7 @@ LEDGER: tuple[Claim, ...] = (
                 "claim.",
           measure=_rule_sites_short,
           note="the same fact, second site"),
-    Claim(site="tools/coyomap/audit_model.py:1434", maps=("mcpolis",),
+    Claim(site="tools/coyomap/audit_model.py:1435", maps=("mcpolis",),
           quote="One role drove 25 use cases at mcpolis's dashboard",
           measure=_role_use_cases_at_dashboard,
           note="why a detail line is capped through `shown` and never by hand"),

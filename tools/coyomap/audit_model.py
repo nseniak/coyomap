@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1670,6 +1671,47 @@ def pinned_claims(path: Path) -> list[str]:
     return [str(i.get("claim", "")) for i in pinned_items(path)]
 
 
+#: Where the first pin is kept once a second wave extends `worklist.json`, the way an update keeps
+#: the list it replaced as `worklist-<from>.json`.
+FIRST_PIN = "worklist-wave1.json"
+
+
+def repin_second_wave(worklist_path: Path, wave: "list[WorkItem]") -> Path:
+    """Append a second wave's claims to the pinned worklist, keeping the first pin beside it as
+    `worklist-wave1.json`, and return that path.
+
+    The CUT calls this (`audit --since`), so the pin holds what the second wave's skeptics are
+    given, exactly as the first pin holds what the first wave's were given: a claim corrected after
+    its vote is then superseded, like any first-wave claim, and its verdicts still count. A first
+    pin already there is kept only when this pin still holds every claim it does; one that another
+    build left behind is replaced."""
+    first = worklist_path.with_name(FIRST_PIN)
+    if not first.exists() or not set(pinned_claims(first)) <= set(pinned_claims(worklist_path)):
+        shutil.copy(worklist_path, first)
+    payload: object = json.loads(worklist_path.read_text(encoding="utf-8"))
+    added = worklist_payload([], wave)["worklist"]
+    assert isinstance(added, list)
+    out: object
+    if isinstance(payload, list):
+        out = [*payload, *added]
+    elif isinstance(payload, dict):
+        held = payload.get("worklist")
+        items: list[object] = [*(held if isinstance(held, list) else []), *added]
+        counts: dict[str, int] = {}
+        for i in items:
+            theme = i.get("theme") if isinstance(i, dict) else None
+            if isinstance(theme, str):
+                counts[theme] = counts.get(theme, 0) + 1
+        before = payload.get("second_wave")
+        out = {**payload, "worklist": items, "theme_counts": counts,
+               "second_wave": (before if isinstance(before, int) else 0) + len(wave)}
+    else:
+        raise ValueError(f"{worklist_path} is not a pinned worklist")
+    worklist_path.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n",
+                             encoding="utf-8")
+    return first
+
+
 def pinned_tier(path: Path) -> bool:
     """Was this pinned worklist captured with `audit --with-behavioural`? Read off the items' own
     `theme`: the behavioural tier is the only producer of `behaviour`, so an existing worklist
@@ -1924,8 +1966,8 @@ def _run(argv: list[str] | None = None) -> int:
               "  not handed a bare `C1 calls C2`. Not build-fragments/ — assemble globs that.\n"
               "--since <pinned worklist.json> (with --batches) cuts ONLY the claims the map carries\n"
               "  that the pin never held — a SECOND WAVE — as claims-added-<theme>-N.json, beside\n"
-              "  the first wave's files and without touching them, at the pin's own tier.\n"
-              "  `grounding write` folds their verdicts into the pin.\n"
+              "  the first wave's files and without touching them, at the pin's own tier, and\n"
+              "  pins them: appended to that worklist, the first pin kept as worklist-wave1.json.\n"
               "  Each worklist item carries `theme` (a closed, most-dangerous-first set) and\n"
               "  `drift_eligible`; `theme_counts` sizes each group. Batch the Phase-4 skeptics\n"
               "  BY THEME — the shape the Phase-4\n"
@@ -2069,10 +2111,14 @@ def _run(argv: list[str] | None = None) -> int:
               f"each carrying its anchor and detail")
         if batch_prefix:
             # A second wave is its own small fan-out: the reader-batch step below belongs to the
-            # first, and the stale-prose sweep must not delete what the first wave minted.
-            print(f"second wave: {len(worklist)} claim(s) added since the pin. Brief them with "
-                  f"`coyomap contract skeptic --from-batches {out_dir} --prefix {batch_prefix} …`; "
-                  f"`grounding write --map` (inside `ship`) folds their verdicts into the pin.")
+            # first, and the stale-prose sweep must not delete what the first wave minted. PINNED
+            # HERE, at the cut, like the first wave: folded at FINISH instead, a wave claim the
+            # reconcile corrected after its vote lost every verdict it had.
+            first = repin_second_wave(Path(since_raw or ""), worklist)
+            print(f"second wave: {len(worklist)} claim(s) added since the pin, now pinned in "
+                  f"{since_raw} (the first pin is kept as {first.name}), so a claim corrected after "
+                  f"its vote keeps its votes. Brief them with `coyomap contract skeptic "
+                  f"--from-batches {out_dir} --prefix {batch_prefix} …`.")
             return 0
         # The read fan-out rides the same flag: one command cuts both kinds of work, so a lead
         # cannot dispatch the skeptics and silently skip the read. Its findings are ADVICE about how

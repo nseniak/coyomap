@@ -2736,7 +2736,9 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   **The claims added since the pin get a SECOND WAVE, and only one.** A text corrected after the
   vote, or an edge written after it, is a claim no skeptic saw. In order:
   1. `coyomap audit <map> --batches .coyomap/verify --since .coyomap/verify/worklist.json` cuts
-     only those, as `claims-added-*.json` beside the first wave's files;
+     only those, as `claims-added-*.json` beside the first wave's files, and pins them: it appends
+     them to `worklist.json` and keeps the first pin as `verify/worklist-wave1.json`, so a claim
+     corrected after its vote keeps its votes;
   2. `coyomap contract skeptic --from-batches .coyomap/verify --prefix added- --fill <slots>
      --out-dir <briefs> --votes security=3` briefs them: the security theme is voted three times,
      as in the first wave, and without the flag it silently gets one voter;
@@ -2745,8 +2747,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   4. `ship` without a note: its `grounding report` lists the second wave's refutations, and a
      closer hears them like the first wave's (`contract closer --from-verdicts .coyomap/verify
      --prefix added- …`);
-  5. `ship --note-file <a NEW note>`: its `grounding write` folds the verdicts into the pin and keeps
-     the first pin as `verify/worklist-wave1.json`. The old note counts the first pin only.
+  5. `ship --note-file <a NEW note>`. The old note counts the first pin only.
   There is no third wave: a claim reworded while the second is reconciled is named in the note, and
   a new cut would overwrite the second wave's files. **Never re-pin with a fresh `audit --json`:**
   `grounding write` refuses every verdict cast on the old wording. On one build 68 claims shipped

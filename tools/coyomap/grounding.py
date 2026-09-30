@@ -27,7 +27,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -41,9 +40,11 @@ from coyomap.audit_model import (
     WorkItem,
     claim_digest,
     l2_worklist_model,
+    FIRST_PIN,
     pinned_claims,
     pinned_items,
     pinned_tier,
+    repin_second_wave,
     resolve_claim,
     rule_site_claim,
     worklist_payload,
@@ -712,53 +713,17 @@ def live_claims_digest(claims: "Iterable[str]") -> str:
     return claim_digest(claims)
 
 
-#: Where the first pin is kept once a second wave extends `worklist.json`, the way an update keeps
-#: the list it replaced as `worklist-<from>.json`.
-FIRST_PIN = "worklist-wave1.json"
-
-
 def second_wave(pinned: list[str], grounding_rows: list[dict], live: list[str]) -> list[str]:
-    """Live claims the pin never held that a skeptic voted on — a SECOND WAVE — in live order.
+    """Live claims the pin never held that a skeptic voted on anyway, in live order: votes cast
+    outside a cut second wave, folded into the pin by `write --map`.
 
-    `write` refused every verdict outside the pin as a sign of the wrong snapshot. That is right for
-    a claim the map no longer makes, and wrong for one it makes and the pin never held: a text
-    corrected after the vote, an edge written after it. On the 2026-09-30 mcpolis build 68 such
-    claims shipped with no verdict, 6 of them re-worded sites of access rules, because the only
-    route that worked (a hand-merged worklist) was described nowhere."""
+    A second wave CUT by `audit --since` is pinned at the cut and never lands here. It used to be
+    folded here too, from the claims the map made at FINISH, and a wave claim corrected between its
+    vote and FINISH then held verdicts on a text neither the pin nor the map carried: `write`
+    refused them, and the documented route stopped at its own step 5."""
     pin = set(pinned)
     voted = {r.get("claim") for r in split_closer_rows(grounding_rows).skeptics}
     return [c for c in dict.fromkeys(live) if c in voted and c not in pin]
-
-
-def repin_second_wave(worklist_path: Path, wave: list[WorkItem]) -> Path:
-    """Append a second wave's claims to the pinned worklist, keeping the first pin beside it as
-    `worklist-wave1.json` — the re-pin an update's `changes ground` does, for a build's own second
-    wave. Idempotent: on a re-run the wave is already pinned and `second_wave` finds nothing."""
-    first = worklist_path.with_name(FIRST_PIN)
-    if not first.exists():
-        shutil.copy(worklist_path, first)
-    payload: object = json.loads(worklist_path.read_text(encoding="utf-8"))
-    added = worklist_payload([], wave)["worklist"]
-    assert isinstance(added, list)
-    out: object
-    if isinstance(payload, list):
-        out = [*payload, *added]
-    elif isinstance(payload, dict):
-        held = payload.get("worklist")
-        items: list[object] = [*(held if isinstance(held, list) else []), *added]
-        counts: dict[str, int] = {}
-        for i in items:
-            theme = i.get("theme") if isinstance(i, dict) else None
-            if isinstance(theme, str):
-                counts[theme] = counts.get(theme, 0) + 1
-        before = payload.get("second_wave")
-        out = {**payload, "worklist": items, "theme_counts": counts,
-               "second_wave": (before if isinstance(before, int) else 0) + len(wave)}
-    else:
-        raise ValueError(f"{worklist_path} is not a pinned worklist")
-    worklist_path.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n",
-                             encoding="utf-8")
-    return first
 
 
 def build_record(worklist_claims: list[str], grounding_rows: list[dict],

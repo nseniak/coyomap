@@ -1,9 +1,10 @@
-# The claims added after the pin get a second wave, and grounding write folds it into the pin
+# The claims added after the pin get a second wave, pinned when it is cut
 
 Change (2026-09-30, retro finding mcpolis-2026-09-30-4): `coyomap audit <map> --batches <verify>
 --since <pinned worklist>` cuts only the claims the map carries that the pin never held, as
-`claims-added-*.json`; `grounding write --map` folds verdicts on those claims into the pin (keeping
-the first pin as `verify/worklist-wave1.json`) instead of refusing them; `grounding report` buckets
+`claims-added-*.json` and pins them at the cut (keeping the first pin as
+`verify/worklist-wave1.json`), so a wave claim corrected after its vote keeps its votes; `grounding
+write --map` folds any other vote on a live claim the pin never held; `grounding report` buckets
 and marks them; `ship` passes their verdict files to `grounding write`; validate's live-coverage
 and claim-loss advisories name this route and no longer prescribe a fresh `audit --json` re-pin;
 method.md describes it · tools/coyomap/audit_model.py, grounding.py, ship.py, validate_model.py,

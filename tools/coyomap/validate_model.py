@@ -4394,7 +4394,8 @@ def _grounding_live_coverage_findings(g: Grounding) -> list[str]:
             f".coyomap/verify/worklist.json` cuts only them, `coyomap contract skeptic "
             f"--from-batches .coyomap/verify --prefix added- … --votes security=3` briefs them — "
             f"then close their refutations and re-run `coyomap ship` with a new note (method.md, "
-            f"the second wave), whose `grounding write` folds their verdicts into the pin. Or say in "
+            f"the second wave). The cut pins them, so a claim corrected after its vote keeps its "
+            f"votes. Or say in "
             f"`grounding.note` which claims were minted after the pin and why they were not "
             f"challenged — a note that says 'all N claims were challenged' is reporting the pin, "
             f"not the map."]
@@ -4457,8 +4458,8 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
     signal; the pinned and live counts are what the reader compares.
 
     NO RECORDED ESCAPE, deliberately. The two honest answers are both structured: re-state the claim
-    (author the site back), or challenge what replaced it in a SECOND WAVE, which `grounding write`
-    folds into the pin — the pin grows, the record says so, and nothing is hidden. This advisory
+    (author the site back), or challenge what replaced it in a SECOND WAVE, which the cut pins
+    (`audit --since`) — the pin grows, the record says so, and nothing is hidden. This advisory
     used to prescribe re-pinning with a fresh `coyomap audit --json`, and that route was refused
     ("N verdict claim(s) are not in the pinned worklist"): on the 2026-09-30 mcpolis build the lead
     followed it, was refused on 67 claims, and shipped 68 with no verdict."""
@@ -4484,8 +4485,8 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
             f"notices. Check each shrunken theme: if the element's own sentence still asserts what "
             f"the removed anchors backed, the sentence is now unbacked. Then either re-state the "
             f"claim, or challenge what replaced it in a second wave (`coyomap audit <map> "
-            f"--batches .coyomap/verify --since .coyomap/verify/worklist.json`), which `grounding "
-            f"write` folds into the pin. Never re-pin with a fresh `audit --json`: `grounding "
+            f"--batches .coyomap/verify --since .coyomap/verify/worklist.json`), which pins what it "
+            f"cuts. Never re-pin with a fresh `audit --json`: `grounding "
             f"write` then refuses every verdict cast on the old wording."]
 
 
