@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
 from coyomap.access_surface import AccessClaim, held, load_claims, lost_files
 from coyomap.audit_model import l2_worklist_model
+from coyomap.credentials import scan as scan_credentials
 from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
 from coyomap.contract import BUDGETS_FILE
 from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
@@ -1003,6 +1004,7 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         *([leg for leg in (_budget_leg(map_path, repo),) if leg is not None]),
         *([leg for leg in (_undispatched_prose_leg(map_path),) if leg is not None]),
         *([leg for leg in (_undispatched_claims_leg(map_path),) if leg is not None]),
+        _credential_leg(map_path),
         _balance_leg(map_path),
     ]
     blocking = sum(len(l.blocking) for l in legs)
@@ -1451,8 +1453,19 @@ def gate_block(report: FinalizeReport, map_sha: str, disposition: str | None = N
     return "\n".join(lines)
 
 
-def _commit_hint(map_path: Path) -> None:
-    """What to commit, and the `git add -f` line that will actually take it."""
+@dataclass(frozen=True)
+class ForceAdded:
+    """What the `git add -f` line names: the files, in the order it names them, and the warrant
+    DIRECTORIES after them. ONE list, read by the commit line and by the credential scan, so the scan
+    covers exactly what the line would commit."""
+    present: list[Path]
+    missing: list[Path]
+    warrant: list[Path]
+    reconcile: Path
+
+
+def force_added(map_path: Path) -> ForceAdded:
+    """The paths `finalize`'s commit line force-adds, and the required ones not there yet."""
     # The four artifacts the method says ship with the map, and whether git will actually take them.
     # A live build ran `git check-ignore`, GOT the answer (`.gitignore:85:.coyomap/`), and then issued
     # an un-forced `git add` two turns later that failed — shipping a map whose viewer symbol-search
@@ -1494,6 +1507,43 @@ def _commit_hint(map_path: Path) -> None:
     # what an operator needs to see, and a 118-path command line is not copyable.
     warrant = [d for d in (map_path.parent / "verify", map_path.parent / "build-fragments")
                if d.is_dir() and any(d.iterdir())]
+    return ForceAdded(present=present, missing=missing, warrant=warrant, reconcile=reconcile)
+
+
+def _credential_leg(map_path: Path) -> Leg:
+    """Credential-shaped values in the files the commit line force-adds. BLOCKING.
+
+    The commit line takes the agents' own files — every verdict, every fragment — and nothing read
+    them. On the 2026-09-30 mcpolis build a skeptic's glob printed the production API key into its
+    transcript; it reached no committed file, and nothing would have said so if it had. No recorded
+    escape, and none is needed: the remedy is to rewrite one sentence without the value, which costs
+    nothing and is always possible. The value itself is never printed (`credentials`)."""
+    fa = force_added(map_path)
+    hits = scan_credentials([*fa.present, *fa.warrant])
+    by_file: dict[Path, list[str]] = {}
+    for h in hits:
+        by_file.setdefault(h.path, []).append(f"line {h.line} ({h.shape})")
+    blocking = [f"{path}: {', '.join(where)} — a credential-shaped value in a file the commit line "
+                f"would force-add. Rewrite that text without the value (name the setting, never "
+                f"its value) and re-run finalize; the commit line is withheld until then. If the "
+                f"value is real it is also in the transcript of the agent that wrote it: tell the "
+                f"operator, who decides whether to rotate it."
+                for path, where in by_file.items()]
+    scanned = len(fa.present) + sum(sum(1 for f in d.rglob("*") if f.is_file()) for d in fa.warrant)
+    return Leg("credential scan", RAN, blocking=blocking,
+               note=f"{scanned} file(s) the commit line force-adds, scanned for credential shapes: "
+                    f"{len(hits)} hit(s)")
+
+
+def _commit_hint(map_path: Path, withheld: bool = False) -> None:
+    """What to commit, and the `git add -f` line that will actually take it — unless the credential
+    scan found a value in those files, when the line is withheld rather than printed."""
+    fa = force_added(map_path)
+    present, missing, warrant, reconcile = fa.present, fa.missing, fa.warrant, fa.reconcile
+    if withheld:
+        print("finalize: NO commit line — the credential scan found a credential-shaped value in the "
+              "files it would force-add. Rewrite those lines and re-run finalize.")
+        return
     if present:
         counts = ", ".join(f"{d.name}/ ({sum(1 for _ in d.rglob('*') if _.is_file())} files)"
                            for d in warrant)
@@ -1677,7 +1727,8 @@ def main(argv: list[str] | None = None) -> int:
         gate_block_path.write_text(gate_block(report, sha, disposition) + "\n",
                                    encoding="utf-8")
         print(f"finalize: wrote the commit-message gate block to {gate_block_path}")
-    _commit_hint(map_path)
+    _commit_hint(map_path, withheld=any(l.name == "credential scan" and l.blocking
+                                        for l in report.legs))
     unran = [f"{l.name} ({l.status})" for l in report.legs if not l.ran]
     print(f"finalize: {report.verdict} — {report.blocking_total} blocking, "
           f"{report.advisory_total} advisory"

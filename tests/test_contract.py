@@ -1277,3 +1277,12 @@ def test_a_claim_the_majority_confirmed_over_a_refutation_is_its_own_section() -
     assert "a caller removed another way keeps passing" in dissent
     assert "it does refuse" in dissent, "the confirming voters' evidence is part of the question"
     assert "1 of them an outvoted dissent" in out, out
+
+
+def test_every_brief_names_the_files_never_read_and_says_to_search_named_folders() -> None:
+    """Retro 2026-09-30, finding 6: a skeptic's recursive search reached the production config and
+    printed its API key. Stated once, in the rule every brief carries."""
+    for name in contract.CONTRACTS:
+        text = contract.render(name)
+        assert "Some files are never read, and never searched." in text, name
+        assert "Search with explicit paths:" in text, name

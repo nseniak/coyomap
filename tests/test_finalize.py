@@ -1699,3 +1699,37 @@ def test_a_dissent_on_a_claim_that_is_not_about_access_does_not_block() -> None:
     _root, p, files, _claim = make_access_dissent_repo(None, access=False)
     leg = finalize._refutations_leg(p, files)
     assert not leg.blocking, leg.blocking
+
+
+# --- a credential in the files the commit line force-adds (retro 2026-09-30, finding 6) ---------
+
+def test_a_key_shaped_value_in_a_fragment_blocks_and_withholds_the_commit_line() -> None:
+    """The value is built from filler at run time (see tests/test_credentials.py): this file holds
+    no credential-shaped value."""
+    import contextlib
+    import io
+    root, p = make_repo()
+    frags = root / ".coyomap" / "build-fragments"
+    frags.mkdir()
+    value = "AK" + "IA" + "Q" * 16
+    (frags / "extras.json").write_text(json.dumps({"extras": [
+        {"heading": "Notes", "body": f"The deploy config sets {value} for the bucket."}]}),
+        encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = finalize.main([str(p), "--repo", str(root), "--no-write"])
+    said = out.getvalue()
+    assert code == 1, said
+    assert "extras.json: line 1 (AWS access key id)" in said, said
+    assert value not in said, "the scan printed the value it found"
+    assert "NO commit line" in said and "git add -f" not in said, said
+
+
+def test_a_clean_map_keeps_its_commit_line() -> None:
+    import contextlib
+    import io
+    root, p = make_repo()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        finalize.main([str(p), "--repo", str(root), "--no-write"])
+    assert "git add -f" in out.getvalue()
