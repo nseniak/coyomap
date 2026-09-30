@@ -2750,6 +2750,17 @@ def _check_actors(m: ProjectModel) -> list[str]:
 
 
 INTERFACE_EXCEPTIONS_HEADING = "Interface exceptions"
+
+
+def unbacked_participants(m: ProjectModel) -> list[tuple[int, str, str]]:
+    """`(messaging row index, role, Cn)` for every publisher or consumer with no backbone edge to
+    its row's broker, when the broker is a dependency the map has. ONE reading, for the messaging
+    check that advises on them and for the idle-record check that must count their excuses."""
+    deps = {d.id for d in m.deps}
+    edge_pairs = {(e.src, e.dst) for e in m.edges}
+    return [(i, role, c) for i, mr in enumerate(m.messaging) if mr.broker in deps
+            for role, ids in (("publisher", mr.publishers), ("consumer", mr.consumers))
+            for c in ids if (c, mr.broker) not in edge_pairs]
 MISSING_SURFACES_HEADING = "Missing surfaces"
 
 _PLUMBING_EP_KINDS = frozenset({"middleware"})
@@ -3247,10 +3258,15 @@ def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
             f"silences the rest too; re-read one by validating a copy with the id removed")
     honoured |= {i for ids in hushed.values() for i in ids if i in recorded}
     honoured |= {ep.id for ep in excused}
-    # EVERY key under the heading, whatever its prefix: a `Cn` line there is honoured by no check
-    # at all, and the first version of this list read only the I/EP ids and so could not say so.
-    idle = sorted(k for k in records.recorded_keys(m, INTERFACE_EXCEPTIONS_HEADING)
-                  if k not in honoured)
+    # EVERY FAMILY THAT READS THE HEADING'S KEYS, the messaging check included: a `Cn` there excuses
+    # a publisher or consumer with no backbone edge to its broker. Counting only the interface
+    # families called the 8 broker ids of the 2026-09-30 mcpolis map idle while the same run counted
+    # their 2 silences, and the lead deleted a line that was doing its job.
+    all_keys = records.recorded_keys(m, INTERFACE_EXCEPTIONS_HEADING)
+    honoured |= {c for _i, _role, c in unbacked_participants(m) if c in all_keys}
+    # EVERY key under the heading, whatever its prefix: a `Cn` line honoured by no check at all is
+    # named, and the first version of this list read only the I/EP ids and so could not say so.
+    idle = sorted(k for k in all_keys if k not in honoured)
     if idle:
         # A record with no finding under it: stale, or written against a surface that is gone.
         warnings.append(
@@ -4019,7 +4035,7 @@ def _check_messaging(m: ProjectModel) -> tuple[list[str], list[str]]:
     if dups:
         problems.append(f"Duplicate messaging channel name(s): {', '.join(dups)} — channel names "
                         "must be unique (they are the row's key, like deployment units)")
-    edge_pairs = {(e.src, e.dst) for e in m.edges}
+    unbacked_all = unbacked_participants(m)
     for i, mr in enumerate(m.messaging):
         label = f"messaging[{i}] ('{mr.name}')"
         if not mr.name.strip():
@@ -4047,10 +4063,9 @@ def _check_messaging(m: ProjectModel) -> tuple[list[str], list[str]]:
             # sometimes "no edge" — on the 2026-09-02 mcpolis map the publishers reach Redis through
             # an event-stream adapter, so authoring a direct `C → broker` edge would state a call
             # that does not happen. The escape is what lets that be said once instead of every build.
-            excused_participants = records.recorded_keys(m, "interface exceptions")
-            for role, ids in (("publisher", mr.publishers), ("consumer", mr.consumers)):
-                unbacked = [c for c in ids
-                            if (c, mr.broker) not in edge_pairs
+            excused_participants = records.recorded_keys(m, INTERFACE_EXCEPTIONS_HEADING)
+            for role in ("publisher", "consumer"):
+                unbacked = [c for j, r, c in unbacked_all if j == i and r == role
                             and c not in excused_participants]
                 if unbacked:
                     warnings.append(

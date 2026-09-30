@@ -6554,3 +6554,31 @@ def test_a_doors_fragment_with_no_ways_in_leaves_its_arrivals_to_validate():
                                                                   unknown_doors_pass=True)
     assert not [w for w in warnings if "UC1 flow step 1" in w], warnings
     assert [w for w in warnings if "UC1 flow step 2" in w], warnings
+
+
+# --- an excuse the messaging check reads is not idle (retro 2026-09-30, finding 12) ---------------
+# The idle-record check counted only the interface families, while the messaging check reads `Cn`
+# keys under the same heading: one run said the 8 broker ids silence nothing AND counted their 2
+# silences, and the lead deleted a line that was doing its job.
+
+def make_unbacked_publisher_model() -> ProjectModel:
+    """C1 publishes on a Redis channel with no backbone edge to Redis, and an 'Interface
+    exceptions' line excuses it; C9 is excused too but takes part in no channel."""
+    m = make_valid_model()
+    m.deps.append(Dep(id="D2", name="Redis broker", kind="messaging", type="queue broker"))
+    m.messaging = [MessagingRow(name="JOBS", kind="job-queue", broker="D2", publishers=["C1"],
+                                consumers=[], source="src/q.py:1")]
+    m.interfaces = [Interface(id="I1", name="Orders page", what="where a buyer sees an order",
+                              side="ours", facing="user", kind="screen")]
+    m.extras = [ExtraSection(heading="Interface exceptions",
+                             body="C1: reaches Redis through the event-stream adapter\n"
+                                  "C9: a line no check reads")]
+    return m
+
+
+def test_a_messaging_excuse_is_not_called_idle_and_a_dead_one_still_is():
+    warnings = warnings_of(make_unbacked_publisher_model())
+    idle = [w for w in warnings if "id(s) silence nothing" in w]
+    assert len(idle) == 1, warnings
+    assert "C9" in idle[0] and "C1" not in idle[0], idle[0]
+    assert not any("publisher(s) C1 carry no backbone edge" in w for w in warnings), warnings

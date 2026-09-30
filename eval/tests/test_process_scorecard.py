@@ -2023,6 +2023,15 @@ def test_24_flags_a_recorded_exception_that_silences_nothing():
     assert P.assert_24_no_inert_recorded_exception((), P.ScoreContext()).of == 0
 
 
+def test_24_reads_every_wording_validate_gives_an_idle_record():
+    """Retro 2026-09-30, finding 12: an idle 'Interface exceptions' line says "silence nothing",
+    and assertion 24 matched only "currently suppressing nothing"."""
+    idle = P.ScoreContext(map_warnings=1, map_warning_lines=(
+        "1 recorded 'Interface exceptions' id(s) silence nothing: C9. A record with no finding "
+        "under it is stale",))
+    assert P.assert_24_no_inert_recorded_exception((), idle).observed == 0
+
+
 def test_25_flags_a_to_reconcile_run_that_recorded_nothing():
     """`--to-reconcile` used to be ignored without `--keep`/`--accept-suggested`: exit 0, a full
     listing, an untouched file. One build escaped only because it read the file back."""

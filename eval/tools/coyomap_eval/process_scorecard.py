@@ -2446,6 +2446,10 @@ def assert_23_the_build_saw_the_whole_gate(turns: Sequence[Turn],
     return Assertion(23, "the build saw the whole gate output", 1 if ok else 0, 1, ev, note)
 
 
+#: What `validate` says about a recorded line no check honours, in each of its wordings.
+_INERT_RECORD = re.compile(r"currently suppressing nothing|\bsilence nothing\b")
+
+
 def assert_24_no_inert_recorded_exception(turns: Sequence[Turn],
                                           ctx: "ScoreContext | None" = None) -> Assertion:
     """24 — the shipped map carries no recorded exception that suppresses nothing.
@@ -2464,7 +2468,11 @@ def assert_24_no_inert_recorded_exception(turns: Sequence[Turn],
         return Assertion(24, "no inert recorded exception", 0, 0, (),
                          ctx.missing_map_note("the shipped exceptions")
                              if ctx else "no map given, so the shipped exceptions are unknown")
-    inert = [ln for ln in ctx.map_warning_lines if "currently suppressing nothing" in ln]
+    # EVERY wording `validate` gives an inert record: "currently suppressing nothing" (a runs-in
+    # key), "silence nothing" (an 'Interface exceptions' id, a near-miss runs-in key). Matching
+    # the first alone read 1/1 on two builds whose map carried an idle line of the second shape —
+    # widened only once validate stopped calling the messaging check's own excuses idle.
+    inert = [ln for ln in ctx.map_warning_lines if _INERT_RECORD.search(ln)]
     ev = tuple(Evidence(0, {"advisory": ln[:200]}) for ln in inert)
     return Assertion(24, "no inert recorded exception", 0 if inert else 1, 1, ev,
                      f"{len(inert)} recorded exception(s) silencing nothing")
