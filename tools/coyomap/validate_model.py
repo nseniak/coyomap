@@ -4367,10 +4367,14 @@ def _grounding_live_coverage_findings(g: Grounding) -> list[str]:
     return [f"Grounding covers the PINNED worklist, not the shipped map: {head}. "
             f"`claims_challenged` ({g.claims_challenged} of {g.claims_total}) counts the worklist "
             f"the skeptics were given, and a claim reworded after the vote leaves that number "
-            f"untouched while the map carries a claim nobody challenged. Challenge them and re-run "
-            f"`coyomap grounding write`, or say in `grounding.note` which claims were minted after "
-            f"the pin and why they were not re-challenged — a note that says 'all N claims were "
-            f"challenged' is reporting the pin, not the map."]
+            f"untouched while the map carries a claim nobody challenged. Challenge them in a "
+            f"second wave — `coyomap audit <map> --batches .coyomap/verify --since "
+            f".coyomap/verify/worklist.json` cuts only them, `coyomap contract skeptic "
+            f"--from-batches .coyomap/verify --prefix added- …` briefs them — then re-run `coyomap "
+            f"ship`, whose `grounding write` folds their verdicts into the pin. Or say in "
+            f"`grounding.note` which claims were minted after the pin and why they were not "
+            f"challenged — a note that says 'all N claims were challenged' is reporting the pin, "
+            f"not the map."]
 
 
 #: Where a build pins the claim surface the skeptics were given, beside the map.
@@ -4430,10 +4434,11 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
     signal; the pinned and live counts are what the reader compares.
 
     NO RECORDED ESCAPE, deliberately. The two honest answers are both structured: re-state the claim
-    (author the site back), or re-pin the surface by re-running `coyomap audit` — and re-pinning IS
-    the record, exactly as authoring the `grounding` block is the record for the line above. Its
-    sibling then reports the re-pinned claims nobody has challenged yet, so neither answer can hide
-    the work."""
+    (author the site back), or challenge what replaced it in a SECOND WAVE, which `grounding write`
+    folds into the pin — the pin grows, the record says so, and nothing is hidden. This advisory
+    used to prescribe re-pinning with a fresh `coyomap audit --json`, and that route was refused
+    ("N verdict claim(s) are not in the pinned worklist"): on the 2026-09-30 mcpolis build the lead
+    followed it, was refused on 67 claims, and shipped 68 with no verdict."""
     if model_path is None:
         return []
     pin = _pinned_worklist_themes(model_path)
@@ -4455,8 +4460,10 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
             f"claim those sites carried — the fix is recorded, the claims are not, and no gate "
             f"notices. Check each shrunken theme: if the element's own sentence still asserts what "
             f"the removed anchors backed, the sentence is now unbacked. Then either re-state the "
-            f"claim, or re-pin the surface with `coyomap audit --json` (the re-pin IS the record) "
-            f"and challenge what it mints."]
+            f"claim, or challenge what replaced it in a second wave (`coyomap audit <map> "
+            f"--batches .coyomap/verify --since .coyomap/verify/worklist.json`), which `grounding "
+            f"write` folds into the pin. Never re-pin with a fresh `audit --json`: `grounding "
+            f"write` then refuses every verdict cast on the old wording."]
 
 
 def _grounding_digest_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:

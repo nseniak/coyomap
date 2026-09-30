@@ -1548,6 +1548,27 @@ def claim_digest(claims: Iterable[str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+#: What a SECOND WAVE's batches are named with: `claims-added-<theme>-N.json`, beside the first
+#: wave's files. The claims a build's map carries that its pinned worklist never held — a text
+#: corrected after the vote, an edge written after it — went to no skeptic and no route took them
+#: to one: on the 2026-09-30 mcpolis build 68 shipped with no verdict, 6 of them re-worded sites of
+#: two access rules.
+SECOND_WAVE_PREFIX = "added-"
+
+
+def pinned_claims(path: Path) -> list[str]:
+    """Claims from a pinned worklist file, in order, in either shape it legitimately arrives in.
+
+    A BARE LIST is what `coyomap audit --json | jq .worklist` produces, and it is the obvious way
+    to hand a verb its input. The list case was already intended — the `isinstance` test was
+    written — but it sat inside the default argument of `.get()`, so reaching it required the
+    attribute access that had already raised. The guard could never run, and the one input shape it
+    existed for was the one that crashed with a traceback."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    items = payload if isinstance(payload, list) else payload.get("worklist", [])
+    return [str(i.get("claim", "")) for i in items if isinstance(i, dict)]
+
+
 def pinned_tier(path: Path) -> bool:
     """Was this pinned worklist captured with `audit --with-behavioural`? Read off the items' own
     `theme`: the behavioural tier is the only producer of `behaviour`, so an existing worklist
@@ -1798,6 +1819,10 @@ def _run(argv: list[str] | None = None) -> int:
               "--batches <dir> [--cap N] [--floor N] writes one Phase-4 claims file per theme (default\n"
               "cap 40); themes under the floor (default 5) share claims-small.json; --with-prose also\n"
               "writes the prose-N.json reader batches, which are not part of the default budget.\n"
+              "--since <pinned worklist.json> (with --batches) cuts ONLY the claims the map carries\n"
+              "  that the pin never held — a SECOND WAVE — as claims-added-<theme>-N.json, beside\n"
+              "  the first wave's files and without touching them. `grounding write` folds their\n"
+              "  verdicts into the pin.\n"
               "  most-dangerous-first, each claim carrying its anchor + detail so the skeptics are\n"
               "  not handed a bare `C1 calls C2`. Not build-fragments/ — assemble globs that.\n"
               "  Each worklist item carries `theme` (a closed, most-dangerous-first set) and\n"
@@ -1810,8 +1835,10 @@ def _run(argv: list[str] | None = None) -> int:
     batches_out = _opt_value(argv, "--batches")
     cap_raw = _opt_value(argv, "--cap")
     floor_raw = _opt_value(argv, "--floor")
+    since_raw = _opt_value(argv, "--since")
     with_prose = "--with-prose" in argv
-    for flag, val in (("--batches", batches_out), ("--cap", cap_raw), ("--floor", floor_raw)):
+    for flag, val in (("--batches", batches_out), ("--cap", cap_raw), ("--floor", floor_raw),
+                      ("--since", since_raw)):
         if flag in argv and val is None:
             print(f"ERROR: {flag} needs a value (a value starting with '-' is not one)",
                   file=sys.stderr)
@@ -1820,7 +1847,7 @@ def _run(argv: list[str] | None = None) -> int:
     # exit 0: a build asking for JSON silently got prose, with no signal that its flag was a typo.
     # Every sibling command already refuses; these two were the exceptions.
     _known = ("--verbose", "--json", "--batches", "--cap", "--floor", "--with-behavioural",
-              "--with-prose")
+              "--with-prose", "--since")
     unknown = [a for a in argv if a.startswith("-") and a not in _known
                and not any(a.startswith(k + "=") for k in _known)]
     if unknown:
@@ -1837,7 +1864,7 @@ def _run(argv: list[str] | None = None) -> int:
         if skip:
             skip = False
             continue
-        if a in ("--batches", "--cap", "--floor"):
+        if a in ("--batches", "--cap", "--floor", "--since"):
             skip = True
             continue
         if not a.startswith("-"):
@@ -1853,7 +1880,27 @@ def _run(argv: list[str] | None = None) -> int:
         return 1
     findings = audit_model(m)
     behavioural = "--with-behavioural" in argv
+    if since_raw is not None:
+        if batches_out is None:
+            print("ERROR: --since cuts a second wave's batches, so it needs --batches <dir>",
+                  file=sys.stderr)
+            return 2
+        # AT THE PIN'S OWN TIER, like `grounding write`: a behavioural pin read at the default tier
+        # would call every behaviour claim new.
+        behavioural = behavioural or pinned_tier(Path(since_raw))
     worklist = l2_worklist_model(m, behavioural=behavioural)
+    batch_prefix = ""
+    if since_raw is not None:
+        try:
+            pinned = set(pinned_claims(Path(since_raw)))
+        except (OSError, ValueError, AttributeError) as e:
+            print(f"ERROR: --since {since_raw} is not a pinned worklist ({e})", file=sys.stderr)
+            return 2
+        worklist = [w for w in worklist if w.claim not in pinned]
+        batch_prefix = SECOND_WAVE_PREFIX
+        if not worklist:
+            print(f"nothing added since the pin: every claim this map makes is in {since_raw}")
+            return 0
     if behavioural:
         # THE LIMIT THIS USED TO STATE IS GONE. `grounding write` now recomputes the live surface at
         # the PINNED worklist's own tier (`grounding.worklist_is_behavioural`), so a record built
@@ -1910,7 +1957,8 @@ def _run(argv: list[str] | None = None) -> int:
             print(f"ERROR: --floor must be an integer, got '{floor_raw}'", file=sys.stderr)
             return 2
         try:
-            written = write_theme_batches(worklist, out_dir, cap, floor=floor)
+            written = write_theme_batches(worklist, out_dir, cap, floor=floor,
+                                          prefix=batch_prefix)
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
@@ -1918,6 +1966,13 @@ def _run(argv: list[str] | None = None) -> int:
             print(f"{name}: {n} claim(s)")
         print(f"wrote {len(written)} theme batch(es) to {out_dir} — {len(worklist)} claim(s) total, "
               f"each carrying its anchor and detail")
+        if batch_prefix:
+            # A second wave is its own small fan-out: the reader-batch step below belongs to the
+            # first, and the stale-prose sweep must not delete what the first wave minted.
+            print(f"second wave: {len(worklist)} claim(s) added since the pin. Brief them with "
+                  f"`coyomap contract skeptic --from-batches {out_dir} --prefix {batch_prefix} …`; "
+                  f"`grounding write --map` (inside `ship`) folds their verdicts into the pin.")
+            return 0
         # The read fan-out rides the same flag: one command cuts both kinds of work, so a lead
         # cannot dispatch the skeptics and silently skip the read. Its findings are ADVICE about how
         # the map READS, never about whether it is true, so they never gate anything.

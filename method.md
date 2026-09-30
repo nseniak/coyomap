@@ -2721,6 +2721,16 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   Read both before writing the note: a build that read neither shipped two refuted claims and
   hand-diffed the post-pin set in python to find what the section would have listed.
 
+  **The claims added since the pin get a SECOND WAVE.** A text corrected after the vote, or an edge
+  written after it, is a claim no skeptic saw. `coyomap audit <map> --batches .coyomap/verify
+  --since .coyomap/verify/worklist.json` cuts only those, as `claims-added-*.json` beside the first
+  wave's files; brief them with `coyomap contract skeptic --from-batches .coyomap/verify --prefix
+  added- …`, dispatch, and run `ship` again. Its `grounding write` folds their verdicts into the pin
+  and keeps the first pin as `verify/worklist-wave1.json`; their refutations are reconciled from
+  `grounding report` like the first wave's. **Never re-pin with a fresh `audit --json`:**
+  `grounding write` refuses every verdict cast on the old wording. On one build 68 claims shipped
+  with no verdict, 6 of them re-worded sites of access rules, because no route here reached them.
+
   `claims_total` keeps the full 1,608 and `claims_challenged` says 319, so the unchallenged
   remainder is visible in the record itself rather than in prose. The `--note` is required (the
   counts say how many, never why those), and passing `--partial` on a pass that turns out to be

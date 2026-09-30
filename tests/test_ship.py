@@ -443,3 +443,27 @@ def test_without_the_flag_the_report_step_is_unchanged():
     with tempfile.TemporaryDirectory() as td:
         steps = ship.build_plan(make_inputs(make_repo(td)))
         assert "--agent-transcripts" not in steps[-1].argv, steps[-1].argv
+
+
+def test_a_second_waves_verdict_file_reaches_grounding_write():
+    """Retro 2026-09-30, finding 4: `grounding write --map` folds a verdict on a claim the map
+    makes and the pin never held into the pin. Filtering on the pin alone handed the second wave's
+    file to nobody, so the route the method names would have run and recorded nothing. A claim in
+    neither the pin nor the map still holds its file back."""
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "note.txt").write_text("a note", encoding="utf-8")
+        out = _ship_dirs(tmp, ["c1"], {"pinned": ["c1"], "added-backbone-1": ["C3 reads E1"],
+                                       "stale": ["C9 calls C10"]})
+        (out / "project-map.json").write_text(json.dumps({
+            "format": "coyomap-map", "title": "T", "goal": "g",
+            "components": [{"id": "C3", "name": "Reader", "purpose": "reads the record"}],
+            "entities": [{"id": "E1", "name": "Record", "meaning": "a saved row"}],
+            "edges": [{"src": "C3", "verb": "reads", "dst": "E1", "why": "w", "where": "b.py:2"}]}),
+            encoding="utf-8")
+        argvs = _plan_argvs(out, tmp)
+    write = " ".join(next(a for t, a in argvs.items() if t.startswith("grounding write")))
+    assert "verdicts-added-backbone-1.json" in write, write
+    assert "verdicts-stale.json" not in write, write

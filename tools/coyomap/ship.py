@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Callable
 
 from coyomap.access_surface import newest_archived_map
+from coyomap.audit_model import l2_worklist_model
+from coyomap.model import load_model, resolve_map_path
 
 USAGE = """usage: coyomap ship <repo> [--note-file <path>] [--partial] [--keep-note]
                     [--note-cites-other-runs]
@@ -221,26 +223,45 @@ def _pinned_verdict_flags(s: ShipInputs) -> list[str]:
     is what `claims_live_challenged` is for. The alternative is not a better record; it is
     `grounding write` refusing and no record at all.
 
-    Dropped files are NAMED by the caller, because a lost sole vote must be visible."""
-    pinned = set(_worklist_claims(s.worklist))
-    if not pinned:
+    Dropped files are NAMED by the caller, because a lost sole vote must be visible.
+
+    A SECOND WAVE IS NOT DROPPED. `grounding write --map` folds a verdict on a claim the map makes
+    and the pin never held into the pin (retro 2026-09-30, finding 4), so only a claim in NEITHER is
+    a reason to hold a file back. Filtering on the pin alone would have handed the second wave's
+    files to nobody, and the route the method now names would have run and recorded nothing."""
+    allowed = _write_accepts(s)
+    if not allowed:
         return _verdict_flags(s)
     flags: list[str] = []
     for v in s.verdicts:
         claims = _verdict_claims(v)
-        if claims and not (claims <= pinned):
-            continue                # holds a post-pin claim: `grounding write` would refuse the set
+        if claims and not (claims <= allowed):
+            continue                # a claim neither pinned nor live: `grounding write` would refuse
         flags += ["--verdicts", str(v)]
     return flags
 
 
 def post_pin_verdicts(s: ShipInputs) -> list[Path]:
     """The verdict files `grounding write` cannot be given — named so a lost vote is visible."""
-    pinned = set(_worklist_claims(s.worklist))
-    if not pinned:
+    allowed = _write_accepts(s)
+    if not allowed:
         return []
     return [v for v in s.verdicts
-            if (claims := _verdict_claims(v)) and not (claims <= pinned)]
+            if (claims := _verdict_claims(v)) and not (claims <= allowed)]
+
+
+def _write_accepts(s: ShipInputs) -> set[str]:
+    """The claims `grounding write --map` takes a verdict on: the pin, plus the claims the map makes
+    now (a second wave). Empty when there is no pin, which lets every file through as before. Read
+    at plan time, from the map the previous assemble wrote — the one the second wave was cut from."""
+    pinned = set(_worklist_claims(s.worklist))
+    if not pinned:
+        return set()
+    try:
+        m = load_model(resolve_map_path(s.map_path).read_text(encoding="utf-8"))
+    except Exception:                  # noqa: BLE001 — an unreadable map keeps the pin-only filter
+        return pinned
+    return pinned | {w.claim for w in l2_worklist_model(m, behavioural=s.behavioural)}
 
 
 def _worklist_claims(path: Path) -> set[str]:
@@ -453,8 +474,8 @@ def main(argv: list[str] | None = None) -> int:
     # unchallenged. A silent drop would make that indistinguishable from nobody having voted.
     dropped = post_pin_verdicts(inputs)
     if dropped:
-        print(f"ship: note — {len(dropped)} verdict file(s) hold claims outside the pinned "
-              f"worklist, so `grounding write` is given the other "
+        print(f"ship: note — {len(dropped)} verdict file(s) hold claims neither in the pinned "
+              f"worklist nor in the map, so `grounding write` is given the other "
               f"{len(inputs.verdicts) - len(dropped)}: "
               f"{', '.join(p.name for p in dropped)}. `finalize` still reads all "
               f"{len(inputs.verdicts)}. Those votes count toward the LIVE map, never toward "

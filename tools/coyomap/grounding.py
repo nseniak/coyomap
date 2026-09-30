@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -34,7 +35,16 @@ from pathlib import Path
 
 from coyomap import subverb_help
 from coyomap.anchor_drift import load_verdicts
-from coyomap.audit_model import ClaimTarget, claim_digest, l2_worklist_model, pinned_tier, resolve_claim
+from coyomap.audit_model import (
+    ClaimTarget,
+    WorkItem,
+    claim_digest,
+    l2_worklist_model,
+    pinned_claims,
+    pinned_tier,
+    resolve_claim,
+    worklist_payload,
+)
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 
@@ -695,6 +705,55 @@ def live_claims_digest(claims: "Iterable[str]") -> str:
     return claim_digest(claims)
 
 
+#: Where the first pin is kept once a second wave extends `worklist.json`, the way an update keeps
+#: the list it replaced as `worklist-<from>.json`.
+FIRST_PIN = "worklist-wave1.json"
+
+
+def second_wave(pinned: list[str], grounding_rows: list[dict], live: list[str]) -> list[str]:
+    """Live claims the pin never held that a skeptic voted on — a SECOND WAVE — in live order.
+
+    `write` refused every verdict outside the pin as a sign of the wrong snapshot. That is right for
+    a claim the map no longer makes, and wrong for one it makes and the pin never held: a text
+    corrected after the vote, an edge written after it. On the 2026-09-30 mcpolis build 68 such
+    claims shipped with no verdict, 6 of them re-worded sites of access rules, because the only
+    route that worked (a hand-merged worklist) was described nowhere."""
+    pin = set(pinned)
+    voted = {r.get("claim") for r in split_closer_rows(grounding_rows).skeptics}
+    return [c for c in dict.fromkeys(live) if c in voted and c not in pin]
+
+
+def repin_second_wave(worklist_path: Path, wave: list[WorkItem]) -> Path:
+    """Append a second wave's claims to the pinned worklist, keeping the first pin beside it as
+    `worklist-wave1.json` — the re-pin an update's `changes ground` does, for a build's own second
+    wave. Idempotent: on a re-run the wave is already pinned and `second_wave` finds nothing."""
+    first = worklist_path.with_name(FIRST_PIN)
+    if not first.exists():
+        shutil.copy(worklist_path, first)
+    payload: object = json.loads(worklist_path.read_text(encoding="utf-8"))
+    added = worklist_payload([], wave)["worklist"]
+    assert isinstance(added, list)
+    out: object
+    if isinstance(payload, list):
+        out = [*payload, *added]
+    elif isinstance(payload, dict):
+        held = payload.get("worklist")
+        items: list[object] = [*(held if isinstance(held, list) else []), *added]
+        counts: dict[str, int] = {}
+        for i in items:
+            theme = i.get("theme") if isinstance(i, dict) else None
+            if isinstance(theme, str):
+                counts[theme] = counts.get(theme, 0) + 1
+        before = payload.get("second_wave")
+        out = {**payload, "worklist": items, "theme_counts": counts,
+               "second_wave": (before if isinstance(before, int) else 0) + len(wave)}
+    else:
+        raise ValueError(f"{worklist_path} is not a pinned worklist")
+    worklist_path.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n",
+                             encoding="utf-8")
+    return first
+
+
 def build_record(worklist_claims: list[str], grounding_rows: list[dict],
                  note: str = "", live_claims: "list[str] | None" = None,
                  partial: bool = False,
@@ -742,7 +801,12 @@ def build_record(worklist_claims: list[str], grounding_rows: list[dict],
             f"{len(orphans)} verdict claim(s) are not in the pinned worklist — the --worklist file is "
             f"a DIFFERENT snapshot from the one the skeptics were given (it was probably re-derived "
             f"after the refutations were applied). Capture `audit --json` BEFORE the fixes. "
-            f"First: {orphans[0][:100]}")
+            + ("A verdict on a claim the shipped map makes and the pin never held is a second "
+               "wave, and `write --map` folds it into the pin; these are in neither. "
+               if live_claims is not None else
+               "Pass `--map`: a verdict on a claim the shipped map makes and the pin never held is "
+               "a second wave, which `write --map` folds into the pin. ")
+            + f"First: {orphans[0][:100]}")
     # An unvoted claim has TWO causes that look identical from here: a pass that deliberately
     # challenged the top slice of a ranked worklist, and a pass whose skeptics silently died or that
     # was handed the wrong snapshot. The second is the failure this whole record exists to catch, so
@@ -1025,8 +1089,11 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
     # exists to explain — first by listing FEWER than the record counted, then, once that was fixed,
     # by listing MORE.
     _seen: set[str] = set()
-    worklist_claims = [c for c in worklist_claims
-                       if not (c in _seen or _seen.add(c))]
+    pin_claims = [c for c in worklist_claims if not (c in _seen or _seen.add(c))]
+    # A SECOND WAVE is bucketed with the pin, exactly as `write --map` will fold it: its refutations
+    # have to be reconciled from this report like the first wave's.
+    waved = second_wave(pin_claims, grounding_rows, live_claims) if live_claims is not None else []
+    worklist_claims = pin_claims + waved
     buckets: dict[str, list[dict[str, object]]] = {
         "refuted": [], "unverifiable": [], "tied": [], "unvoted": [], "confirmed": [],
         "superseded": [], "refuted_not_superseded": []}
@@ -1187,15 +1254,17 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
     # file itself to extend it — against the rule that the pin is not re-derived. Listing them
     # here is the read half of that job, and it is the half that needed no hand script.
     if live is not None:
-        pinned = set(worklist_claims)
+        pinned = set(pin_claims)
         added = [c for c in dict.fromkeys(live_claims or []) if c not in pinned]
         if added:
             out.append(f"\nADDED SINCE THE PIN ({len(added)}) — in the shipped map, never in the "
-                       f"pinned worklist, so no skeptic saw them. Challenge them, or say in the "
-                       f"note why they were not re-challenged; `claims_challenged` counts the pin "
-                       f"and will keep reading as full coverage either way:")
+                       f"pinned worklist. {len(set(waved) & set(added))} have a verdict from a "
+                       f"second wave, which "
+                       f"`grounding write --map` folds into the pin. Challenge the rest the same "
+                       f"way (`coyomap audit <map> --batches <verify dir> --since <pinned "
+                       f"worklist>` cuts them), or say in the note why they were not challenged:")
             for c in added:
-                out.append(f"  * {c}")
+                out.append(f"  * {'[second wave] ' if c in waved else ''}{c}")
     # THE CLOSER'S ANSWERS. An appeal, never a vote: none of the buckets above moved because of
     # these rows. Listed because the map kept nothing of what the closer decided — on one build 22
     # of 24 refutation judgements were applied on the strength of a chat sentence no later reader
@@ -1825,16 +1894,9 @@ def worklist_is_behavioural(path: Path) -> bool:
 
 
 def _worklist_claims(path: Path) -> list[str]:
-    """Claims from a worklist file, in either shape it legitimately arrives in.
-
-    A BARE LIST is what `coyomap audit --json | jq .worklist` produces, and it is the obvious way
-    to hand this command its input. The list case was already intended — the `isinstance` test was
-    written — but it sat inside the default argument of `.get()`, so reaching it required the
-    attribute access that had already raised. The guard could never run, and the one input shape it
-    existed for was the one that crashed with a traceback."""
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    items = payload if isinstance(payload, list) else payload.get("worklist", [])
-    return [str(i.get("claim", "")) for i in items if isinstance(i, dict)]
+    """Claims from a worklist file — `audit_model.pinned_claims`, the one reader, under the name
+    this module's callers already use."""
+    return pinned_claims(path)
 
 
 @dataclass
@@ -2542,6 +2604,12 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         except Exception as e:
             print(f"ERROR: --map {map_path} could not be read as a map ({e})", file=sys.stderr)
             return 2
+    # A SECOND WAVE, folded into the pin for the report and the record alike: verdicts on claims the
+    # shipped map makes and the pin never held. `write` rewrites the pin file only once the record
+    # is accepted, below.
+    wave: list[str] = []
+    if live_claims is not None and worklist_path and verb in ("report", "write"):
+        wave = second_wave(claims, rows, live_claims)
     if verb == "by-element":
         assert live_model is not None   # guarded above: --map is required for this verb
         # With no `--worklist` the surface is the LIVE map's, which `--map` guarantees is populated.
@@ -2579,12 +2647,13 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
             # report, so printing them here puts them in front of the author before the first try.
             # Errors are discarded on purpose: a report is a READ, and `write` is where a refusal
             # belongs.
-            record, _errors = build_record(claims, rows, live_claims=live_claims)
-            print("\n" + note_facts_block(claims, rows, record, live_claims))
+            record, _errors = build_record(claims + wave, rows, live_claims=live_claims)
+            print("\n" + note_facts_block(claims + wave, rows, record, live_claims))
             print("\nNext: coyomap ship <repo> --note-file <the note you write from this report> "
                   "— the whole closing sequence in one command, stopping at the first failing step "
                   "and naming every step that did not run.")
         return 0
+    claims = claims + wave
     record, errors = build_record(claims, rows, note, live_claims=live_claims, partial=partial)
     # AN UNREADABLE APPEAL WORD, REFUSED HERE. `grounding lint` catches it too, and `ship` never
     # runs `grounding lint` — `method.md` schedules that at COLLECTION, before the closer is even
@@ -2633,6 +2702,13 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         return 1
     payload = {"grounding": record}
     text = json.dumps(payload, indent=2, ensure_ascii=False)
+    if wave and worklist_path and live_model is not None:
+        by_claim = {w.claim: w for w in l2_worklist_model(
+            live_model, behavioural=worklist_is_behavioural(Path(worklist_path)))}
+        first = repin_second_wave(Path(worklist_path), [by_claim[c] for c in wave])
+        print(f"second wave: {len(wave)} claim(s) the pin never held have verdicts; they are now "
+              f"pinned in {worklist_path} (the first pin is kept as {first.name}).",
+              file=sys.stderr)
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(text + "\n", encoding="utf-8")
@@ -2665,8 +2741,10 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
                 print(f"  NOTE: the SHIPPED map carries {live_total} claim(s), of which "
                       f"{live_done} have a verdict — {unvoted} do NOT. "
                       + unvoted_reason(unvoted, added if isinstance(added, int) else 0)
-                      + " Challenge them, or say so in `--note`: `claims_challenged` counts the "
-                      "pinned worklist and will keep reading as full coverage.")
+                      + " Challenge them in a second wave (`coyomap audit <map> --batches "
+                      "<verify dir> --since <pinned worklist>`, then re-run this), or say so in "
+                      "`--note`: `claims_challenged` counts the pinned worklist and will keep "
+                      "reading as full coverage.")
     elif as_json:
         print(text)
     else:

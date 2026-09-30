@@ -1,6 +1,8 @@
 """`coyomap grounding write` — the record `validate` blocks on, derived instead of hand-tallied."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -10,7 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from coyomap import grounding as G  # noqa: E402
+from coyomap.audit_model import l2_worklist_model  # noqa: E402
 from coyomap.grounding import build_record, main  # noqa: E402
+from coyomap.model import load_model  # noqa: E402
 
 
 def make_worklist(*claims: str) -> list[str]:
@@ -1622,3 +1626,82 @@ def test_the_headline_rule_against_all_four_live_notes():
         assert got[0] == expected, (name, got)
     # ...and only reminderrepo's headline disagrees with its own label count
     assert G._headline_skeptic_count(live[3][2])[0] != 38
+
+
+# --- a second wave for the claims written after the pin (retro 2026-09-30, finding 4) -----------
+# `write` refused every verdict on a claim outside the pin, and validate's claim-loss advisory
+# prescribed a re-pin that `write` then refused too. On the 2026-09-30 mcpolis build 68 claims
+# shipped with no verdict, 6 of them re-worded sites of access rules: a hand-merged worklist would
+# have been accepted, and nothing described it.
+
+_WAVE_MAP = {"format": "coyomap-map", "title": "T", "goal": "g", "commit": "abc1234",
+             "components": [{"id": "C3", "name": "Reader", "purpose": "reads the record"}],
+             "entities": [{"id": "E1", "name": "Record", "meaning": "a saved row"}],
+             "edges": [{"src": "C3", "verb": "reads", "dst": "E1", "why": "w", "where": "b.py:2"}]}
+
+
+def make_second_wave(td: Path, orphan: bool = False) -> tuple[Path, Path, Path, list[str]]:
+    """A map, a pin missing its edge claim, and verdicts on the pin plus that claim — the second
+    wave. `orphan` adds a verdict on a claim neither the pin nor the map holds. Returns (worklist,
+    verdicts, map, live claims)."""
+    mp = td / "map.json"
+    mp.write_text(json.dumps(_WAVE_MAP), encoding="utf-8")
+    live = [w.claim for w in l2_worklist_model(load_model(mp.read_text(encoding="utf-8")))]
+    assert "C3 reads E1" in live, live
+    wl = td / "worklist.json"
+    wl.write_text(json.dumps({"worklist": [{"claim": c, "theme": "backbone"}
+                                           for c in live if c != "C3 reads E1"]}), encoding="utf-8")
+    rows = [{"claim": c, "grounded": True, "evidence": "b.py:2", "skeptic": "s1"} for c in live]
+    if orphan:
+        rows.append({"claim": "C9 calls C10", "grounded": True, "evidence": "b.py:2", "skeptic": "s1"})
+    vd = td / "verdicts-added-backbone-1.json"
+    vd.write_text(json.dumps({"grounding": rows}), encoding="utf-8")
+    return wl, vd, mp, live
+
+
+def test_write_folds_a_second_wave_into_the_pin_and_keeps_the_first_pin() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        wl, vd, mp, live = make_second_wave(tmp)
+        first_pin = wl.read_text(encoding="utf-8")
+        argv = ["write", "--worklist", str(wl), "--verdicts", str(vd), "--map", str(mp),
+                "--out", str(tmp / "g.json"), "--note", "second wave on the claim added after the pin"]
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = main(argv)
+        assert code == 0, err.getvalue()
+        record = json.loads((tmp / "g.json").read_text(encoding="utf-8"))["grounding"]
+        assert record["claims_total"] == len(live) and record["claims_added_since"] == 0, record
+        assert record["claims_live_challenged"] == len(live), record
+        assert "C3 reads E1" in G._worklist_claims(wl), "the second wave was not pinned"
+        assert (tmp / "worklist-wave1.json").read_text(encoding="utf-8") == first_pin
+        assert "second wave: 1 claim(s)" in err.getvalue(), err.getvalue()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert main(argv) == 0, "a re-run must find the wave already pinned"
+        assert G._worklist_claims(wl).count("C3 reads E1") == 1
+
+
+def test_a_verdict_on_a_claim_neither_the_pin_nor_the_map_holds_is_still_refused() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        wl, vd, mp, _live = make_second_wave(tmp, orphan=True)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = main(["write", "--worklist", str(wl), "--verdicts", str(vd), "--map", str(mp),
+                         "--out", str(tmp / "g.json"), "--note", "n"])
+        assert code == 1, err.getvalue()
+        assert "1 verdict claim(s) are not in the pinned worklist" in err.getvalue()
+        assert not (tmp / "worklist-wave1.json").exists(), "a refused write re-pinned the worklist"
+
+
+def test_the_report_buckets_a_second_wave_and_marks_it() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        wl, vd, _mp, live = make_second_wave(Path(td))
+        rows = [{**r, "grounded": False, "note": "no such read"} if r["claim"] == "C3 reads E1"
+                else r for r in json.loads(vd.read_text(encoding="utf-8"))["grounding"]]
+        out = G.format_report(G._worklist_claims(wl), rows, live_claims=live)
+        refuted = json.loads(G.format_report(G._worklist_claims(wl), rows, as_json=True,
+                                             live_claims=live))["refuted"]
+    assert "[second wave] C3 reads E1" in out, out
+    assert [r["claim"] for r in refuted] == ["C3 reads E1"], "a second-wave refutation must be " \
+                                                            "reconciled like the first wave's"

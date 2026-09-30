@@ -11,6 +11,8 @@ Stdlib-only — no pytest required. Run either way (needs an editable install: `
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import itertools
 import json
 import re
@@ -2557,3 +2559,34 @@ def test_the_shared_small_batch_is_cut_at_the_cap_and_a_floor_above_the_cap_is_r
     import pytest as _pytest
     with _pytest.raises(ValueError, match="above --cap"):
         write_theme_batches(wl, tmp_path, cap=10, floor=20)
+
+
+def test_since_cuts_only_the_claims_the_pin_never_held_beside_the_first_wave() -> None:
+    """Retro 2026-09-30, finding 4: 68 claims written after the pin shipped with no verdict because
+    no route took them to a skeptic. `--since` cuts them as a second wave, and leaves the first
+    wave's batch files where they are."""
+    doc = {"format": "coyomap-map", "title": "T", "goal": "g",
+           "components": [{"id": "C3", "name": "Reader", "purpose": "reads the record"}],
+           "entities": [{"id": "E1", "name": "Record", "meaning": "a saved row"}],
+           "edges": [{"src": "C3", "verb": "reads", "dst": "E1", "why": "w", "where": "b.py:2"}]}
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mp = tmp / "map.json"
+        mp.write_text(json.dumps(doc), encoding="utf-8")
+        live = [w.claim for w in audit_model.l2_worklist_model(
+            audit_model.load_model(mp.read_text(encoding="utf-8")))]
+        pin = tmp / "worklist.json"
+        pin.write_text(json.dumps({"worklist": [{"claim": c} for c in live
+                                                 if c != "C3 reads E1"]}), encoding="utf-8")
+        verify = tmp / "verify"
+        verify.mkdir()
+        (verify / "claims-backbone-1.json").write_text("{}", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = audit_model.main([str(mp), "--batches", str(verify), "--since", str(pin)])
+        assert code == 0, out.getvalue()
+        added = sorted(verify.glob("claims-added-*.json"))
+        assert added, out.getvalue()
+        claims = [c["claim"] for f in added
+                  for c in json.loads(f.read_text(encoding="utf-8"))["claims"]]
+        assert claims == ["C3 reads E1"], claims
+        assert (verify / "claims-backbone-1.json").exists(), "the first wave's batch was deleted"
