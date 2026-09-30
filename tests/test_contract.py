@@ -1293,11 +1293,18 @@ def test_the_secret_files_rule_grants_no_exception_a_guard_refuses():
     example alone suggested that naming any folder was enough — while `backend/` held example
     files a recursive search would open by pattern."""
     text = contract.render("skeptic")
-    assert "a name that starts with `.env` or `env.` (examples and" in text
+    assert "(a name that starts with `.env`, examples and templates" in text
     assert "excepted" not in text
     assert "One named file that is not a" in text
     assert "Listing a folder is fine" in text
     assert "never a folder that holds a secret file" in text
+
+
+def test_the_secret_files_rule_leaves_source_code_named_env_or_credentials_alone():
+    """Review of finding 6: the rule banned every `env.*` and `credentials*` name, so an agent could
+    not read alembic's `env.py` or a project's `credentials.py`, which are code."""
+    text = contract.render("skeptic")
+    assert "`env.py` is code" in text and "`credentials.py` is code" in text
 
 
 def test_a_brief_of_dissent_only_says_the_refuted_section_is_empty_and_stays_neutral() -> None:

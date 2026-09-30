@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
 from coyomap.access_surface import AccessClaim, held, load_claims, lost_files
 from coyomap.audit_model import l2_worklist_model
-from coyomap.credentials import scan as scan_credentials
+from coyomap.credentials import map_folder_files, redact, scan as scan_credentials
 from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
 from coyomap.contract import BUDGETS_FILE
 from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
@@ -1096,6 +1096,13 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         verdict = "ADVISORIES"
     else:
         verdict = "CLEAN"
+    # NO VALUE LEAVES THROUGH THE REPORT. A leg quotes skeptics' and closers' notes, and a note can
+    # hold a key: the review put one in a dissent note, and the report printed it while the
+    # credential leg blocked on the very same file. Every string every writer reads is here.
+    for leg in legs:
+        leg.blocking = [redact(b) for b in leg.blocking]
+        leg.advisory = [redact(a) for a in leg.advisory]
+        leg.note = redact(leg.note) if leg.note else leg.note
     return FinalizeReport(map_path=str(map_path),
                           map_sha256=hashlib.sha256(map_path.read_bytes()).hexdigest(),
                           legs=legs, verdict=verdict,
@@ -1607,20 +1614,24 @@ def _credential_leg(map_path: Path) -> Leg:
     transcript; it reached no committed file, and nothing would have said so if it had. No recorded
     escape, and none is needed: the remedy is to rewrite one sentence without the value, which costs
     nothing and is always possible. The value itself is never printed (`credentials`)."""
-    fa = force_added(map_path)
-    hits = scan_credentials([*fa.present, *fa.warrant])
+    # THE WHOLE MAP FOLDER, archived maps aside: everything the commit line force-adds, and
+    # `.ignore` and `changes/`, which it takes too and the first version of this leg never read.
+    # Not this command's own report, which this run rewrites from masked strings: counting it made
+    # two identical runs report different numbers.
+    own = {f"{REPORT_STEM}.json", f"{REPORT_STEM}.md"}
+    files = [f for f in map_folder_files(map_path.parent) if f.name not in own]
+    hits = scan_credentials(files)
     by_file: dict[Path, list[str]] = {}
     for h in hits:
         by_file.setdefault(h.path, []).append(f"line {h.line} ({h.shape})")
-    blocking = [f"{path}: {', '.join(where)} — a credential-shaped value in a file the commit line "
-                f"would force-add. Rewrite that text without the value (name the setting, never "
-                f"its value) and re-run finalize; the commit line is withheld until then. If the "
-                f"value is real it is also in the transcript of the agent that wrote it: tell the "
-                f"operator, who decides whether to rotate it."
+    blocking = [f"{path}: {', '.join(where)} — a credential-shaped value in a file of the map "
+                f"folder, which the commit takes. Rewrite that text without the value (name the "
+                f"setting, never its value) and re-run finalize; the commit line is withheld until "
+                f"then. If the value is real it is also in the transcript of the agent that wrote "
+                f"it: tell the operator, who decides whether to rotate it."
                 for path, where in by_file.items()]
-    scanned = len(fa.present) + sum(sum(1 for f in d.rglob("*") if f.is_file()) for d in fa.warrant)
     return Leg("credential scan", RAN, blocking=blocking,
-               note=f"{scanned} file(s) the commit line force-adds, scanned for credential shapes: "
+               note=f"{len(files)} file(s) of the map folder scanned for credential shapes: "
                     f"{len(hits)} hit(s)")
 
 

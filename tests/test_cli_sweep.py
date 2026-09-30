@@ -202,6 +202,8 @@ RECIPES: dict[str, tuple] = {
     # Reads the map and asks the viewer's own generator which lines it draws; writes only --out.
     "line-texts":    (lambda t, m: ["line-texts", "pending", "--map", str(m),
                                     "--out", str(t / "pending.json")], OK),
+    # Reads the files under a folder; writes nothing.
+    "credentials":   (lambda t, m: ["credentials", str(m.parent)], OK),
 }
 
 

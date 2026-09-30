@@ -50,6 +50,7 @@ from coyomap.audit_model import (
     rule_site_claim,
     worklist_payload,
 )
+from coyomap.credentials import redact
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 
@@ -1133,7 +1134,7 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
         buckets["agent_findings"] = [{"agent": f.agent, "task": f.task, "heading": f.heading,
                                       "items": list(f.items)} for f in from_agents]
     if as_json:
-        return json.dumps(buckets, indent=2, ensure_ascii=False)
+        return redact(json.dumps(buckets, indent=2, ensure_ascii=False))
     out: list[str] = []
     # A SUMMARY LINE FIRST, AND THE CRITICAL COUNT AGAIN LAST. This report is read through a pipe,
     # and two opposite narrowings hid two ends of one section on the same build: `| tail -40`
@@ -1323,7 +1324,7 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
                    f"— see REFUTED BUT NOT SUPERSEDED above, and fix the map before shipping it: "
                    + ", ".join(str(r["claim"])[:60] for r in buckets["refuted_not_superseded"][:5])
                    + (" …" if still_live_n > 5 else ""))
-    return "\n".join(out).lstrip("\n")
+    return redact("\n".join(out).lstrip("\n"))
 
 
 # ── per-element checks: what the grounding pass actually did to each element ──────────────────────
@@ -1857,7 +1858,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
     appealed = settled_on_appeal(m, grounding_rows or []) if m else []
     dissent = access_dissent(m, grounding_rows or [], pinned) if m else []
     if as_json:
-        return json.dumps({
+        return redact(json.dumps({
             "surviving_refutations": [
                 {"claim": s.claim, "id": s.element_id, "kind": s.kind, "label": s.label,
                  "refuted_by": s.refuted_by, "note": s.note, "closed": s.closed,
@@ -1887,7 +1888,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
                      {"sites_voted": reworded[e.element_id][0],
                       "sites": reworded[e.element_id][1]}
                      if e.element_id in reworded else None)} for e in unseen],
-        }, indent=2, ensure_ascii=False)
+        }, indent=2, ensure_ascii=False))
     lines: list[str] = []
     if surviving:
         lines.append(f"{len(surviving)} REFUTED claim(s) are still in this map, unchanged. The "
@@ -1950,7 +1951,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
                 lines.append(f"  {len(again)} of those ACCESS rules were re-worded after the vote: "
                              f"the skeptics voted on an older wording at the same line(s): "
                              f"{', '.join(again[:8])}")
-    return "\n".join(lines)
+    return redact("\n".join(lines))
 
 
 def worklist_is_behavioural(path: Path) -> bool:

@@ -1951,3 +1951,23 @@ def test_the_refutations_verb_exits_1_on_an_unheard_access_dissent() -> None:
 def test_the_refutations_verb_exits_0_when_only_a_reported_step_survives() -> None:
     _root, p, files = make_refuted_step_repo(None)
     assert _refutations_exit(p, files) == 0
+
+
+
+def test_a_key_in_a_dissent_note_never_reaches_the_report() -> None:
+    """Review of finding 6: the credential leg blocked on the verdict file, and the same report
+    printed the dissent note, value and all. The value is built from filler at run time."""
+    value = "AK" + "IA" + "Z" * 16
+    root, p, files, _claim = make_access_dissent_repo(None)
+    doc = json.loads(files[0].read_text(encoding="utf-8"))
+    for row in doc["grounding"]:
+        if row["grounded"] is False:
+            row["note"] = f"the config holds {value} for the caller"
+    files[0].write_text(json.dumps(doc), encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        finalize.main([str(p), "--repo", str(root), "--verdicts", *[str(f) for f in files]])
+    written = "".join((root / ".coyomap" / f"finalize-report.{ext}").read_text(encoding="utf-8")
+                      for ext in ("md", "json"))
+    assert value not in out.getvalue() and value not in written
+    assert "credential-shaped value" in written

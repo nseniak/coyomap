@@ -485,7 +485,7 @@ def bash_commands(turns: Sequence[Turn]) -> tuple[tuple[int, str], ...]:
 #: `files`, `loc`, `map` and `runs`.
 _COYOMAP_SUBCOMMANDS = frozenset({
     "anchor-drift", "archive", "arrows", "assemble", "audit", "balance", "bless", "changes", "claims",
-    "compare", "impact", "reanchor",
+    "compare", "credentials", "impact", "reanchor",
     "contract", "cost", "diff", "dump", "field-score", "finalize", "fix", "grounding", "hash", "judge",
     "ledger", "line-texts", "lint-fragment", "live-numbers",
     "mutate", "preindex",

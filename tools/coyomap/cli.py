@@ -100,6 +100,10 @@ Commands:
              with whole lists. Adds no check of its own and compares nothing against
              a previous map. A convenience wrapper, not an enforcement point — exit 1
              for what validate/audit already block on, or when a check did not run.
+  credentials Scan the map folder for credential-shaped values (vendor key prefixes, key
+             blocks, web tokens), archived maps aside: each hit's file, line and shape, never the
+             value, and exit 1 on any. finalize runs it for a build; an update runs it before its
+             commit.
   scope      The up-front briefing, before any work: which files will be analyzed
              (git decides — .gitignore is out), what `.coyomap/.ignore` removed, and
              which commit the map will be pinned to, warning when uncommitted code
@@ -245,6 +249,9 @@ def _dispatch(cmd: str, rest: list[str]) -> int:
     if cmd == "record":
         from coyomap import record  # stdlib-only; the one writer for a recorded exception
         return record.main(rest)
+    if cmd == "credentials":
+        from coyomap import credentials  # stdlib-only; the scan finalize runs, for an update's close
+        return credentials.main(rest)
     if cmd == "timings":
         from coyomap import timings  # stdlib-only; build telemetry beside the map, never in it
         return timings.main(rest)

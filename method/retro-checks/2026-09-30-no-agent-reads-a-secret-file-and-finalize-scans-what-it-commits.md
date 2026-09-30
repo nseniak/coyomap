@@ -33,3 +33,9 @@ shared; do not run the eval.
 4. expect: every brief in the build's scratchpad carries "Some files are never read, and never
    searched."
    regression sign: a brief composed by hand without it.
+
+4. expect (after the review): `finalize-report.md`, the gate block and the grounding reports show
+   no credential-shaped value even when a verdict note holds one (each is masked), and an update's
+   close runs `coyomap credentials .coyomap` before its commit.
+   regression sign: a key-shaped value in any report file, or an update commit with no
+   `coyomap credentials` run before it in the transcript.
