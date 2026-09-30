@@ -2191,9 +2191,11 @@ synthesis → parallel trace.**
   use case structurally guarantees that components off every traced flow get no edges, so the
   gap-fill is predictable, not a surprise: discovering the edgeless set only after the trace agents
   finish costs a serial dispatch, plus rework of anything written too early. **The rules and tests
-  agents read the map assembled WITH the gap-fill's fragment:** assemble after it lands, then
-  dispatch them, and point them at the map itself rather than a copy. One build handed them a copy
-  taken before the gap-fill landed, and both worked from a map missing 121 of 143 gap-fill edges;
+  agents read the map assembled WITH the gap-fill's fragment:** assemble after it lands, even
+  when a map already sits at `.coyomap/project-map.json` (that one was assembled before the
+  gap-fill), then dispatch them, and point them at the map itself rather than a copy. One build
+  handed them a copy taken before the gap-fill landed, and both worked from a map missing 121 of
+  143 gap-fill edges;
   `assemble` writes the map whole (a temporary file, then one rename), so a reader never meets half
   a file. Seed that slice from
   the post-synthesis edgeless set, and get its brief from `coyomap contract gapfill` — never by
@@ -2975,7 +2977,8 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
         what `grounding.note` is written from.
     5b. YOURS, while you write the note — the Architecture line texts: `line-texts pending`, then
         ONE writer (`contract line-texts`), `line-texts check-input` AFTER the writer has handed
-        back, ONE FRESH checker (`contract line-texts-check`), and `line-texts record`. Nothing
+        back, ONE FRESH checker (`contract line-texts-check`), and `line-texts record`, before
+        step 12: `finalize` lists `line-texts.json` for the commit only when it exists. Nothing
         pending: skip both agents.
     6.  grounding write, measured against the map it describes.
     7.  assemble again, carrying the RECORD in. Idempotent, and not optional — skip it and the
@@ -3004,7 +3007,8 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     `ship` does not run it; these are yours, with `LT=<repo>/.coyomap/build-fragments/line-texts`:
 
     ```
-    mkdir -p $LT && .venv/bin/coyomap line-texts pending --out $LT/pending.json
+    mkdir -p $LT && .venv/bin/coyomap line-texts pending --map <repo>/.coyomap/project-map.json \
+        --out $LT/pending.json
     #   the writer: `contract line-texts --fill`, with LINES=$LT/pending.json, OUT=$LT/written.json
     #   ...and only once it has HANDED BACK: it rewrites OUT as it goes, so its file is final then
     .venv/bin/coyomap line-texts check-input --lines $LT/pending.json --texts $LT/written.json \
@@ -3012,8 +3016,10 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     #   the checker: `contract line-texts-check --fill`, with TEXTS=$LT/to-check.json,
     #   OUT=$LT/verdicts.json, and an AGENT_ID that is not the writer's
     .venv/bin/coyomap line-texts record --texts $LT/written.json --checked $LT/to-check.json \
-        --verdicts $LT/verdicts.json
+        --verdicts $LT/verdicts.json --map <repo>/.coyomap/project-map.json
     ```
+    `pending` and `record` name the map, because without `--map` they read the map in the folder
+    they run from: run from the coyomap folder, that is coyomap's own map.
 
     - **`record` keeps a text only as the checker read it.** A text that differs from the one in
       `to-check.json` is not kept, whatever its verdict, and `record` names it: on one build the
