@@ -1135,8 +1135,10 @@ def claims_block(m: ProjectModel, claims: list[DisputedClaim]) -> str:
         out.append(f"## {OUTVOTED_DISSENT} — the majority CONFIRMED these, and a skeptic refuted "
                    f"them")
         out.append("A split vote files the claim as confirmed, and the dissent then appears in no "
-                   "count. Judge each one exactly as above: **uphold** means the claim is false "
-                   "as the map states it; **reject** means the claim holds as the map states it.")
+                   "count. Judge each one by the same steps as every other entry (How to judge, "
+                   "below): **uphold** — the dissenting skeptic is right, and the code contradicts "
+                   "the claim as the map states it; **reject** — the dissent is wrong, and the "
+                   "claim holds as the map states it.")
         out.append("")
         for c in dissent:
             out.extend(_claim_entry(m, c))

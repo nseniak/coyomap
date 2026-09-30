@@ -1288,6 +1288,17 @@ def test_every_brief_names_the_files_never_read_and_says_to_search_named_folders
         assert "Search with explicit paths:" in text, name
 
 
+def test_the_secret_files_rule_grants_no_exception_a_guard_refuses():
+    """From the partial run of the rule (2026-09-30): an exception for committed example files,
+    "read by its exact name", drew a guard refusal the moment a skeptic used it, and the folder
+    example alone suggested that naming any folder was enough — while `backend/` held example
+    files a recursive search would open by pattern."""
+    text = contract.render("skeptic")
+    assert "the committed examples too" in text and "excepted" not in text
+    assert "Listing a folder is fine" in text
+    assert "never a folder that holds a secret file" in text
+
+
 def test_a_brief_of_dissent_only_says_the_refuted_section_is_empty_and_stays_neutral() -> None:
     """From the partial run of the dissent section (2026-09-30): an empty 'refuted claims' heading
     read as lost entries; a sentence about what happened to a dissent once before pushed the closer
@@ -1302,5 +1313,6 @@ def test_a_brief_of_dissent_only_says_the_refuted_section_is_empty_and_stays_neu
         block = contract.claims_block(load_model(_tiny_map()), claims)
     assert block.startswith("None this time: every claim in this brief is an outvoted dissent")
     dissent = block.partition(f"## {contract.OUTVOTED_DISSENT}")[2]
-    assert "**reject** means the claim holds as the map states it" in dissent
+    assert "**reject** — the dissent is wrong, and the claim holds as the map states it" in dissent
+    assert "same steps as every other entry (How to judge, below)" in dissent
     assert "shipped `verified`" not in dissent and "duplicate votes" not in dissent

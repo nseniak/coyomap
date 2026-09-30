@@ -73,7 +73,7 @@ lead; nothing above this line goes into an agent prompt.
 >
 > ## What you are given per claim
 >
-> Each entry below carries four things:
+> Each entry below carries three things:
 > - **the claim**, word for word as the map states it;
 > - **the map rows behind it** — the element and its arrows, as the map holds them. This is what the
 >   claim is ABOUT; read it before you read the skeptics;
@@ -82,8 +82,9 @@ lead; nothing above this line goes into an agent prompt.
 >   yours to weigh; the rest of the map's confirmed claims are not in this brief, on purpose.
 >
 > The entries under **Outvoted dissent** are claims the majority CONFIRMED while a skeptic refuted
-> them. Judge them the same way: **uphold** means the claim is false as the map states it;
-> **reject** means the claim holds as the map states it.
+> them. Judge them by the same steps: **uphold** — the dissenting skeptic is right, and the code
+> contradicts the claim as the map states it; **reject** — the dissent is wrong, and the claim holds
+> as the map states it.
 >
 > If a claim's map rows are MISSING from this brief, say so and return `unsure` for it. Do not
 > answer a question about a row you were not given: guessing at it is the exact failure this
