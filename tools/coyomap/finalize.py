@@ -433,6 +433,11 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
     appealed = list(payload.get("settled_on_appeal") or [])
     stated = list(payload.get("unseen_by_any_skeptic") or [])
     dissent = list(payload.get("access_dissent") or [])
+    # A WALK STEP OR AN INTERFACE CLAIM IS REPORTED, NOT BLOCKED (`grounding.REPORT_ONLY_KINDS`):
+    # the gate could not place those claims at all until 2026-09-30, and gating on them before the
+    # closer's ruling on disputed appeals is fixed would have stopped that very build.
+    report_only = [s for s in surviving if s.get("blocks") is False]
+    surviving = [s for s in surviving if s.get("blocks") is not False]
     blocking = [f"{s['claim']} — REFUTED by {s['refuted_by']} skeptic(s)"
                 + (" and outvoted, then UPHELD on appeal," if s.get("outvoted") else "")
                 + f" and still in the map, unchanged. Correct the claim or drop the row; a "
@@ -551,10 +556,22 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
             + (f" … and {len(unsettled) - 4} more" if len(unsettled) > 4 else "")
             + ". Each stands on the majority vote alone. Send it to a second closer, or correct "
               "the claim if the dissent is right."))
+    if report_only:
+        advisory.insert(0, (
+            f"{len(report_only)} refuted walk-step or interface claim(s) are still in the map, "
+            f"unchanged — reported, not blocking yet: "
+            + "; ".join(f"{s['claim'][:110]} (refuted by {s['refuted_by']}"
+                        + (f", closer said {s['closed']}" if s.get("closed") else "") + ")"
+                        for s in report_only[:6])
+            + (f" … and {len(report_only) - 6} more" if len(report_only) > 6 else "")
+            + ". Correct each step or drop it, as for any refutation; a claim a closer rejected "
+              "is not here."))
     unheard = len(dissent) - len(unsettled)
     return Leg("grounding refutations", RAN if code in (0, 1) else FAILED,
                blocking=blocking, advisory=advisory,
-               note=(f"{len(surviving)} refuted claim(s) still in the map, "
+               note=(f"{len(surviving)} refuted claim(s) still in the map"
+                     + (f" and {len(report_only)} reported, not blocking" if report_only else "")
+                     + ", "
                      + (f"{len(appealed)} settled on appeal, " if appealed else "")
                      + (f"{unheard} access dissent(s) no closer heard, " if unheard else "")
                      + f"{len(unchecked)} element(s) no skeptic looked at"))

@@ -1733,3 +1733,45 @@ def test_a_clean_map_keeps_its_commit_line() -> None:
     with contextlib.redirect_stdout(out):
         finalize.main([str(p), "--repo", str(root), "--no-write"])
     assert "git add -f" in out.getvalue()
+
+
+# --- a refuted walk step is reported, not blocked (retro 2026-09-30, finding 1) -----------------
+# The gate could not place a flow-step claim at all, so it answered "0 refuted claim(s) still in the
+# map" while `grounding report` listed 3. It sees them now, and REPORTS them without blocking:
+# blocking waits for the closer's ruling on disputed appeals (finding 15), or it would have stopped
+# that build on two steps whose appeals disagree.
+
+def make_refuted_step_repo(closer_word: str | None) -> tuple[Path, Path, list[Path]]:
+    """The finalize fixture map with its step 2 refuted by one skeptic, and the closer's word on it
+    when `closer_word` names one."""
+    root, p = make_repo()
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    claim = "UC1 step 2: C1 → C2 — forwards"
+    files = [verify / "verdicts-behaviour-1.json"]
+    files[0].write_text(json.dumps({"grounding": [
+        {"claim": claim, "grounded": False, "evidence": "src/a.py:2", "skeptic": "behaviour-1",
+         "note": "it answers, it forwards nothing"}]}), encoding="utf-8")
+    if closer_word:
+        files.append(verify / "closer-c1.json")
+        files[1].write_text(json.dumps({"grounding": [
+            {"id": "behaviour-1#1", "claim": claim, "verdict": closer_word,
+             "grounded": {"uphold": False, "reject": True}[closer_word],
+             "evidence": "src/a.py:2", "skeptic": "c1", "note": "read the line"}]}),
+            encoding="utf-8")
+    return root, p, files
+
+
+def test_a_refuted_step_still_in_the_map_is_reported_and_does_not_block():
+    _root, p, files = make_refuted_step_repo(None)
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking, leg.blocking
+    assert any("UC1 step 2: C1 → C2 — forwards" in a and "reported, not blocking" in a
+               for a in leg.advisory), leg.advisory
+
+
+def test_a_step_the_closer_rejected_is_disclosed_as_settled_on_appeal():
+    _root, p, files = make_refuted_step_repo("reject")
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking
+    assert any("CLOSER REJECTED" in a and "UC1 step 2" in a for a in leg.advisory), leg.advisory

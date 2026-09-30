@@ -36,6 +36,7 @@ from pathlib import Path
 from coyomap import subverb_help
 from coyomap.anchor_drift import load_verdicts
 from coyomap.audit_model import (
+    WALK_AND_INTERFACE_KINDS,
     ClaimTarget,
     WorkItem,
     claim_digest,
@@ -1622,6 +1623,20 @@ class SurvivingRefutation:
     outvoted: bool = False
 
 
+#: The claim kinds the gate REPORTS and does not block on: a walk step, a use case's sentence, a
+#: `theirs` interface and a derived far side. The resolver could not place any of them until
+#: 2026-09-30 (retro finding 1), so no build has ever been gated on them, and blocking now would
+#: have stopped the build that finding came from on two steps whose appeals disagree (one closer
+#: `unsure`, one `reject`) — the ruling on such a pair is its own finding, not yet fixed. They block
+#: once it is.
+REPORT_ONLY_KINDS = WALK_AND_INTERFACE_KINDS
+
+
+def blocks(s: "SurvivingRefutation") -> bool:
+    """Does this surviving refutation stop the map? Every kind but the report-only ones."""
+    return s.kind not in REPORT_ONLY_KINDS
+
+
 def surviving_refutations(m: ProjectModel,
                           grounding_rows: list[dict]) -> list[SurvivingRefutation]:
     """The refutations the shipped map still carries.
@@ -1794,7 +1809,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
             "surviving_refutations": [
                 {"claim": s.claim, "id": s.element_id, "kind": s.kind, "label": s.label,
                  "refuted_by": s.refuted_by, "note": s.note, "closed": s.closed,
-                 "outvoted": s.outvoted}
+                 "outvoted": s.outvoted, "blocks": blocks(s)}
                 for s in surviving],
             # Access claims the majority confirmed over a refutation no closer settled. `closed`
             # "" = nobody ruled (finalize blocks), else the closer's unsettled word.
@@ -1824,6 +1839,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
             lines.append(f"  - {s.claim}   [{s.kind}{' ' + s.element_id if s.element_id else ''}, "
                          f"refuted by {s.refuted_by}"
                          + (", outvoted by the majority" if s.outvoted else "")
+                         + ("" if blocks(s) else ", reported, not blocking")
                          + (f", two appeals DISAGREE" if s.closed == DISPUTED
                             else f", closer said {s.closed.upper()}" if s.closed else "") + "]")
             if s.note:
@@ -2513,7 +2529,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         # disproved, which is the one shape here that makes the map wrong rather than unclear.
         # An access dissent no closer ruled on blocks too: its remedy is one closer brief away.
         unheard = [d for d in access_dissent(live, rows) if not d.closed]
-        return 1 if surviving or unheard else 0
+        return 1 if any(blocks(s) for s in surviving) or unheard else 0
 
     if verb == "by-element" and not worklist_path and verdicts:
         # `--worklist` OPTIONAL here, and only here. `finalize`'s advisory prints a count and then

@@ -31,9 +31,12 @@ from coyomap import balance_lib, prose, records, grammar
 from coyomap.anchors import FILEREF as _FILEREF, strip_anchor
 from coyomap.model import (
     resolve_map_path,
+    FlowStep,
+    Interface,
     ProjectModel,
     Role,
     RuleSite,
+    UseCase,
     expanded_flow_steps,
     group_forests,
     load_model,
@@ -194,6 +197,31 @@ def lifecycle_claim(el_id: str, name: str, states: "Sequence[str]",
             + (f" with {len(transitions)} transition(s)" if transitions else ""))
 
 
+def step_claim(label: str, st: FlowStep) -> str:
+    """A walk step's L2 claim (a use case's `UCn` or a sub-flow's `SFn` as `label`), EXACTLY as
+    `l2_worklist_model` builds it, and as `resolve_claim` recomputes it to find the step again."""
+    which = f" [{st.direction}]" if st.direction else ""
+    return f"{label} step {st.n}: {st.src} → {st.dst}{which} — {st.phrase}"
+
+
+def use_case_claim(uc: UseCase) -> str:
+    """A use case's own sentence as an L2 claim, or "" when it has neither trigger nor outcome —
+    ONE claim over the pair, joined as the card joins them."""
+    sentence = " → ".join(x for x in ((uc.trigger or "").strip(), (uc.outcome or "").strip()) if x)
+    return f"{uc.id} {uc.name}: {sentence}" if sentence else ""
+
+
+def interface_claim(iface: Interface, far: str) -> str:
+    """A `theirs` interface's L2 claim; `far` names the dependencies standing on it."""
+    return (f"{iface.id} '{iface.name}' is an interface the product exchanges data through"
+            + (f" with {far}" if far else ""))
+
+
+def far_side_claim(iface: Interface, rid: str, role_name: str) -> str:
+    """The DERIVED claim that a role stands on an interface's far side."""
+    return f"{iface.id} '{iface.name}': {rid} '{role_name}' is on its far side"
+
+
 # ── claim → element resolution: the ONE reader ────────────────────────────────────────────────────
 
 
@@ -329,6 +357,73 @@ def resolve_claim(m: ProjectModel, claim: str) -> ClaimMatch:
             return ClaimMatch(None, "description", len(desc))
         c = m.components[desc[0]]
         return ClaimMatch(ClaimTarget("description", desc[0], -1, c.id, c.name), "description", 1)
+    return _resolve_walk_or_interface(m, claim)
+
+
+#: The head of a walk-step claim: its container (`UCn` a use case's walk, `SFn` a shared sub-flow)
+#: and the step's number.
+_STEP_CLAIM_HEAD = re.compile(r"^(UC\d+|SF\d+) step (\d+): ")
+
+#: The kinds only the behavioural and interface arms mint. Resolution-only (a phrase is re-authored,
+#: never nudged onto another line), and the refutation gate REPORTS them without blocking — see
+#: `grounding.REPORT_ONLY_KINDS`.
+WALK_AND_INTERFACE_KINDS = frozenset({"flow_step", "subflow_step", "use_case", "interface",
+                                      "far_side"})
+
+
+def _resolve_walk_or_interface(m: ProjectModel, claim: str) -> ClaimMatch:
+    """The claims the behavioural and interface arms mint, found again by recomputing each candidate
+    from the same builder.
+
+    They had no branch here, and `resolve_claim` answered None for all of them: on the 2026-09-30
+    mcpolis map 0 of 1,343 behaviour claims and 0 of 34 interface claims resolved. Every reader
+    treats None as "the live map no longer makes this claim", so the refutation gate called a
+    refuted step reconciled, `settled_on_appeal` found none of a closer's rejects, and `by-element`
+    had no walk to put a vote on."""
+    head = _STEP_CLAIM_HEAD.match(claim)
+    if head:
+        label, n = head.group(1), int(head.group(2))
+        containers = ([(i, sf.steps) for i, sf in enumerate(m.subflows) if sf.id == label]
+                      if label.startswith("SF") else
+                      [(i, f.steps) for i, f in enumerate(m.flows) if f.uc == label])
+        kind = "subflow_step" if label.startswith("SF") else "flow_step"
+        hits = [(i, j) for i, steps in containers for j, st in enumerate(steps)
+                if st.n == n and (st.phrase or "").strip() and step_claim(label, st) == claim]
+        if len(hits) != 1:
+            return ClaimMatch(None, kind, len(hits))
+        i, j = hits[0]
+        return ClaimMatch(ClaimTarget(kind, i, j, label, f"{label} step {n}"), kind, 1)
+    ucs = [i for i, uc in enumerate(m.use_cases) if use_case_claim(uc) == claim]
+    if ucs:
+        if len(ucs) != 1:
+            return ClaimMatch(None, "use_case", len(ucs))
+        uc = m.use_cases[ucs[0]]
+        return ClaimMatch(ClaimTarget("use_case", ucs[0], -1, uc.id, uc.name), "use_case", 1)
+    ifaces = [i for i, iface in enumerate(m.interfaces) if iface.side == "theirs"
+              and interface_claim(iface, ", ".join(d.name for d in m.deps
+                                                   if iface.id in d.interfaces)) == claim]
+    if ifaces:
+        if len(ifaces) != 1:
+            return ClaimMatch(None, "interface", len(ifaces))
+        iface = m.interfaces[ifaces[0]]
+        return ClaimMatch(ClaimTarget("interface", ifaces[0], -1, iface.id, iface.name),
+                          "interface", 1)
+    if claim.endswith("' is on its far side"):
+        # DERIVED, so the join is recomputed: the claim holds while the walks still put that role
+        # at that interface, and resolves to nothing once they do not.
+        from coyomap.validate_model import interface_actor_use_cases  # noqa: PLC0415 — circular at import
+        far_side = interface_actor_use_cases(m)
+        role_name = {r.id: r.name for r in m.roles}
+        role_idx = {r.id: k for k, r in enumerate(m.roles)}
+        hits_far = [(i, rid) for i, iface in enumerate(m.interfaces)
+                    for rid in far_side.get(iface.id, {})
+                    if far_side_claim(iface, rid, role_name.get(rid, rid)) == claim]
+        if len(hits_far) != 1:
+            return ClaimMatch(None, "far_side", len(hits_far))
+        i, rid = hits_far[0]
+        iface = m.interfaces[i]
+        return ClaimMatch(ClaimTarget("far_side", i, role_idx.get(rid, -1), iface.id,
+                                      f"{iface.name}: {role_name.get(rid, rid)}"), "far_side", 1)
     return ClaimMatch(None, "", 0)
 
 
@@ -350,6 +445,11 @@ _AMBIGUOUS_KIND_NOUN = {
     "store": "stored entities",
     "messaging": "messaging channels",
     "description": "component descriptions",
+    "flow_step": "walk steps",
+    "subflow_step": "shared sub-flow steps",
+    "use_case": "use cases",
+    "interface": "interfaces",
+    "far_side": "far-side roles",
 }
 
 
@@ -1282,8 +1382,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         # what the deps and the doors now say as elements. Both were removed.
         far = ", ".join(d.name for d in owning)
         items.append(WorkItem(
-            claim=(f"{iface.id} '{iface.name}' is an interface the product exchanges data through"
-                   + (f" with {far}" if far else "")),
+            claim=interface_claim(iface, far),
             anchor=_anchor(anchor_raw),
             elements=(iface.id, *(d.id for d in owning)),
             detail=(f"the walks carry {crossings} through it" if crossings else None),
@@ -1339,8 +1438,7 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             # this.
             ucs = _shown(ucs_here, 6)
             items.append(WorkItem(
-                claim=(f"{iface.id} '{iface.name}': {rid} '{role_name.get(rid, rid)}' is on its "
-                       f"far side"),
+                claim=far_side_claim(iface, rid, role_name.get(rid, rid)),
                 anchor=_anchor(door or ways or dep), elements=(iface.id, rid),
                 detail=(f"derived, brought by {ucs}; anchored at {via}" if ucs
                         else f"derived; anchored at {via}"),
@@ -1374,9 +1472,8 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
                 # data goes out of every skeptic's reach — and the migration that seeded it had
                 # already labelled ten steps the wrong way round. A skeptic reading the call site
                 # can settle it; nothing else can.
-                which = f" [{st.direction}]" if st.direction else ""
                 items.append(WorkItem(
-                    claim=f"{label} step {st.n}: {st.src} → {st.dst}{which} — {st.phrase}",
+                    claim=step_claim(label, st),
                     # REPORT-ONLY, like `interface`: a phrase that misdescribes what happens is
                     # re-authored, not nudged onto another line. `apply-drift` places a correction
                     # by re-deriving an edge-shaped or claim-shaped row, and a step phrase is
@@ -1395,14 +1492,13 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
             # ONE claim over the PAIR, joined as the card joins them: the two halves are one
             # statement about what the use case is for, and challenging them apart would ask a
             # skeptic to judge "a person opens a map" with the result it leads to taken away.
-            sentence = " → ".join(x for x in ((uc.trigger or "").strip(),
-                                              (uc.outcome or "").strip()) if x)
-            if not sentence:
+            uc_claim = use_case_claim(uc)
+            if not uc_claim:
                 continue
             first = next((st.where or "" for f in m.flows if f.uc == uc.id
                            for st in f.steps if (st.where or "").strip()), "")
             items.append(WorkItem(
-                claim=f"{uc.id} {uc.name}: {sentence}",
+                claim=uc_claim,
                 anchor=_anchor(first), drift_eligible=False, theme="behaviour",
                 elements=(uc.id,),
                 why_risky=("the headline sentence of the behavioural layer — a reader takes the "

@@ -45,6 +45,7 @@ from coyomap.model import (
     SubFlow,
     UseCase,
     load_model,
+    Interface,
 )
 
 AUDIT = [sys.executable, "-m", "coyomap.audit_model"]
@@ -2590,3 +2591,50 @@ def test_since_cuts_only_the_claims_the_pin_never_held_beside_the_first_wave() -
                   for c in json.loads(f.read_text(encoding="utf-8"))["claims"]]
         assert claims == ["C3 reads E1"], claims
         assert (verify / "claims-backbone-1.json").exists(), "the first wave's batch was deleted"
+
+
+# --- every claim the worklist mints resolves to an element (retro 2026-09-30, finding 1) ---------
+# `resolve_claim` had no branch for walk steps, use-case sentences or interface claims, so on the
+# 2026-09-30 mcpolis map 0 of 1,343 behaviour claims and 0 of 34 interface claims resolved, and every
+# reader took None to mean "the live map no longer makes this claim": the refutation gate called a
+# refuted step reconciled.
+
+def make_walk_and_interface_map():
+    """A map that mints every walk and interface claim shape: a step at a door, a step out to a
+    `theirs` interface, a sub-flow reference and step, a use case's sentence, and a derived far side."""
+    m = ProjectModel(title="t", goal="g")
+    m.roles = [Role(id="R1", name="Admin", kind="human", audience="user", wants="in")]
+    m.use_cases = [UseCase(id="UC1", name="Do it", actors=["R1"], entry_points=["EP1"],
+                           trigger="asks", outcome="gets")]
+    m.flows = [Flow(uc="UC1", title="Do it", steps=[
+        FlowStep(n=1, src="R1", dst="I1", phrase="opens it"),
+        FlowStep(n=2, src="C1", dst="I2", direction="out", phrase="charges the card",
+                 where="src/pay.py:3"),
+        FlowStep(n=3, src="C1", dst="SF1", phrase="records it")])]
+    m.subflows = [SubFlow(id="SF1", name="Record", steps=[
+        FlowStep(n=1, src="C1", dst="C1", phrase="writes the receipt", where="src/pay.py:9")])]
+    m.entry_points = [EntryPoint(id="EP1", kind="http-route", trigger="GET /x",
+                                 activation="external", source="src/routes.py:12", component="C1")]
+    m.interfaces = [Interface(id="I1", name="Console", what="Where an admin works.", side="ours",
+                              facing="user", kind="screen", source="src/app.py:1", ways_in=["EP1"]),
+                    Interface(id="I2", name="Payments", what="Charges cards.", side="theirs",
+                              facing="user", kind="api", source="src/pay.py:1")]
+    m.deps = [Dep(id="D1", name="Stripe", interfaces=["I2"], where_configured="src/cfg.py:1")]
+    return m
+
+
+def test_every_walk_and_interface_claim_resolves_to_the_element_that_makes_it():
+    m = make_walk_and_interface_map()
+    got = {w.claim: audit_model.resolve_claim(m, w.claim).target
+           for w in audit_model.l2_worklist_model(m, behavioural=True)}
+    assert all(t is not None for t in got.values()), [c for c, t in got.items() if t is None]
+    kinds = {t.kind for t in got.values() if t is not None}
+    assert {"flow_step", "subflow_step", "use_case", "interface", "far_side"} <= kinds, kinds
+    step = got["UC1 step 2: C1 → I2 [out] — charges the card"]
+    assert step is not None and (step.element_id, step.idx, step.sub) == ("UC1", 0, 1)
+
+
+def test_a_reworded_step_resolves_to_nothing():
+    """The rule every other kind follows: a claim the live map no longer makes is reconciled."""
+    m = make_walk_and_interface_map()
+    assert audit_model.resolve_claim(m, "UC1 step 2: C1 → I2 [out] — refunds the card").target is None
