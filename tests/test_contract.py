@@ -1294,7 +1294,9 @@ def test_the_secret_files_rule_grants_no_exception_a_guard_refuses():
     example alone suggested that naming any folder was enough — while `backend/` held example
     files a recursive search would open by pattern."""
     text = contract.render("skeptic")
-    assert "the committed examples too" in text and "excepted" not in text
+    assert "a name that starts with `.env` or `env.` (examples and" in text
+    assert "excepted" not in text
+    assert "One named file that is not a" in text
     assert "Listing a folder is fine" in text
     assert "never a folder that holds a secret file" in text
 
@@ -1315,6 +1317,7 @@ def test_a_brief_of_dissent_only_says_the_refuted_section_is_empty_and_stays_neu
     dissent = block.partition(f"## {contract.OUTVOTED_DISSENT}")[2]
     assert "**reject** — the dissent is wrong, and the claim holds as the map states it" in dissent
     assert "same steps as every other entry (How to judge, below)" in dissent
+    assert "every line a vote's note relies on" in contract.render("closer")
     assert "shipped `verified`" not in dissent and "duplicate votes" not in dissent
 
 

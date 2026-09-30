@@ -99,8 +99,9 @@ lead; nothing above this line goes into an agent prompt.
 > For each claim, in this order:
 >
 > 1. Read the map rows. Say in one line what the claim actually asserts about the code.
-> 2. OPEN each refuting skeptic's evidence file at its line, and each confirming vote's line where it
->    cites a different one. Read enough around each to know what it does.
+> 2. OPEN each refuting skeptic's evidence line, every line a vote's note relies on, and each
+>    confirming vote's line when it differs from the claim's own anchor. Read enough around each to
+>    know what it does.
 > 3. Decide whether that line disproves the claim as the map states it.
 >
 > **uphold** — the code says what the skeptic says, and it contradicts the claim.
