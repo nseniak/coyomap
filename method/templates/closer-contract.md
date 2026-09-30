@@ -19,9 +19,10 @@ coyomap contract closer --from-verdicts <repo>/.coyomap/verify --map <repo>/.coy
                         --fill closer-slots.json --out <scratch>/closer.md --brief closer
 ```
 
-It reads every skeptic verdicts file, takes every `grounded: false` row, and pastes that claim's own
-`dump --id`, `dump --record` and `dump --edges` output under it — for EVERY claim kind, the rule
-site included. **Do not hand-build the claims block.** One build built it twice, in two shapes, and
+It reads every skeptic verdicts file, takes every claim at least one skeptic refuted — ONCE, with
+every vote cast on it — and pastes that claim's own `dump --id`, `dump --record` and `dump --edges`
+output under it, for EVERY claim kind, the rule site included. A claim the majority CONFIRMED over a
+refutation goes under its own heading, **Outvoted dissent**. **Do not hand-build the claims block.** One build built it twice, in two shapes, and
 the second was a regex generator with no branch for a rule-site claim: 4 of 20 refutations reached
 the closer with no map row at all, and it answered `uphold` on all four instead of the `unsure` this
 contract asks for.
@@ -38,6 +39,12 @@ id — matched 0 of 20, and re-sent four settled refutations to the second close
   waves never write over each other.
 - **«CLAIMS»** — the refuted claims with their map rows, built by `--from-verdicts`. Leave it empty
   in the slots file; that verb refuses to run if you filled it.
+
+**Send the Outvoted dissent section whole, and never drop an entry as "a duplicate vote or a
+minority".** A split vote files a claim as confirmed, and its dissent then appears in no count. On
+the 2026-09-30 mcpolis build two such entries were dropped while the brief was split by hand, both on
+an access rule, and the rule shipped `verified` against a counterexample the code supports. A 2-1
+split on an ACCESS claim always goes to a closer: `finalize` blocks while one has no closer ruling.
 
 1. Take the quoted block below and strip the leading `> ` from every line.
 2. Fill ONLY the «angle-bracket» slots.
@@ -69,9 +76,14 @@ lead; nothing above this line goes into an agent prompt.
 > Each entry below carries four things:
 > - **the claim**, word for word as the map states it;
 > - **the map rows behind it** — the element and its arrows, as the map holds them. This is what the
->   claim is ABOUT; read it before you read the skeptic;
-> - **the skeptic's `evidence`** — the `path:line` it says disproves the claim;
-> - **the skeptic's `note`** — its reasoning.
+>   claim is ABOUT; read it before you read the skeptics;
+> - **every vote cast on it** — each skeptic's word (REFUTED, confirmed or unverifiable), its
+>   `evidence` (the `path:line` it read) and its `note` (its reasoning). The votes on THIS claim are
+>   yours to weigh; the rest of the map's confirmed claims are not in this brief, on purpose.
+>
+> The entries under **Outvoted dissent** are claims the majority CONFIRMED while a skeptic refuted
+> them. Judge them the same way: **uphold** means the dissent is right and the claim is false as the
+> map states it; **reject** means the majority read the code right.
 >
 > If a claim's map rows are MISSING from this brief, say so and return `unsure` for it. Do not
 > answer a question about a row you were not given: guessing at it is the exact failure this
@@ -86,7 +98,8 @@ lead; nothing above this line goes into an agent prompt.
 > For each claim, in this order:
 >
 > 1. Read the map rows. Say in one line what the claim actually asserts about the code.
-> 2. OPEN the skeptic's evidence file at its line. Read enough around it to know what it does.
+> 2. OPEN each refuting skeptic's evidence file at its line. Read enough around it to know what it
+>    does.
 > 3. Decide whether that line disproves the claim as the map states it.
 >
 > **uphold** — the code says what the skeptic says, and it contradicts the claim.

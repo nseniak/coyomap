@@ -431,10 +431,25 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
     # it stopped firing on is the shape every silent pass in this tool has taken.
     appealed = list(payload.get("settled_on_appeal") or [])
     stated = list(payload.get("unseen_by_any_skeptic") or [])
-    blocking = [f"{s['claim']} — REFUTED by {s['refuted_by']} skeptic(s) and still in the map, "
-                f"unchanged. Correct the claim or drop the row; a reconciled refutation no longer "
-                f"resolves here." + (f" Skeptic: {s['note'][:300]}" if s.get("note") else "")
+    dissent = list(payload.get("access_dissent") or [])
+    blocking = [f"{s['claim']} — REFUTED by {s['refuted_by']} skeptic(s)"
+                + (" and outvoted, then UPHELD on appeal," if s.get("outvoted") else "")
+                + f" and still in the map, unchanged. Correct the claim or drop the row; a "
+                f"reconciled refutation no longer resolves here."
+                + (f" Skeptic: {s['note'][:300]}" if s.get("note") else "")
                 for s in surviving]
+    # AN ACCESS CLAIM CONFIRMED OVER A DISSENT NO CLOSER HEARD. The tally files a 2-1 claim as
+    # confirmed, so no count shows the one; on the 2026-09-30 mcpolis build two such dissents were
+    # dropped from the closer's brief by hand and an access rule shipped `verified` against a
+    # counterexample the code supports. Blocking, because the remedy costs one closer: the brief
+    # `contract closer --from-verdicts` builds carries every one under "Outvoted dissent".
+    blocking += [f"{d['claim']} — an ACCESS claim ({d['id']}) the majority CONFIRMED while "
+                 f"{d['refuted_by']} skeptic(s) REFUTED it, and no closer has ruled on the dissent. "
+                 f"A split vote on who may do what goes to a closer: `coyomap contract closer "
+                 f"--from-verdicts <verify dir> --map <map>` carries it under 'Outvoted dissent'; "
+                 f"send that section whole." + (f" Dissent: {d['note'][:300]}" if d.get("note")
+                                               else "")
+                 for d in dissent if not d.get("closed")]
     # ONE advisory line, not one per element. A live map produced 81 of these, and an advisory in
     # this report is contractually "fixed or recorded under the heading its message names" — 81 rows
     # with no heading to record them under is not a finding, it is noise that pushes the ten real
@@ -523,10 +538,24 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
             + (f" … and {len(appealed) - 4} more" if len(appealed) > 4 else "")
             + ". This is a disclosure of what the refutation gate did NOT block on; the appeals are "
               "recorded in the map's `grounding.closer_rejected`."))
+    # HEARD AND NOT SETTLED: a closer said `unsure`, or two appeals disagree. The claim stands on
+    # the majority, which is not the same as settled, so it is said rather than blocked.
+    unsettled = [d for d in dissent if d.get("closed")]
+    if unsettled:
+        advisory.insert(0, (
+            f"{len(unsettled)} ACCESS claim(s) the majority CONFIRMED over a dissent the closer "
+            f"could not settle: "
+            + "; ".join(f"{d['id']}: {d['claim'][:90]} (closer said {d['closed']})"
+                        for d in unsettled[:4])
+            + (f" … and {len(unsettled) - 4} more" if len(unsettled) > 4 else "")
+            + ". Each stands on the majority vote alone. Send it to a second closer, or correct "
+              "the claim if the dissent is right."))
+    unheard = len(dissent) - len(unsettled)
     return Leg("grounding refutations", RAN if code in (0, 1) else FAILED,
                blocking=blocking, advisory=advisory,
                note=(f"{len(surviving)} refuted claim(s) still in the map, "
                      + (f"{len(appealed)} settled on appeal, " if appealed else "")
+                     + (f"{unheard} access dissent(s) no closer heard, " if unheard else "")
                      + f"{len(unchecked)} element(s) no skeptic looked at"))
 
 

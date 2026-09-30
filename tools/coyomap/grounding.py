@@ -1547,6 +1547,10 @@ class SurvivingRefutation:
     #: (it could not settle it), `conflict` (two appeals disagreed) or "" (never closed). A `reject`
     #: is not here at all — it stops being a surviving refutation.
     closed: str = ""
+    #: The majority CONFIRMED this claim and a skeptic refuted it: a dissent the tally files as
+    #: confirmed. It is here only when a closer upheld the dissent, or (in `access_dissent`) when
+    #: the claim is about who may do what.
+    outvoted: bool = False
 
 
 def surviving_refutations(m: ProjectModel,
@@ -1573,7 +1577,12 @@ def surviving_refutations(m: ProjectModel,
             votes.setdefault(claim, []).append(r)
     out: list[SurvivingRefutation] = []
     for claim, rows in votes.items():
-        if _verdict_bucket(rows) != "refuted":
+        # AN UPHELD DISSENT IS A REFUTATION. The majority confirmed the claim, one skeptic refuted
+        # it, and a closer then read the code and sided with the one: the claim is false as the map
+        # states it, whatever the tally says. Left out, the appeal the method runs for exactly this
+        # case would have nowhere to land.
+        outvoted = _outvoted(rows)
+        if _verdict_bucket(rows) != "refuted" and not (outvoted and closed.get(claim) == "uphold"):
             continue
         target = resolve_claim(m, claim).target
         if target is None:
@@ -1584,8 +1593,50 @@ def surviving_refutations(m: ProjectModel,
         out.append(SurvivingRefutation(
             claim=claim, element_id=target.element_id, kind=target.kind, label=target.label,
             refuted_by=sum(1 for r in rows if r.get("grounded") is False), note=note,
-            closed=closed.get(claim, "")))
+            closed=closed.get(claim, ""), outvoted=outvoted))
     out.sort(key=lambda s: (s.kind, s.element_id, s.claim))
+    return out
+
+
+def _outvoted(rows: list[dict]) -> bool:
+    """The majority confirmed the claim and at least one skeptic refuted it."""
+    return _verdict_bucket(rows) == "confirmed" and any(r.get("grounded") is False for r in rows)
+
+
+def access_dissent(m: ProjectModel, grounding_rows: list[dict]) -> list[SurvivingRefutation]:
+    """ACCESS claims the majority confirmed over a refutation, that no closer has settled.
+
+    A 2-1 vote files the claim as confirmed, and every count after that is silent about the one.
+    On the 2026-09-30 mcpolis build two sites of an access rule were confirmed 2-1; all three voters
+    wrote the same counterexample (a member removed one way keeps the row these lines trust), the
+    code supported the dissent, and the brief's two dissent rows were dropped by hand as "duplicate
+    votes or minority". The rule shipped `verified`.
+
+    `closed` says where each one stands: "" nobody ruled (the gate BLOCKS: the remedy is one closer
+    brief away), `unsure` or DISPUTED (heard and not settled; said, not blocked). A `reject` settles
+    it — the majority read the code right — and an `uphold` makes it a surviving refutation, so
+    neither is here."""
+    split = split_closer_rows(grounding_rows)
+    closed = closer_ruling(split.closer)
+    access = _access_rule_ids(m)
+    votes: dict[str, list[dict]] = {}
+    for r in split.skeptics:
+        claim = r.get("claim")
+        if isinstance(claim, str):
+            votes.setdefault(claim, []).append(r)
+    out: list[SurvivingRefutation] = []
+    for claim, rows in votes.items():
+        if not _outvoted(rows) or closed.get(claim) in ("reject", "uphold"):
+            continue
+        target = resolve_claim(m, claim).target
+        if target is None or target.element_id not in access:
+            continue
+        note = next((str(r.get("note") or "") for r in rows if r.get("grounded") is False), "")
+        out.append(SurvivingRefutation(
+            claim=claim, element_id=target.element_id, kind=target.kind, label=target.label,
+            refuted_by=sum(1 for r in rows if r.get("grounded") is False), note=note,
+            closed=closed.get(claim, ""), outvoted=True))
+    out.sort(key=lambda s: (s.element_id, s.claim))
     return out
 
 
@@ -1668,12 +1719,20 @@ def format_refutations(surviving: list[SurvivingRefutation],
     access = _access_rule_ids(m) if m else set()
     voted = _rules_voted_under_any_anchor(m, grounding_rows or []) if m else set()
     appealed = settled_on_appeal(m, grounding_rows or []) if m else []
+    dissent = access_dissent(m, grounding_rows or []) if m else []
     if as_json:
         return json.dumps({
             "surviving_refutations": [
                 {"claim": s.claim, "id": s.element_id, "kind": s.kind, "label": s.label,
-                 "refuted_by": s.refuted_by, "note": s.note, "closed": s.closed}
+                 "refuted_by": s.refuted_by, "note": s.note, "closed": s.closed,
+                 "outvoted": s.outvoted}
                 for s in surviving],
+            # Access claims the majority confirmed over a refutation no closer settled. `closed`
+            # "" = nobody ruled (finalize blocks), else the closer's unsettled word.
+            "access_dissent": [
+                {"claim": s.claim, "id": s.element_id, "kind": s.kind, "label": s.label,
+                 "refuted_by": s.refuted_by, "note": s.note, "closed": s.closed}
+                for s in dissent],
             # The refutations this gate NO LONGER blocks on, and why. `finalize` reads the key
             # above; this one is beside it so a reader of either can see what left the list.
             "settled_on_appeal": [
@@ -1695,12 +1754,26 @@ def format_refutations(surviving: list[SurvivingRefutation],
         for s in surviving:
             lines.append(f"  - {s.claim}   [{s.kind}{' ' + s.element_id if s.element_id else ''}, "
                          f"refuted by {s.refuted_by}"
+                         + (", outvoted by the majority" if s.outvoted else "")
                          + (f", two appeals DISAGREE" if s.closed == DISPUTED
                             else f", closer said {s.closed.upper()}" if s.closed else "") + "]")
             if s.note:
                 lines.append(f"      skeptic: {s.note[:200]}")
     else:
         lines.append("No refuted claim survives in this map.")
+    if dissent:
+        lines.append("")
+        lines.append(f"{len(dissent)} ACCESS claim(s) the majority CONFIRMED over a skeptic who "
+                     f"refuted them, with no closer ruling that settles it. A split vote on who may "
+                     f"do what goes to a closer (`contract closer --from-verdicts` carries it under "
+                     f"'Outvoted dissent'):")
+        for s in dissent:
+            lines.append(f"  - {s.claim}   [{s.element_id}, refuted by {s.refuted_by}, "
+                         + ("NO closer ruling" if not s.closed
+                            else "two appeals DISAGREE" if s.closed == DISPUTED
+                            else f"closer said {s.closed.upper()}") + "]")
+            if s.note:
+                lines.append(f"      dissent: {s.note[:200]}")
     if appealed:
         lines.append("")
         lines.append(f"{len(appealed)} refutation(s) the CLOSER REJECTED — the map keeps these "
@@ -2376,7 +2449,9 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         # BLOCKING on a survivor, ADVISORY on a label the pass does not support. The second is a
         # judgement about wording; the first is the map asserting something its own skeptics
         # disproved, which is the one shape here that makes the map wrong rather than unclear.
-        return 1 if surviving else 0
+        # An access dissent no closer ruled on blocks too: its remedy is one closer brief away.
+        unheard = [d for d in access_dissent(live, rows) if not d.closed]
+        return 1 if surviving or unheard else 0
 
     if verb == "by-element" and not worklist_path and verdicts:
         # `--worklist` OPTIONAL here, and only here. `finalize`'s advisory prints a count and then

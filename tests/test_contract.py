@@ -1054,7 +1054,7 @@ def test_the_documented_exclude_example_works_on_a_moved_rule_site(tmp_path: Pat
     make_closer_inputs(tmp_path, [_RULE_CLAIM])
     (tmp_path / "project-map.json").write_text(_map_with_moved_rule_site(), encoding="utf-8")
     rc, out, _ = _from_verdicts(tmp_path, ["--exclude", "BR1"])
-    assert rc == 2 and "every one of the 1 refutation(s)" in out, out   # excluded, not unmatched
+    assert rc == 2 and "every one of the 1 refuted claim(s)" in out, out   # excluded, not unmatched
     assert "matched no refutation" not in out, out
 
 
@@ -1067,10 +1067,11 @@ def test_two_rules_stating_the_same_decision_are_both_named(tmp_path: Path) -> N
     assert contract.dump_ids(load_model(json.dumps(doc)), _RULE_CLAIM) == ["BR1", "BR2"]
 
 
-def make_description_refutation(eid: str) -> contract.Refutation:
-    return contract.Refutation(id="description-1#6",
-                               claim=f"Component {eid} (Gate) is described as: Checks the caller.",
-                               evidence="src/gate.py:10", skeptic="description-1", note="no")
+def make_description_refutation(eid: str) -> contract.DisputedClaim:
+    return contract.DisputedClaim(
+        claim=f"Component {eid} (Gate) is described as: Checks the caller.",
+        votes=(contract.Vote(id="description-1#6", grounded=False, evidence="src/gate.py:10",
+                             skeptic="description-1", note="no"),))
 
 
 def test_an_id_the_map_no_longer_holds_still_tells_the_closer_to_answer_unsure(tmp_path: Path) -> None:
@@ -1221,3 +1222,58 @@ def test_the_rowless_instruction_names_what_happens_without_it() -> None:
     block = contract.claims_block(load_model(json.dumps(doc)), [make_description_refutation("C1")])
     assert "Do NOT settle it from the claim text and the skeptic's note alone" in block
     assert "four blocks arrived exactly like this one" in block and "`uphold`" in block
+
+
+# --- each refuted claim once, every vote, and the outvoted dissent (retro 2026-09-30, finding 3) --
+# The brief carried one entry per refuting ROW: 77 entries for 56 claims on the 2026-09-30 mcpolis
+# build. The lead split it by hand and dropped two rows as "duplicate votes or minority"; both were
+# the dissent on an access rule the majority had confirmed, and the code supported the dissent.
+
+def make_split_votes(tmp: Path) -> None:
+    """`C1 calls C2` refuted by two skeptics; the rule claim confirmed 2-1."""
+    verify = tmp / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    rows_a = [{"claim": "C1 calls C2", "grounded": False, "evidence": "src/gate.py:22",
+               "skeptic": "edge-a", "note": "the call is gone"},
+              {"claim": _RULE_CLAIM, "grounded": True, "evidence": "src/gate.py:31",
+               "skeptic": "security-a", "note": "the line refuses it"}]
+    rows_b = [{"claim": "C1 calls C2", "grounded": False, "evidence": "src/gate.py:23",
+               "skeptic": "edge-b", "note": "no such call"},
+              {"claim": _RULE_CLAIM, "grounded": True, "evidence": "src/gate.py:31",
+               "skeptic": "security-b", "note": "it does refuse"},
+              {"claim": _RULE_CLAIM, "grounded": False, "evidence": "src/gate.py:40",
+               "skeptic": "security-c", "note": "a caller removed another way keeps passing"}]
+    (verify / "verdicts-a.json").write_text(json.dumps({"grounding": rows_a}), encoding="utf-8")
+    (verify / "verdicts-b.json").write_text(json.dumps({"grounding": rows_b}), encoding="utf-8")
+    (tmp / "project-map.json").write_text(_tiny_map(), encoding="utf-8")
+    (tmp / "closer-slots.json").write_text(
+        json.dumps({"REPO": str(tmp), "AGENT_ID": "closer1", "CLAIMS": ""}), encoding="utf-8")
+
+
+def test_a_claim_two_skeptics_refuted_reaches_the_closer_once_with_both_votes() -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_split_votes(tmp)
+        rc, out, brief_path = _from_verdicts(tmp)
+        text = brief_path.read_text(encoding="utf-8")
+    assert rc == 0, out
+    assert text.count("**claim (verbatim):** C1 calls C2") == 1, text
+    assert "(also refuted as b#1)" in text and "`src/gate.py:23`" in text, text
+
+
+def test_a_claim_the_majority_confirmed_over_a_refutation_is_its_own_section() -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_split_votes(tmp)
+        rc, out, brief_path = _from_verdicts(tmp)
+        text = brief_path.read_text(encoding="utf-8")
+    assert rc == 0, out
+    head, _, dissent = text.partition(f"## {contract.OUTVOTED_DISSENT}")
+    assert dissent, "the outvoted dissent has no section of its own"
+    assert _RULE_CLAIM in dissent and _RULE_CLAIM not in head
+    assert "**votes:** 2 confirmed, 1 REFUTED" in dissent, dissent
+    assert "a caller removed another way keeps passing" in dissent
+    assert "it does refuse" in dissent, "the confirming voters' evidence is part of the question"
+    assert "1 of them an outvoted dissent" in out, out

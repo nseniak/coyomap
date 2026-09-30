@@ -64,6 +64,7 @@ from pathlib import Path
 from coyomap.anchor_drift import load_verdicts
 from coyomap.audit_model import RULE_SITE_CLAIM, resolve_claim
 from coyomap.dump import edges_of, record_of, resolve_id
+from coyomap.grounding import is_closer_row
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 from coyomap.provenance import SESSION_ENV
 
@@ -889,6 +890,79 @@ def refutations(verdicts_dir: Path, prefix: str = "") -> list[Refutation]:
     return out
 
 
+@dataclass(frozen=True)
+class Vote:
+    """One skeptic's row on one claim, whichever way it went. `id` is `<batch>#<row>`, the same
+    address a `Refutation` carries."""
+    id: str
+    grounded: object          # True, False, or the string "unverifiable"
+    evidence: str
+    skeptic: str
+    note: str
+
+    def word(self) -> str:
+        if self.grounded is True:
+            return "confirmed"
+        if self.grounded is False:
+            return "REFUTED"
+        return "unverifiable"
+
+
+@dataclass(frozen=True)
+class DisputedClaim:
+    """One claim at least one skeptic refuted, ONCE, with every vote cast on it.
+
+    The brief used to carry one entry per refuting ROW: a claim two skeptics refuted came twice, and
+    a claim two confirmed and one refuted came once, as if nobody had confirmed it. On the 2026-09-30
+    mcpolis build that was 77 entries for 56 claims, 589 KB, and the lead split it by hand across
+    closers and dropped two rows as "duplicate votes or minority". Both were the dissent on an
+    ACCESS rule that the majority had confirmed, and the code supported the dissent."""
+    claim: str
+    votes: tuple[Vote, ...]
+
+    @property
+    def refutation_ids(self) -> list[str]:
+        return [v.id for v in self.votes if v.grounded is False]
+
+    @property
+    def id(self) -> str:
+        """The first refutation's id — the heading a closer copies into its verdicts file."""
+        return self.refutation_ids[0]
+
+    @property
+    def outvoted(self) -> bool:
+        """The majority CONFIRMED it, so the tally files it as confirmed and the dissent appears in
+        no count. The same strict-majority rule `grounding` buckets a claim by."""
+        confirmed = sum(1 for v in self.votes if v.grounded is True)
+        return confirmed * 2 > len(self.votes)
+
+
+def disputed_claims(verdicts_dir: Path, prefix: str = "") -> list[DisputedClaim]:
+    """Every claim at least one skeptic refuted, each ONCE and with every vote on it, in the order
+    of its first refutation (file-name order, then row order — the order `refutations` gives).
+
+    A closer's appeal row is not a vote (`grounding.is_closer_row`), so one found in a verdicts file
+    is left out rather than counted as a skeptic."""
+    refs = refutations(verdicts_dir, prefix)
+    votes: dict[str, list[Vote]] = {}
+    for f in sorted(verdicts_dir.glob(f"verdicts-{prefix}*.json")):
+        batch = f.stem[len("verdicts-"):]
+        rows, _notes = load_verdicts([str(f)])
+        for n, row in enumerate(rows, start=1):
+            claim = str(row.get("claim") or "")
+            if not claim or is_closer_row(row):
+                continue
+            votes.setdefault(claim, []).append(Vote(
+                id=f"{batch}#{n}", grounded=row.get("grounded"),
+                evidence=str(row.get("evidence") or ""), skeptic=str(row.get("skeptic") or batch),
+                note=str(row.get("note") or "")))
+    out: dict[str, DisputedClaim] = {}
+    for ref in refs:
+        if ref.claim not in out:
+            out[ref.claim] = DisputedClaim(claim=ref.claim, votes=tuple(votes.get(ref.claim, ())))
+    return list(out.values())
+
+
 def settled_by(paths: list[Path]) -> Settled:
     """The refutations a prior closer already judged, read from the verdicts file it wrote."""
     ids: set[str] = set()
@@ -989,42 +1063,79 @@ def _dump_blocks(m: ProjectModel, eid: str) -> MapRows:
     return MapRows(out, True)
 
 
-def claims_block(m: ProjectModel, refs: list[Refutation]) -> str:
-    """The «CLAIMS» value: one section per refutation, each carrying the claim, the skeptic's
-    evidence and note, and the map rows the claim is about.
+#: The heading of the brief's second section. Named so the gate, the template and the tests all
+#: say the same words.
+OUTVOTED_DISSENT = "Outvoted dissent"
+
+
+def _claim_entry(m: ProjectModel, c: DisputedClaim) -> list[str]:
+    """One claim's section: its id, the claim, EVERY vote on it, and the map rows it is about."""
+    ids = dump_ids(m, c.claim)
+    rows = [(eid, _dump_blocks(m, eid)) for eid in ids]
+    grounded = [eid for eid, r in rows if r.found]
+    tally = {w: sum(1 for v in c.votes if v.word() == w) for w in ("confirmed", "REFUTED",
+                                                                   "unverifiable")}
+    out: list[str] = [f"### {c.id} — {', '.join(grounded) if grounded else 'NO MAP ROW FOUND'}",
+                      f"**claim (verbatim):** {c.claim}",
+                      "**votes:** " + ", ".join(f"{n} {w}" for w, n in tally.items() if n)
+                      + (f" (also refuted as {', '.join(c.refutation_ids[1:])})"
+                         if len(c.refutation_ids) > 1 else "")]
+    for v in c.votes:
+        out.append(f"- **{v.word()}** by `{v.skeptic}` · **evidence:** "
+                   f"`{v.evidence or '(none given)'}` · **note:** {v.note or '(none given)'}")
+    if not grounded:
+        missing = f" The map holds no {', '.join(ids)}." if ids else ""
+        out.append("**The map rows for this claim could not be found** — nothing in the map "
+                   f"resolves it.{missing} Return `unsure` and say so, exactly as this contract "
+                   "tells you to when rows are missing. Do NOT settle it from the claim text "
+                   "and the skeptic's note alone: on the build this instruction was written "
+                   "after, four blocks arrived exactly like this one and all four came back "
+                   "`uphold`, with no `unsure` anywhere across two waves.")
+    for _eid, r in rows:
+        out.extend(r.blocks)
+    out.append("")
+    return out
+
+
+def claims_block(m: ProjectModel, claims: list[DisputedClaim]) -> str:
+    """The «CLAIMS» value: one section per refuted CLAIM, each carrying the claim, every vote cast
+    on it (the ones that confirmed it too) and the map rows the claim is about; then the claims the
+    majority CONFIRMED over a refutation, under their own heading.
 
     **THE ROWLESS BLOCK CARRIES ITS OWN INSTRUCTION.** Whether the rows are missing because no id
     was found or because every id found is absent from the map, the closer is looking at the same
     thing — a claim it cannot check — and it must answer `unsure`. Gating that paragraph on "no id
     was found" left the second case silent: an id the map no longer holds printed `NOT IN THE MAP`
     and nothing else, which is exactly the shape that returned four `uphold`s and zero `unsure` on
-    the 2026-09-13 build. The test is whether any id yielded ROWS, never whether an id was named."""
+    the 2026-09-13 build. The test is whether any id yielded ROWS, never whether an id was named.
+
+    **THE OUTVOTED DISSENT IS A SECTION OF ITS OWN.** A 2-1 confirmed claim ships as confirmed and
+    its dissent is counted nowhere, so inside a list of refutations it reads as a stray minority row
+    — and that is how two were dropped by hand on the 2026-09-30 mcpolis build, both on an access
+    rule the code let a removed member past."""
     out: list[str] = []
-    for ref in refs:
-        ids = dump_ids(m, ref.claim)
-        rows = [(eid, _dump_blocks(m, eid)) for eid in ids]
-        grounded = [eid for eid, r in rows if r.found]
-        out.append(f"### {ref.id} — {', '.join(grounded) if grounded else 'NO MAP ROW FOUND'}")
-        out.append(f"**claim (verbatim):** {ref.claim}")
-        out.append(f"**skeptic:** `{ref.skeptic}` · **evidence:** `{ref.evidence or '(none given)'}`")
-        out.append(f"**skeptic's note:** {ref.note or '(none given)'}")
-        if not grounded:
-            missing = f" The map holds no {', '.join(ids)}." if ids else ""
-            out.append("**The map rows for this claim could not be found** — nothing in the map "
-                       f"resolves it.{missing} Return `unsure` and say so, exactly as this contract "
-                       "tells you to when rows are missing. Do NOT settle it from the claim text "
-                       "and the skeptic's note alone: on the build this instruction was written "
-                       "after, four blocks arrived exactly like this one and all four came back "
-                       "`uphold`, with no `unsure` anywhere across two waves.")
-        for _eid, r in rows:
-            out.extend(r.blocks)
+    for c in (c for c in claims if not c.outvoted):
+        out.extend(_claim_entry(m, c))
+    dissent = [c for c in claims if c.outvoted]
+    if dissent:
+        out.append(f"## {OUTVOTED_DISSENT} — the majority CONFIRMED these, and a skeptic refuted "
+                   f"them")
+        out.append("A split vote files the claim as confirmed, and the dissent then appears in no "
+                   "count. Judge each one exactly as above: **uphold** means the dissent is right "
+                   "and the claim is false as the map states it; **reject** means the majority "
+                   "read the code right. These are not duplicate votes. On the build this section "
+                   "was written after, two of them were dropped as a minority, and an access rule "
+                   "shipped `verified` against a counterexample the code supports.")
         out.append("")
+        for c in dissent:
+            out.extend(_claim_entry(m, c))
     return "\n\n".join(out).strip("\n")
 
 
 def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Path,
                        exclude: list[str], settled: list[Path],
-                       root: Path | None = None, prefix: str = "") -> tuple[str, list[Refutation]]:
+                       root: Path | None = None,
+                       prefix: str = "") -> tuple[str, list[DisputedClaim]]:
     """The filled closer contract, with «CLAIMS» built from the skeptics' own verdict files.
 
     `exclude` takes a refutation id (`rule-1#12`) or an element id (`BR205`), and an exclusion that
@@ -1044,16 +1155,16 @@ def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Pat
         m = load_model(resolved.read_text(encoding="utf-8"))
     except (OSError, ModelError) as exc:
         raise ValueError(f"--map {map_path}: {exc}") from exc
-    refs = refutations(verdicts_dir, prefix)
+    refs = disputed_claims(verdicts_dir, prefix)
     already = settled_by(settled)
-    kept: list[Refutation] = []
+    kept: list[DisputedClaim] = []
     hit: dict[str, int] = {k: 0 for k in exclude}
     settled_hits = 0
     for ref in refs:
-        if ref.id in already.ids or ref.claim.strip() in already.claims:
+        if already.ids & set(ref.refutation_ids) or ref.claim.strip() in already.claims:
             settled_hits += 1
             continue
-        names = {ref.id, *dump_ids(m, ref.claim)}
+        names = {*ref.refutation_ids, *dump_ids(m, ref.claim)}
         matched = [k for k in exclude if k in names]
         for k in matched:
             hit[k] += 1
@@ -1072,8 +1183,8 @@ def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Pat
                          f"and none of them is a refutation in {verdicts_dir} — that is the wrong "
                          f"file, not an empty wave")
     if not kept:
-        raise ValueError(f"every one of the {len(refs)} refutation(s) in {verdicts_dir} is already "
-                         f"settled or excluded; there is nothing for a closer to judge")
+        raise ValueError(f"every one of the {len(refs)} refuted claim(s) in {verdicts_dir} is "
+                         f"already settled or excluded; there is nothing for a closer to judge")
     return fill("closer", {**values, "CLAIMS": claims_block(m, kept)}, root), kept
 
 
@@ -1236,9 +1347,13 @@ def main(argv: list[str] | None = None) -> int:
         pointer = brief(brief_id, target) if brief_id is not None else ""
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-        print(f"filled closer contract with {len(kept)} refutation(s) -> {target}", file=sys.stderr)
+        dissent = sum(1 for c in kept if c.outvoted)
+        print(f"filled closer contract with {len(kept)} refuted claim(s)"
+              + (f", {dissent} of them an outvoted dissent" if dissent else "")
+              + f" -> {target}", file=sys.stderr)
         for ref in kept:
-            print(f"  {ref.id:22} {ref.claim[:70]}", file=sys.stderr)
+            print(f"  {ref.id:22} {'[dissent] ' if ref.outvoted else ''}{ref.claim[:70]}",
+                  file=sys.stderr)
         if brief_id is not None:
             sys.stdout.write(pointer)
         return 0

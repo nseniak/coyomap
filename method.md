@@ -2635,9 +2635,13 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   filter, not a verdict: on a live build three of one batch's adverse findings were FALSE, the
   highest-risk claim among them, and all three were caught by the lead's own initiative rather than
   by any step written here. This is that step, and it runs in FRESH CONTEXT too: dispatch ONE
-  **closer** agent with only the refuted claims — each with its skeptic's `evidence` and `note` —
-  and the repo; never the build reasoning, and never the confirming rows. It opens each
-  refutation's file and returns **uphold / reject** per refutation with the line it read.
+  **closer** agent with only the refuted claims — each ONCE, with every vote cast on it, its
+  `evidence` and its `note` — and the repo; never the build reasoning, and never the map's other
+  confirmed claims. It opens each refutation's file and returns **uphold / reject** per refutation
+  with the line it read. **A 2-1 split on an access claim always goes to a closer.** The tally files
+  it as confirmed and the dissent then appears in no count, so the brief carries it under
+  **Outvoted dissent**: send that section whole, and never drop an entry as a duplicate vote or a
+  minority. `finalize` blocks while an access claim's dissent has no closer ruling.
   **Build the brief with `coyomap contract closer --from-verdicts <verify-dir> --map <map>`; do not
   compose it from this paragraph and do not hand-build the claims block.** A refuted claim is a claim
   about a MAP ROW, and that verb pastes each claim's own `dump --id`, `--record` and `--edges` output

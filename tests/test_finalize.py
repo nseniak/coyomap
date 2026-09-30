@@ -1630,3 +1630,72 @@ def test_the_commit_line_states_what_went_to_appeal(tmp_path):
     assert "refutation(s) went to appeal" not in disputed, disputed
     assert "1 claim(s) drew appeals that DISAGREE" in disputed, disputed
     assert "the refutation still stands" in disputed, disputed
+
+
+# --- an access claim confirmed over a dissent goes to a closer (retro 2026-09-30, finding 3) ------
+# BR23's sites were confirmed 2-1 on the 2026-09-30 mcpolis build; all three voters wrote the same
+# counterexample and the code supported the dissent. The two dissent rows were dropped from the
+# closer's brief by hand, and the rule shipped `verified`. Nothing counted a dissent the majority
+# outvoted, so nothing could say it had not been heard.
+
+def make_access_dissent_repo(closer_word: str | None,
+                             access: bool = True) -> tuple[Path, Path, list[Path], str]:
+    """A map whose rule BR1 is confirmed 2-1 by three skeptics, with the closer's ruling on the
+    dissent when `closer_word` names one. Returns (root, map, verdict files, the claim)."""
+    from coyomap.audit_model import rule_site_claim
+    root, p = make_repo()
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["rules"] = [{"id": "BR1", "name": "No token, no entry",
+                     "statement": "A caller with no token is refused.", "access": access,
+                     "risk": "impersonation",
+                     "sites": [{"where": "src/a.py:2", "why": "Rejects the tokenless caller."}]}]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    claim = rule_site_claim("A caller with no token is refused.", "src/a.py:2",
+                            "Rejects the tokenless caller.")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    votes = [{"claim": claim, "grounded": g, "evidence": "src/a.py:2", "skeptic": who,
+              "note": "a caller removed another way keeps passing" if g is False else "it refuses"}
+             for g, who in ((True, "security-1-a"), (True, "security-1-b"), (False, "security-1-c"))]
+    files = [verify / "verdicts-security-1.json"]
+    files[0].write_text(json.dumps({"grounding": votes}), encoding="utf-8")
+    if closer_word:
+        grounded = {"uphold": False, "reject": True, "unsure": "unverifiable"}[closer_word]
+        files.append(verify / "closer-c1.json")
+        files[1].write_text(json.dumps({"grounding": [
+            {"id": "security-1#3", "claim": claim, "verdict": closer_word, "grounded": grounded,
+             "evidence": "src/a.py:2", "skeptic": "c1", "note": "read the line"}]}),
+            encoding="utf-8")
+    return root, p, files, claim
+
+
+def test_an_access_dissent_no_closer_heard_blocks() -> None:
+    _root, p, files, claim = make_access_dissent_repo(None)
+    leg = finalize._refutations_leg(p, files)
+    assert any(b.startswith(claim) and "no closer has ruled on the dissent" in b
+               for b in leg.blocking), leg.blocking
+
+
+def test_a_closer_that_rejects_the_dissent_settles_it() -> None:
+    _root, p, files, _claim = make_access_dissent_repo("reject")
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking, leg.blocking
+
+
+def test_a_closer_that_upholds_the_dissent_makes_it_a_refutation_the_map_still_carries() -> None:
+    _root, p, files, claim = make_access_dissent_repo("uphold")
+    leg = finalize._refutations_leg(p, files)
+    assert [b for b in leg.blocking if b.startswith(claim) and "UPHELD on appeal" in b], leg.blocking
+
+
+def test_a_dissent_the_closer_could_not_settle_is_said_not_blocked() -> None:
+    _root, p, files, _claim = make_access_dissent_repo("unsure")
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking, leg.blocking
+    assert any("could not settle" in a for a in leg.advisory), leg.advisory
+
+
+def test_a_dissent_on_a_claim_that_is_not_about_access_does_not_block() -> None:
+    _root, p, files, _claim = make_access_dissent_repo(None, access=False)
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking, leg.blocking
