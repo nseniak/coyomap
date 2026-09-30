@@ -1286,3 +1286,21 @@ def test_every_brief_names_the_files_never_read_and_says_to_search_named_folders
         text = contract.render(name)
         assert "Some files are never read, and never searched." in text, name
         assert "Search with explicit paths:" in text, name
+
+
+def test_a_brief_of_dissent_only_says_the_refuted_section_is_empty_and_stays_neutral() -> None:
+    """From the partial run of the dissent section (2026-09-30): an empty 'refuted claims' heading
+    read as lost entries; a sentence about what happened to a dissent once before pushed the closer
+    toward `uphold` before it read any code; and "reject means the majority read the code right"
+    decided nothing when the majority had read the code right AND the claim was false as stated."""
+    import tempfile
+    from coyomap.model import load_model
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_split_votes(tmp)
+        claims = [c for c in contract.disputed_claims(tmp / "verify") if c.outvoted]
+        block = contract.claims_block(load_model(_tiny_map()), claims)
+    assert block.startswith("None this time: every claim in this brief is an outvoted dissent")
+    dissent = block.partition(f"## {contract.OUTVOTED_DISSENT}")[2]
+    assert "**reject** means the claim holds as the map states it" in dissent
+    assert "shipped `verified`" not in dissent and "duplicate votes" not in dissent

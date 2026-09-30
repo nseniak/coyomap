@@ -82,8 +82,8 @@ lead; nothing above this line goes into an agent prompt.
 >   yours to weigh; the rest of the map's confirmed claims are not in this brief, on purpose.
 >
 > The entries under **Outvoted dissent** are claims the majority CONFIRMED while a skeptic refuted
-> them. Judge them the same way: **uphold** means the dissent is right and the claim is false as the
-> map states it; **reject** means the majority read the code right.
+> them. Judge them the same way: **uphold** means the claim is false as the map states it;
+> **reject** means the claim holds as the map states it.
 >
 > If a claim's map rows are MISSING from this brief, say so and return `unsure` for it. Do not
 > answer a question about a row you were not given: guessing at it is the exact failure this
@@ -98,8 +98,8 @@ lead; nothing above this line goes into an agent prompt.
 > For each claim, in this order:
 >
 > 1. Read the map rows. Say in one line what the claim actually asserts about the code.
-> 2. OPEN each refuting skeptic's evidence file at its line. Read enough around it to know what it
->    does.
+> 2. OPEN each refuting skeptic's evidence file at its line, and each confirming vote's line where it
+>    cites a different one. Read enough around each to know what it does.
 > 3. Decide whether that line disproves the claim as the map states it.
 >
 > **uphold** — the code says what the skeptic says, and it contradicts the claim.

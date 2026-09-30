@@ -1116,18 +1116,27 @@ def claims_block(m: ProjectModel, claims: list[DisputedClaim]) -> str:
     — and that is how two were dropped by hand on the 2026-09-30 mcpolis build, both on an access
     rule the code let a removed member past."""
     out: list[str] = []
-    for c in (c for c in claims if not c.outvoted):
-        out.extend(_claim_entry(m, c))
+    refuted = [c for c in claims if not c.outvoted]
     dissent = [c for c in claims if c.outvoted]
+    # An empty section reads as lost content: the first closer given only dissent could not rule out
+    # that the entries had been dropped while the brief was put together.
+    if not refuted:
+        out.append("None this time: every claim in this brief is an outvoted dissent, below.")
+        out.append("")
+    for c in refuted:
+        out.extend(_claim_entry(m, c))
     if dissent:
+        # NEUTRAL WORDS ONLY. The first version told the closer what happened to a dissent once
+        # before ("an access rule shipped `verified` against a counterexample"), and the closer
+        # that read it said the sentence pushed it toward `uphold` before it had read any code.
+        # That history is for the lead, in the contract's header. And `reject` is defined by the
+        # CLAIM, like `uphold`: "the majority read the code right" decided nothing when the
+        # majority had read the code right AND the claim was false as stated.
         out.append(f"## {OUTVOTED_DISSENT} — the majority CONFIRMED these, and a skeptic refuted "
                    f"them")
         out.append("A split vote files the claim as confirmed, and the dissent then appears in no "
-                   "count. Judge each one exactly as above: **uphold** means the dissent is right "
-                   "and the claim is false as the map states it; **reject** means the majority "
-                   "read the code right. These are not duplicate votes. On the build this section "
-                   "was written after, two of them were dropped as a minority, and an access rule "
-                   "shipped `verified` against a counterexample the code supports.")
+                   "count. Judge each one exactly as above: **uphold** means the claim is false "
+                   "as the map states it; **reject** means the claim holds as the map states it.")
         out.append("")
         for c in dissent:
             out.extend(_claim_entry(m, c))
