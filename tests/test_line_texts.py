@@ -6,8 +6,11 @@ Conventions: top-level test functions, no classes/fixtures (helpers are `make_*`
 """
 from __future__ import annotations
 
+import contextlib
 import copy
+import io
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +145,7 @@ def test_only_a_text_the_check_passed_and_the_rules_allow_is_kept():
         "k1": {"verdict": "ok"},
         "k2": {"verdict": "reject", "says_more": ["delete a role"], "leaves_out": ["post the thing"]},
         "k3": {"verdict": "ok"}}
-    choice = line_texts.choose(lines, {}, texts, verdicts)
+    choice = line_texts.choose(lines, {}, texts, verdicts, checked=texts)
     assert choice.kept == {"k1": "post the thing or send the delete"}
     assert choice.rejected == {"k2": ["says more: delete a role", "leaves out: post the thing"]}
     assert list(choice.faulty) == ["k3"]
@@ -150,7 +153,8 @@ def test_only_a_text_the_check_passed_and_the_rules_allow_is_kept():
 
 
 def test_an_old_text_stays_while_its_line_is_drawn_and_goes_when_it_is_not():
-    choice = line_texts.choose([make_line("k1")], {"k1": "old words", "gone": "older words"}, {}, {})
+    choice = line_texts.choose([make_line("k1")], {"k1": "old words", "gone": "older words"}, {}, {},
+                               checked={})
     assert choice.kept == {"k1": "old words"}
     assert choice.dropped == ["gone"]
 
@@ -161,7 +165,7 @@ def test_a_recheck_that_rejects_a_kept_text_takes_it_out():
     old = {"k1": "post the thing or send the delete", "k2": "post or delete the thing"}
     verdicts: dict[str, dict[str, object]] = {"k1": {"verdict": "ok"},
                                               "k2": {"verdict": "reject", "says_more": ["x"]}}
-    choice = line_texts.choose([make_line("k1"), make_line("k2")], old, old, verdicts)
+    choice = line_texts.choose([make_line("k1"), make_line("k2")], old, old, verdicts, checked=old)
     assert choice.kept == {"k1": "post the thing or send the delete"}
     assert list(choice.rejected) == ["k2"]
 
@@ -220,8 +224,10 @@ def test_record_on_a_map_with_no_shared_line_writes_no_file(tmp_path: Path):
     (folder / "project-map.json").write_text(json.dumps(make_arch_map()), encoding="utf-8")
     (tmp_path / "written.json").write_text("{}")
     (tmp_path / "verdicts.json").write_text("{}")
+    (tmp_path / "to-check.json").write_text("[]")
     assert line_texts_cmd.main(["record", "--map", str(folder / "project-map.json"),
                                 "--texts", str(tmp_path / "written.json"),
+                                "--checked", str(tmp_path / "to-check.json"),
                                 "--verdicts", str(tmp_path / "verdicts.json")]) == 0
     assert not (folder / line_texts.FILE_NAME).exists()
 
@@ -232,8 +238,11 @@ def test_record_writes_the_kept_texts_beside_the_map(tmp_path: Path):
     written = {ln.key: "post the thing or send the delete" for ln in lines}
     (tmp_path / "written.json").write_text(json.dumps(written))
     (tmp_path / "verdicts.json").write_text(json.dumps({k: {"verdict": "ok"} for k in written}))
+    (tmp_path / "to-check.json").write_text(json.dumps([{"key": k, "merged": t}
+                                                        for k, t in written.items()]))
     code = line_texts_cmd.main(["record", "--map", str(folder / "project-map.json"),
                                 "--texts", str(tmp_path / "written.json"),
+                                "--checked", str(tmp_path / "to-check.json"),
                                 "--verdicts", str(tmp_path / "verdicts.json")])
     assert code == 0
     assert line_texts.load(folder) == written
@@ -287,3 +296,46 @@ def test_the_check_brief_reads_only_the_texts_and_never_the_code():
     text = render("line-texts-check")
     assert "never the code" in text
     assert '"says_more"' in text and '"leaves_out"' in text
+
+
+# --- a text is kept only as the checker read it (retro 2026-09-30, finding 5) ---------------------
+# The writer rewrote written.json after `check-input` had read it; `choose` kept the file's text
+# whenever the key's verdict was ok, so a text no checker read could ship under a verdict given for
+# its old wording. Only the lead's own file watch caught it.
+
+def test_a_text_changed_after_the_check_is_not_kept_whatever_its_verdict():
+    lines = [make_line("k1"), make_line("k2")]
+    checked = {"k1": "post the thing or send the delete", "k2": "post or delete the thing"}
+    texts = {"k1": "post the thing or send the delete", "k2": "a text no checker read"}
+    verdicts: dict[str, dict[str, object]] = {"k1": {"verdict": "ok"}, "k2": {"verdict": "ok"}}
+    choice = line_texts.choose(lines, {}, texts, verdicts, checked=checked)
+    assert choice.kept == {"k1": "post the thing or send the delete"}
+    assert choice.changed == ["k2"]
+
+
+def test_a_text_the_check_input_never_held_is_not_kept():
+    lines = [make_line("k1")]
+    texts = {"k1": "post the thing or send the delete"}
+    choice = line_texts.choose(lines, {}, texts, {"k1": {"verdict": "ok"}}, checked={})
+    assert choice.kept == {} and choice.unchecked == ["k1"]
+
+
+def test_record_names_a_text_changed_after_the_check():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        folder = make_map_folder(tmp)
+        lines = line_texts_cmd.drawn_lines(make_graph())
+        written = {ln.key: "post the thing or send the delete" for ln in lines}
+        (tmp / "to-check.json").write_text(json.dumps([{"key": k, "merged": "post or delete it"}
+                                                       for k in written]))
+        (tmp / "written.json").write_text(json.dumps(written))
+        (tmp / "verdicts.json").write_text(json.dumps({k: {"verdict": "ok"} for k in written}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = line_texts_cmd.main(["record", "--map", str(folder / "project-map.json"),
+                                        "--texts", str(tmp / "written.json"),
+                                        "--checked", str(tmp / "to-check.json"),
+                                        "--verdicts", str(tmp / "verdicts.json")])
+        assert code == 0
+        assert "CHANGED after the check, so not kept" in out.getvalue()
+        assert not line_texts.load(folder)

@@ -146,10 +146,12 @@ Otherwise run what a build runs (method.md, closing step 5b), with the files bes
 ```
 .venv/bin/coyomap line-texts pending --out .coyomap/changes/<from>-<to>.lines.json
 #   the writer: `contract line-texts --fill`, LINES = that file, OUT = <from>-<to>.texts.json
+#   ...and only once it has handed back, the check input:
 .venv/bin/coyomap line-texts check-input --lines .coyomap/changes/<from>-<to>.lines.json \
     --texts .coyomap/changes/<from>-<to>.texts.json --out .coyomap/changes/<from>-<to>.to-check.json
 #   a FRESH checker: `contract line-texts-check --fill`, OUT = <from>-<to>.text-verdicts.json
 .venv/bin/coyomap line-texts record --texts .coyomap/changes/<from>-<to>.texts.json \
+    --checked .coyomap/changes/<from>-<to>.to-check.json \
     --verdicts .coyomap/changes/<from>-<to>.text-verdicts.json
 ```
 

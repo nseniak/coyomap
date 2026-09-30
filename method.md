@@ -2955,8 +2955,9 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     5.  grounding report: WHICH claims were refuted / tied / unvoted — the reconcile worklist, and
         what `grounding.note` is written from.
     5b. YOURS, while you write the note — the Architecture line texts: `line-texts pending`, then
-        ONE writer (`contract line-texts`), `line-texts check-input`, ONE FRESH checker
-        (`contract line-texts-check`), and `line-texts record`. Nothing pending: skip both agents.
+        ONE writer (`contract line-texts`), `line-texts check-input` AFTER the writer has handed
+        back, ONE FRESH checker (`contract line-texts-check`), and `line-texts record`. Nothing
+        pending: skip both agents.
     6.  grounding write, measured against the map it describes.
     7.  assemble again, carrying the RECORD in. Idempotent, and not optional — skip it and the
         grounding record never reaches the map.
@@ -2986,12 +2987,19 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     ```
     mkdir -p $LT && .venv/bin/coyomap line-texts pending --out $LT/pending.json
     #   the writer: `contract line-texts --fill`, with LINES=$LT/pending.json, OUT=$LT/written.json
+    #   ...and only once it has HANDED BACK: it rewrites OUT as it goes, so its file is final then
     .venv/bin/coyomap line-texts check-input --lines $LT/pending.json --texts $LT/written.json \
         --out $LT/to-check.json
     #   the checker: `contract line-texts-check --fill`, with TEXTS=$LT/to-check.json,
     #   OUT=$LT/verdicts.json, and an AGENT_ID that is not the writer's
-    .venv/bin/coyomap line-texts record --texts $LT/written.json --verdicts $LT/verdicts.json
+    .venv/bin/coyomap line-texts record --texts $LT/written.json --checked $LT/to-check.json \
+        --verdicts $LT/verdicts.json
     ```
+
+    - **`record` keeps a text only as the checker read it.** A text that differs from the one in
+      `to-check.json` is not kept, whatever its verdict, and `record` names it: on one build the
+      writer rewrote 5 texts after `check-input` had read its file, and 3 would have shipped under
+      verdicts given for their old wording.
 
     - **The checker is a FRESH agent, never the writer.** A merged text has no code line, so no
       skeptic can check it: it is right when it says what its sentences say, no more and no less. A
@@ -3003,7 +3011,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
       not written for. The next build or update lists only the lines whose sentences changed.
     - **To re-check the kept texts** after the check's own rules change: `line-texts pending --all`,
       then `check-input` with the kept `line-texts.json` as its texts, a fresh checker, and `record`
-      with the same two files. A kept text the new check rejects leaves the file.
+      with the same files. A kept text the new check rejects leaves the file.
 
     **Steps 5, 8, 9 and 12 are here because the list without them cost real builds.** `grounding
     report` used to live only in prose 74 lines above, so a build that followed this block literally

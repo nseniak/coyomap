@@ -41,15 +41,18 @@ an update.
   check-input --lines <file> --texts <texts> --out <file>
       The file the `line-texts-check` agent reads: each line's sentences beside its merged text. A
       text lint faults is left out, and named: it cannot be kept anyway.
-  record --texts <texts> --verdicts <verdicts> [--map <map>]
+  record --texts <texts> --checked <check input> --verdicts <verdicts> [--map <map>]
       Keep every text the check passed and lint does not fault, in line-texts.json beside the map.
-      A text whose line the pictures no longer draw is dropped from the file. A line with no kept
-      text shows its stories' own sentences, as before. A key <texts> names ends with this run's
-      outcome, whatever was kept for it before.
+      A text that differs from the one in <check input> (the file `check-input --out` wrote) is
+      not kept: its verdict is about other words. A text whose line the pictures no longer draw is
+      dropped from the file. A line with no kept text shows its stories' own sentences, as before.
+      A key <texts> names ends with this run's outcome, whatever was kept for it before.
+
+  Run `check-input` only after the writer has handed back: its file is final then.
 
   To re-check the kept texts (the check's rules changed): `pending --all --out <lines>`, then
   `check-input --lines <lines> --texts <map folder>/line-texts.json --out <file>`, a fresh checker,
-  and `record --texts <map folder>/line-texts.json --verdicts <its verdicts>`.
+  and `record --texts <map folder>/line-texts.json --checked <file> --verdicts <its verdicts>`.
 
   --map   the map (default: .coyomap/project-map.json)
 """
@@ -144,7 +147,8 @@ def cmd_record(args: argparse.Namespace) -> int:
     lines = drawn_lines(graph)
     old = line_texts.load(folder)
     choice = line_texts.choose(lines, old, line_texts.read_texts(Path(args.texts)),
-                               line_texts.read_verdicts(Path(args.verdicts)))
+                               line_texts.read_verdicts(Path(args.verdicts)),
+                               line_texts.checked_texts(Path(args.checked)))
     # No file, and nothing to put in one: a map whose pictures draw no line several stories take
     # gets no empty file beside it.
     exists = (folder / line_texts.FILE_NAME).exists()
@@ -159,8 +163,13 @@ def cmd_record(args: argparse.Namespace) -> int:
     if choice.faulty:
         print(f"  faulted by lint ({len(choice.faulty)}):")
         _print_faults(choice.faulty)
+    if choice.changed:
+        print(f"  CHANGED after the check, so not kept ({len(choice.changed)}): "
+              f"{', '.join(choice.changed)}. Their verdicts are about the words the checker read. "
+              f"Run check-input and a fresh checker again on the file as it is now.")
     if choice.unchecked:
-        print(f"  no verdict, so not kept ({len(choice.unchecked)}): {', '.join(choice.unchecked)}")
+        print(f"  never checked, so not kept ({len(choice.unchecked)}): "
+              f"{', '.join(choice.unchecked)}")
     if choice.unknown:
         print(f"  for no line the pictures draw ({len(choice.unknown)}): {', '.join(choice.unknown)}")
     if choice.dropped:
@@ -192,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     record = sub.add_parser("record", add_help=False)
     record.add_argument("--map", default=None)
     record.add_argument("--texts", required=True)
+    record.add_argument("--checked", required=True)
     record.add_argument("--verdicts", required=True)
     record.set_defaults(func=cmd_record)
     return parser

@@ -255,10 +255,21 @@ class Choice:
     unchecked: list[str] = field(default_factory=list)          # a text with no verdict at all
     unknown: list[str] = field(default_factory=list)            # a text for a line no picture draws
     dropped: list[str] = field(default_factory=list)            # an old text whose line is gone
+    changed: list[str] = field(default_factory=list)            # a text other than the one checked
+
+
+def checked_texts(path: Path) -> dict[str, str]:
+    """The texts the checker was handed: `{key: merged}` from the file `check-input` wrote."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"{path} must be the JSON list `check-input` wrote")
+    return {str(r["key"]): str(r.get("merged") or "") for r in data
+            if isinstance(r, dict) and isinstance(r.get("key"), str)}
 
 
 def choose(lines: Iterable[Line], old: Mapping[str, str], texts: Mapping[str, str],
-           verdicts: Mapping[str, Mapping[str, object]]) -> Choice:
+           verdicts: Mapping[str, Mapping[str, object]],
+           checked: Mapping[str, str]) -> Choice:
     """The texts to keep beside the map, from the ones kept before and one writer's run.
 
     `lines` is EVERY line the pictures draw that wants a text, not only the pending ones: an old
@@ -269,7 +280,13 @@ def choose(lines: Iterable[Line], old: Mapping[str, str], texts: Mapping[str, st
     not, whatever was kept for it before. That is what makes a re-check possible: hand the kept file
     itself to the checker (`pending --all`, then `check-input --texts <the kept file>`), and a text
     a weaker check once passed leaves the file when this one rejects it. A normal build never meets
-    the case, because `pending` lists only the lines with no text."""
+    the case, because `pending` lists only the lines with no text.
+
+    A TEXT IS KEPT ONLY AS THE CHECKER READ IT. `checked` is the check input (`check-input --out`),
+    and a text that differs from the one there is not kept, whatever its verdict: the verdict is
+    about other words. On the 2026-09-30 mcpolis build the writer rewrote 5 texts after
+    `check-input` had read its file, and only the lead's own file watch stopped 3 of them shipping
+    under verdicts given for their old wording."""
     by_key = {ln.key: ln for ln in lines}
     out = Choice()
     for key, text in old.items():
@@ -286,6 +303,12 @@ def choose(lines: Iterable[Line], old: Mapping[str, str], texts: Mapping[str, st
         faults = text_faults(text, ln.sentences)
         if faults:
             out.faulty[key] = faults
+            continue
+        if key not in checked:
+            out.unchecked.append(key)
+            continue
+        if checked[key].strip() != text.strip():
+            out.changed.append(key)
             continue
         row = verdicts.get(key)
         if row is None:
