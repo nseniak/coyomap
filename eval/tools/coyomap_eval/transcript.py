@@ -510,7 +510,7 @@ _COYOMAP_SUBCOMMANDS = frozenset({
 _COYOMAP_SUBVERBS = frozenset({
     # fix
     "apply-drift", "drop-edge", "dedup-relation", "dedup-edge", "security-row", "dedup-security",
-    "row", "rows",
+    "row", "rows", "step-notes",
     # grounding
     "write", "report", "lint",
     # provenance

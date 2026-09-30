@@ -1963,3 +1963,40 @@ def test_both_write_paths_count_a_cross_file_refusal_on_their_last_line(capsys):
                              *argv]) == 0
             last = capsys.readouterr().out.splitlines()[-1]
         assert "1 cross-file correction(s) REFUSED" in last, f"{extra or 'in place'}: {last}"
+
+
+# --- step-notes: the note of a walk step, in the fragment that wrote the walk (finding 14) -------
+
+def make_walk_fragments(td: str) -> Path:
+    """Two fragments: a use case's walk and a shared sub-flow, one step each."""
+    return make_frag_dir(td,
+                         trace={"flows": [{"uc": "UC5", "title": "Add a server", "steps": [
+                             {"n": 3, "src": "C1", "dst": "C2", "phrase": "checks the plan",
+                              "where": "a.py:9"}]}]},
+                         shared={"subflows": [{"id": "SF10", "name": "Sign in", "steps": [
+                             {"n": 2, "src": "C2", "dst": "C3", "phrase": "checks the role",
+                              "where": "b.py:4"}]}]})
+
+
+def test_step_notes_writes_a_use_cases_step_and_a_sub_flows_step():
+    with tempfile.TemporaryDirectory() as td:
+        d = make_walk_fragments(td)
+        notes = Path(td) / "notes.json"
+        notes.write_text(json.dumps({"UC5:3": "refused once the plan's servers are used up",
+                                     "SF10:2": "only when the role allows the tool"}))
+        assert fix.main(["step-notes", "--fragments", str(d), "--from", str(notes)]) == 0
+        trace = json.loads((d / "trace.json").read_text())
+        shared = json.loads((d / "shared.json").read_text())
+    assert trace["flows"][0]["steps"][0]["note"] == "refused once the plan's servers are used up"
+    assert shared["subflows"][0]["steps"][0]["note"] == "only when the role allows the tool"
+
+
+def test_step_notes_writes_nothing_when_one_address_matches_no_step():
+    with tempfile.TemporaryDirectory() as td:
+        d = make_walk_fragments(td)
+        notes = Path(td) / "notes.json"
+        notes.write_text(json.dumps({"UC5:3": "refused once the plan is used up",
+                                     "UC5:9": "no such step"}))
+        before = (d / "trace.json").read_text()
+        assert fix.main(["step-notes", "--fragments", str(d), "--from", str(notes)]) == 2
+        assert (d / "trace.json").read_text() == before

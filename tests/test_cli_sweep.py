@@ -245,6 +245,10 @@ FIX_RECIPES: dict[str, Recipe] = {
     # `rows` takes its batch from --edits, never from --map. An empty list is the honest sweep: it
     # exercises the parse and the refusal without needing a fragment set shaped for an edit.
     "rows":           lambda t, m: ["fix", "rows", "--map", str(m)],
+    # `step-notes` writes into fragments; handed the map as its --fragments file and an address no
+    # walk has, it exercises the parse and the all-or-nothing refusal without writing anything.
+    "step-notes":     lambda t, m: ["fix", "step-notes", "--fragments", str(m),
+                                    "--step", "UC999:1", "--note", "only when the sweep runs"],
 }
 
 

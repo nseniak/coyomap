@@ -1398,9 +1398,10 @@ the wording of anchored steps with a heuristic vocabulary, so an empty worklist 
 obvious was left", never "the sweep was exhaustive".
 
 **A step where a rule decides says its condition in its note** — when the story goes on from it, or
-when it stops. The pictures mark such a step with the rule mark, and the note is the one place that
-says which way it goes; the trace contract tells the tracing agents how to write it. `validate`
-advises on a deciding step with an empty note. A step whose note deliberately says nothing is
+when it stops. A step decides when a rule site sits on its own line. The pictures mark such a step
+with the rule mark, and the note is the one place that says which way it goes; the trace contract
+tells the tracing agents how to write it, and the lead writes the rest after the rules fan-out
+(`coyomap fix step-notes`). `validate` advises on a deciding step with an empty note. A step whose note deliberately says nothing is
 recorded under the `Condition exceptions` extras heading, keyed by the step's own anchor
 (`<path:line>: <why>`), the way `Sweep debt` keys its records.
 
@@ -3117,6 +3118,15 @@ field on every rule, which `lint-fragment` treats as BLOCKING. The failure fired
 build's 71 agent transcripts and every one of the eleven fragments had to be repaired. `block` is
 the lead's to assign, through `reconcile`, after the fan-out — an agent states its block id in its
 REPLY and never in its fragment.
+
+**Then write the deciding steps' conditions — after the rules fan-out, never before.** A rule
+usually lands on a step after the tracers are gone, so a tracer could not have written its
+condition. Once the rules fragments are assembled, `validate` lists every step a rule site sits on
+exactly — the steps the pictures mark with the rule mark — whose note is empty. Read the rule's
+statement and the step's line, and write each condition with `coyomap fix step-notes --fragments
+.coyomap/build-fragments --from <file>`, one `"UC5:3": "refused once the plan's servers are used
+up"` per step. On one build 166 steps were listed, 147 of them only because they shared a function
+with a rule; the list counts exact sites now, and there it was 19.
 
 **Completeness check before the barrier (lead, not delegated).** Before the Phase 2 synthesis, the
 lead confirms **every prescribed slice came back with its sections** — in particular that the T5 owner

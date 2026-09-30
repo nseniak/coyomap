@@ -2497,3 +2497,22 @@ def test_a_rules_page_names_the_data_it_touches_only_when_there_is_some() -> Non
     page = _js_function("renderRule")
     assert "'Data it touches'" in page
     assert "(nEnts ? sec('ents', 'Data it touches', countLabel(nEnts, 'entity'), ents) : '')" in page
+
+
+# --- a step where a rule decides is a step the rule sits on (retro 2026-09-30, finding 14) --------
+# The condition advisory and the picture's rule mark read every link from a rule to a step, the
+# enclosing-function ones too: on the 2026-09-30 mcpolis map 147 of the 166 steps listed were such
+# links, a condition nobody could write because the step decides nothing.
+
+def test_the_condition_advisory_lists_only_the_step_a_rule_site_sits_on():
+    m = make_extent_model()
+    warnings = check_rules_model(m, GUARD_EXTENTS)[1]
+    found = [w for w in warnings if w.startswith("Steps where a business rule decides")]
+    assert len(found) == 1, warnings
+    assert "UC2 step 2" in found[0] and "UC1 step 2" not in found[0], found[0]
+    assert "coyomap fix step-notes" in found[0]
+
+
+def test_the_rule_mark_marks_only_the_step_a_rule_site_sits_on():
+    by_step = cast(dict, model_to_graph(make_extent_model(), GUARD_EXTENTS)["rules_view"])["byStep"]
+    assert sorted(by_step) == ["UC2:UC2:2"], by_step

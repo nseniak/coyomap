@@ -1883,9 +1883,115 @@ def rows(argv: list[str]) -> int:
 
 # ── dispatch ─────────────────────────────────────────────────────────────────────────────────────
 
+#: A walk step's address: a use case's walk (`UC5:3`) or a shared sub-flow's (`SF10:2`).
+_STEP_ADDRESS = re.compile(r"^(UC\d+|SF\d+):(\d+)$")
+
+
+def _steps_in(doc: object, container: str, n: int) -> list[dict]:
+    """Every step `n` of the walk `container` in one fragment document."""
+    if not isinstance(doc, dict):
+        return []
+    key, name = ("subflows", "id") if container.startswith("SF") else ("flows", "uc")
+    return [st for walk in doc.get(key) or [] if isinstance(walk, dict) and walk.get(name) == container
+            for st in walk.get("steps") or [] if isinstance(st, dict) and st.get("n") == n]
+
+
+def step_notes(argv: list[str]) -> int:
+    """Write the `note` on walk steps, in the fragment that authored the walk. All-or-nothing.
+
+    A step where a rule decides says its condition in its note (method.md), and the rule is often
+    placed on the step by the rules fan-out, after the tracers are gone. No verb could write a use
+    case's step at all, and a sub-flow's only through a `--set-json-steps` of its whole step list:
+    on the 2026-09-30 mcpolis build 166 deciding steps shipped with no condition."""
+    fragments: str | None = None
+    source: str | None = None
+    step: str | None = None
+    note: str | None = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--fragments", "--from", "--step", "--note"):
+            if i + 1 >= len(argv):
+                return usage_error(_USAGE, "step-notes", f"{a} needs a value")
+            val = argv[i + 1]
+            i += 2
+            if a == "--fragments":
+                fragments = val
+            elif a == "--from":
+                source = val
+            elif a == "--step":
+                step = val
+            else:
+                note = val
+            continue
+        return usage_error(_USAGE, "step-notes", f"unknown argument '{a}'")
+    if not fragments or (source is None) == (step is None) or (step is None) != (note is None):
+        return usage_error(_USAGE, "step-notes", "--fragments and one of --from <file|-> or "
+                                                 "--step <UCn:k> --note <text> are required")
+    wanted: dict[str, object]
+    if source is not None:
+        try:
+            raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+            wanted = json.loads(raw)
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: cannot read --from {source}: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(wanted, dict):
+            print("ERROR: --from takes one JSON object of step to note: "
+                  '{"UC5:3": "only when the plan allows it"}', file=sys.stderr)
+            return 2
+    else:
+        wanted = {str(step): note}
+    where = Path(fragments)
+    paths, _skipped = _fragment_paths(where)
+    docs: dict[Path, object] = {}
+    for path in paths:
+        try:
+            docs[path] = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: cannot read {path}: {exc}", file=sys.stderr)
+            return 2
+    faults: list[str] = []
+    targets: list[tuple[str, Path, dict, str]] = []
+    for address, text in wanted.items():
+        hit = _STEP_ADDRESS.match(str(address))
+        if not hit:
+            faults.append(f"{address}: not a step address — write UCn:k or SFn:k")
+            continue
+        if not isinstance(text, str) or not text.strip():
+            faults.append(f"{address}: the note is empty — a condition is a sentence")
+            continue
+        container, n = hit.group(1), int(hit.group(2))
+        owners = [(path, st) for path, doc in docs.items() for st in _steps_in(doc, container, n)]
+        if len(owners) != 1:
+            faults.append(f"{address}: {len(owners)} fragment step(s) match — "
+                          + ("no fragment writes that walk step" if not owners else
+                             "more than one fragment writes it; fix the fragments first"))
+            continue
+        targets.append((str(address), owners[0][0], owners[0][1], text.strip()))
+    if faults:
+        print(f"ERROR: {len(faults)} problem(s) — nothing was written:", file=sys.stderr)
+        for fault in faults:
+            print(f"       {fault}", file=sys.stderr)
+        return 2
+    touched: set[Path] = set()
+    for address, path, st, text in targets:
+        if st.get("note") == text:
+            continue
+        print(f"  {address}.note: {st.get('note', '')!r} → {text!r}")
+        st["note"] = text
+        touched.add(path)
+    for path in touched:
+        path.write_text(json.dumps(docs[path], indent=2, ensure_ascii=_file_is_ascii(path)) + "\n",
+                        encoding="utf-8")
+    print(f"step-notes: wrote {sum(1 for t in targets if t[1] in touched)} note(s) in "
+          f"{len(touched)} fragment(s). Re-assemble to see them in the map.")
+    return 0
+
+
 _VERBS = {"apply-drift": apply_drift, "drop-edge": drop_edge, "dedup-relation": dedup_relation,
           "dedup-edge": dedup_edge, "security-row": security_row, "rows": rows,
-          "dedup-security": dedup_security, "row": row}
+          "dedup-security": dedup_security, "row": row, "step-notes": step_notes}
 
 _USAGE = """usage: coyomap fix <verb> [args...]
 
@@ -1927,6 +2033,13 @@ Apply a mechanical reconcile edit to .coyomap/project-map.json IN PLACE. Verbs:
       Writing `verb` (or `src`/`dst`) on an edge MOVES it, because an edge's identity is its triple.
       A move onto a triple that already exists is refused: that is a merge, not a rewrite, and
       `drop-edge` is the verb for it.
+
+  step-notes --fragments <dir|file> (--from <notes.json|-> | --step <UCn:k> --note <text>)
+      Write the NOTE on walk steps, in the fragment that authored each walk: `UC5:3` is step 3 of
+      the use case's walk, `SF10:2` step 2 of a shared sub-flow. `--from` takes one JSON object,
+      {"UC5:3": "only when the plan allows it", ...}; every address is checked before anything is
+      written. The note of a step where a rule decides says its condition, and the rule often
+      lands on the step after the tracers are gone: `validate` lists those steps.
 
   apply-drift --map <map> --verdicts <raw.json>... [--tolerance N] [--to-reconcile <file>]
       Write the grounding skeptics' corrected anchor into each drifted element: an edge `where`, a

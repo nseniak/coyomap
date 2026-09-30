@@ -1904,11 +1904,16 @@ def check_rules_model(m: ProjectModel,
     # with a count, it never blocks, and the count IS the debt the next build or update pays down.
     # Scoping it to new maps would need a build-date marker the map does not carry, and would hide the
     # debt on exactly the maps that have it.
+    # EXACT LINKS ONLY: a rule site on the step's own line. A link through the enclosing function
+    # says the rule decides somewhere near the step, not at it, and on the 2026-09-30 mcpolis map
+    # 147 of the 166 steps this listed were such links — a condition nobody could write because the
+    # step decides nothing. The picture's rule mark reads the same exact links (`views.rules_view`).
     anchored = anchored_flow_steps(m)
     written = {(f.uc, str(st.n)): st for f in m.flows for st in f.steps}
     written.update({(sf.id, str(st.n)): st for sf in m.subflows for st in sf.steps})
     decided = sorted({(link.container, str(link.n)) for r in m.rules
-                      for link in rule_steps(m, r, extents, anchored)},
+                      for link in rule_steps(m, r, extents, anchored)
+                      if link.strength == STEP_LINK_EXACT},
                      key=lambda cn: (element_sort_key(cn[0]), int(cn[1]) if cn[1].isdigit() else 0))
     recorded_conditions = _recorded_line_keys(m, "condition exceptions")
     silent = [f"{c} step {n}" for c, n in decided if (c, n) in written
@@ -1918,9 +1923,11 @@ def check_rules_model(m: ProjectModel,
         warnings.append(
             f"Steps where a business rule decides say no condition in their note: "
             f"{_shown(silent, 12, unit='step(s)')} — say when the story goes on or when it stops "
-            "(\"only when …\", \"refused when …\"), or record '<path:line>: <why>' under a "
-            "'Condition exceptions' extras heading. A map built before this rule lists every "
-            "deciding step; its next build or update writes the conditions")
+            "(\"only when …\", \"refused when …\"): write them with `coyomap fix step-notes "
+            "--fragments .coyomap/build-fragments --from <file>`, one {\"UC5:3\": \"<condition>\"} "
+            "per step, or record '<path:line>: <why>' under a 'Condition exceptions' extras "
+            "heading. A map built before this rule lists every deciding step; its next build or "
+            "update writes the conditions")
 
     return problems, warnings
 

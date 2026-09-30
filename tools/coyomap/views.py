@@ -1051,8 +1051,12 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
                  for l in rule_steps(m, r, extents, anchored)]
         for c in rule_components(m, r, owners):
             by_component.setdefault(c, []).append(r.id)
+        # THE RULE MARK READS EXACT LINKS ONLY, as `validate`'s condition advisory does: a site on
+        # the step's own line. A link through the enclosing function put the mark on about 310
+        # mcpolis steps that decide nothing (retro 2026-09-30, finding 14).
         for l in steps:
-            by_step.setdefault(f"{l['uc']}:{l['container']}:{l['n']}", []).append(r.id)
+            if l["strength"] == STEP_LINK_EXACT:
+                by_step.setdefault(f"{l['uc']}:{l['container']}:{l['n']}", []).append(r.id)
         out_rules.append({
             "id": r.id, "name": r.name, "statement": r.statement, "block": r.block or "",
             "access": r.access, "risk": r.risk, "confidence": r.confidence,
