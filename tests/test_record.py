@@ -17,8 +17,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from coyomap.model import ExtraSection, ProjectModel
+from coyomap.model import ExtraSection, ProjectModel, to_canonical_json
 from coyomap.record import KNOWN_HEADINGS, append_line, main
+from test_business_rules import make_swept_model
 
 
 def make_fragment(tmp: str, extras: list[dict] | None = None) -> Path:
@@ -283,3 +284,62 @@ def test_the_help_no_longer_recommends_the_merged_form_unconditionally():
     from coyomap.record import USAGE
     assert "ONLY WHERE THE HEADING HAS A KEY GRAMMAR" in USAGE
     assert "coyomap record --headings" in USAGE
+
+
+# --- record refuses what it cannot write, and removes all it is asked to (retro 2026-09-30, 17) -----
+# The 2026-09-30 mcpolis build stored 6 comma-listed 'Sweep debt' lines with exit 0 that silenced
+# nothing; `--remove A --remove B` removed A only; and a fragment with no `extras` key printed
+# "recorded" and "wrote" while the line was dropped.
+
+def make_sweep_repo(tmp: Path) -> Path:
+    """An assembled map whose one sweep finding is the step at src/admin.py:4, and an empty extras
+    fragment beside it, laid out the way a build lays them out."""
+    out = tmp / ".coyomap"
+    (out / "build-fragments").mkdir(parents=True)
+    (out / "project-map.json").write_text(to_canonical_json(make_swept_model()), encoding="utf-8")
+    frag = out / "build-fragments" / "extras.json"
+    frag.write_text(json.dumps({"extras": []}), encoding="utf-8")
+    return frag
+
+
+def test_every_remove_is_honoured(tmp_path):
+    frag = tmp_path / "extras.json"
+    frag.write_text(json.dumps({"extras": [{"heading": "Sweep debt",
+                                            "body": "a.py:1: one\nb.py:2: two\nc.py:3: three\n"}]}),
+                    encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Sweep debt",
+                 "--remove", "a.py:1", "--remove", "b.py:2"]) == 0
+    assert json.loads(frag.read_text(encoding="utf-8"))["extras"][0]["body"].strip() == "c.py:3: three"
+
+
+def test_a_remove_that_matches_nothing_removes_none_of_the_batch(tmp_path):
+    frag = tmp_path / "extras.json"
+    frag.write_text(json.dumps({"extras": [{"heading": "Sweep debt", "body": "a.py:1: one\n"}]}),
+                    encoding="utf-8")
+    before = frag.read_text(encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Sweep debt",
+                 "--remove", "a.py:1", "--remove", "zzz"]) == 1
+    assert frag.read_text(encoding="utf-8") == before
+
+
+def test_a_fragment_with_no_extras_key_is_refused_rather_than_losing_the_line(tmp_path):
+    frag = tmp_path / "behavioral.json"
+    frag.write_text(json.dumps({"title": "T"}), encoding="utf-8")
+    before = frag.read_text(encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Balance exceptions",
+                 "--line", "UC1: a stated reason"]) == 2
+    assert frag.read_text(encoding="utf-8") == before
+
+
+def test_a_free_text_line_that_silences_nothing_is_refused(tmp_path, capsys):
+    frag = make_sweep_repo(tmp_path)
+    before = frag.read_text(encoding="utf-8")
+    assert main(["--map", str(frag), "--heading", "Sweep debt", "--line",
+                 "src/admin.py:4, src/guard.py:3: both are overrides, not rules"]) == 1
+    assert frag.read_text(encoding="utf-8") == before
+    out, err = capsys.readouterr()
+    assert "names 2 anchors" in err and "recorded under" not in out, (out, err)
+    # the same finding, keyed the way the reader matches it, is written
+    assert main(["--map", str(frag), "--heading", "Sweep debt", "--line",
+                 "src/admin.py:4: an admin override, not a business rule"]) == 0
+    assert "src/admin.py:4: an admin override" in frag.read_text(encoding="utf-8")

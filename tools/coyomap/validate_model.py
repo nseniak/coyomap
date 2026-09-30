@@ -7847,7 +7847,8 @@ def _run(argv: list[str] | None = None) -> int:
         # A footer rather than sixty rewritten strings: the sentence lands once and stays right.
         if any("extras heading" in w for w in warnings):
             print("\n  To record any escape named above — `record` shape-checks the line before it "
-                  "writes, so a line that would silence nothing is refused rather than stored:\n"
+                  "writes and tries a free-text key against what `validate` reports, so a line its "
+                  "heading cannot read, or that changes nothing, is refused rather than stored:\n"
                   "    coyomap record --map <the FRAGMENT that owns extras> "
                   "--heading \"<heading>\" --line \"<key>: <why>\"")
     if problems:

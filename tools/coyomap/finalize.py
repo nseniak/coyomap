@@ -1148,8 +1148,9 @@ def format_report(r: FinalizeReport) -> str:
         if any(d in ("UNRECORDED", "UNSURE") for d, _, _ in disp):
             out.append("Write the missing records with `coyomap record --map <the FRAGMENT that "
                        "owns extras> --heading \"<heading>\" --line \"<key>: <why>\"` — it "
-                       "shape-checks each line, so one that would silence nothing is refused "
-                       "rather than stored. Re-run `finalize` after, never before: records written "
+                       "shape-checks each line and tries a free-text key against what `validate` "
+                       "reports, so a line its heading cannot read, or that changes nothing, is "
+                       "refused rather than stored. Re-run `finalize` after, never before: records written "
                        "against an earlier run's findings go stale the moment anything is fixed.")
             out.append("")
     for leg in r.legs:
