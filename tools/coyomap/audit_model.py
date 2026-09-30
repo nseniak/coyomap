@@ -1652,8 +1652,8 @@ def claim_digest(claims: Iterable[str]) -> str:
 SECOND_WAVE_PREFIX = "added-"
 
 
-def pinned_claims(path: Path) -> list[str]:
-    """Claims from a pinned worklist file, in order, in either shape it legitimately arrives in.
+def pinned_items(path: Path) -> list[dict[str, object]]:
+    """The items of a pinned worklist file, in order, in either shape it legitimately arrives in.
 
     A BARE LIST is what `coyomap audit --json | jq .worklist` produces, and it is the obvious way
     to hand a verb its input. The list case was already intended — the `isinstance` test was
@@ -1662,7 +1662,12 @@ def pinned_claims(path: Path) -> list[str]:
     existed for was the one that crashed with a traceback."""
     payload = json.loads(path.read_text(encoding="utf-8"))
     items = payload if isinstance(payload, list) else payload.get("worklist", [])
-    return [str(i.get("claim", "")) for i in items if isinstance(i, dict)]
+    return [i for i in items if isinstance(i, dict)]
+
+
+def pinned_claims(path: Path) -> list[str]:
+    """Claims from a pinned worklist file, in order (`pinned_items` reads either shape)."""
+    return [str(i.get("claim", "")) for i in pinned_items(path)]
 
 
 def pinned_tier(path: Path) -> bool:

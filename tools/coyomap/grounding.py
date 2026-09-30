@@ -42,8 +42,10 @@ from coyomap.audit_model import (
     claim_digest,
     l2_worklist_model,
     pinned_claims,
+    pinned_items,
     pinned_tier,
     resolve_claim,
+    rule_site_claim,
     worklist_payload,
 )
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
@@ -1754,6 +1756,39 @@ def _rules_voted_under_any_anchor(m: ProjectModel, grounding_rows: list[dict]) -
             if br.id and (br.statement or "").strip() and (br.statement or "").strip() in claims}
 
 
+def rules_reworded_after_vote(m: ProjectModel, grounding_rows: list[dict],
+                              pinned: list[dict[str, object]]) -> dict[str, tuple[int, int]]:
+    """Rule id -> (its sites a skeptic voted on under an OLDER wording, all its sites).
+
+    A rule whose statement was reworded after the vote matches no vote by its text, whole or by
+    statement, so `_rules_voted_under_any_anchor` misses it as well, and `finalize` said it "was
+    never challenged". On the 2026-09-30 mcpolis map that was false for both rules it named: all 11
+    of their current sites carried 3 votes each, cast on the wording before the correction.
+
+    The PINNED worklist says which element and which line each claim was about, so an older claim
+    is matched to this rule exactly, at the same element and the same line, never by resembling
+    text. A site counts only when a claim voted there differs from the site's claim today."""
+    voted = {r.get("claim") for r in split_closer_rows(grounding_rows).skeptics}
+    older: dict[tuple[str, str], set[str]] = {}
+    for item in pinned:
+        claim, anchor, elements = item.get("claim"), item.get("anchor"), item.get("elements")
+        if not (isinstance(claim, str) and claim in voted and isinstance(anchor, str)
+                and isinstance(elements, list)):
+            continue
+        for e in elements:
+            older.setdefault((str(e), anchor.strip()), set()).add(claim)
+    out: dict[str, tuple[int, int]] = {}
+    for br in m.rules:
+        if not br.id or not br.sites:
+            continue
+        hit = sum(1 for site in br.sites
+                  if older.get((br.id, (site.where or "").strip()), set())
+                  - {rule_site_claim(br.statement, (site.where or "").strip(), site.why)})
+        if hit:
+            out[br.id] = (hit, len(br.sites))
+    return out
+
+
 def settled_on_appeal(m: ProjectModel, grounding_rows: list[dict]) -> list[SurvivingRefutation]:
     """The refutations a closer REJECTED that the map still carries — the ones the gate now lets by.
 
@@ -1791,7 +1826,8 @@ def settled_on_appeal(m: ProjectModel, grounding_rows: list[dict]) -> list[Survi
 def format_refutations(surviving: list[SurvivingRefutation],
                        unseen: list[ElementCheck], as_json: bool = False,
                        m: ProjectModel | None = None,
-                       grounding_rows: list[dict] | None = None) -> str:
+                       grounding_rows: list[dict] | None = None,
+                       pinned: list[dict[str, object]] | None = None) -> str:
     """The gate's report: refuted claims still in the map, and the elements no skeptic looked at.
 
     `access` rides on each unseen element because the caller has to tell two cases apart that read
@@ -1806,6 +1842,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
     which carry no `confidence` field, and printed as `says , pass says unchecked`."""
     access = _access_rule_ids(m) if m else set()
     voted = _rules_voted_under_any_anchor(m, grounding_rows or []) if m else set()
+    reworded = rules_reworded_after_vote(m, grounding_rows or [], pinned or []) if m else {}
     appealed = settled_on_appeal(m, grounding_rows or []) if m else []
     dissent = access_dissent(m, grounding_rows or []) if m else []
     if as_json:
@@ -1832,7 +1869,13 @@ def format_refutations(surviving: list[SurvivingRefutation],
             "unseen_by_any_skeptic": [
                 {"id": e.element_id, "kind": e.kind, "label": e.label, "stated": e.stated,
                  "status": e.status, "access": e.element_id in access,
-                 "voted_under_any_anchor": e.element_id in voted} for e in unseen],
+                 "voted_under_any_anchor": e.element_id in voted,
+                 # {"sites_voted", "sites"} when the skeptics voted on an OLDER wording of this
+                 # rule at the same line (`rules_reworded_after_vote`), else null.
+                 "reworded_after_vote": (
+                     {"sites_voted": reworded[e.element_id][0],
+                      "sites": reworded[e.element_id][1]}
+                     if e.element_id in reworded else None)} for e in unseen],
         }, indent=2, ensure_ascii=False)
     lines: list[str] = []
     if surviving:
@@ -1891,6 +1934,11 @@ def format_refutations(surviving: list[SurvivingRefutation],
         if access_rows:
             lines.append(f"  {len(access_rows)} of those are ACCESS rules, which is what a reader "
                          f"trusts a map for: {', '.join(e.element_id for e in access_rows[:8])}")
+            again = [e.element_id for e in access_rows if e.element_id in reworded]
+            if again:
+                lines.append(f"  {len(again)} of those ACCESS rules were re-worded after the vote: "
+                             f"the skeptics voted on an older wording at the same line(s): "
+                             f"{', '.join(again[:8])}")
     return "\n".join(lines)
 
 
@@ -2615,6 +2663,14 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         rows, notes = load_verdicts(verdicts)
         for n in notes:
             print(n, file=sys.stderr)
+        # The pin beside the map, where every build keeps it (`record_gap` reads the same file). It
+        # is what says which rule and which line an older claim was about; with none, a rule
+        # re-worded after the vote reads as never challenged, as it did before, and never a guess.
+        pin = resolve_map_path(map_path).parent / "verify" / "worklist.json"
+        try:
+            pinned = pinned_items(pin) if pin.is_file() else []
+        except (OSError, ValueError, AttributeError):
+            pinned = []
         surviving = surviving_refutations(live, rows)
         # DEFAULT tier here, deliberately, unlike `write` above. This surface feeds the COVERAGE
         # list only — the refutation GATE beside it walks the verdicts directly and is unaffected.
@@ -2623,7 +2679,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         # where that question belongs.
         checks, _unresolved = element_checks(live, [w.claim for w in l2_worklist_model(live)], rows)
         print(format_refutations(surviving, [c for c in checks if c.unseen],
-                                 as_json=as_json, m=live, grounding_rows=rows))
+                                 as_json=as_json, m=live, grounding_rows=rows, pinned=pinned))
         # BLOCKING on a survivor, ADVISORY on a label the pass does not support. The second is a
         # judgement about wording; the first is the map asserting something its own skeptics
         # disproved, which is the one shape here that makes the map wrong rather than unclear.

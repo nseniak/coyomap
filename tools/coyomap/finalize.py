@@ -515,6 +515,14 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
                        if e.get("access") and e.get("kind") == "rule_site"
                        and e.get("status") == "unchecked"
                        and not e.get("voted_under_any_anchor")]
+    # RE-WORDED AFTER THE VOTE is not "never challenged". A rule whose statement a reconcile
+    # corrected keeps no vote under its new text, and the line below called BR1 and BR21 of the
+    # 2026-09-30 mcpolis map "never challenged" while all 11 of their sites carried 3 votes each
+    # under the older wording. The pinned worklist names the element and the line of every claim,
+    # so `grounding` pairs the older vote to this rule exactly; the rule is still unread in its
+    # current words, and the advisory says that instead.
+    reworded = [e for e in unvetted_access if e.get("reworded_after_vote")]
+    unvetted_access = [e for e in unvetted_access if not e.get("reworded_after_vote")]
     # Every row in `unseen_by_any_skeptic` is `unchecked` by construction (`grounding.py` filters
     # on `ElementCheck.unseen`, which IS `status == "unchecked"`), so this is the whole list. Named
     # rather than re-filtered: a filter that never removes anything reads as a narrowing.
@@ -537,6 +545,18 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
     # THE ACCESS ROWS, SAID SEPARATELY AND FIRST. They are a subset of the count above, so this is
     # not a second finding — it is the part of it that is worth acting on, named. Who-may-do-what is
     # the one thing a reader trusts a map for.
+    if reworded:
+        advisory.insert(0, (
+            f"{len(reworded)} ACCESS rule(s) were re-worded after the vote: the skeptics voted on an "
+            f"older wording at the same line, and no skeptic has read the current one: "
+            + ", ".join(f"{e['id']} ({e['label']}, {e['reworded_after_vote']['sites_voted']} of "
+                        f"{e['reworded_after_vote']['sites']} site(s) voted under the older wording)"
+                        for e in reworded[:6])
+            + (" …" if len(reworded) > 6 else "")
+            + ". These are among the count above. Send the current wording to a skeptic in a "
+              "second wave (method.md; `coyomap audit <map> --batches .coyomap/verify --since "
+              ".coyomap/verify/worklist.json` cuts it), or say in the grounding note why it needs "
+              "none."))
     if unvetted_access:
         advisory.insert(0, (
             f"{len(unvetted_access)} ACCESS rule(s) were never challenged — no skeptic voted on "

@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 from coyomap import finalize
+from coyomap.audit_model import rule_site_claim
 from coyomap.model import FORMAT
 
 #: A genuinely minimal VALID map — no entities, because a domain card carries its own blocking
@@ -1837,3 +1838,44 @@ def test_the_drift_leg_carries_a_recorded_line_that_matched_no_finding():
                  encoding="utf-8")
     leg = finalize._drift_leg(p, root, [v])
     assert any("recorded drift exception(s) matched no finding" in a for a in leg.advisory), leg
+
+
+# --- a rule re-worded after the vote is not "never challenged" (retro 2026-09-30, finding 38) -----
+# finalize told the commit that access rules BR1 and BR21 "were never challenged", while all 11 of
+# their current sites carried 3 votes each under the wording before a reconcile corrected it.
+
+def make_reworded_rule_repo(elements: list[str], anchor: str) -> tuple[Path, Path, Path]:
+    """BR1 (access, one site at src/a.py:2), and a pinned worklist whose one claim, an OLDER wording
+    of a rule, was voted on at `anchor` for `elements`."""
+    root, p = _map_with_rule(access=True, confidence="inferred")
+    older = rule_site_claim("A listener reaches its own organization.", anchor, "the refusal")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    (verify / "worklist.json").write_text(json.dumps({"worklist": [
+        {"claim": older, "anchor": anchor, "elements": elements, "theme": "security"}]}),
+        encoding="utf-8")
+    v = make_verdicts(root, "verdicts-security-1-a.json",
+                      [{"claim": older, "grounded": True, "evidence": "src/a.py:2"}])
+    return root, p, v
+
+
+def _access_advisory(root: Path, p: Path, v: Path) -> str:
+    assert finalize.main([str(p), "--repo", str(root), "--verdicts", str(v)]) == 0
+    doc = json.loads((root / ".coyomap" / "finalize-report.json").read_text())
+    leg = next(l for l in doc["legs"] if l["name"] == "grounding refutations")
+    return leg["advisory"][0]
+
+
+def test_an_access_rule_voted_on_under_an_older_wording_is_said_to_be_reworded():
+    root, p, v = make_reworded_rule_repo(["BR1"], "src/a.py:2")
+    first = _access_advisory(root, p, v)
+    assert "re-worded after the vote" in first and "BR1" in first, first
+    assert "1 of 1 site(s) voted under the older wording" in first, first
+    assert "never challenged" not in first, first
+
+
+def test_an_older_vote_for_another_rule_or_another_line_still_reads_never_challenged():
+    for elements, anchor in ((["BR9"], "src/a.py:2"), (["BR1"], "src/a.py:3")):
+        root, p, v = make_reworded_rule_repo(elements, anchor)
+        first = _access_advisory(root, p, v)
+        assert "ACCESS rule(s) were never challenged" in first, (elements, anchor, first)
