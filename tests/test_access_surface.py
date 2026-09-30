@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 
 from coyomap.access_surface import access_files, load_surface, lost_files, write_surface
+from coyomap.grounding import unopened
+from coyomap.provenance import session_transcript
 from coyomap.assemble import load_map_or_fragment
 
 
@@ -182,3 +184,61 @@ def test_the_session_transcript_is_the_file_beside_its_subagents_folder() -> Non
         assert session_transcript(repo, "abc", home) is None
         (folder / "abc.jsonl").write_text("{}\n", encoding="utf-8")
         assert session_transcript(repo, "abc", home) == folder / "abc.jsonl"
+
+
+
+# --- after the review of finding 2: which tool calls open a file, and where the transcript is -----
+
+def make_call_transcript(td: Path, calls: list[tuple[str, dict[str, str], bool]]) -> Path:
+    """A transcript of `(tool name, input, failed)` calls, each with its result."""
+    recs: list[dict[str, object]] = []
+    for n, (name, inp, failed) in enumerate(calls):
+        recs.append({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"t{n}", "name": name, "input": inp}]}})
+        recs.append({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"t{n}", "is_error": failed,
+             "content": "refused" if failed else "1 line"}]}})
+    f = td / "lead.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    return f
+
+
+def _opens(call: tuple[str, dict[str, str], bool], path: str = "app/auth/guard.py") -> bool:
+    with tempfile.TemporaryDirectory() as td:
+        return unopened([path], [make_call_transcript(Path(td), [call])]) == []
+
+
+def test_a_refused_read_opens_nothing() -> None:
+    assert not _opens(("Read", {"file_path": "app/auth/guard.py"}, True))
+    assert _opens(("Read", {"file_path": "app/auth/guard.py"}, False))
+
+
+def test_counting_or_listing_a_file_is_not_opening_it() -> None:
+    for command in ("wc -l app/auth/guard.py", "grep -l token app/auth/guard.py",
+                    "grep -c token app/auth/guard.py"):
+        assert not _opens(("Bash", {"command": command}, False)), command
+    assert _opens(("Bash", {"command": "grep -n token app/auth/guard.py"}, False))
+
+
+def test_a_quoted_path_and_a_git_show_are_opening_it() -> None:
+    for command in ("sed -n '1,80p' \"app/auth/guard.py\"", "git show HEAD:app/auth/guard.py",
+                    "cat app/auth/guard.py | head -40"):
+        assert _opens(("Bash", {"command": command}, False)), command
+
+
+def test_a_pattern_naming_a_path_is_still_not_opening_it() -> None:
+    assert not _opens(("Bash", {"command": 'grep -rn "app/auth/guard.py" docs/'}, False))
+
+
+def test_a_bare_name_read_elsewhere_does_not_open_a_longer_path() -> None:
+    assert not _opens(("Bash", {"command": "cat guard.py"}, False))
+
+
+def test_the_transcript_of_a_session_started_in_another_folder_is_found() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        home = Path(td)
+        other = home / ".claude" / "projects" / "-Users-someone-elsewhere"
+        other.mkdir(parents=True)
+        (other / "abc-123.jsonl").write_text("{}\n", encoding="utf-8")
+        found = session_transcript(home / "repo", "abc-123", home=home)
+        assert found == other / "abc-123.jsonl", found

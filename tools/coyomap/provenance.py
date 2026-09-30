@@ -198,8 +198,15 @@ def session_transcript(repo: Path, session_id: str | None = None,
     sid = session_id or os.environ.get(SESSION_ENV)
     if not sid:
         return None
-    f = (home or Path.home()) / ".claude" / "projects" / project_slug(repo) / f"{sid}.jsonl"
-    return f if f.is_file() else None
+    root = (home or Path.home()) / ".claude" / "projects"
+    f = root / project_slug(repo) / f"{sid}.jsonl"
+    if f.is_file():
+        return f
+    # A session started in another folder keeps its transcript under THAT folder's slug: the
+    # 2026-09-30 mcpolis build ran from the coyomap clone, the mcpolis slug held nothing, and the
+    # check never ran. A session id names one session, so one match anywhere is the file.
+    found = sorted(root.glob(f"*/{sid}.jsonl"))
+    return found[0] if len(found) == 1 else None
 
 
 def tool_commit_here() -> str | None:

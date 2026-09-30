@@ -964,8 +964,10 @@ def _unread_excuses(excused: list[str], base: dict[str, list[AccessClaim]],
         return []
     try:
         never = unopened(excused, [lead_transcript])
-    except OSError:
-        return []
+    except OSError as exc:
+        return [f"the lead's transcript ({lead_transcript.name}) could not be read ({exc}), so "
+                f"whether the {len(excused)} excused access path(s) were opened is not known. "
+                f"Pass --lead-transcript with a readable copy."]
     if not never:
         return []
     listed = "; ".join(f"{f} (held {held(base[f])})" for f in never)

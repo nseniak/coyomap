@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -2208,6 +2209,13 @@ def _agent_transcript_files(agent_dir: Path) -> list[Path]:
 #: FAILS the lint and the loose set only notes.
 _FILE_READING_TOOLS = ("Read", "NotebookRead", "Grep", "Glob")
 _SHELL_READERS = re.compile(r"\b(?:cat|sed|head|tail|less|awk|grep|rg|nl|wc)\b")
+#: The shell verbs whose output is the lines of the files they read. `wc` is not one: it prints
+#: counts, and a file it counted was not read.
+_PRINTING_READERS = frozenset({"cat", "sed", "head", "tail", "less", "awk", "grep", "rg", "nl"})
+#: The verbs whose first operand is a pattern or a script, unless a flag carries it.
+_PATTERN_FIRST = frozenset({"grep", "rg", "sed", "awk"})
+#: A grep flag that prints file names or counts instead of lines.
+_NAMES_ONLY = re.compile(r"^-(?:[a-zA-Z]*[lLc][a-zA-Z]*|-files-with(?:out)?-matches|-count)$")
 
 
 def _shell_read_operands(command: str) -> set[str]:
@@ -2218,17 +2226,40 @@ def _shell_read_operands(command: str) -> set[str]:
     grep laundered an arbitrary file list into "actually opened", and the row cleared without even a
     note. Quoted spans and everything after a redirect are dropped, and only the verbs that read a
     file are considered at all."""
-    if not _SHELL_READERS.search(command):
+    if not _SHELL_READERS.search(command) and "git show" not in command:
         return set()
-    body = re.sub(r"'[^']*'|\"[^\"]*\"", " ", command)      # a pattern is quoted; an operand rarely is
-    body = re.split(r"[>]", body)[0]                        # a redirect target is written, not read
     out: set[str] = set()
-    for tok in body.split():
-        if tok.startswith("-"):
-            continue
-        if re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+", tok) or tok.rsplit("/", 1)[-1].lower() in _EXTENSIONLESS:
-            out.add(_norm_path(tok))
-    return out
+    # ONE COMMAND AT A TIME, its words as the shell splits them. The first version dropped every
+    # quoted span as a pattern, so `sed -n '1,80p' "<path>"` read nothing, and it took any
+    # path-shaped word after any reader, so `wc -l <path>` and `grep -c x <path>` read a file whose
+    # lines they never print. A review counted 11 such cases on synthetic transcripts.
+    for segment in re.split(r"&&|\|\||[;|\n]", command):
+        segment = segment.split(">", 1)[0]                   # a redirect target is written, not read
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            words = segment.split()
+        out |= _segment_reads(words)
+    return {p for p in out if p}
+
+
+def _segment_reads(words: list[str]) -> set[str]:
+    """The files one simple command prints lines of: its operands, never its pattern or script."""
+    if len(words) >= 3 and words[0] == "git" and words[1] == "show":
+        return {_norm_path(w.split(":", 1)[1]) for w in words[2:] if ":" in w and not w.startswith("-")}
+    at = next((i for i, w in enumerate(words) if w.rsplit("/", 1)[-1] in _PRINTING_READERS), None)
+    if at is None:
+        return set()
+    verb, rest = words[at].rsplit("/", 1)[-1], words[at + 1:]
+    flags = [w for w in rest if w.startswith("-")]
+    if verb in ("grep", "rg") and any(_NAMES_ONLY.match(f) for f in flags):
+        return set()                                         # names or counts, never a line
+    operands = [w for w in rest if not w.startswith("-")]
+    if verb in _PATTERN_FIRST and not any(f in ("-e", "-f", "--regexp", "--file") for f in flags):
+        operands = operands[1:]                              # the pattern or the script
+    return {_norm_path(w) for w in operands
+            if re.fullmatch(r"[\w./-]+\.[A-Za-z0-9]+", w)
+            or w.rsplit("/", 1)[-1].lower() in _EXTENSIONLESS}
 
 
 def _opened_files(files: list[Path]) -> set[str]:
@@ -2242,12 +2273,15 @@ def _opened_files(files: list[Path]) -> set[str]:
     finding, and a claim inside the loose set but outside this one is the weaker signal, reported as
     such rather than silently folded into "no findings"."""
     out: set[str] = set()
+    failed = _failed_tool_uses(files)
     for f in files:
         for rec in _records(f):
             msg = rec.get("message")
             for c in ((msg if isinstance(msg, dict) else {}).get("content") or []):
                 if not isinstance(c, dict) or c.get("type") != "tool_use":
                     continue
+                if c.get("id") and c.get("id") in failed:
+                    continue                         # refused, or it failed: nothing was read
                 inp = c.get("input") or {}
                 if c.get("name") in _FILE_READING_TOOLS:
                     for key in ("file_path", "path", "notebook_path"):
@@ -2256,6 +2290,18 @@ def _opened_files(files: list[Path]) -> set[str]:
                 elif c.get("name") == "Bash":
                     out |= _shell_read_operands(str(inp.get("command") or ""))
     return {p for p in out if p}
+
+
+def _failed_tool_uses(files: list[Path]) -> set[str]:
+    """Ids of the tool calls whose result is an error: a Read a hook refused opened nothing."""
+    out: set[str] = set()
+    for f in files:
+        for rec in _records(f):
+            msg = rec.get("message")
+            for c in ((msg if isinstance(msg, dict) else {}).get("content") or []):
+                if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("is_error"):
+                    out.add(str(c.get("tool_use_id") or ""))
+    return out
 
 
 def unopened(paths: list[str], transcripts: list[Path]) -> list[str]:
@@ -2377,7 +2423,9 @@ def _resolves(claimed: str, pool: set[str]) -> bool:
     if c in normed:
         return True
     if "/" in c:
-        return any(p.endswith("/" + c) or c.endswith("/" + p) for p in normed)
+        # The other way round too, and for the same reason: a bare name read somewhere (`cat
+        # same.py`) says nothing about which `same.py` a longer path means.
+        return any(p.endswith("/" + c) or ("/" in p and c.endswith("/" + p)) for p in normed)
     # A one-segment claim (`config.py`, `Makefile`) matches on basename ONLY when the pool holds
     # exactly one file with that name. Two candidates and the claim cannot say which was read; zero
     # is a genuine miss. Matching any suffix would clear a row that cited `config.py` against a

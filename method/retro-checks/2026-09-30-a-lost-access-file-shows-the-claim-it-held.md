@@ -7,9 +7,10 @@ under "Access baseline exceptions"; and the leg adds an advisory counting the ex
 lead's own transcript never shows it opening (`--lead-transcript`, default this session's
 `$CLAUDE_CODE_SESSION_ID` file) · tools/coyomap/finalize.py, access_surface.py, record.py,
 records.py, provenance.py, grounding.py, eval/retro/method.md.
-On the 2026-09-30 mcpolis build the leg named 17 paths with no claims; the lead opened none of them
-and recorded 11 reasons, 5 of which answered a different claim, and four old access rules (team
-scoping of every stored record among them) left the map.
+On the 2026-09-30 mcpolis build the leg named 17 paths with no claims; the lead recorded 11 reasons,
+8 of them for files it never opened (re-counted after the review: an earlier count cut each command
+at its first `>` and missed 2 reads), 5 of the 11 answered a different claim, and four old access
+rules (team scoping of every stored record among them) left the map.
 
 Escalation: if item 3 fails, run the eval before accepting the map.
 
