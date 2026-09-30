@@ -1386,6 +1386,27 @@ def test_the_harvest_batch_warns_about_the_scripts_no_slice_owns():
     assert "tests/integration/list_orphans.py" in err.getvalue()
 
 
+def test_the_script_warning_names_every_script_and_its_folders():
+    """A list cut at 12 hid 3 of the 15 scripts on the 2026-09-30 mcpolis slots."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_script_repo(Path(td) / "repo")
+        for i in range(13):
+            (repo / "tests" / "integration" / f"run-{i:02d}.sh").write_text("#!/bin/sh\necho x\n",
+                                                                           encoding="utf-8")
+        slots = Path(td) / "slots"
+        slots.mkdir()
+        values = _harvest_values(REPO_ABS=str(repo), EXPECTED_COMPONENTS="2")
+        values.update({"agent-id": "h1", "repo": str(repo), "FILES": f"{repo}/src/"})
+        (slots / "h1.json").write_text(json.dumps(values), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            contract.main(["harvest", "--from-slots", str(slots), "--out-dir", str(Path(td) / "b")])
+    said = err.getvalue()
+    assert "tests/integration/ (15)" in said, said
+    assert all(f"tests/integration/run-{i:02d}.sh" in said for i in range(13)), said
+    assert "more" not in said, said
+
+
 def test_the_tests_brief_says_to_read_the_body_of_every_test_it_cites():
     """Retro 2026-09-30, finding 28: the skeptic contract said "do not reason from the name" and the
     tests contract did not; 83 of 184 citations rested on the name alone."""

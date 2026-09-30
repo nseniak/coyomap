@@ -850,11 +850,19 @@ def _warn_scripts_in_no_slice(files: list[Path]) -> None:
         return
     missed = scripts_in_no_slice(Path(repos.pop()), owned)
     if missed:
+        # EVERY script, and the folders first: the lead acts per folder, and a list cut at 12 hid 3
+        # of the 15 scripts on the 2026-09-30 mcpolis slots, so they could be neither given to a
+        # slice nor stated as out of scope.
+        folders: dict[str, int] = {}
+        for s in missed:
+            folder = s.rsplit("/", 1)[0] + "/" if "/" in s else "./"
+            folders[folder] = folders.get(folder, 0) + 1
         print(f"WARNING: {len(missed)} script(s) a person runs a command from are in no harvest "
-              f"slice, so no agent reads them: {', '.join(missed[:12])}"
-              + (f" … and {len(missed) - 12} more" if len(missed) > 12 else "")
-              + ". Give their folders to a slice, tests included, or state in the build's notes "
-                "why each is out of scope.", file=sys.stderr)
+              f"slice, so no agent reads them. By folder: "
+              + ", ".join(f"{d} ({n})" for d, n in sorted(folders.items()))
+              + f". Every one: {', '.join(missed)}. Give their folders to a slice, tests "
+                "included, or state in the build's notes why each is out of scope.",
+              file=sys.stderr)
 
 
 def budgets_doc(repo: Path) -> dict[str, object]:
