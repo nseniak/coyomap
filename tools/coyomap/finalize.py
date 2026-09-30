@@ -375,6 +375,15 @@ def _stale_grounding_pin(map_path: Path, live_claims: list[str],
             f"the refuted ones, so that records `refuted 0`.")
 
 
+#: anchor-drift's notes about the 'Drift exceptions' lines themselves.
+_DRIFT_RECORD_NOTE = re.compile(r"recorded drift exception\(s\) matched no finding|"
+                                r"drift finding\(s\) suppressed by recorded exception|"
+                                r"'Drift exceptions' heading open with `anchor-drift`")
+#: Of those, the two that say a recorded line does nothing.
+_INERT_DRIFT_RECORD = re.compile(r"recorded drift exception\(s\) matched no finding|"
+                                 r"'Drift exceptions' heading open with `anchor-drift`")
+
+
 def _drift_leg(map_path: Path, repo: Path, verdicts: list[Path],
                behavioural: bool = False) -> Leg:
     """`behavioural` (verdict-based pass only) counts coverage at the record's tier, so the
@@ -387,6 +396,12 @@ def _drift_leg(map_path: Path, repo: Path, verdicts: list[Path],
     code, out, err = _run_leg("anchor-drift", argv)
     text = (out or "") + (err or "")
     rows = [ln.strip()[2:] for ln in text.splitlines() if ln.startswith("  - ")]
+    # WHAT anchor-drift SAID ABOUT THE RECORDED LINES, carried beside its findings: a line that
+    # does not parse, a line that matched no finding, and what the lines suppressed. Only the
+    # verdict-based pass: the recorded lines answer verdict findings, so the shape-only pass would
+    # call every one of them idle. They used to be dropped with every line not shaped `  - `.
+    if verdicts:
+        rows += [ln.strip() for ln in text.splitlines() if _DRIFT_RECORD_NOTE.search(ln)]
     kind = "verdict-based" if verdicts else "shape-only"
     # Carry the COVERAGE line into the report and the gate block. Without it the leg printed
     # "no drifted anchors" off a pass that had seen 31 of 404 claims — the same "the gate did not
@@ -940,6 +955,23 @@ def _unread_excuses(excused: list[str], base: dict[str, list[AccessClaim]],
             f"correct its why, or remove it and restore the rule."]
 
 
+#: The 'Balance exceptions' key the component-budget leg reads. The line must NAME both counts, so a
+#: record written against another size stops answering the leg once the map moves, and a bare
+#: `granularity:` sentence (which answers validate's own count advisory) never answers this one.
+BUDGET_KEY = "component-budget"
+
+
+def budget_record(m: "ProjectModel", shipped: int, budgeted: int) -> str:
+    """The 'Balance exceptions' line that answers the budget leg for THESE counts, or ""."""
+    for line in records.lines(m, "Balance exceptions"):
+        if not line.lower().startswith(BUDGET_KEY):
+            continue
+        numbers = {int(n) for n in re.findall(r"(?<![\w.])(\d+)(?![\w.])", line)}
+        if {shipped, budgeted} <= numbers:
+            return line
+    return ""
+
+
 def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
     """The sum of the component budgets the harvest briefs were handed, against what shipped and
     against the code-derived expectation E. None when no budgets were recorded (a build that did
@@ -993,10 +1025,17 @@ def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
     low, high = granularity_band(total)      # the same ±40 % band each slice is held to
     advisory: list[str] = []
     if total and not low <= shipped <= high:
-        advisory.append(f"{shipped} component(s) shipped against {total} budgeted across "
-                        f"{len(budgets)} harvest brief(s) (band {low}-{high}{e_note}{uncounted}). "
-                        f"Every slice can be inside its own band while the sum is not; say in "
-                        f"`Balance exceptions` why the map is this size, or re-cut the slices.")
+        recorded = budget_record(m, shipped, total)
+        if recorded:
+            advisory.append(f"DISCLOSURE, not a request: {shipped} component(s) shipped against "
+                            f"{total} budgeted (band {low}-{high}{e_note}), recorded as deliberate "
+                            f"under 'Balance exceptions': {recorded}")
+        else:
+            advisory.append(f"{shipped} component(s) shipped against {total} budgeted across "
+                            f"{len(budgets)} harvest brief(s) (band {low}-{high}{e_note}{uncounted}). "
+                            f"Every slice can be inside its own band while the sum is not; record "
+                            f"'{BUDGET_KEY}: {shipped} shipped of {total} budgeted — <why the map is "
+                            f"this size>' under 'Balance exceptions', or re-cut the slices.")
     return Leg("component budget", RAN, advisory=advisory,
                note=f"{shipped} shipped / {total} budgeted across {len(budgets)} brief(s), "
                     f"band {low}-{high}{e_note}{uncounted}")
@@ -1211,7 +1250,8 @@ _ADVISORY_IDS = re.compile(
 #: "a recorded gap is still a gap" family under "handled", which cancelled the disclosure outright.
 _DISCLOSURE = re.compile(
     r"suppressed by (?:a )?recorded|counted as (?:CLAIMED|SWEPT)|and NOT re-nudged|"
-    r"is NOT re-reported above|"
+    r"is NOT re-reported above|advisory line\(s\) are silenced by this map's recorded lines|"
+    r"^DISCLOSURE, not a request|"
     # The refutation gate saying what it did NOT block on. Asking whether that is "recorded under a
     # heading" is a category error: it reports a thing the map is right to carry.
     r"disclosure of what the refutation gate did NOT block on", re.I)
@@ -1264,6 +1304,17 @@ def advisory_disposition(map_path: Path, report: FinalizeReport) -> list[tuple[s
             heading = next((h for h in records.KNOWN_HEADINGS if h.lower() in low), "")
             if _DISCLOSURE.search(a):
                 out.append(("disclosure", heading, a))
+                continue
+            # Three advisories whose key is known although it is no id. A lost access FILE is
+            # listed only while no line records it, so each one is unrecorded by construction; the
+            # budget advisory is printed only when no `component-budget` line names both counts; and
+            # an excuse nobody read, or a recorded line that silences nothing, is answered by
+            # reading or deleting, never by recording more.
+            if "named by NO access rule in this map" in a or "budgeted across" in a:
+                out.append(("UNRECORDED", heading, a))
+                continue
+            if UNREAD_EXCUSES in a or _INERT_DRIFT_RECORD.search(a):
+                out.append(("carried (no escape)", "", a))
                 continue
             if not heading:
                 field = _map_field_escape(m, a)

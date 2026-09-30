@@ -1775,3 +1775,65 @@ def test_a_step_the_closer_rejected_is_disclosed_as_settled_on_appeal():
     leg = finalize._refutations_leg(p, files)
     assert not leg.blocking
     assert any("CLOSER REJECTED" in a and "UC1 step 2" in a for a in leg.advisory), leg.advisory
+
+
+# --- finalize can settle every row it files UNSURE (retro 2026-09-30, finding 13) ------------------
+# The budget leg read no record, two disclosures were missed by the disclosure pattern, an access
+# path was never UNRECORDED, and anchor-drift's notes about the recorded lines were dropped: none of
+# the 3 UNSURE rows on the 2026-09-30 mcpolis report could ever be settled.
+
+def make_budget_repo(record: str | None) -> tuple[Path, Path]:
+    """10 components against 5 budgeted, with `record` under 'Balance exceptions' when given."""
+    root, p = make_repo(components=10)
+    _with_budgets(root, {"t1": 3, "t2": 2})
+    if record is not None:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc["extras"] = [{"heading": "Balance exceptions", "body": record}]
+        p.write_text(json.dumps(doc), encoding="utf-8")
+    return root, p
+
+
+def test_a_budget_record_naming_both_counts_settles_the_budget_leg():
+    root, p = make_budget_repo("component-budget: 10 shipped of 5 budgeted — the slices were "
+                               "cut before the adapters were counted")
+    report = finalize.build_report(p, root, [])
+    leg = _budget_leg_of(report)
+    assert leg is not None and leg.advisory and leg.advisory[0].startswith("DISCLOSURE"), leg
+    rows = [d for d, _h, a in finalize.advisory_disposition(p, report) if "shipped against" in a]
+    assert rows == ["disclosure"], rows
+
+
+def test_a_bare_granularity_line_does_not_settle_the_budget_leg():
+    root, p = make_budget_repo("granularity: the map is this size on purpose")
+    report = finalize.build_report(p, root, [])
+    rows = [d for d, _h, a in finalize.advisory_disposition(p, report) if "shipped against" in a]
+    assert rows == ["UNRECORDED"], rows
+
+
+def test_the_silenced_lines_disclosure_and_a_lost_access_file_are_filed_by_what_they_are():
+    silenced = ("46 advisory line(s) are silenced by this map's recorded lines, which sit under: "
+                "Access baseline exceptions, Balance exceptions.")
+    lost = ("1 of 2 file(s) that held ACCESS enforcement in 0001/project-map.json are named by NO "
+            "access rule in this map. Record '<path>: <why>' under an 'Access baseline exceptions' "
+            "extras heading for each one that is deliberate.")
+    disclosed = ("DISCLOSURE, not a request: 1 of 2 file(s) that held ACCESS enforcement are still "
+                 "named, and the other 1 are recorded under 'Access baseline exceptions'.")
+    assert _disposition_for(None, silenced)[0] == "disclosure"
+    assert _disposition_for(None, lost)[0] == "UNRECORDED"
+    assert _disposition_for(None, disclosed)[0] == "disclosure"
+
+
+def test_the_drift_leg_carries_a_recorded_line_that_matched_no_finding():
+    root, p = make_repo()
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["extras"] = [{"heading": "Drift exceptions",
+                      "body": "anchor-drift `C9 calls C8`: the call moved into a helper on purpose"}]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    v = verify / "verdicts-backbone-1.json"
+    v.write_text(json.dumps({"grounding": [{"claim": "C1 calls C2", "grounded": True,
+                                            "evidence": "src/a.py:2", "skeptic": "b1"}]}),
+                 encoding="utf-8")
+    leg = finalize._drift_leg(p, root, [v])
+    assert any("recorded drift exception(s) matched no finding" in a for a in leg.advisory), leg
