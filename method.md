@@ -2190,7 +2190,12 @@ synthesis → parallel trace.**
   **Put the gap-fill slice in the SAME batch as the Phase-3 trace fan-out.** Slicing the trace by
   use case structurally guarantees that components off every traced flow get no edges, so the
   gap-fill is predictable, not a surprise: discovering the edgeless set only after the trace agents
-  finish costs a serial dispatch, plus rework of anything written too early. Seed that slice from
+  finish costs a serial dispatch, plus rework of anything written too early. **The rules and tests
+  agents read the map assembled WITH the gap-fill's fragment:** assemble after it lands, then
+  dispatch them, and point them at the map itself rather than a copy. One build handed them a copy
+  taken before the gap-fill landed, and both worked from a map missing 121 of 143 gap-fill edges;
+  `assemble` writes the map whole (a temporary file, then one rename), so a reader never meets half
+  a file. Seed that slice from
   the post-synthesis edgeless set, and get its brief from `coyomap contract gapfill` — never by
   mutating a trace slice's filled slots. Harvest agents may use per-slice *provisional* ids; synthesis
   assigns the final canonical ids here. This is the safe place to renumber: Phase 1 produced only

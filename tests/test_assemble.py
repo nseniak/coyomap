@@ -1526,3 +1526,24 @@ def test_a_recorded_correction_into_a_stray_file_is_refused_on_replay_too():
         m = json.loads((out / "project-map.json").read_text(encoding="utf-8"))
         assert m["edges"][0]["where"] == "a.py:10", m["edges"][0]
         assert "REFUSED" in proc.stdout + proc.stderr
+
+
+# --- the map is written whole or not at all (retro 2026-09-30, finding 32) -------------------------
+# `assemble` truncated and rewrote project-map.json in place, so an agent reading it mid-assemble
+# could open half a file; the lead handed its rules and tests agents a copy instead, and the copy
+# predated the gap-fill (121 of 143 gap-fill edges missing).
+
+def test_a_reader_holding_the_old_map_keeps_reading_the_old_map_whole():
+    """A rename leaves an open reader on the file it opened; an in-place rewrite truncates it under
+    the reader. The open handle is the observable difference."""
+    with tempfile.TemporaryDirectory() as td:
+        proc, out = _assemble_with_reconcile(td, None)
+        assert proc.returncode == 0, proc.stderr
+        path = out / "project-map.json"
+        before = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8") as held:
+            proc, _ = _assemble_with_reconcile(td, {"set": [{"ids": ["C1"], "subsystem": "S1"}]})
+            assert proc.returncode == 0, proc.stderr
+            assert held.read() == before, "the reader's file changed under it"
+        assert path.read_text(encoding="utf-8") != before
+        assert not [p.name for p in out.iterdir() if p.name.endswith(".tmp")], "a temp file was left"
