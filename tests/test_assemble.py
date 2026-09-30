@@ -8,6 +8,8 @@ Run either way (needs an editable install: `make deps`):
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1532,6 +1534,24 @@ def test_a_recorded_correction_into_a_stray_file_is_refused_on_replay_too():
 # `assemble` truncated and rewrote project-map.json in place, so an agent reading it mid-assemble
 # could open half a file; the lead handed its rules and tests agents a copy instead, and the copy
 # predated the gap-fill (121 of 143 gap-fill edges missing).
+
+def test_the_map_is_written_with_the_ordinary_permissions_and_keeps_any_it_was_given():
+    """Written through a temporary file, the map came out readable by its owner only (0600) where
+    an ordinary write gives 0644."""
+    old = os.umask(0o022)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            proc, out = _assemble_with_reconcile(td, None)
+            assert proc.returncode == 0, proc.stderr
+            for name in ("project-map.json", "project-map.md"):
+                assert stat.S_IMODE((out / name).stat().st_mode) == 0o644, name
+            (out / "project-map.json").chmod(0o640)
+            proc, _ = _assemble_with_reconcile(td, {"set": [{"ids": ["C1"], "subsystem": "S1"}]})
+            assert proc.returncode == 0, proc.stderr
+            assert stat.S_IMODE((out / "project-map.json").stat().st_mode) == 0o640
+    finally:
+        os.umask(old)
+
 
 def test_a_reader_holding_the_old_map_keeps_reading_the_old_map_whole():
     """A rename leaves an open reader on the file it opened; an in-place rewrite truncates it under

@@ -22,3 +22,8 @@ Escalation: none on its own.
 
 3. expect: 0 `.project-map.json.*.tmp` files left in `.coyomap/` after the build.
    regression sign: a leftover temporary file, which means an assemble died mid-write.
+
+4. expect: `project-map.json`, `project-map.md` and `line-texts.json` carry the permissions an
+   ordinary write gives (`-rw-r--r--` under the usual umask), or the ones they had before the build.
+   regression sign: `-rw-------` on a file that was not made private by hand (the first whole-file
+   writer left all three readable by their owner only).

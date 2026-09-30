@@ -27,14 +27,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from coyomap import prose
+from coyomap.whole_file import write_whole
 
 FILE_NAME = "line-texts.json"
 
@@ -94,15 +93,7 @@ def save(folder: Path, texts: Mapping[str, str]) -> Path:
     Written whole or not at all (a temporary file, then one rename): a running viewer re-reads the
     file when it changes, and a half-written one would be cached as a view with no texts."""
     path = folder / FILE_NAME
-    body = json.dumps(dict(sorted(texts.items())), indent=1, ensure_ascii=False) + "\n"
-    fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{FILE_NAME}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(body)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    write_whole(path, json.dumps(dict(sorted(texts.items())), indent=1, ensure_ascii=False) + "\n")
     return path
 
 

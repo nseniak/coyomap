@@ -19,10 +19,8 @@ resolved here — that is `coyomap validate`'s job on the assembled result (the 
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
-import tempfile
 from dataclasses import MISSING, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
@@ -59,6 +57,7 @@ from coyomap.reconcile import (
     validate_reconcile,
 )
 from coyomap.validate_model import rule_identity, unbacked_entity_steps
+from coyomap.whole_file import write_whole
 
 # Top-level NON-list fields, merged one-per-map with a conflict report. `grounding` belongs here:
 # it is written by the Phase-4 reconcile as its own fragment, and omitting it meant `assemble`
@@ -1129,22 +1128,6 @@ _GITIGNORE_KEEP: tuple[str, ...] = ("build-fragments/", "finalize-report.json",
 _GITIGNORE_DROP = {"preindex.json", "/preindex.json"}
 
 
-def _write_whole(path: Path, text: str) -> None:
-    """Write `path` whole or not at all: a temporary file beside it, then one rename.
-
-    Agents read the map while the lead assembles it. Written in place, a reader could open it
-    half-written, so the 2026-09-30 mcpolis lead handed its rules and tests agents a copy instead,
-    and that copy predated the gap-fill: they worked from a map missing 121 of 143 gap-fill edges."""
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-
-
 def ensure_fragments_ignored(out_dir: Path) -> bool:
     """Normalize `<out>/.gitignore`: ensure every per-run artifact IS ignored (`build-fragments/`, the
     agents' scratch dir, and `finalize-report.{json,md}`, rewritten on every pre-commit read) so a build
@@ -1327,8 +1310,11 @@ def main(argv: list[str] | None = None) -> int:
     # map, which is what the 2026-09-02 build did. `assemble` is the only verb that writes one.
     guard_wrong_map(out_dir / "project-map.json")
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_whole(out_dir / "project-map.json", to_canonical_json(model))
-    _write_whole(out_dir / "project-map.md", model_to_markdown(model))
+    # WHOLE OR NOT AT ALL: agents read the map while the lead assembles it, and a map rewritten in
+    # place can be read half-written. The 2026-09-30 mcpolis lead handed its rules and tests agents a
+    # copy instead, and that copy predated the gap-fill: 121 of 143 gap-fill edges were missing.
+    write_whole(out_dir / "project-map.json", to_canonical_json(model))
+    write_whole(out_dir / "project-map.md", model_to_markdown(model))
     # The interactive viewer is served live by `coyomap serve` (built on demand from the model), so no
     # HTML file is written here — registering the folder is enough for the server to pick it up.
     from coyomap.viewer.recents import register_project  # registers the project with `coyomap serve` (best-effort)

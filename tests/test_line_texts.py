@@ -10,6 +10,8 @@ import contextlib
 import copy
 import io
 import json
+import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -339,3 +341,14 @@ def test_record_names_a_text_changed_after_the_check():
         assert code == 0
         assert "CHANGED after the check, so not kept" in out.getvalue()
         assert not line_texts.load(folder)
+
+
+def test_the_saved_texts_get_the_ordinary_permissions():
+    """`save` wrote through a temporary file left readable by its owner only (0600)."""
+    old = os.umask(0o022)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            path = line_texts.save(Path(td), {"k1": "a"})
+            assert stat.S_IMODE(path.stat().st_mode) == 0o644
+    finally:
+        os.umask(old)
