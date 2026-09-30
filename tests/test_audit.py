@@ -2638,3 +2638,24 @@ def test_a_reworded_step_resolves_to_nothing():
     """The rule every other kind follows: a claim the live map no longer makes is reconciled."""
     m = make_walk_and_interface_map()
     assert audit_model.resolve_claim(m, "UC1 step 2: C1 → I2 [out] — refunds the card").target is None
+
+
+def test_since_does_not_claim_the_operator_passed_with_behavioural():
+    """From the second wave's partial run (2026-09-30): the cut reads the pin's own tier, and the
+    NOTE about `--with-behavioural` printed as if the operator had passed the flag."""
+    doc = {"format": "coyomap-map", "title": "T", "goal": "g",
+           "components": [{"id": "C3", "name": "Reader", "purpose": "reads the record"}],
+           "entities": [{"id": "E1", "name": "Record", "meaning": "a saved row"}],
+           "edges": [{"src": "C3", "verb": "reads", "dst": "E1", "why": "w", "where": "b.py:2"}]}
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        mp = tmp / "map.json"
+        mp.write_text(json.dumps(doc), encoding="utf-8")
+        pin = tmp / "worklist.json"
+        pin.write_text(json.dumps({"worklist": [{"claim": "x", "theme": "behaviour"}]}),
+                       encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = audit_model.main([str(mp), "--batches", str(tmp / "verify"), "--since", str(pin)])
+    assert code == 0, err.getvalue()
+    assert "--with-behavioural" not in err.getvalue(), err.getvalue()

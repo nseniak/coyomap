@@ -1915,12 +1915,12 @@ def _run(argv: list[str] | None = None) -> int:
               "--batches <dir> [--cap N] [--floor N] writes one Phase-4 claims file per theme (default\n"
               "cap 40); themes under the floor (default 5) share claims-small.json; --with-prose also\n"
               "writes the prose-N.json reader batches, which are not part of the default budget.\n"
-              "--since <pinned worklist.json> (with --batches) cuts ONLY the claims the map carries\n"
-              "  that the pin never held — a SECOND WAVE — as claims-added-<theme>-N.json, beside\n"
-              "  the first wave's files and without touching them. `grounding write` folds their\n"
-              "  verdicts into the pin.\n"
               "  most-dangerous-first, each claim carrying its anchor + detail so the skeptics are\n"
               "  not handed a bare `C1 calls C2`. Not build-fragments/ — assemble globs that.\n"
+              "--since <pinned worklist.json> (with --batches) cuts ONLY the claims the map carries\n"
+              "  that the pin never held — a SECOND WAVE — as claims-added-<theme>-N.json, beside\n"
+              "  the first wave's files and without touching them, at the pin's own tier.\n"
+              "  `grounding write` folds their verdicts into the pin.\n"
               "  Each worklist item carries `theme` (a closed, most-dangerous-first set) and\n"
               "  `drift_eligible`; `theme_counts` sizes each group. Batch the Phase-4 skeptics\n"
               "  BY THEME — the shape the Phase-4\n"
@@ -1997,7 +1997,7 @@ def _run(argv: list[str] | None = None) -> int:
         if not worklist:
             print(f"nothing added since the pin: every claim this map makes is in {since_raw}")
             return 0
-    if behavioural:
+    if "--with-behavioural" in argv:
         # THE LIMIT THIS USED TO STATE IS GONE. `grounding write` now recomputes the live surface at
         # the PINNED worklist's own tier (`grounding.worklist_is_behavioural`), so a record built
         # against a behavioural worklist no longer reports every behaviour claim as `superseded` —

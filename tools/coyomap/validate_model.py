@@ -4392,8 +4392,9 @@ def _grounding_live_coverage_findings(g: Grounding) -> list[str]:
             f"untouched while the map carries a claim nobody challenged. Challenge them in a "
             f"second wave — `coyomap audit <map> --batches .coyomap/verify --since "
             f".coyomap/verify/worklist.json` cuts only them, `coyomap contract skeptic "
-            f"--from-batches .coyomap/verify --prefix added- …` briefs them — then re-run `coyomap "
-            f"ship`, whose `grounding write` folds their verdicts into the pin. Or say in "
+            f"--from-batches .coyomap/verify --prefix added- … --votes security=3` briefs them — "
+            f"then close their refutations and re-run `coyomap ship` with a new note (method.md, "
+            f"the second wave), whose `grounding write` folds their verdicts into the pin. Or say in "
             f"`grounding.note` which claims were minted after the pin and why they were not "
             f"challenged — a note that says 'all N claims were challenged' is reporting the pin, "
             f"not the map."]

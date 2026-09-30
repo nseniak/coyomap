@@ -1399,9 +1399,9 @@ obvious was left", never "the sweep was exhaustive".
 
 **A step where a rule decides says its condition in its note** — when the story goes on from it, or
 when it stops. A step decides when a rule site sits on its own line. The pictures mark such a step
-with the rule mark, and the note is the one place that says which way it goes; the trace contract
-tells the tracing agents how to write it, and the lead writes the rest after the rules fan-out
-(`coyomap fix step-notes`). `validate` advises on a deciding step with an empty note. A step whose note deliberately says nothing is
+with the rule mark, and its note says which way the story goes from it, even when the step before
+already said so; the trace contract tells the tracing agents how to write it, and the lead writes
+the rest after the rules fan-out (`coyomap fix step-notes`). `validate` advises on a deciding step with an empty note. A step whose note deliberately says nothing is
 recorded under the `Condition exceptions` extras heading, keyed by the step's own anchor
 (`<path:line>: <why>`), the way `Sweep debt` keys its records.
 
@@ -2731,13 +2731,22 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   Read both before writing the note: a build that read neither shipped two refuted claims and
   hand-diffed the post-pin set in python to find what the section would have listed.
 
-  **The claims added since the pin get a SECOND WAVE.** A text corrected after the vote, or an edge
-  written after it, is a claim no skeptic saw. `coyomap audit <map> --batches .coyomap/verify
-  --since .coyomap/verify/worklist.json` cuts only those, as `claims-added-*.json` beside the first
-  wave's files; brief them with `coyomap contract skeptic --from-batches .coyomap/verify --prefix
-  added- …`, dispatch, and run `ship` again. Its `grounding write` folds their verdicts into the pin
-  and keeps the first pin as `verify/worklist-wave1.json`; their refutations are reconciled from
-  `grounding report` like the first wave's. **Never re-pin with a fresh `audit --json`:**
+  **The claims added since the pin get a SECOND WAVE, and only one.** A text corrected after the
+  vote, or an edge written after it, is a claim no skeptic saw. In order:
+  1. `coyomap audit <map> --batches .coyomap/verify --since .coyomap/verify/worklist.json` cuts
+     only those, as `claims-added-*.json` beside the first wave's files;
+  2. `coyomap contract skeptic --from-batches .coyomap/verify --prefix added- --fill <slots>
+     --out-dir <briefs> --votes security=3` briefs them: the security theme is voted three times,
+     as in the first wave, and without the flag it silently gets one voter;
+  3. dispatch; the barrier is `coyomap grounding lint --verdicts .coyomap/verify/verdicts-added-*.json
+     --expect <every voter id>`;
+  4. `ship` without a note: its `grounding report` lists the second wave's refutations, and a
+     closer hears them like the first wave's (`contract closer --from-verdicts .coyomap/verify
+     --prefix added- …`);
+  5. `ship --note-file <a NEW note>`: its `grounding write` folds the verdicts into the pin and keeps
+     the first pin as `verify/worklist-wave1.json`. The old note counts the first pin only.
+  There is no third wave: a claim reworded while the second is reconciled is named in the note, and
+  a new cut would overwrite the second wave's files. **Never re-pin with a fresh `audit --json`:**
   `grounding write` refuses every verdict cast on the old wording. On one build 68 claims shipped
   with no verdict, 6 of them re-worded sites of access rules, because no route here reached them.
 
@@ -3135,12 +3144,13 @@ the lead's to assign, through `reconcile`, after the fan-out — an agent states
 REPLY and never in its fragment.
 
 **Then write the deciding steps' conditions — after the rules fan-out, never before.** A rule
-usually lands on a step after the tracers are gone, so a tracer could not have written its
-condition. Once the rules fragments are assembled, `validate` lists every step a rule site sits on
+usually lands on a step after the tracers are gone, so a tracer rarely wrote its condition. Once the rules fragments are assembled, `validate` lists every step a rule site sits on
 exactly — the steps the pictures mark with the rule mark — whose note is empty. Read the rule's
 statement and the step's line, and write each condition with `coyomap fix step-notes --fragments
 .coyomap/build-fragments --from <file>`, one `"UC5:3": "refused once the plan's servers are used
-up"` per step. On one build 166 steps were listed, 147 of them only because they shared a function
+up"` per step. A step whose line always runs, with nothing depending on its result (a delete every
+removal makes), has no condition: record `<path:line>: <why>` under `Condition exceptions` with
+`coyomap record`, a why of at most 20 words. On one build 166 steps were listed, 147 of them only because they shared a function
 with a rule; the list counts exact sites now, and there it was 19.
 
 **Completeness check before the barrier (lead, not delegated).** Before the Phase 2 synthesis, the

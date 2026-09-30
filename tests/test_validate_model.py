@@ -6582,3 +6582,13 @@ def test_a_messaging_excuse_is_not_called_idle_and_a_dead_one_still_is():
     assert len(idle) == 1, warnings
     assert "C9" in idle[0] and "C1" not in idle[0], idle[0]
     assert not any("publisher(s) C1 carry no backbone edge" in w for w in warnings), warnings
+
+
+def test_the_second_wave_advice_names_the_security_voters():
+    """From the second wave's partial run (2026-09-30): without `--votes security=3` the security
+    theme of a second wave silently gets one voter."""
+    g = Grounding(claims_total=10, claims_challenged=10, claims_confirmed=10, claims_refuted=0,
+                  claims_unverifiable=0, claims_superseded=0, claims_added_since=2,
+                  claims_live_challenged=10)
+    found = validate_model_mod._grounding_live_coverage_findings(g)
+    assert found and "--votes security=3" in found[0], found
