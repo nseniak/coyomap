@@ -68,6 +68,7 @@ from coyomap.audit_model import RULE_SITE_CLAIM, resolve_claim
 from coyomap.dump import edges_of, record_of, resolve_id
 from coyomap.grounding import is_closer_row
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
+from coyomap.preindex_lib import iter_source_files
 from coyomap.provenance import SESSION_ENV
 
 # Contract name → template file. The name is what a lead types, so it is the phase, not the filename.
@@ -718,6 +719,60 @@ def write_briefs(plan: list[tuple[str, Path, str]]) -> list[tuple[str, Path, str
     return out
 
 
+#: Suffixes of a file a person runs as a command.
+_SCRIPT_SUFFIXES = (".sh", ".bash", ".zsh")
+
+
+def is_script(path: Path) -> bool:
+    """A file a person runs a command from: a shell script, a file that opens with `#!`, or a
+    Python file with a `__main__` guard."""
+    if path.suffix in _SCRIPT_SUFFIXES:
+        return True
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return text.startswith("#!") or (path.suffix == ".py" and re.search(
+        r"""if\s+__name__\s*==\s*['"]__main__['"]""", text) is not None)
+
+
+def owned_paths(files_slot: str, repo: Path) -> list[str]:
+    """The repo-relative paths a harvest slot's FILES value names (a comma, space or line list of
+    absolute paths, a directory ending in `/`)."""
+    out: list[str] = []
+    base = repo.resolve()
+    for tok in re.split(r"[,\s]+", files_slot):
+        tok = tok.strip().strip("`*-").strip()
+        if not tok:
+            continue
+        p = Path(tok)
+        try:
+            rel = p.resolve().relative_to(base).as_posix() if p.is_absolute() else tok.lstrip("./")
+        except ValueError:
+            continue
+        out.append(rel.rstrip("/"))
+    return out
+
+
+def scripts_in_no_slice(repo: Path, owned: list[str]) -> list[str]:
+    """The in-scope scripts no harvest slice owns — repo-relative, sorted.
+
+    A way in or a run command lives in a script a person runs, and a script no slice owns is read by
+    nobody. On the 2026-09-30 mcpolis build no slice covered `backend/tests/integration/`, where the
+    orphan-sandbox lister and 3 run scripts live: all four left the map, which recorded `cli:
+    complete`. The scope's own walk decides what is in scope, so a folder `.coyomap/.ignore` drops
+    is never named here."""
+    walk = iter_source_files(repo)
+    out: list[str] = []
+    for f in walk.files:
+        rel = f.relative_to(walk.root).as_posix()
+        if any(o == "" or rel == o or rel.startswith(o + "/") for o in owned):
+            continue
+        if is_script(f):
+            out.append(rel)
+    return sorted(out)
+
+
 def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None = None,
                     append: list[str] | None = None,
                     session: str | None = None) -> list[tuple[str, Path, str]]:
@@ -770,12 +825,36 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
     if faults:
         raise ValueError(f"{len(faults)} of {len(files)} slots file(s) are bad; NOTHING was "
                          f"written — " + " | ".join(faults))
+    if name == "harvest":
+        _warn_scripts_in_no_slice(files)
     written = write_briefs(plan)
     done = {stem for stem, _p, state in written if state == "written"}
     for stem, repo_slot, agent_id, expected in budgets:
         if stem in done:
             record_budget(repo_slot, agent_id, expected, session=session)
     return written
+
+
+def _warn_scripts_in_no_slice(files: list[Path]) -> None:
+    """Name, on stderr, the scripts no harvest slice's FILES covers. A warning, not a refusal: a
+    script left out on purpose is the lead's call, and the method says to state it."""
+    owned: list[str] = []
+    repos: set[str] = set()
+    for f in files:
+        values = _read_values(str(f))
+        repo = str(values.get("REPO_ABS") or values.get("repo") or "")
+        if repo:
+            repos.add(repo)
+            owned += owned_paths(str(values.get("FILES") or ""), Path(repo))
+    if len(repos) != 1:
+        return
+    missed = scripts_in_no_slice(Path(repos.pop()), owned)
+    if missed:
+        print(f"WARNING: {len(missed)} script(s) a person runs a command from are in no harvest "
+              f"slice, so no agent reads them: {', '.join(missed[:12])}"
+              + (f" … and {len(missed) - 12} more" if len(missed) > 12 else "")
+              + ". Give their folders to a slice, tests included, or state in the build's notes "
+                "why each is out of scope.", file=sys.stderr)
 
 
 def budgets_doc(repo: Path) -> dict[str, object]:

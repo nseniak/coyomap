@@ -3101,6 +3101,12 @@ the pointer to send, one call per slice. The `--fill` is what records the brief'
 `finalize` sums those budgets against what shipped (the `component budget` leg, held to the same
 ±40 % band each slice is held to): 60 budgeted and 114 shipped is a sentence at assemble time, not
 a `Balance exceptions` record 450 turns later.
+**The slices cover every folder a person runs a command from, tests included.** A way in or a run
+command lives in a script, and a script no slice owns is read by nobody: one build left
+`backend/tests/integration/` in no slice, lost a way in and 3 run scripts, and still recorded
+`cli: complete`. The batch form, `coyomap contract harvest --from-slots <slots-dir> --out-dir
+<briefs-dir>`, names every in-scope script no slice's FILES covers; give its folder to a slice, or
+state in the build's notes why it is out of scope.
 The verb prints the agent's half and appends the writing rules, so you never handle the template
 and the lead-facing header at its top cannot reach an agent. A harvest agent authors every
 component `purpose` in the map, the largest block of reader-facing prose there is. Do not `Read` it and `Write` your own — that is one
