@@ -50,6 +50,7 @@ from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 
 USAGE = """usage: coyomap grounding lint   --verdicts <raw.json>... [--agent-transcripts <dir>] [--expect <batch,…>]
+       coyomap grounding lint   --tests <x-tests.json> [--agent-transcripts <dir>]
        coyomap grounding write  --worklist <audit.json> --verdicts <raw.json>... \\
                                [--out <fragment.json>] [--json] [--partial]
                                [--note <text> | --note-file <path> | --keep-note]
@@ -58,6 +59,9 @@ USAGE = """usage: coyomap grounding lint   --verdicts <raw.json>... [--agent-tra
                                [--agent-transcripts <dir>] [--json]
        coyomap grounding by-element --worklist <audit.json> --verdicts <raw.json>... \\
                                --map <project-map.json> [--kind <kind>] [--json]
+
+`lint --tests` checks a tests fragment against the agents' transcripts: every test it cites at a
+line must have had its BODY printed by some tool call, not only its name. Exit 1 names the rest.
 
 `by-element` says what the pass did to each ELEMENT, beside the confidence its author typed.
 Nothing in the tooling ever writes `confidence`, so an element challenged three times and confirmed
@@ -2203,6 +2207,68 @@ def unopened(paths: list[str], transcripts: list[Path]) -> list[str]:
     return [p for p in paths if not _resolves(p, opened)]
 
 
+def tests_citations(path: Path) -> list[str]:
+    """Every test a tests fragment (or a map) cites at a line: `tests[].tests[].file` as
+    `path:line`, in order, once each. A directory citation names no test body and is left out."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    out: list[str] = []
+    for row in (doc.get("tests") or []) if isinstance(doc, dict) else []:
+        for t in (row.get("tests") or []) if isinstance(row, dict) else []:
+            f = str(t.get("file") or "").strip() if isinstance(t, dict) else ""
+            if re.fullmatch(r"[^\s:]+:\d+", f):
+                out.append(f)
+    return list(dict.fromkeys(out))
+
+
+def _tool_results(files: list[Path]) -> str:
+    """Every tool result the transcripts hold, whitespace collapsed — what the agents SAW."""
+    seen: list[str] = []
+    for f in files:
+        for rec in _records(f):
+            msg = rec.get("message")
+            for c in ((msg if isinstance(msg, dict) else {}).get("content") or []):
+                if not isinstance(c, dict) or c.get("type") != "tool_result":
+                    continue
+                body = c.get("content")
+                seen.append("".join(str(x.get("text") or "") for x in body if isinstance(x, dict))
+                            if isinstance(body, list) else str(body or ""))
+    return re.sub(r"\s+", " ", "\n".join(seen))
+
+
+#: How much of a test's body must reach a tool result for the citation to count as READ: its next
+#: 8 lines, those of at least 25 characters, and 2 of them (or all, when there are fewer). The
+#: measure the 2026-09-30 retro used; a name alone never satisfies it.
+_BODY_LINES, _BODY_MIN_CHARS, _BODY_SEEN = 8, 25, 2
+
+
+def unread_test_bodies(citations: list[str], files: list[Path],
+                       repo: Path) -> tuple[list[str], int]:
+    """`(the citations whose test BODY no tool result printed, how many could be checked)`.
+
+    A tests agent on the 2026-09-30 mcpolis build listed its test names with `grep -n 'def test_'`
+    and wrote each row's `why` from the name: 83 of its 184 citations point at a test whose body it
+    never printed. A citation whose body is too short to measure is not counted either way."""
+    seen = _tool_results(files)
+    unread: list[str] = []
+    checked = 0
+    for cite in citations:
+        path, _, line = cite.rpartition(":")
+        try:
+            lines = (repo / path).read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        n = int(line)
+        body = [re.sub(r"\s+", " ", ln.strip()) for ln in lines[n:n + _BODY_LINES]
+                if len(ln.strip()) >= _BODY_MIN_CHARS]
+        if not body:
+            continue
+        checked += 1
+        hits = sum(1 for ln in body if ln in seen)
+        if hits < min(_BODY_SEEN, len(body)):
+            unread.append(cite)
+    return unread, checked
+
+
 def _norm_path(p: str) -> str:
     """One normaliser, used on BOTH sides. `lstrip("./")` was the first version and it is a
     character-class strip, not a prefix strip: it turned `.github/dependabot.yml` into
@@ -2354,6 +2420,34 @@ def _resolve_agent_dir(agent_dir: str | None, env: Mapping[str, str] | None,
     return str(found)
 
 
+def _lint_tests(tests_path: Path, agent_dir: str | None,
+               env: Mapping[str, str] | None) -> int:
+    """`grounding lint --tests <fragment>`: the test citations no agent read the body of."""
+    repo = _repo_of(str(tests_path))
+    found = _resolve_agent_dir(agent_dir, env, repo)
+    if found is None or repo is None:
+        print("ERROR: grounding lint --tests needs the agents' transcripts (--agent-transcripts "
+              "<dir>, found by itself inside the build's session) and a fragment under "
+              "<repo>/.coyomap/", file=sys.stderr)
+        return 2
+    try:
+        cites = tests_citations(tests_path)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: --tests {tests_path}: {exc}", file=sys.stderr)
+        return 2
+    unread, checked = unread_test_bodies(cites, _agent_transcript_files(Path(found)), repo)
+    if unread:
+        print(f"TESTS FAILED — {len(unread)} of {checked} test citation(s) rest on the name "
+              f"alone: no tool result printed the test's body. {', '.join(unread[:12])}"
+              + (f" … and {len(unread) - 12} more" if len(unread) > 12 else "")
+              + ". Read each test before citing it (the tests contract): its name says what the "
+                "author meant, its body what it checks.", file=sys.stderr)
+        return 1
+    print(f"TESTS OK — {checked} of {len(cites)} test citation(s) checked; every one had its "
+          f"body printed by a tool call")
+    return 0
+
+
 def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None) -> int:
     """`env` is the process environment the verb reads its session id from (`lint` defaults
     `--agent-transcripts` to the running session's sub-agent transcripts). Injected, not read
@@ -2375,6 +2469,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
     if helped is not None:
         return helped
     worklist_path = out_path = map_path = agent_dir = None
+    tests_path: str | None = None
     expect: list[str] = []
     verdicts: list[str] = []
     note = ""
@@ -2402,13 +2497,15 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         elif a == "--note-cites-other-runs":
             note_cites_other_runs = True
         elif a in ("--worklist", "--verdicts", "--out", "--note", "--note-file", "--map",
-                   "--kind"):
+                   "--kind", "--tests"):
             i += 1
             if i >= len(rest):
                 print(f"ERROR: {a} needs a value", file=sys.stderr)
                 return 2
             if a == "--worklist":
                 worklist_path = rest[i]
+            elif a == "--tests":
+                tests_path = rest[i]
             elif a == "--map":
                 map_path = rest[i]
             elif a == "--kind":
@@ -2436,11 +2533,14 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         else:
             return subverb_help.usage_error(USAGE, verb, f"unknown option(s): {a}")
         i += 1
+    if verb == "lint" and tests_path and not verdicts:
+        return _lint_tests(Path(tests_path), agent_dir, env)
     if verb == "lint":
         # LINT NEEDS ONLY THE VERDICTS. Requiring a worklist and a map here would put it at the end
         # of the build again, which is the whole thing it exists to move earlier.
         if not verdicts:
-            print("ERROR: grounding lint needs at least one --verdicts <file>", file=sys.stderr)
+            print("ERROR: grounding lint needs at least one --verdicts <file> (or --tests "
+                  "<tests fragment>)", file=sys.stderr)
             return 2
         # `--expect` NAMES THE BATCHES THAT MUST HAVE LANDED. Without it this command lints the
         # files that happen to exist and cannot see a batch that produced none, so a fan-out whose

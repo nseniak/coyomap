@@ -65,6 +65,13 @@ reading, not a measurement. Never present a read-only table as if it were measur
 suite with coverage, which upgrades rows to `verified`, is an opt-in the lead grants in this brief;
 it was not granted here.
 
+**Read the body of every test you cite.** A test's name says what its author meant; its body says
+what it checks. Open each test you cite at its line and read it through (`sed -n '<line>,+30p'
+<file>`) before you write its `why`. A list of names from `grep -n 'def test_'` tells you where to
+look, never what to cite. The lead runs `coyomap grounding lint --tests` over your fragment, and a
+citation whose body no tool call of yours printed fails it: on one build 83 of 184 citations rested
+on the name alone.
+
 ## The fragment
 
 Write ONE JSON fragment to `«REPO»/.coyomap/build-fragments/x-tests.json` and return only that

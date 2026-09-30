@@ -2503,6 +2503,10 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   **inferred**, and set `tests_note` to state the suite was not run. Running the suite with coverage
   (upgrading rows to **verified**) is the opt-in upgrade described in that section — never run an
   unknown suite by default. The table is always produced; it must never ship empty.
+  **When it lands, run `coyomap grounding lint --tests .coyomap/build-fragments/x-tests.json`.** A
+  row's `why` is only as good as the test body behind it, and a name is not a body: on one build
+  83 of 184 citations pointed at tests whose body no tool call had printed. The lint names each;
+  re-ping the agent with that list.
 - Phase 4 Adversarial verify (fan out, **fresh context**). After the map validates and `coyomap
   audit` runs (fix any blocking `why:`-ref contradiction; reconcile the read-before-create / actor
   advisories — **fix each, or record it under an `Audit exceptions` extras heading** as

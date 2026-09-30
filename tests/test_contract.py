@@ -1384,3 +1384,11 @@ def test_the_harvest_batch_warns_about_the_scripts_no_slice_owns():
     assert rc == 0, err.getvalue()
     assert "2 script(s) a person runs a command from are in no harvest slice" in err.getvalue()
     assert "tests/integration/list_orphans.py" in err.getvalue()
+
+
+def test_the_tests_brief_says_to_read_the_body_of_every_test_it_cites():
+    """Retro 2026-09-30, finding 28: the skeptic contract said "do not reason from the name" and the
+    tests contract did not; 83 of 184 citations rested on the name alone."""
+    text = contract.render("tests")
+    assert "Read the body of every test you cite." in text
+    assert "grounding lint --tests" in text

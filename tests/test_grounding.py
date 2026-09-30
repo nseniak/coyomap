@@ -1705,3 +1705,53 @@ def test_the_report_buckets_a_second_wave_and_marks_it() -> None:
     assert "[second wave] C3 reads E1" in out, out
     assert [r["claim"] for r in refuted] == ["C3 reads E1"], "a second-wave refutation must be " \
                                                             "reconciled like the first wave's"
+
+
+# --- a test cited by its name alone (retro 2026-09-30, finding 28) ---------------------------------
+# The tests agent listed names with `grep -n 'def test_'` and wrote each `why` from the name: 83 of
+# its 184 citations point at a test whose body no tool call printed.
+
+_TEST_BODY = ("def test_a_member_is_refused():\n"
+              "    response = client.post('/api/orgs/1/members', json={'role': 'owner'})\n"
+              "    assert response.status_code == 403, response.json()\n"
+              "    assert store.members_of_org(1) == [], 'the refused member was saved anyway'\n")
+
+
+def make_tests_repo(td: Path, printed_body: bool) -> tuple[Path, Path]:
+    """A repo whose tests fragment cites one test, and an agent transcript that printed either the
+    test's body or only its name. Returns (fragment, transcripts dir)."""
+    repo = td / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "tests" / "test_members.py").write_text(_TEST_BODY, encoding="utf-8")
+    frag = repo / ".coyomap" / "build-fragments" / "x-tests.json"
+    frag.parent.mkdir(parents=True)
+    frag.write_text(json.dumps({"tests_note": "read, not run", "tests": [
+        {"targets": ["UC1"], "label": "refused member", "tested": "yes", "confidence": "inferred",
+         "tests": [{"file": "tests/test_members.py:1", "why": "a member is refused"}]}]}),
+        encoding="utf-8")
+    shown = _TEST_BODY if printed_body else "tests/test_members.py:1:def test_a_member_is_refused():"
+    agents = td / "agents"
+    agents.mkdir()
+    (agents / "agent-t1.jsonl").write_text(json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "content": shown}]}}) + "\n", encoding="utf-8")
+    return frag, agents
+
+
+def test_a_test_cited_by_its_name_alone_fails_the_lint():
+    with tempfile.TemporaryDirectory() as td:
+        frag, agents = make_tests_repo(Path(td), printed_body=False)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = main(["lint", "--tests", str(frag), "--agent-transcripts", str(agents)], env={})
+    assert code == 1, err.getvalue()
+    assert "1 of 1 test citation(s) rest on the name alone" in err.getvalue()
+    assert "tests/test_members.py:1" in err.getvalue()
+
+
+def test_a_test_whose_body_was_printed_passes_the_lint():
+    with tempfile.TemporaryDirectory() as td:
+        frag, agents = make_tests_repo(Path(td), printed_body=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = main(["lint", "--tests", str(frag), "--agent-transcripts", str(agents)], env={})
+    assert code == 0 and "TESTS OK — 1 of 1" in out.getvalue(), out.getvalue()
