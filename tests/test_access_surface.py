@@ -75,3 +75,110 @@ def test_a_surface_file_and_a_whole_map_are_both_accepted_as_the_baseline() -> N
         surface_path = tmp / "s.json"
         write_surface(_model(doc), surface_path)
         assert load_surface(map_path) == load_surface(surface_path) == {"a/auth.py": ["BR1"]}
+
+
+# --- a lost file is shown with the claim it held (retro 2026-09-30 mcpolis, finding 2) ----------
+# The access-baseline leg named 17 paths and nothing else. The lead opened none of them and wrote
+# 11 reasons from the NEW map; 5 answered a different claim than the one lost, and four old access
+# rules left the map outright. A path is not a question; the claim it held is.
+
+_BEFORE = _map([_rule("BR61", "Every stored record carries its team", ["a/store.py:42"]),
+                _rule("BR7", "Owner scoping", ["b/owner.py:18"])])
+_AFTER = _map([_rule("BR9", "Owner scoping, reworded", ["b/owner.py:20"])])
+
+
+def make_baseline_pair(td: Path, after: dict[str, object] | None = None) -> tuple[Path, Path]:
+    """`(previous map, current map)` written under `td`, the current one as `.coyomap/project-map.json`
+    with an archive beside it, the way `coyomap-eval archive` leaves a repo."""
+    out = td / ".coyomap"
+    (out / "dev-rebuilds" / "0001").mkdir(parents=True)
+    before = out / "dev-rebuilds" / "0001" / "project-map.json"
+    before.write_text(json.dumps(_BEFORE), encoding="utf-8")
+    current = out / "project-map.json"
+    current.write_text(json.dumps(after if after is not None else _AFTER), encoding="utf-8")
+    return before, current
+
+
+def make_lead_transcript(td: Path, read: list[str]) -> Path:
+    """A lead transcript whose only tool calls are `Read`s of `read`."""
+    f = td / "lead.jsonl"
+    recs = [{"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": str(td / p)}}]}} for p in read]
+    f.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    return f
+
+
+def test_a_lost_file_is_listed_with_the_statement_and_the_why_it_held() -> None:
+    from coyomap.finalize import build_report
+    with tempfile.TemporaryDirectory() as td:
+        before, current = make_baseline_pair(Path(td))
+        report = build_report(current, Path(td), [], before)
+    leg = next(l for l in report.legs if l.name == "access baseline")
+    text = leg.advisory[0]
+    assert "a/store.py held BR61 \"Every stored record carries its team\"" in text, text
+    assert "line 42: enforces it" in text, text
+    assert "b/owner.py" not in text, "a file still named by an access rule is not lost"
+
+
+def test_a_surface_file_keeps_the_claims_and_an_old_one_still_reads() -> None:
+    from coyomap.access_surface import AccessClaim, load_claims
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        new = tmp / "new.json"
+        write_surface(_model(_BEFORE), new)
+        assert load_claims(new)["a/store.py"] == [AccessClaim(
+            "BR61", "Every stored record carries its team", "a/store.py:42", "enforces it")]
+        old = tmp / "old.json"
+        old.write_text(json.dumps({"schema": "coyomap-access-surface/v1",
+                                   "files": {"a/store.py": ["BR61"]}}), encoding="utf-8")
+        assert load_claims(old) == {"a/store.py": [AccessClaim("BR61", "")]}
+
+
+def test_record_echoes_the_claim_an_excused_path_held() -> None:
+    import contextlib
+    import io
+    from coyomap import record
+    with tempfile.TemporaryDirectory() as td:
+        _before, current = make_baseline_pair(Path(td))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = record.main(["--map", str(current), "--heading", "Access baseline exceptions",
+                                "--line", "a/store.py: the team filter moved into the query layer",
+                                "--line", "c/other.py: never held one"])
+    assert code == 0
+    said = out.getvalue()
+    assert "a/store.py held, in 0001/project-map.json: BR61 \"Every stored record carries its " \
+           "team\"" in said, said
+    assert "c/other.py held no access claim" in said, said
+
+
+def test_an_excused_path_the_lead_never_opened_is_counted() -> None:
+    from coyomap.finalize import UNREAD_EXCUSES, build_report
+    after = {**_AFTER, "extras": [{"heading": "Access baseline exceptions",
+                                   "body": "a/store.py: the team filter moved into the query layer"}]}
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        before, current = make_baseline_pair(tmp, after)
+        unread = build_report(current, tmp, [], before, make_lead_transcript(tmp, ["b/owner.py"]))
+        read = build_report(current, tmp, [], before, make_lead_transcript(tmp, ["a/store.py"]))
+        unknown = build_report(current, tmp, [], before, None)
+    leg = next(l for l in unread.legs if l.name == "access baseline")
+    flagged = [a for a in leg.advisory if UNREAD_EXCUSES in a]
+    assert len(flagged) == 1 and flagged[0].startswith("1 of 1 access path(s)"), leg.advisory
+    assert "a/store.py (held BR61" in flagged[0], flagged
+    leg = next(l for l in read.legs if l.name == "access baseline")
+    assert not [a for a in leg.advisory if UNREAD_EXCUSES in a], leg.advisory
+    leg = next(l for l in unknown.legs if l.name == "access baseline")
+    assert leg.note is not None and "not checked" in leg.note, leg
+
+
+def test_the_session_transcript_is_the_file_beside_its_subagents_folder() -> None:
+    from coyomap.provenance import project_slug, session_transcript
+    with tempfile.TemporaryDirectory() as td:
+        home, repo = Path(td) / "home", Path(td) / "repo"
+        repo.mkdir()
+        folder = home / ".claude" / "projects" / project_slug(repo)
+        folder.mkdir(parents=True)
+        assert session_transcript(repo, "abc", home) is None
+        (folder / "abc.jsonl").write_text("{}\n", encoding="utf-8")
+        assert session_transcript(repo, "abc", home) == folder / "abc.jsonl"

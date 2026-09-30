@@ -188,6 +188,20 @@ def session_agent_transcripts(repo: Path, session_id: str | None = None,
     return d if d.is_dir() else None
 
 
+def session_transcript(repo: Path, session_id: str | None = None,
+                       home: Path | None = None) -> Path | None:
+    """The running build's OWN transcript — the lead's turns — or None.
+
+    `~/.claude/projects/<slug of repo>/<$CLAUDE_CODE_SESSION_ID>.jsonl`, the file beside the
+    `subagents/` folder `session_agent_transcripts` finds. `finalize` reads it for one question
+    only: did the lead open a file before recording why its access claim may go."""
+    sid = session_id or os.environ.get(SESSION_ENV)
+    if not sid:
+        return None
+    f = (home or Path.home()) / ".claude" / "projects" / project_slug(repo) / f"{sid}.jsonl"
+    return f if f.is_file() else None
+
+
 def tool_commit_here() -> str | None:
     """The coyomap clone this command runs from, spelled as `assemble` spells the map header's
     `tool_commit` (`git describe --always --dirty`), or None under an ordinary install."""

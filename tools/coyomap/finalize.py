@@ -59,12 +59,14 @@ from coyomap.reporting import shown
 if TYPE_CHECKING:
     from coyomap.model import ProjectModel
 
+from coyomap.access_surface import AccessClaim, held, load_claims, lost_files
 from coyomap.audit_model import l2_worklist_model
-from coyomap.grounding import live_claims_digest, unvoted_reason
+from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
 from coyomap.contract import BUDGETS_FILE
 from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
 from coyomap.model import ModelError, access_rules, load_model, load_model_path, resolve_map_path
 from coyomap.preindex_lib import expected_components, granularity_band
+from coyomap.provenance import session_transcript
 
 #: The extras heading the access-baseline advisory offers as its escape, and READS. Named the way
 #: `AUDIT_EXCEPTIONS_HEADING` and `DRIFT_EXCEPTIONS_HEADING` are, so the method contract's scan for
@@ -773,7 +775,8 @@ def _balance_leg(map_path: Path) -> Leg:
                     + " (informational: grouping is a view-only choice, method.md)")
 
 
-def _access_baseline_leg(map_path: Path, baseline: Path) -> Leg:
+def _access_baseline_leg(map_path: Path, baseline: Path,
+                         lead_transcript: Path | None = None) -> Leg:
     """Files that held ACCESS enforcement in a previous map and are named by no access rule now.
 
     A from-scratch rebuild is deliberately blind to its predecessor, and that independence is the
@@ -791,11 +794,17 @@ def _access_baseline_leg(map_path: Path, baseline: Path) -> Leg:
 
     ADVISORY, never blocking, and FILES rather than statements or lines. Two independent LLM builds
     legitimately reword and re-anchor; a file that lost its coverage altogether is the one signal
-    that survives both."""
-    from coyomap.access_surface import load_surface, lost_files
+    that survives both.
+
+    EACH FILE WITH THE CLAIM IT HELD. The leg named paths and nothing else, and on the 2026-09-30
+    mcpolis build that list of 17 was answered without one file being opened: 11 reasons were
+    recorded from the NEW map, 5 of them about a different claim than the one lost, and four old
+    access rules left the map outright (team scoping of every stored record among them). A path is
+    not a question; the claim is. And because the record is the escape, the lead's own transcript is
+    read, when there is one, for the excused paths nobody opened."""
     from coyomap.assemble import load_map_or_fragment
     try:
-        base = load_surface(baseline)
+        base = load_claims(baseline)
         m, _present = load_map_or_fragment(map_path)
     except Exception as exc:                       # noqa: BLE001 — any unreadable baseline is one case
         return Leg("access baseline", FAILED,
@@ -816,6 +825,13 @@ def _access_baseline_leg(map_path: Path, baseline: Path) -> Leg:
     excused = records.recorded_keys(m, ACCESS_BASELINE_EXCEPTIONS_HEADING)
     lost = [f for f in all_lost if f not in excused]
     excused_here = [f for f in all_lost if f in excused]
+    advisory: list[str] = []
+    note: str | None = None
+    if excused_here:
+        advisory += _unread_excuses(excused_here, base, lead_transcript)
+        if lead_transcript is None:
+            note = (f"{len(excused_here)} excused path(s); no lead transcript was found, so "
+                    f"whether the lead opened them is not checked (pass --lead-transcript)")
     excused_note = (
         f"; {len(excused_here)} of {len(base)} more are named by no access rule and are recorded as "
         f"deliberate under '{ACCESS_BASELINE_EXCEPTIONS_HEADING}'" if excused_here else "")
@@ -825,7 +841,7 @@ def _access_baseline_leg(map_path: Path, baseline: Path) -> Leg:
             return Leg("access baseline", RAN,
                        note=f"every one of {len(base)} file(s) that held access enforcement in "
                             f"{baseline.name} is still named by an access rule")
-        return Leg("access baseline", RAN, advisory=[
+        return Leg("access baseline", RAN, note=note, advisory=[
             f"DISCLOSURE, not a request: {covered} of {len(base)} file(s) that held ACCESS "
             f"enforcement in {baseline.name} are still named by an access rule, and the other "
             f"{len(excused_here)} are NOT — they are already recorded as deliberate under "
@@ -833,18 +849,48 @@ def _access_baseline_leg(map_path: Path, baseline: Path) -> Leg:
             f"There is nothing to record here and recording more would raise this number; the line "
             f"stays so a reader can see what the escape forgave. It clears when the rules cover "
             f"those files again, or when the records are deleted. A recorded gap is still a gap — "
-            f"re-read one by validating a copy with its line removed."])
+            f"re-read one by validating a copy with its line removed.", *advisory])
     # Every file, never a `+N more`: this list IS the reading list, and a build that ran the leg
-    # would have seen 8 of its 19 names.
-    listed = ", ".join(lost)
-    return Leg("access baseline", RAN, advisory=[
+    # would have seen 8 of its 19 names. Each with the claim it held, which is the question.
+    listed = "; ".join(f"{f} held {held(base[f])}" for f in lost)
+    return Leg("access baseline", RAN, note=note, advisory=[
         f"{len(lost)} of {len(base)} file(s) that held ACCESS enforcement in "
         f"{baseline.parent.name}/{baseline.name} are "
-        f"named by NO access rule in this map: {listed}. The code may be unchanged — check each one "
-        f"before shipping. A statement count can hold steady while a claim disappears, so this is "
-        f"not visible in `auth-surfaces-no-drop`. Record '<path>: <why>' under an "
+        f"named by NO access rule in this map. Each is listed with the claim it held there: "
+        f"{listed}. The code may be unchanged — check each one before shipping: open the file, "
+        f"then restore a rule that states the claim, or record why that claim no longer holds. "
+        f"A statement count can hold steady while a claim disappears, so this is not visible in "
+        f"`auth-surfaces-no-drop`. Record '<path>: <why>' under an "
         f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}' extras heading for each one that is "
-        f"deliberate{excused_note}."])
+        f"deliberate — the why answers the claim above, not the new map{excused_note}.",
+        *advisory])
+
+
+#: The start of the advisory that counts excused access paths the lead never opened. Named so the
+#: disposition table can file it: no record answers it, only opening the file does.
+UNREAD_EXCUSES = "excused without being opened"
+
+
+def _unread_excuses(excused: list[str], base: dict[str, list[AccessClaim]],
+                    lead_transcript: Path | None) -> list[str]:
+    """One advisory naming the excused paths the lead's transcript never shows it opening, or [].
+
+    `dispatch.md` says to record a drop "after reading the file". On the 2026-09-30 mcpolis build
+    the lead recorded 11 and opened none, and 5 of the 11 reasons answered a different claim. The
+    record IS the escape here, so a record cannot answer this; only opening the file does."""
+    if lead_transcript is None:
+        return []
+    try:
+        never = unopened(excused, [lead_transcript])
+    except OSError:
+        return []
+    if not never:
+        return []
+    listed = "; ".join(f"{f} (held {held(base[f])})" for f in never)
+    return [f"{len(never)} of {len(excused)} access path(s) {UNREAD_EXCUSES}: the lead's "
+            f"transcript ({lead_transcript.name}) shows no tool call reading {listed}. A drop is "
+            f"recorded after reading the file (dispatch.md). Open each one, then keep its line, "
+            f"correct its why, or remove it and restore the rule."]
 
 
 def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
@@ -910,7 +956,8 @@ def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
 
 
 def build_report(map_path: Path, repo: Path, verdicts: list[Path],
-                 access_baseline: Path | None = None) -> FinalizeReport:
+                 access_baseline: Path | None = None,
+                 lead_transcript: Path | None = None) -> FinalizeReport:
     unasked = _unasked_verdicts(map_path, verdicts)
     # The audit runs at the tier the grounding record was written at, so the gate block counts
     # ONE surface and the digest is compared with the surface it hashed.
@@ -922,7 +969,8 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         *([_drift_leg(map_path, repo, verdicts, behavioural=behavioural)] if verdicts else []),
         *([_refutations_leg(map_path, verdicts)] if verdicts else []),
         *([_unasked_verdicts_leg(unasked)] if unasked else []),
-        *([_access_baseline_leg(map_path, access_baseline)] if access_baseline else []),
+        *([_access_baseline_leg(map_path, access_baseline, lead_transcript)]
+          if access_baseline else []),
         *([leg for leg in (_budget_leg(map_path, repo),) if leg is not None]),
         *([leg for leg in (_undispatched_prose_leg(map_path),) if leg is not None]),
         *([leg for leg in (_undispatched_claims_leg(map_path),) if leg is not None]),
@@ -1464,7 +1512,7 @@ def main(argv: list[str] | None = None) -> int:
     if "-h" in argv or "--help" in argv:
         print("usage: coyomap finalize [--repo <root>] [--verdicts <file>]... "
               "[--emit-gate-block <file>] [--access-baseline <map-or-surface.json>] "
-              "[--no-write] "
+              "[--lead-transcript <session.jsonl>] [--no-write] "
               "[.coyomap/project-map.json]\n\n"
               "The pre-commit read: validate (--check-sources --check-coverage) + audit +\n"
               "anchor-drift (shape-only, and verdict-based when --verdicts is given). Writes\n"
@@ -1486,7 +1534,10 @@ def main(argv: list[str] | None = None) -> int:
               "disappear between two maps of unchanged code with nothing noticing — one pair held its\n"
               "access-rule COUNT at 21 -> 21 while the file verifying an identity token's signature\n"
               "lost its claim entirely. Reading it HERE cannot contaminate the rebuild: the map is\n"
-              "already written, and the commit has not happened yet.\n\n"
+              "already written, and the commit has not happened yet. Each lost file is listed with\n"
+              "the claim it held there, and the excused files the lead's own transcript never shows\n"
+              "it opening are counted: --lead-transcript names that transcript (default: this\n"
+              "session's, from $CLAUDE_CODE_SESSION_ID).\n\n"
               "Read the REPORT FILE, not this stdout: a file survives `> /dev/null` and `| tail`,\n"
               "and it carries whole lists with no `+N more`.")
         return 0
@@ -1494,6 +1545,10 @@ def main(argv: list[str] | None = None) -> int:
     verdicts: list[Path] = []
     gate_block_path: Path | None = None
     access_baseline: Path | None = None
+    #: The lead's own transcript, read for the excused access paths it never opened. Defaults to
+    #: this session's, which is right inside a build and wrong for a retrospective — so a reader
+    #: re-running finalize on a finished build names the build's file here.
+    lead_transcript: Path | None = None
     #: Report-only. `finalize` OVERWRITES `.coyomap/finalize-report.{json,md}` on every run, and
     #: the retro method sends a read-only reader at it — so reading a finished build's disposition
     #: destroyed the record of the disposition being read. A reader can now see it without
@@ -1511,7 +1566,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("ERROR: --emit-gate-block needs a value", file=sys.stderr)
                 return 2
             gate_block_path = Path(argv[i])
-        elif a in ("--repo", "--verdicts", "--access-baseline"):
+        elif a in ("--repo", "--verdicts", "--access-baseline", "--lead-transcript"):
             i += 1
             if i >= len(argv):
                 print(f"ERROR: {a} needs a path", file=sys.stderr)
@@ -1520,6 +1575,8 @@ def main(argv: list[str] | None = None) -> int:
                 repo = Path(argv[i])
             elif a == "--access-baseline":
                 access_baseline = Path(argv[i])
+            elif a == "--lead-transcript":
+                lead_transcript = Path(argv[i])
             else:
                 # VARIADIC, exactly as `grounding` had to become: swallow every following non-flag
                 # path. It took one value per flag, so the natural `--verdicts verify/verdicts-*.json`
@@ -1567,7 +1624,12 @@ def main(argv: list[str] | None = None) -> int:
     if access_baseline is not None and not access_baseline.exists():
         print(f"ERROR: --access-baseline {access_baseline} not found", file=sys.stderr)
         return 1
-    report = build_report(map_path, repo, verdicts, access_baseline)
+    if lead_transcript is not None and not lead_transcript.is_file():
+        print(f"ERROR: --lead-transcript {lead_transcript} not found", file=sys.stderr)
+        return 1
+    if lead_transcript is None:
+        lead_transcript = session_transcript(repo)
+    report = build_report(map_path, repo, verdicts, access_baseline, lead_transcript)
     # ONCE. Both the gate block and the stdout line below say it, and working it out re-loads the map.
     disposition = disposition_line(map_path, report)
     json_path = map_path.parent / f"{REPORT_STEM}.json"

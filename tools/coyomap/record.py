@@ -21,6 +21,10 @@ find-and-replace its own text two turns later with a fragile `body.find(...)` + 
                    --line "UC5: the two clauses are one goal — <why>" [--replace <prefix>]
     coyomap record --map <map-or-fragment> --heading "Sweep debt" --remove "<prefix>"
 
+Under "Access baseline exceptions" each recorded path is echoed with the claim it held in the
+previous map (the newest `dev-rebuilds/NNNN/` map beside this one, or `--access-baseline <file>`),
+because the why must answer THAT claim, not describe the new map.
+
 `--line` REPEATS, and `--lines-from <file|->` reads one per line (blank lines and `#` comments
 skipped). One process, one write. Reading only the first `--line` is why a build with 57 records to
 make spawned 57 processes — twenty of them re-typing long prose after the first attempt failed — for
@@ -60,6 +64,8 @@ import sys
 from pathlib import Path
 
 from coyomap import records
+from coyomap.access_surface import baseline_beside, held, load_claims
+from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
 from coyomap.model import ExtraSection, ProjectModel
 
 #: `__doc__` is `str | None` to a type checker, and this is the only `USAGE` in the package that is
@@ -147,6 +153,35 @@ def remove_line(m: ProjectModel, heading: str, prefix: str) -> tuple[bool, str]:
     return True, f"removed under '{heading}': {gone.strip()}"
 
 
+def echo_access_claims(path: Path, recorded: list[str], baseline: Path | None) -> None:
+    """For each path just recorded under 'Access baseline exceptions', the claim it held.
+
+    `finalize` lists them beside its advisory; this says it again at the moment of writing, which
+    is where the 2026-09-30 mcpolis build went wrong: 11 reasons were written from the NEW map, and
+    5 of them answered a different claim than the one that was lost."""
+    base_path = baseline or baseline_beside(path)
+    if base_path is None:
+        print("note: no archived map beside this one, so the claim each path held cannot be shown; "
+              "pass --access-baseline <the previous map> to see it")
+        return
+    try:
+        base = load_claims(base_path)
+    except Exception as exc:                       # noqa: BLE001 — any unreadable baseline is one case
+        print(f"note: {base_path} could not be read ({exc}), so the claim each path held cannot "
+              f"be shown")
+        return
+    where = f"{base_path.parent.name}/{base_path.name}"
+    for ln in recorded:
+        for key in records.line_keys(ACCESS_BASELINE_EXCEPTIONS_HEADING, ln):
+            claims = base.get(key)
+            if claims:
+                print(f"  {key} held, in {where}: {held(claims)}. The why must answer THAT "
+                      f"claim: where it went, or why it no longer holds.")
+            else:
+                print(f"  {key} held no access claim in {where}, so this line excuses nothing "
+                      f"there.")
+
+
 def _arg(argv: list[str], flag: str, default: str = "") -> str:
     if flag in argv:
         i = argv.index(flag)
@@ -203,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     from_file = _arg(argv, "--lines-from")
     replace = _arg(argv, "--replace")
     remove = _arg(argv, "--remove")
+    baseline_arg = _arg(argv, "--access-baseline")
     # The TARGET is checked before the payload. A build ran 21 well-formed `record` calls in one turn
     # and every one failed with `cannot read … extras.json — no such file`, because no fan-out agent
     # owns creating that fragment; the build worked around it with `echo '{"extras": []}' >`, which is
@@ -321,6 +357,8 @@ def main(argv: list[str] | None = None) -> int:
               f"Record against the FRAGMENT that owns the extras section to make it durable.")
     else:
         print(f"wrote {path}")
+    if canonical == ACCESS_BASELINE_EXCEPTIONS_HEADING and not remove:
+        echo_access_claims(path, lines, Path(baseline_arg) if baseline_arg else None)
     return 0
 
 

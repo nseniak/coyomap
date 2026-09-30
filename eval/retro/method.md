@@ -404,6 +404,8 @@ Four checks, all cheap, all deterministic, each one productive on that run:
    alone. `finalize` says in its own
    output that each advisory is either fixed or recorded; it does not check it. Nine had been waved
    through, and the transcript could not show it because every read of the list had been filtered.
+   Pass `--lead-transcript <the build's session .jsonl>` too: without it the access-baseline leg
+   looks for the RETRO's own session and cannot say which excused paths the lead never opened.
 3. **Check each use case's declared `actors` against the actor of its own flow's first step**, and
    its name against its flow's title. A late rewrite left two use cases declaring one actor while
    their flows started with another, and one carrying its pre-rename flow title.

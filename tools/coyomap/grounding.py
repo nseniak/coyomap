@@ -2043,6 +2043,15 @@ def _opened_files(files: list[Path]) -> set[str]:
     return {p for p in out if p}
 
 
+def unopened(paths: list[str], transcripts: list[Path]) -> list[str]:
+    """The `paths` no file-reading tool call in `transcripts` opened, in the order given.
+
+    The same reading of "opened" the verdict lint uses (`_opened_files`, matched by `_resolves`),
+    so a path counts as read here exactly when it would count as read there."""
+    opened = _opened_files(transcripts)
+    return [p for p in paths if not _resolves(p, opened)]
+
+
 def _norm_path(p: str) -> str:
     """One normaliser, used on BOTH sides. `lstrip("./")` was the first version and it is a
     character-class strip, not a prefix strip: it turned `.github/dependabot.yml` into

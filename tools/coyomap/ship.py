@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from coyomap.access_surface import newest_archived_map
+
 USAGE = """usage: coyomap ship <repo> [--note-file <path>] [--partial] [--keep-note]
                     [--note-cites-other-runs]
                     [--access-baseline <map-or-surface.json>]
@@ -99,18 +101,6 @@ class ShipInputs:
     #: The pinned worklist's tier, read off its items. Step 2's `anchor-drift` counts coverage at
     #: that tier, so the gate block's `challenged N of M` and its audit line count ONE surface.
     behavioural: bool = False
-
-
-def newest_archived_map(out: Path) -> Path | None:
-    """The map the last `coyomap-eval archive` filed under `dev-rebuilds/NNNN/`, or None.
-
-    The archive is the coyomap developer's convention (a user of coyomap never has it), and its
-    numbers are zero-padded, so text order is recency. `finalize --access-baseline` exists for
-    exactly this map — files that held ACCESS enforcement there and are named by no rule now — and
-    the 2026-09-08 mcpolis build never ran it, because nothing in the closing sequence asked:
-    19 of 60 such files went unnamed while the hard gate beside them failed."""
-    maps = sorted(p for p in (out / "dev-rebuilds").glob("*/project-map.json") if p.parent.name.isdigit())
-    return maps[-1] if maps else None
 
 
 def derive_inputs(repo: Path,

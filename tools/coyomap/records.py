@@ -359,6 +359,13 @@ def keys_on_line(line: str, key: str = ID_KEY, seps: str = SEP_ID, lead: str = "
     return keys
 
 
+def line_keys(heading: str, line: str) -> list[str]:
+    """The keys ONE line records under `heading`, by that heading's own grammar — `[]` for a
+    family with no key grammar, or for a line that is not a record of it."""
+    args = _spec_args(heading, None, None)
+    return keys_on_line(line, *args) if args else []
+
+
 def _spec_args(heading: str, key: str | None, seps: str | None) -> tuple[str, str, str, str] | None:
     """`(key, seps, lead, strict_multi)` for a heading — the registry's grammar unless the caller
     overrides it. `None` when this family has no comma-list grammar at all."""
