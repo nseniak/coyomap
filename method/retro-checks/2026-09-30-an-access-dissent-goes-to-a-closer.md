@@ -34,3 +34,9 @@ Escalation: if item 3 fails, run the eval before accepting the map.
 4. expect: a dissent a closer UPHELD shows in the gate as a refutation, and the map corrects the
    claim or drops the site before it ships.
    regression sign: an upheld dissent on a claim the shipped map still makes word for word.
+
+5. expect (after the review): a security claim confirmed 2-1 counts as a dissent even when its line
+   moved or its sentence was reworded before FINISH, and when it is a role that may do everything
+   another may do.
+   regression sign: a 2-1 security vote whose claim the shipped map no longer makes word for word
+   (apply-drift moved it) and no closer file answers, with finalize silent about it.

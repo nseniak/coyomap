@@ -10,14 +10,16 @@ Run either way: `python3 tests/test_finalize.py` or `pytest tests/test_finalize.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from coyomap import finalize
-from coyomap.audit_model import rule_site_claim
+from coyomap import finalize, grounding
+from coyomap.audit_model import role_inclusion_claim, rule_site_claim
 from coyomap.model import FORMAT
 
 #: A genuinely minimal VALID map — no entities, because a domain card carries its own blocking
@@ -1879,3 +1881,73 @@ def test_an_older_vote_for_another_rule_or_another_line_still_reads_never_challe
         root, p, v = make_reworded_rule_repo(elements, anchor)
         first = _access_advisory(root, p, v)
         assert "ACCESS rule(s) were never challenged" in first, (elements, anchor, first)
+
+
+# --- after the review of findings 1 and 3: a dissent survives a moved line, a role's claim counts,
+# and the refutations verb's exit code says what finalize blocks on ----------------------------------
+
+def _refutations_exit(p: Path, files: list[Path]) -> int:
+    argv = ["refutations", "--map", str(p), "--json"]
+    for f in files:
+        argv += ["--verdicts", str(f)]
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return grounding.main(argv)
+
+
+def test_an_access_dissent_keeps_blocking_after_its_line_moves() -> None:
+    """`fix apply-drift` accepts a 2-1 majority's line inside `ship`: moved, the claim no longer
+    matched its votes, and the dissent left the gate."""
+    _root, p, files, claim = make_access_dissent_repo(None)
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["rules"][0]["sites"][0]["where"] = "src/a.py:3"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    leg = finalize._refutations_leg(p, files)
+    assert any(b.startswith(claim) and "no closer has ruled on the dissent" in b
+               for b in leg.blocking), leg.blocking
+
+
+def test_an_access_dissent_keeps_blocking_after_its_statement_is_reworded() -> None:
+    root, p, files, claim = make_access_dissent_repo(None)
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["rules"][0]["statement"] = "A caller without a token is refused."
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    (root / ".coyomap" / "verify" / "worklist.json").write_text(json.dumps({"worklist": [
+        {"claim": claim, "anchor": "src/a.py:2", "elements": ["BR1"], "theme": "security"}]}),
+        encoding="utf-8")
+    leg = finalize._refutations_leg(p, files)
+    assert any(b.startswith(claim) for b in leg.blocking), leg.blocking
+
+
+def test_a_split_vote_on_a_role_that_may_do_everything_another_may_do_blocks() -> None:
+    root, p = make_repo()
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["roles"] = [{"id": "R1", "name": "Owner",
+                     "relations": [{"kind": "includes", "role": "R2"}]},
+                    {"id": "R2", "name": "Contact"}]
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    claim = role_inclusion_claim("Owner", "Contact")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    v = verify / "verdicts-security-1.json"
+    v.write_text(json.dumps({"grounding": [
+        {"claim": claim, "grounded": g, "evidence": "src/a.py:2", "skeptic": who, "note": "n"}
+        for g, who in ((True, "a"), (True, "b"), (False, "c"))]}), encoding="utf-8")
+    leg = finalize._refutations_leg(p, [v])
+    assert any(b.startswith(claim) for b in leg.blocking), leg.blocking
+    assert _refutations_exit(p, [v]) == 1
+
+
+def test_a_dissent_the_closer_rejected_is_neither_blocked_nor_advised() -> None:
+    _root, p, files, _claim = make_access_dissent_repo("reject")
+    leg = finalize._refutations_leg(p, files)
+    assert not leg.blocking and not any("dissent" in a.lower() for a in leg.advisory), leg
+
+
+def test_the_refutations_verb_exits_1_on_an_unheard_access_dissent() -> None:
+    _root, p, files, _claim = make_access_dissent_repo(None)
+    assert _refutations_exit(p, files) == 1
+
+
+def test_the_refutations_verb_exits_0_when_only_a_reported_step_survives() -> None:
+    _root, p, files = make_refuted_step_repo(None)
+    assert _refutations_exit(p, files) == 0

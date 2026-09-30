@@ -1413,3 +1413,15 @@ def test_the_tests_brief_says_to_read_the_body_of_every_test_it_cites():
     text = contract.render("tests")
     assert "Read the body of every test you cite." in text
     assert "grounding lint --tests" in text
+
+
+def test_a_closer_row_misfiled_among_the_skeptics_is_no_dispute() -> None:
+    """Review of finding 3: a claim whose only refutation is a closer's row in a verdicts file had
+    no skeptic refutation to head its entry with, and reading its id raised IndexError."""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "verdicts-security-1.json").write_text(json.dumps({"grounding": [
+            {"claim": "C1 calls C2", "grounded": True, "evidence": "a.py:1", "skeptic": "s1"},
+            {"claim": "C1 calls C2", "verdict": "uphold", "grounded": False, "evidence": "a.py:1",
+             "skeptic": "c1", "id": "security-1#1"}]}), encoding="utf-8")
+        assert [c.id for c in contract.disputed_claims(d)] == []

@@ -1071,8 +1071,11 @@ def disputed_claims(verdicts_dir: Path, prefix: str = "") -> list[DisputedClaim]
                 note=str(row.get("note") or "")))
     out: dict[str, DisputedClaim] = {}
     for ref in refs:
-        if ref.claim not in out:
-            out[ref.claim] = DisputedClaim(claim=ref.claim, votes=tuple(votes.get(ref.claim, ())))
+        cast = tuple(votes.get(ref.claim, ()))
+        # A claim whose only refutation is a closer's row misfiled among the skeptics' has no
+        # skeptic refutation to head its entry with, and is no dispute a closer is briefed on.
+        if ref.claim not in out and any(v.grounded is False for v in cast):
+            out[ref.claim] = DisputedClaim(claim=ref.claim, votes=cast)
     return list(out.values())
 
 

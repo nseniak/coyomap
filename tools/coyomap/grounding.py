@@ -41,6 +41,7 @@ from coyomap.audit_model import (
     claim_digest,
     l2_worklist_model,
     FIRST_PIN,
+    RULE_SITE_CLAIM,
     pinned_claims,
     pinned_items,
     pinned_tier,
@@ -1658,7 +1659,46 @@ def _outvoted(rows: list[dict]) -> bool:
     return _verdict_bucket(rows) == "confirmed" and any(r.get("grounded") is False for r in rows)
 
 
-def access_dissent(m: ProjectModel, grounding_rows: list[dict]) -> list[SurvivingRefutation]:
+#: Claim kinds that state who may do what, whatever the map labels them: a role that may do
+#: everything another role may do, and a legacy auth-surface row. A rule site counts only on a rule
+#: the map marks `access`.
+PRIVILEGE_KINDS = frozenset({"role", "security"})
+
+
+def _dissent_target(m: ProjectModel, claim: str, access: set[str],
+                    pinned: dict[str, dict[str, object]]) -> tuple[str, str, str] | None:
+    """(element id, kind, label) of the access element a voted claim is about, or None.
+
+    Through `resolve_claim` first. When the claim's text has changed since the vote, through the
+    pinned worklist's `elements` for that very claim, then through the rule statement the claim
+    carries. A dissent must not disappear because the line under it moved: `fix apply-drift` accepts
+    a 2-1 majority's line inside `ship`, before `finalize` reads the votes, and a review moved BR23's
+    anchor one line on the real map and took the dissent, the block and every mention of BR23 with
+    it."""
+    target = resolve_claim(m, claim).target
+    if target is not None:
+        if target.kind in PRIVILEGE_KINDS or target.element_id in access:
+            return target.element_id, target.kind, target.label
+        return None
+    item = pinned.get(claim) or {}
+    elements = item.get("elements")
+    ids = [str(e) for e in elements] if isinstance(elements, list) else []
+    stated = RULE_SITE_CLAIM.match(claim)
+    if stated:
+        ids += [br.id for br in m.rules
+                if br.id and (br.statement or "").strip() == stated.group(1).strip()]
+    rules = {br.id: br for br in m.rules if br.id}
+    roles = {r.id: r for r in m.roles if r.id}
+    for eid in dict.fromkeys(ids):
+        if eid in access:
+            return eid, "rule_site", rules[eid].name or rules[eid].statement
+        if eid in roles:
+            return eid, "role", roles[eid].name
+    return None
+
+
+def access_dissent(m: ProjectModel, grounding_rows: list[dict],
+                   pinned: list[dict[str, object]] | None = None) -> list[SurvivingRefutation]:
     """ACCESS claims the majority confirmed over a refutation, that no closer has settled.
 
     A 2-1 vote files the claim as confirmed, and every count after that is silent about the one.
@@ -1670,10 +1710,15 @@ def access_dissent(m: ProjectModel, grounding_rows: list[dict]) -> list[Survivin
     `closed` says where each one stands: "" nobody ruled (the gate BLOCKS: the remedy is one closer
     brief away), `unsure` or DISPUTED (heard and not settled; said, not blocked). A `reject` settles
     it — the majority read the code right — and an `uphold` makes it a surviving refutation, so
-    neither is here."""
+    neither is here.
+
+    A claim about who may do what counts whatever its kind (`PRIVILEGE_KINDS`), and one whose text
+    moved since the vote still counts for the element it was about (`_dissent_target`), so it keeps
+    blocking until a closer rules on the words that were voted on."""
     split = split_closer_rows(grounding_rows)
     closed = closer_ruling(split.closer)
     access = _access_rule_ids(m)
+    by_claim = {str(i.get("claim")): i for i in (pinned or []) if i.get("claim")}
     votes: dict[str, list[dict]] = {}
     for r in split.skeptics:
         claim = r.get("claim")
@@ -1683,12 +1728,13 @@ def access_dissent(m: ProjectModel, grounding_rows: list[dict]) -> list[Survivin
     for claim, rows in votes.items():
         if not _outvoted(rows) or closed.get(claim) in ("reject", "uphold"):
             continue
-        target = resolve_claim(m, claim).target
-        if target is None or target.element_id not in access:
+        found = _dissent_target(m, claim, access, by_claim)
+        if found is None:
             continue
+        element_id, kind, label = found
         note = next((str(r.get("note") or "") for r in rows if r.get("grounded") is False), "")
         out.append(SurvivingRefutation(
-            claim=claim, element_id=target.element_id, kind=target.kind, label=target.label,
+            claim=claim, element_id=element_id, kind=kind, label=label,
             refuted_by=sum(1 for r in rows if r.get("grounded") is False), note=note,
             closed=closed.get(claim, ""), outvoted=True))
     out.sort(key=lambda s: (s.element_id, s.claim))
@@ -1809,7 +1855,7 @@ def format_refutations(surviving: list[SurvivingRefutation],
     voted = _rules_voted_under_any_anchor(m, grounding_rows or []) if m else set()
     reworded = rules_reworded_after_vote(m, grounding_rows or [], pinned or []) if m else {}
     appealed = settled_on_appeal(m, grounding_rows or []) if m else []
-    dissent = access_dissent(m, grounding_rows or []) if m else []
+    dissent = access_dissent(m, grounding_rows or [], pinned) if m else []
     if as_json:
         return json.dumps({
             "surviving_refutations": [
@@ -2649,7 +2695,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         # judgement about wording; the first is the map asserting something its own skeptics
         # disproved, which is the one shape here that makes the map wrong rather than unclear.
         # An access dissent no closer ruled on blocks too: its remedy is one closer brief away.
-        unheard = [d for d in access_dissent(live, rows) if not d.closed]
+        unheard = [d for d in access_dissent(live, rows, pinned) if not d.closed]
         return 1 if any(blocks(s) for s in surviving) or unheard else 0
 
     if verb == "by-element" and not worklist_path and verdicts:
