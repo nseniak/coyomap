@@ -12,10 +12,12 @@ Escalation: if item 2 fails, re-run the partial run of the harvest step before a
 
 ## Checks
 
-1. expect: the lead runs `contract harvest --from-slots` (the batch form), and either it printed no
-   "script(s) … are in no harvest slice" warning or the build's notes answer each script it named.
-   regression sign: the warning printed and nothing answered, or harvest briefs filled one by one
-   with `--fill` so the check never ran.
+1. expect: the lead runs `contract harvest --from-slots` (the batch form), and either its last run
+   printed no "script(s) … are in no harvest slice" warning or the 'Entry-point coverage' line of
+   each named script's kind says why that script is no way in.
+   regression sign: the warning printed and nothing answered, harvest briefs filled one by one with
+   `--fill` so the check never ran, or slots changed after the first run while the old briefs were
+   dispatched (the batch form never rewrites a brief).
 
 2. expect: the map has at least 1 row (a way in or a run command) whose source is the orphan-sandbox
    lister (`list_orphan_sandboxes.py` or its run script).

@@ -860,8 +860,10 @@ def _warn_scripts_in_no_slice(files: list[Path]) -> None:
         print(f"WARNING: {len(missed)} script(s) a person runs a command from are in no harvest "
               f"slice, so no agent reads them. By folder: "
               + ", ".join(f"{d} ({n})" for d, n in sorted(folders.items()))
-              + f". Every one: {', '.join(missed)}. Give their folders to a slice, tests "
-                "included, or state in the build's notes why each is out of scope.",
+              + f". Every one: {', '.join(missed)}. Give each to a slice (its folder, or the "
+                "file alone), or say on the 'Entry-point coverage' line for its kind why it is no "
+                "way in. Every brief was still written: delete the briefs of the slices you "
+                "change, then run this again, since it never rewrites a brief.",
               file=sys.stderr)
 
 
