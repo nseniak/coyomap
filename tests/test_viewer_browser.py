@@ -4399,6 +4399,64 @@ def test_follow_a_story_in_the_header_lists_every_story_by_feature_and_follows_t
         assert not page.js_errors, page.js_errors
 
 
+PLAYER = """() => ({ shown: !document.getElementById('archplayer').hidden,
+    text: document.getElementById('archplayer').textContent,
+    count: (document.querySelector('.archplay-count') || {}).textContent || '',
+    hash: decodeURIComponent(location.hash),
+    badge: (document.querySelector('#panel .pane-title .badge') || {}).textContent || '',
+    picked: [...document.querySelectorAll('#diagram .arch-ov-line.arch-ov-picked')].map((l) => l.dataset.src + '>' + l.dataset.dst) })"""
+
+
+def _walk_a_story(url: str, story: dict[str, Any]) -> list[dict[str, Any]]:
+    """Follow `story` from its address and press Next twice, Left once and the strip's × once,
+    reading the screen after each."""
+    seen = []
+    with _page(url + f"#v=arch&cap=all&story={story['uc']}") as page:
+        _arch_ready(page)
+        seen.append(page.evaluate(PLAYER))
+        for _ in range(2):
+            page.click('[data-archstep="1"]')
+            page.wait_for_timeout(500)
+            seen.append(page.evaluate(PLAYER))
+        page.keyboard.press("ArrowLeft")
+        page.wait_for_timeout(500)
+        seen.append(page.evaluate(PLAYER))
+        page.click("#archplayer .archplay-x")
+        page.wait_for_function("() => !location.hash.includes('story=')")
+        seen.append(page.evaluate(PLAYER))
+        assert not page.js_errors, page.js_errors
+    return seen
+
+
+def test_a_followed_story_is_walked_step_by_step_from_a_strip_under_the_picture() -> None:
+    """Following a story shows a strip under the picture: the story's name, what starts it and what it
+    ends with, and a walk. Each step picks that step's line, so its card says the story's own step;
+    the arrow keys walk too, and the strip's × lets go of the story."""
+    text = make_whole_product_text(lambda m: None)
+    story = max(text["stories"], key=lambda x: len(x["lines"]))
+    n = len(story["lines"])
+    assert n >= 2
+    with _served() as url:
+        start, one, two, back, gone = _walk_a_story(url, story)
+    assert start["shown"] and story["name"] in start["text"] and start["count"] == f"{n} steps", start
+    assert "Starts when" in start["text"] and "Ends with" in start["text"], start
+    for got, k in ((one, 0), (two, 1), (back, 0)):
+        a, b = story["lines"][k]
+        assert got["count"] == f"Step {k + 1} of {n}" and f"sel=arch:{a}>{b}" in got["hash"], (k, got)
+        assert got["badge"] == f"step {k + 1}", (k, got)
+    assert not gone["shown"], gone
+
+
+def test_a_followed_story_is_walked_on_a_crowded_picture_through_the_lines_drawn_on_top() -> None:
+    """On a crowded picture the walk picks the story's lines drawn on top of it."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    story = max(text["stories"], key=lambda x: len(x["lines"]))
+    with _served_map(make_parts_in_every_layer) as url:
+        _start, one, two, _back, _gone = _walk_a_story(url, story)
+    assert one["picked"] == ["%s>%s" % tuple(story["lines"][0])], one
+    assert two["picked"] == ["%s>%s" % tuple(story["lines"][1])], two
+
+
 def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
     """A line says which use cases take it: the use case is what a line is for, and a step sentence only
     says how, in one story's words. Past a few use cases from several features, a line lists its

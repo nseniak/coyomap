@@ -930,9 +930,9 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archhp-box { width: 11px; height: 11px; border: 1.5px solid #64748b; border-radius: 2px; background: #fff; }
 .archhp.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
 .archhp.on .archhp-box { border-color: #4f46e5; background: #4f46e5; }
-/* What the reader narrows the picture to: a story to follow. */
-.archctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
-.archfollow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #334155; }
+/* What the reader narrows the picture to, on the same row: a story to follow, and whose lines alone. */
+.archfollow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #334155;
+  margin-left: 8px; }
 .archfollow-lbl { font-weight: 600; }
 .archfollow select { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #cbd5e1;
   border-radius: 6px; background: #fff; color: #1f2937; max-width: 340px; cursor: pointer; }
@@ -953,7 +953,28 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 #archtext { flex: 0 0 clamp(260px, 32%, 380px); box-sizing: border-box; overflow: auto;
             border-left: 1px solid #e5e7eb; background: #fff; padding: 12px 14px 20px; }
 #archtext[hidden] { display: none; }
+/* THE STORY PLAYER: a slim strip at the foot of the Architecture drawing, centred, while one story is
+   followed. The story's name and its two ends on the left, the step walk on the right. */
+#archplayer { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
+  max-width: calc(100% - 24px); box-sizing: border-box; display: flex; align-items: center; gap: 14px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 7px 8px 7px 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.07); font-size: 12px; color: #334155; }
+#archplayer[hidden] { display: none; }
+.archplay-story { min-width: 0; }
+.archplay-name { font-size: 13px; font-weight: 600; color: #1f2937; }
+.archplay-ends { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; color: #475569; }
+.archplay-end { display: inline-flex; align-items: center; gap: 6px; }
+.archplay-ctl { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.archplay-ctl button { font-size: 12px; line-height: 1; padding: 5px 11px; border: 0; border-radius: 999px;
+  background: #6366f1; color: #fff; cursor: pointer; }
+.archplay-ctl button:hover:not(:disabled) { background: #4f46e5; }
+.archplay-ctl button:disabled { background: #e5e7eb; color: #9ca3af; cursor: default; }
+.archplay-count { font-variant-numeric: tabular-nums; min-width: 78px; text-align: center; white-space: nowrap; }
+.archplay-x { flex: 0 0 auto; font: inherit; font-size: 16px; line-height: 1; border: 0; background: none;
+  color: #9ca3af; cursor: pointer; padding: 2px 4px; }
+.archplay-x:hover { color: #374151; }
 #diagwrap:has(> #archtext:not([hidden])):not(.archtext-below) :is(#zoomctl, #panel) { right: calc(clamp(260px, 32%, 380px) + 12px); }
+#diagwrap:has(> #archtext:not([hidden])):not(.archtext-below) #archplayer { left: calc((100% - clamp(260px, 32%, 380px)) / 2); max-width: calc(100% - clamp(260px, 32%, 380px) - 24px); }
 /* A narrow drawing area stacks the text UNDER the drawing (viewer.js placeArchText sets the class). */
 #diagwrap.archtext-below { flex-direction: column; }
 #diagwrap.archtext-below > #archtext { flex: 0 0 45%; border-left: 0; border-top: 1px solid #e5e7eb; }

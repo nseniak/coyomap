@@ -283,6 +283,7 @@ const zoomin = document.getElementById('zoomin');
 const zoomout = document.getElementById('zoomout');
 const zoomlevel = document.getElementById('zoomlevel');
 const zoomctl = document.getElementById('zoomctl');
+const archplayer = document.getElementById('archplayer');   // the story player under the Architecture drawing
 const flowplayer = document.getElementById('flowplayer');
 const flowprev = document.getElementById('flowprev');
 const flownext = document.getElementById('flownext');
@@ -1901,6 +1902,7 @@ function selApply(scene) {
   // the guard is here so it cannot start when one does.
   if (scene === mainScene && !renderingTransient) refreshUrl();
   flowSuspendIfDeselected(scene);
+  if (scene === mainScene) archPlaySync();
   flowMapRefreshStepLabels();
   // Deselecting the last element (⌘-click it off) returns to the empty state: clear the file-browser
   // highlight + default the code slot to browse, the same cleanup empty-canvas click / Escape do.
@@ -3547,6 +3549,8 @@ function flowVisibleRect() {
   if (overlaps(fp)) top = Math.min(fp.bottom, top + (bottom - top) / 2);
   const pr = panel.getBoundingClientRect();
   if (overlaps(pr)) bottom = Math.max(pr.top, top + (bottom - top) / 2);
+  const ap = archplayer && !archplayer.hidden ? archplayer.getBoundingClientRect() : null;
+  if (overlaps(ap)) bottom = Math.max(ap.top, top + (bottom - top) / 2);
   return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 // items: [{el, xOnly}] -> padded union rect in screen px, or null. `xf` (optional) maps each element's
@@ -3569,6 +3573,28 @@ function flowReveal(els, i) {
   // differently per diagram type: `messageText` in a sequence diagram, `edgeLabel` in a flowchart.
   const stepLabel = els.find((e) => e.classList
     && (e.classList.contains('messageText') || e.classList.contains('edgeLabel')));
+  const st = flowPlay.steps[i];
+  // Preferred target: the arrow + its label (full extent) plus both endpoints. What an "endpoint" is
+  // depends on the rendering: a sequence lifeline is a tall column, so only its x matters (including its
+  // full height would always overflow); a map endpoint is a box, which is exactly what should be in view.
+  const map = flowPlay.kind === 'map';
+  const items = els.map((el) => ({ el, xOnly: false }));
+  // On the map an actor endpoint is a drawn box like any other, so it is addressed by its `FAn` alias,
+  // and a step inside a COLLAPSED shared sub-use case is addressed by the two boxes its arrow actually joins —
+  // its own endpoints are inside the collapsed box and have nothing on screen to scroll to. In the
+  // sequence view actor parts live outside partsById (see bindFlow), so only element ids apply.
+  const ends = map ? flowMapStepArrow(flowPlay.uc, i, st) : [st.srcId, st.dstId];
+  for (const end of ends)
+    for (const el of (flowPlay.partsById[end] || []))
+      if (map) items.push({ el, xOnly: false });
+      else if (el.tagName === 'line') items.push({ el, xOnly: true });
+  revealOnScreen(items, stepLabel);
+}
+// BRING A STEP INTO VIEW: pan (and zoom, when its label is too small to read) so `items` — each
+// { el, xOnly } — fit the drawing's unobstructed area, or failing that `stepLabel` alone. Shared by the
+// use case map's step player and the Architecture view's story player.
+function revealOnScreen(items, stepLabel) {
+  if (!mainPz || !items.length) return;
   // Below the readability floor the reveal ZOOMS as well as pans: a fit-to-width sequence diagram
   // renders its messages at ~4px, and panning an unreadable label into view shows nothing. The zoom
   // factor is decided up front and every measurement below is passed through it analytically —
@@ -3587,21 +3613,6 @@ function flowReveal(els, i) {
   const xf = scale === 1 ? null : (q) => ({ left: zx(q.left), right: zx(q.right),
     top: zy(q.top), bottom: zy(q.bottom), width: q.width * scale, height: q.height * scale });
   const d = flowVisibleRect();
-  const st = flowPlay.steps[i];
-  // Preferred target: the arrow + its label (full extent) plus both endpoints. What an "endpoint" is
-  // depends on the rendering: a sequence lifeline is a tall column, so only its x matters (including its
-  // full height would always overflow); a map endpoint is a box, which is exactly what should be in view.
-  const map = flowPlay.kind === 'map';
-  const items = els.map((el) => ({ el, xOnly: false }));
-  // On the map an actor endpoint is a drawn box like any other, so it is addressed by its `FAn` alias,
-  // and a step inside a COLLAPSED shared sub-use case is addressed by the two boxes its arrow actually joins —
-  // its own endpoints are inside the collapsed box and have nothing on screen to scroll to. In the
-  // sequence view actor parts live outside partsById (see bindFlow), so only element ids apply.
-  const ends = map ? flowMapStepArrow(flowPlay.uc, i, st) : [st.srcId, st.dstId];
-  for (const end of ends)
-    for (const el of (flowPlay.partsById[end] || []))
-      if (map) items.push({ el, xOnly: false });
-      else if (el.tagName === 'line') items.push({ el, xOnly: true });
   let box = flowRect(items, xf);
   if (!box && scale === 1) return;
   if (box && (box.r - box.l > d.width || box.b - box.t > d.height)) {  // too big to show in full -> just the label
@@ -4900,6 +4911,7 @@ function archOverlay(items) {
     };
     hit.addEventListener('click', find);
     if (desc) {
+      mainScene.selectors[desc.key] = () => selAdd(mainScene, desc);   // the story player and the address
       if (selHas(mainScene, desc.key)) line.classList.add('is-selected', 'arch-ov-picked');
       previewOnHover(mainScene, [hit], desc.show, line);
     }
@@ -4907,6 +4919,7 @@ function archOverlay(items) {
       const tx = document.createElementNS(SVGNS, 'text');
       tx.setAttribute('x', String((x1 + x2) / 2)); tx.setAttribute('y', String(ym));
       tx.setAttribute('class', 'arch-ov-num');
+      tx.dataset.src = it.src; tx.dataset.dst = it.dst;
       tx.textContent = it.label;
       g.appendChild(tx);
       const bb = tx.getBBox();
@@ -7505,17 +7518,17 @@ function archFeatureHtml() {
     + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
-    + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
-    + archControlsHtml(s)
+    + `<span class="archwho-sep" aria-hidden="true"></span>${sw}${archControlsHtml(s)}</div>`
     + archKeyHtml(archTextOf({ ...s, kind: 'arch' }));
 }
-// WHAT THE READER NARROWS THE PICTURE TO, under the features: one story to follow, and the box (or
-// the line between layers) whose lines alone are shown, as a tag that lets go of it.
+// WHAT THE READER NARROWS THE PICTURE TO, after the happy-path switch on the features' row, which it
+// shares rather than taking a row of the drawing's height: one story to follow, and the box (or the
+// line between layers) whose lines alone are shown, as a tag that lets go of it.
 function archControlsHtml(s) {
   const t = archTextOf({ ...s, kind: 'arch' });
   const stories = (t && t.stories) || [];
-  return '<div class="archctl-row">' + (stories.length ? archFollowSelectHtml(stories, s.story || '') : '')
-    + `<span class="archthrough"${archFilterLabel ? '' : ' hidden'}>${archThroughHtml()}</span></div>`;
+  return (stories.length ? archFollowSelectHtml(stories, s.story || '') : '')
+    + `<span class="archthrough"${archFilterLabel ? '' : ' hidden'}>${archThroughHtml()}</span>`;
 }
 function archThroughHtml() {
   return archFilterLabel ? `${archFilterLabel} <button type="button" class="archthrough-x" data-archthrough-clear`
@@ -7581,6 +7594,7 @@ const ARCH_FOLLOW_OPEN = 8;
 let archBoxFilter = '';
 let archFilterLabel = '';   // what the header's tag says while a box's lines alone are shown
 function syncArchText(s) {
+  syncArchPlayer(s);
   const t = archTextOf(s);
   const entries = t ? (t.lines || []) : null;
   archtext.hidden = !entries || !entries.length;
@@ -7593,6 +7607,93 @@ function syncArchText(s) {
   archtext.innerHTML = story ? archStoryTextHtml(t, story) : archFlowTextHtml(t);
   bindItemPills(archtext);   // a rule decided on a line is an item pill, and opens that rule
 }
+// THE STORY PLAYER (#archplayer): while one story is followed, a strip at the foot of the drawing walks
+// its lines in its own order. Each step picks that line, exactly as a click on it does, so the card says
+// the story's own sentence for it, and the camera brings the line and its two boxes into view
+// (revealOnScreen, the use case map's own move). `cur` is the step last reached; the walk is ACTIVE while
+// that step's line is the one picked, and a click on one of the story's lines moves it there.
+let archPlay = null;   // { story, cur } while a story is followed, else null
+function syncArchPlayer(s) {
+  const story = archStoryOf(s, archTextOf(s));
+  archPlay = story && story.lines.length ? { story, cur: -1 } : null;
+  archplayer.hidden = !archPlay;
+  if (!archPlay) { archplayer.innerHTML = ''; return; }
+  const end = (cls, word, text) => text
+    ? `<span class="archplay-end"><span class="${cls}" aria-hidden="true"></span>${word}: ${esc(text)}</span>` : '';
+  archplayer.innerHTML = `<div class="archplay-story"><div class="archplay-name">${esc(story.name)}</div>`
+    + `<div class="archplay-ends">${end('ucm-key-start', 'Starts when', story.trigger)}`
+    + `${end('ucm-key-end', 'Ends with', story.outcome)}</div></div>`
+    + '<div class="archplay-ctl"><button type="button" data-archstep="-1" aria-label="Previous step">\u25c0</button>'
+    + '<span class="archplay-count"></span>'
+    + '<button type="button" data-archstep="1" aria-label="Next step">\u25b6</button></div>'
+    + '<button type="button" class="archplay-x" data-archstory="" aria-label="Show every story"'
+    + ' title="Show every story">\u00d7</button>';
+  archPlayCounter();
+}
+function archPlayKey(i) {
+  const [a, b] = archPlay.story.lines[i];
+  return 'arch:' + a + '>' + b;
+}
+function archPlayActive() {
+  return !!(archPlay && archPlay.cur >= 0 && mainScene && selHas(mainScene, archPlayKey(archPlay.cur)));
+}
+function archPlayCounter() {
+  if (!archPlay) return;
+  const n = archPlay.story.lines.length, on = archPlayActive();
+  const count = archplayer.querySelector('.archplay-count');
+  if (count) count.textContent = on ? `Step ${archPlay.cur + 1} of ${n}` : `${n} steps`;
+  const prev = archplayer.querySelector('[data-archstep="-1"]');
+  if (prev) prev.disabled = !on;
+}
+// A PICK MADE ANY OTHER WAY — a click on one of the story's lines, the address — moves the walk there.
+function archPlaySync() {
+  if (!archPlay || !mainScene) return;
+  const key = mainScene.selectedKey || '';
+  if (!archPlayActive() && key.startsWith('arch:')) {
+    const i = archPlay.story.lines.findIndex(([a, b]) => key === 'arch:' + a + '>' + b);
+    if (i >= 0) archPlay.cur = i;
+  }
+  archPlayCounter();
+}
+function archStepGoto(i) {
+  if (!archPlay || !mainScene) return;
+  const n = archPlay.story.lines.length;
+  archPlay.cur = Math.max(0, Math.min(n - 1, i));
+  const sel = mainScene.selectors[archPlayKey(archPlay.cur)];
+  selClear(mainScene);
+  if (sel) sel(); else resetScene(mainScene);
+  const [a, b] = archPlay.story.lines[archPlay.cur];
+  const line = archLineEls(a, b);
+  const items = [...line, mainScene.nodeEls[a], mainScene.nodeEls[b]].filter(Boolean)
+    .map((el) => ({ el, xOnly: false }));
+  revealOnScreen(items, line[1] || null);
+  archPlayCounter();
+}
+// Not active: Previous does nothing and Next picks up where the walk was, or starts at step 1.
+function archStepBy(d) {
+  if (!archPlay) return;
+  const n = archPlay.story.lines.length;
+  if (!archPlayActive()) { if (d > 0) archStepGoto(archPlay.cur >= 0 ? archPlay.cur : 0); return; }
+  archStepGoto((archPlay.cur + d + n) % n);
+}
+// A line on the drawing and its number: a drawn line and its label, or one drawn on top of a crowded
+// picture and its number.
+function archLineEls(a, b) {
+  const ov = archOverlayLineEl(a, b);
+  if (ov) {
+    const num = [...ov.parentNode.querySelectorAll('.arch-ov-num')]
+      .find((x) => x.dataset.src === a && x.dataset.dst === b) || null;
+    return [ov, num].filter(Boolean);
+  }
+  let hit = [];
+  if (mainScene) eachEdge(mainScene.root, (p, label, m) => { if (m[1] === a && m[2] === b) hit = [p, label]; });
+  return hit.filter(Boolean);
+}
+archplayer.addEventListener('click', (e) => {
+  if (archStoryClick(e)) return;
+  const step = e.target.closest && e.target.closest('[data-archstep]');
+  if (step) { e.stopPropagation(); archStepBy(+step.getAttribute('data-archstep')); }
+});
 function archList(xs) {
   return xs.length <= 1 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
 }
@@ -8555,7 +8656,8 @@ function cardKeepSets(el) {
   // IN EVERY SET. The later sets exist so a crowded arrow can place its card at all, by giving up one
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
-  const fixed = (zoomctl && !zoomctl.hidden) ? [grow(rectOf(zoomctl), CARD_CLEAR)] : [];
+  // The story player's strip at the foot of the drawing is a control too.
+  const fixed = [zoomctl, archplayer].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   if (!isArrow) return [[...g(own), ...fixed]];
   return [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
           [...g([...own, ...ends]), ...fixed],
@@ -16318,6 +16420,11 @@ document.addEventListener('keydown', (e) => {
   if (flowPlay && !typing && !e.metaKey && !e.altKey && !e.ctrlKey) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); flowStepBy(-1); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); flowStepBy(1); return; }
+  }
+  // …and the story followed on the Architecture view, the same way.
+  if (archPlay && !typing && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); archStepBy(-1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); archStepBy(1); return; }
   }
   if (e.key === 'Escape' && mainScene) resetScene(mainScene);
 });
