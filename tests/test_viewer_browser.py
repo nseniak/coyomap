@@ -4617,3 +4617,83 @@ def test_a_use_case_map_draws_no_start_or_end_mark() -> None:
         assert page.evaluate("() => document.querySelectorAll('#diagram g.node').length") > 0
         assert page.evaluate("() => document.querySelectorAll('.ucm-mark').length") == 0
         assert not page.js_errors, page.js_errors
+
+
+_PICTURES_SHARING_THE_DRAWING_CODE = ["#v=container", "#v=usecase&uc=UC1", "#v=domain", "#v=subsystem&sid=S1"]
+
+
+def _lit_label_near_its_line(page: Any) -> dict[str, Any]:
+    """Hover each line's hit area in turn and report, per line, how many labels light with it and how far
+    the lit label sits from the line. Run in the page: the pairing lives in the drawing."""
+    return dict(page.evaluate("""() => {
+        const lit = (el) => !!(el && el.style && el.style.filter);
+        const labels = [...document.querySelectorAll('#diagram .edgeLabels > g.edgeLabel')];
+        const paths = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
+        const out = { checked: 0, wrong: [] };
+        // A pointer that has not moved since the drawing appeared is not hovering (`holdPointer`): move it once.
+        for (const t of ['pointermove', 'mousemove'])
+          document.dispatchEvent(new MouseEvent(t, { clientX: 1, clientY: 1, bubbles: true }));
+        for (const hit of [...document.querySelectorAll('#diagram .cy-edgehit')].slice(0, 12)) {
+          hit.dispatchEvent(new MouseEvent('mouseenter'));
+          const on = labels.filter((l) => lit(l) && (l.textContent || '').trim());
+          const path = paths.find(lit);
+          hit.dispatchEvent(new MouseEvent('mouseleave'));
+          if (!path || !on.length) continue;          // a line with no words has no label to light
+          out.checked += 1;
+          // How far the lit label's centre is from the lit line, in screen pixels.
+          const r = on[0].getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+          const m = path.getScreenCTM(), len = path.getTotalLength();
+          let best = Infinity;
+          for (let i = 0; i <= 60; i++) {
+            const q = path.getPointAtLength(len * i / 60);
+            const x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f;
+            best = Math.min(best, Math.hypot(x - cx, y - cy));
+          }
+          if (on.length !== 1 || best > 30) out.wrong.push({ labels: on.length, text: on[0].textContent.trim(), px: Math.round(best) });
+        }
+        return out;
+    }"""))
+
+
+@pytest.mark.parametrize("where", _PICTURES_SHARING_THE_DRAWING_CODE)
+def test_on_every_picture_a_line_lights_its_own_label(where: str) -> None:
+    """The line code every picture shares (eachEdge, attachEdgeHandlers) was reshaped for the Architecture
+    picture's reversed lines. On every other picture, hovering a line must still light one label, its own:
+    the one sitting on that line."""
+    with _served() as url, _page(url + where) as page:
+        _settle(page)
+        seen = _lit_label_near_its_line(page)
+        assert seen["checked"] >= 1, f"no labelled line was hovered, so this proved nothing: {seen}"
+        assert not seen["wrong"], seen
+        assert not page.js_errors, page.js_errors
+
+
+@pytest.mark.parametrize("where", _PICTURES_SHARING_THE_DRAWING_CODE)
+def test_on_every_picture_a_box_selects_and_shows_itself(where: str) -> None:
+    """The box code every picture shares (bindNodes) learnt that a box may stand for another element, for
+    the Architecture picture's groups of parts. On every other picture a box still stands for itself: a
+    click on its edge selects it, and the card that appears is that box's own."""
+    with _served() as url, _page(url + where) as page:
+        _settle(page)
+        # A PERSON's figure stands for that person under an id of the picture's own, by design; every
+        # other box is drawn under its element's id.
+        boxes = page.evaluate("""() => [...document.querySelectorAll('#diagram g.node')]
+            .map((n) => [n, n.querySelector('.ibox[data-id]')]).filter(([n, b]) => b && n.id.includes(b.dataset.id))
+            .map(([, b]) => b).filter((b) => { const r = b.getBoundingClientRect();
+              return r.left > 0 && r.top > 0 && r.right < innerWidth - 40 && r.bottom < innerHeight; }).slice(0, 3)
+            .map((b) => { const r = b.getBoundingClientRect(); return { id: b.dataset.id, x: r.left + 3, y: r.top + 3 }; })""")
+        assert boxes, "no box to click on this picture"
+        for b in boxes:
+            # A FRESH picture per box: the previous box's popup can sit over the next one. The box is
+            # measured again there, since a fresh picture can be fitted differently.
+            page.goto(url + where.replace("#", "?fresh=" + b["id"] + "#"))
+            _settle(page)
+            b = page.evaluate("""(id) => { const r = document.querySelector(`#diagram .ibox[data-id="${id}"]`)
+                .getBoundingClientRect(); return { id, x: r.left + 3, y: r.top + 3 }; }""", b["id"])
+            page.mouse.click(b["x"], b["y"])
+            page.wait_for_timeout(500)
+            seen = page.evaluate("""() => ({ hash: location.hash,
+                card: (document.querySelector('#panel .pane-card [data-id]') || {}).dataset?.id || '' })""")
+            assert f"node%3A{b['id']}" in seen["hash"], (b, seen)
+            assert seen["card"] == b["id"], (b, seen)
+        assert not page.js_errors, page.js_errors
