@@ -251,29 +251,17 @@ def test_flow_arrows_locate_all_backbone_relationships_in_structural_views() -> 
     assert "'edge:' + e.src + '>' + e.dst + ':' + m[3]" in js
 
 
-def test_only_direct_diagram_clicks_pin_selection_action_icons() -> None:
+def test_a_selection_pins_nothing() -> None:
+    """A selection used to carry `revealAction`, so a box picked by a direct click kept its corner
+    magnifier showing after the pointer left. The magnifier is gone from every drawing, and the flag
+    that pinned it is gone with it: a glow is a glow, however the element came to be selected."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     selection = js[js.index("function selApply"):js.index("// The full click-gesture handler")]
-    sequence = ""   # the sequence rendering was removed; the map is the one picture of a walk
-    glow_edge = js[js.index("function glowEdge"):js.index("// EVERY ARROW IS DRAWN THE SAME")]
-    hp_glow = js[js.index("function hpGlow"):js.index("// Glow a set of elements")]
-    flow_map = js[js.index("function bindFlowMap(uc)"):js.index("function syncEnvPicker")]
-
-    assert "d.glow(!!d.revealAction)" in selection
-    assert "function selAdd(scene, desc, revealAction = false)" in selection
-    assert "revealAction: !!revealAction" in selection
-    assert "selToggle(scene, desc, true)" in selection
-    assert "selReplace(scene, desc, true)" in selection
-    # `selRevealsAction` went with the arrow pill it answered for: an arrow has no icon to reveal, so
-    # `revealAction` now means only what a BOX and a Happy Path message do with it.
-    assert "function selRevealsAction" not in js
-    assert "glowEdge(p, label, revealAction = true)" in glow_edge
-    assert "_actionIcon" not in glow_edge, "an arrow has no pill to pin or hide"
-    assert "hpGlow(el, revealAction = true)" in hp_glow
-    assert "el._actionIcon._selected = !!revealAction" in hp_glow
-    assert "glowEdgeAt(arrow.path, arrow.label, reveal, stepNumEl(arrow.label, i))" in flow_map
-    assert "flowPlay.showLocate" not in js
-    assert "showLocate:" not in js
+    assert "d.glow()" in selection
+    assert "function selAdd(scene, desc) {" in selection
+    assert "selToggle(scene, desc);" in selection and "selReplace(scene, desc);" in selection
+    assert "revealAction" not in js
+    assert "function glowEdge(p, label) {" in js and "function glowNode(el) {" in js
 
 
 def test_node_use_cases_are_grouped_by_capability_without_a_serves_row() -> None:
@@ -351,33 +339,20 @@ def test_flow_map_boxes_locate_the_element_in_its_structural_diagram() -> None:
     assert "title: 'Locate in ' + tab" in locate_code
     assert "sel: 'node:' + t.selectId" in locate_code
     assert "pendingCenter = t.selectId" in locate_code
-    assert "if (isFlowState(s) || isDataPicture(s) || isStructurePicture(s) || (s && PAIR_PAGE[s.kind])) return;" in locate_code   # no icons on a walk, a Data or a structure picture, or a pair page
-    # No icons on a walk at all — the box's NAME opens what it names. Off a walk, the icon is the
-    # element's own primary action.
-    assert "const action = primaryActionFor(sceneElementOf(scene, id));" in locate_code
+    # ⌥-click or a double click on the box locates it: there is no icon to offer it any more.
     assert "if (locate && isDrillClick(ev)) { locate.run(); return; }" in js
-    assert "action-icon is-' + action.kind" in js
-    assert "Lucide LocateFixed" in js
-    assert "ACTION_ICON_TIP_DELAY_MS = 250" in js
-    assert "scheduleActionIconTip(actionLabel, ev)" in js
-    assert "icon.setAttribute('aria-label', actionLabel)" in js
-    assert "createElementNS(SVGNS, 'title')" not in js[js.index("function addActionIcon"):js.index("function showIcon")]
 
 
-def test_all_action_icons_render_in_the_foreground_overlay() -> None:
+def test_the_diff_badges_render_in_the_foreground_overlay() -> None:
+    """The front overlay was built for the corner icons and the diff badges together. The icons are
+    gone; the badges still need it, so a badge on a container's corner is not painted over."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    action = js[js.index("function addActionIcon"):js.index("function showIcon")]
-
-    assert "svg.appendChild(g)" in js[js.index("function ensureIconOverlay"):js.index("const ACTION_ICON_TIP_DELAY_MS")]
-    assert "svg.querySelector(':scope > g')" not in js[js.index("function ensureIconOverlay"):js.index("const ACTION_ICON_TIP_DELAY_MS")]
+    overlay = js[js.index("function ensureIconOverlay"):js.index("\n}", js.index("function ensureIconOverlay"))]
+    assert "svg.appendChild(g)" in overlay
     assert "iconOverlay.parentNode.appendChild(iconOverlay)" in js
-    assert "const parent = iconOverlay || host || el" in action
-    assert "const parent = host || iconOverlay || el" not in action
-    # ONE ICON BUILDER IS LEFT, and it homes every icon in the overlay. The label-anchored pill and its
-    # hover bridge went with the arrow icons they were built for — they were the only kind that had to
-    # hang off a label instead of a box corner, and the only reason a second overlay layer existed.
-    assert "coyomap-icon-bridge-overlay" not in js
-    assert "function addLabelActionIcon" not in js and "function bindEdgeActionIcon" not in js
+    badge = js[js.index("function addBadge"):js.index("\n}", js.index("function addBadge"))]
+    assert "const parent = iconOverlay || el;" in badge
+    assert "const BADGE_HALO_R = 16.5;" in js
 
 
 def test_a_walk_has_one_rendering_and_it_is_the_map() -> None:
@@ -1360,8 +1335,8 @@ def test_a_line_joins_the_card_to_the_one_element_it_describes() -> None:
     # one query covers both — an arrow selection could not answer this before.
     sole = js[js.index("function soleSelectedEl() {"): js.index("\n}", js.index("function soleSelectedEl() {"))]
     assert "diagram.querySelectorAll('.is-selected')" in sole and "els.length === 1 ? els[0] : null" in sole
-    edge = js[js.index("function glowEdge(p, label, revealAction = true) {"):
-              js.index("\n}", js.index("function glowEdge(p, label, revealAction = true) {"))]
+    edge = js[js.index("function glowEdge(p, label) {"):
+              js.index("\n}", js.index("function glowEdge(p, label) {"))]
     assert "p.classList.add('is-selected')" in edge and "p.classList.remove('is-selected')" in edge
     # The `hidden` PROPERTY does not exist on an SVG element, so the attribute is set on both sides.
     hide = js[js.index("function hideCallout() {"): js.index("\n}", js.index("function hideCallout() {"))]
@@ -1606,12 +1581,12 @@ def test_clicking_an_arrow_points_the_line_at_its_number_not_its_middle() -> Non
     numbers (a bundle, whose card describes all of them). The anchor is looked up at glow time, not at
     bind time, because the numbers are built after the arrows are bound."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    glow_at = js[js.index("function glowEdgeAt(p, label, reveal, anchor) {"): js.index("\n}", js.index("function glowEdgeAt(p, label, reveal, anchor) {"))]
-    assert "const off = glowEdge(p, label, reveal);" in glow_at
+    glow_at = js[js.index("function glowEdgeAt(p, label, anchor) {"): js.index("\n}", js.index("function glowEdgeAt(p, label, anchor) {"))]
+    assert "const off = glowEdge(p, label);" in glow_at
     assert "anchor.classList.add('flow-step-picked'); setStepAnchor(anchor);" in glow_at
     assert "if (stepAnchorEl === anchor) setStepAnchor(null);" in glow_at, "the line goes when the selection goes"
     desc = js[js.index("function edgeDesc(scene, p, label, e, selKey, showFn, anchor) {"): js.index("\n}", js.index("function edgeDesc(scene, p, label, e, selKey, showFn, anchor) {"))]
-    assert "glowEdgeAt(p, label, reveal, anchor ? anchor() : null)" in desc, "looked up at glow time"
+    assert "glowEdgeAt(p, label, anchor ? anchor() : null)" in desc, "looked up at glow time"
     assert js.count("function glowEdgeAt(") == 1 and js.count("glowEdgeAt(") == 3, \
         "one helper, two doors: the step's own selection and the arrow's — nothing else lights a step"
     flow_map = js[js.index("function bindFlowMap(uc)"):js.index("function syncEnvPicker")]
@@ -1625,24 +1600,6 @@ def test_clicking_an_arrow_points_the_line_at_its_number_not_its_middle() -> Non
     draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function syncCallout() {"))]
     assert "grow(rectOf(el), isStepAnchor(el) ? NUM_DOT_CLEAR : 0)" in draw
     assert "const NUM_DOT_CLEAR = 7;" in js
-
-
-def test_the_sequence_views_get_a_line_too() -> None:
-    """Every use-case flow selects through `hpHighlight`, which marked nothing — so `soleSelectedEl`
-    found nothing and the whole feature was silently absent on that view.
-
-    One selection there lights SEVERAL parts: a step is its label and its arrow; an actor is its
-    figure, its lifeline and every step it drives. The mark goes on ONE of them, the first, which each
-    caller orders as the part that stands for the whole. Marking all of them would read as several
-    selections and take the line away again.
-
-    The Happy Path used to be the second such view. It is an HTML board now (renderHappyPath), so the
-    flow is the only one left."""
-    js = (VIEWER_DIR / "viewer.js").read_text()
-    fn = js[js.index("function hpHighlight(scene, els, revealAction = true) {"):
-            js.index("\n}", js.index("function hpHighlight(scene, els, revealAction = true) {"))]
-    assert "const lead = els[0];" in fn
-    assert "lead.classList.add('is-selected')" in fn and "lead.classList.remove('is-selected')" in fn
 
 
 def test_everything_that_floats_over_the_drawing_states_its_layer() -> None:
@@ -1777,9 +1734,9 @@ def test_closing_the_panel_is_not_deselecting() -> None:
     assert "if (e.key === 'Escape' && mainScene) resetScene(mainScene);" in js
     # …and re-clicking the same element rebuilds the panel, because a plain click replaces the selection
     # with itself rather than noticing it is already there.
-    rep = js[js.index("function selReplace(scene, desc, revealAction = false) {"):
-             js.index("\n", js.index("function selReplace(scene, desc, revealAction = false) {"))]
-    assert "selClear(scene); selAdd(scene, desc, revealAction);" in rep
+    rep = js[js.index("function selReplace(scene, desc) {"):
+             js.index("\n", js.index("function selReplace(scene, desc) {"))]
+    assert "selClear(scene); selAdd(scene, desc);" in rep
     bar = js[js.index("function stampPanelBar() {"): js.index("\n}", js.index("function stampPanelBar() {"))]
     assert "Close (Esc)" not in bar, "the two gestures differ now, so the tooltip stops equating them"
     assert "the selection stays" in bar
@@ -5653,17 +5610,17 @@ def test_a_pointer_that_did_not_move_is_not_hovering() -> None:
     assert "{--ibox-rest:color-mix(in srgb, ${t.stroke} ${mix}%, #fff)}" in js, "the per-kind resting line is the variable"
 
 
-def test_a_walk_draws_no_corner_icons() -> None:
+def test_no_drawing_draws_a_corner_icon() -> None:
     """The icon floating in a box's corner was the older way of saying "this opens something", in a
-    language no other screen speaks. The name says it now, and it says it the way a card's title does."""
+    language no other screen speaks. The name says it now, on every drawing, so the code that drew the
+    icon, revealed it on hover, pinned it on a click and flashed it on a double click is gone."""
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
-    fn = js[js.index("function decorateActionIcons(scene, s) {"):
-            js.index("\n}", js.index("function decorateActionIcons(scene, s) {"))]
-    assert "if (isFlowState(s) || isDataPicture(s) || isStructurePicture(s) || (s && PAIR_PAGE[s.kind])) return;" in fn
-    assert "addActionIcon(el, sid, open)" not in js, "the shared sub-use case's box lost its icon too"
-    # The two picture tests each name ONE TAB's drawings, so the bridge — a subsystem crossed with a
-    # subdomain — was in neither and kept the icon after every page around it had let it go.
-    # `PAIR_PAGE` names every pair page, so a fourth kind cannot fall through the same gap.
+    css = (VIEWER_DIR / "viewer.css").read_text(encoding="utf-8")
+    for gone in ("function decorateActionIcons", "function addActionIcon", "function buildGlyph",
+                 "function flashIcon", "function primaryActionFor", "ACTION_ICONS", "ICON_PAINT",
+                 "refreshPillReveal", "_actionIcon", "rescaleActionIcons", "noAction"):
+        assert gone not in js, gone
+    assert ".action-icon" not in css and "actionflash" not in css
 
 
 def test_hovering_a_box_shows_its_card_and_leaving_puts_back_what_was_there() -> None:

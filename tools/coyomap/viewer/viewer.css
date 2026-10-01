@@ -1538,68 +1538,16 @@ body.panel-dragging { user-select: none; }
    beats the inline cursor:pointer. */
 body.altmod .drill, body.altmod .drill * { cursor: zoom-in !important; }
 /* Leaf boxes with a source ref (components / domain entities) show a slanted-arrow cursor instead —
-   ⌥-click opens the source rather than drilling. Hand-drawn to match the corner action icon's own
-   "open externally" glyph (see buildGlyph's `open` branch in viewer.js) — same shaft + corner-arrowhead
-   shape, just repositioned for this cursor's own 28x22 box. SVG data-URI cursor, pointer as the fallback. */
+   ⌥-click opens the source rather than drilling. The standard "open externally" glyph, a shaft with a
+   corner arrowhead, in a 28x22 box. SVG data-URI cursor, pointer as the fallback. */
 body.altmod .opensrc, body.altmod .opensrc * {
   cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='28'%20height='22'%20viewBox='0%200%2028%2022'%3E%3Crect%20x='1'%20y='1'%20width='26'%20height='20'%20rx='5'%20fill='%234f46e5'%20stroke='%23fff'%20stroke-width='1.5'/%3E%3Cpath%20d='M9,15%20L17,7%20M17,10.5%20L17,7%20L13.5,7'%20fill='none'%20stroke='%23fff'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E") 4 4, pointer !important;
 }
 
-/* Corner action icon: a container's zoom-in glass drills in, a leaf-with-source's arrow opens its file,
-   and a use-case Map box's fixed target locates it in its structural diagram — the one useful secondary
-   action that box has in that view. Hidden until the box is hovered (a busy diagram would
-   otherwise show a badge on every single box at once); double-click-anywhere-on-the-box (see
-   isDrillClick) is the fully-visible fallback for anyone who never hovers it. A plain click on the
-   icon fires the action directly. Also stays visible when a direct diagram click selected the box;
-   automatic selections keep it hover-only (driven by glowNode's `_selected` state).
-   Paint (fill/stroke/stroke-width/stroke-dasharray) is deliberately NOT set here — it's set via inline
-   style + !important in viewer.js (see ICON_PAINT/paintImportant), because Mermaid emits its OWN
-   per-diagram CSS scoped by an id, e.g. `#coyomapGraph7 .subsystem > * { fill: …; stroke-dasharray: 6,3;
-   … !important }` for a container's own dashed-border styling. An id in a selector outranks any number
-   of classes regardless of specificity, and Mermaid's rule is ALSO `!important` — a class-based CSS
-   override, `!important` or not, can never win against that combination. Only an inline `!important`
-   style does (same reason `applyTint` elsewhere in this file sets cluster-frame colours via JS, not
-   CSS). This was a real, confirmed bug: BOTH glyphs (not just the open one) were silently painted
-   Mermaid's own default colour/dash pattern the whole time — drill only looked "right" by coincidence
-   (its intended indigo is a similarly-toned purple to Mermaid's default). */
-.action-icon { cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
-/* Every action pill lives in a front overlay (see iconOverlay in viewer.js), never inside a Mermaid
-   node, edge or label group where a later box could cover it. For box/cluster pills, the old descendant
-   reveal rule (`g.node:hover .action-icon`) therefore can't reach them. JS
-   toggles `.revealed` off the owner box's hover + direct-selection state instead (see refreshPillReveal),
-   including the "never on a dimmed box, even under the cursor" case the old `.dim:hover` rule covered. */
-.action-icon.revealed { opacity: 1; pointer-events: auto; }
-/* Diff badges are purely informational (no click/hover) and now live in the same front overlay as the
-   pills, so they'd otherwise sit above everything and swallow pointer events meant for whatever is under
-   a box's top-right corner (a frame, an inner element). They must never intercept input. */
+/* Diff badges are purely informational (no click/hover) and live in a front overlay, so they'd
+   otherwise sit above everything and swallow pointer events meant for whatever is under a box's
+   top-right corner (a frame, an inner element). They must never intercept input. */
 .diff-badge { pointer-events: none; }
-/* transform-box/transform-origin here (not repeated below) because a CSS `transform` on an SVG element
-   scales/animates around the SVG viewport's origin by default, not the shape's own center — needed by
-   both the hover grow and the flash pulse further down. transform-box:fill-box; transform-origin:center
-   pin it to the circle's own center instead. */
-.action-icon > circle { transition: fill .1s ease, transform .1s ease; transform-box: fill-box; transform-origin: center; }
-.action-icon .glyph circle, .action-icon .glyph path { stroke-linecap: round; stroke-linejoin: round; }
-/* The icon's own hover reaction — grows (fill tint is applied via JS, see addActionIcon). Never a
-   filter/drop-shadow, and never applied to the whole icon GROUP: a CSS `transform` on the group itself
-   would override the `transform` attribute Mermaid/JS uses to POSITION it, snapping the icon back to
-   the origin (see addActionIcon) — so this scales just the badge circle, same trick the flash pulse
-   below already uses. Deliberately NOT the blue HILITE/HOVER glow used for node selection — the icon
-   needs a reaction that reads as "this is a button", not as "this box is selected" (see
-   glowNode/bindHoverGlow in viewer.js, which apply that glow to the box's own shape, never to this icon). */
-.action-icon:hover > circle { transform: scale(1.15); }
-/* Pulses when the SAME action fires via ⌘-click / double-click on the box instead of a direct icon
-   click, so the icon's meaning rubs off even on someone who never clicks it. Forced visible for the
-   duration (the pointer may not still be hovering by the time this plays out; viewer.js's flashIcon
-   removes the class again after that, or it would leave the icon stuck fully visible forever). */
-.action-icon.flash { opacity: 1; }
-.action-icon.flash > circle { animation: actionflash .5s ease-out; }
-@keyframes actionflash {
-  0%, 100% { transform: scale(1); filter: none; }
-  40% { transform: scale(1.35); filter: drop-shadow(0 0 3px #6366f1); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .action-icon.flash circle { animation: none; }
-}
 
 /* THE BREADCRUMB ROW: the path inside the open view, and the page's own title.
    The 17px left padding is the whole point of the row's alignment — 10px of view-row padding plus the

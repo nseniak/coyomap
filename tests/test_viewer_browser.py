@@ -4350,8 +4350,7 @@ def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
     text says whose steps these are, and one click shows every step again."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        # ON THE BOX'S SENTENCE: clear of its name, which opens it, and of the corner icon a subsystem
-        # box carries, which drills into it.
+        # ON THE BOX'S SENTENCE: clear of its name, which opens it.
         spot = page.evaluate("""() => {
             const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.querySelector('.ibox-map .ibox-what'));
             const w = n.querySelector('.ibox-what').getBoundingClientRect();
@@ -4368,6 +4367,60 @@ def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
         assert seen["head"].startswith("Only the steps through"), seen
         page.evaluate("() => document.querySelector('#archtext [data-archfilter-clear]').click()")
         assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == before
+        assert not page.js_errors, page.js_errors
+
+
+def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -> None:
+    """Four gestures every other picture has, which the Architecture picture lacked: resting on a box
+    shows its card and no corner magnifier, a person's box picks like any other box and lights its
+    lines, and a click on empty space lets go of the box, in the text as well as on the drawing."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
+        box = page.evaluate("""() => {
+            const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.querySelector('.ibox-map .ibox-what'));
+            const w = n.querySelector('.ibox-what').getBoundingClientRect();
+            return { x: w.left + w.width / 2, y: w.top + w.height / 2,
+                     name: n.querySelector('.ibox-name').textContent.trim() };
+        }""")
+        page.mouse.move(box["x"], box["y"])
+        page.mouse.move(box["x"] + 1, box["y"])
+        page.wait_for_timeout(600)
+        seen = page.evaluate("""() => ({ icons: document.querySelectorAll('.action-icon').length,
+                                         card: document.querySelector('#panel').textContent })""")
+        assert seen["icons"] == 0, "no corner magnifier on any box"
+        assert box["name"] in seen["card"], (box, seen["card"][:200])
+        # A PERSON: on the figure, clear of the name, which opens their page.
+        person = page.evaluate("""() => {
+            const n = [...document.querySelectorAll('#diagram g.node')].find((x) => /-CYP/.test(x.id));
+            const r = n.getBoundingClientRect();
+            return { x: r.left + 6, y: r.top + 6 };
+        }""")
+        page.mouse.click(person["x"], person["y"])
+        page.wait_for_timeout(700)
+        seen = page.evaluate("""() => ({ hash: location.hash,
+            dim: document.querySelectorAll('#diagram g.node.dim').length,
+            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
+            head: document.querySelector('#archtext .archtext-filter').textContent })""")
+        assert "sel=node%3ACYP" in seen["hash"], seen
+        assert seen["dim"] > 0 and 0 < seen["shown"] < before, (before, seen)
+        assert seen["head"].startswith("Only the steps through"), seen
+        # EMPTY SPACE: a point of the drawing with nothing drawn under it.
+        empty = page.evaluate("""() => {
+            const svg = document.querySelector('#diagram svg'), r = svg.getBoundingClientRect();
+            for (let y = r.top + 8; y < r.bottom; y += 12) for (let x = r.left + 8; x < r.right; x += 12)
+              if (document.elementFromPoint(x, y) === svg) return { x, y };
+            return null;
+        }""")
+        assert empty, "the drawing has no empty spot"
+        page.mouse.click(empty["x"], empty["y"])
+        page.wait_for_timeout(500)
+        seen = page.evaluate("""() => ({ hash: location.hash,
+            selected: document.querySelectorAll('#diagram .is-selected').length,
+            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
+            filtered: !document.querySelector('#archtext .archtext-filter').hidden })""")
+        assert "sel=" not in seen["hash"] and seen["selected"] == 0, seen
+        assert seen["shown"] == before and not seen["filtered"], (before, seen)
         assert not page.js_errors, page.js_errors
 
 
