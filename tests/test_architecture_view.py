@@ -651,3 +651,14 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print("ok", name)
+
+
+def test_a_box_does_not_name_the_subsystem_it_sits_in() -> None:
+    """A component's box carried its subsystem as a pill, a line of every box spent on what its card
+    says one hover away. The only pill a picture adds to a box is a person's `via AI agent`."""
+    graph = make_fixture_graph()
+    comp = next(i for i, n in graph["nodes"].items()
+                if n.get("kind") == "component" and gv._top_subsystem(graph, i) not in (None, i))
+    lines: list[str] = []
+    gv._arch_inside_box(graph, lines, comp, set(), {})
+    assert f"data-id={comp}" in lines[0] and "data-pill" not in lines[0], lines

@@ -2009,8 +2009,9 @@ def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set
     """One box inside the product on an Architecture picture."""
     # EVERY BOX INSIDE THE PRODUCT CARRIES ITS OWN SENTENCE, cut to 2 lines (`map`): the name
     # alone did not say what a box is ("Team MCPs" is a set of screens, "Plan caps" both the
-    # limits and the prompt). A subsystem keeps its component count in the band; a box names the
-    # top-level area it sits in, unless it IS that area. A shared sub-use case is its dashed box.
+    # limits and the prompt). A subsystem keeps its component count in the band. A box does NOT name
+    # the subsystem it sits in: the pill took a line of every component box to say what the box's
+    # card says one hover away. A shared sub-use case is its dashed box.
     # A GROUP OF PARTS is its subsystem's box, and it counts only the parts it holds here: the
     # same subsystem has a group in each layer it has parts in.
     cell = cells.get(bid)
@@ -2020,9 +2021,7 @@ def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set
         lines.append(f'  {bid}["{_slot("cell", "map", cell["sub"], parts=cell["parts"])}"]:::cy-{bid}')
     else:
         kind = str(graph["nodes"].get(bid, {}).get("kind"))
-        area = _top_subsystem(graph, bid) or ""
-        pill = _area_pill(graph, area) if area and area != bid else ""
-        lines.append(f'  {bid}["{_slot(kind, "map", bid, pill)}"]:::cy-{bid}')
+        lines.append(f'  {bid}["{_slot(kind, "map", bid)}"]:::cy-{bid}')
     lines.append(f"  class {bid} itembox")
 
 
@@ -2236,13 +2235,6 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
                                    for ll in layer_lines if ll["rule"]]}
                    if whole else {})}
     return drawings, texts
-
-
-def _area_pill(graph: GraphDict, area: str) -> str:
-    """The area a box belongs to, as the box's own extra pill. With no frames to say it, the area
-    still has to be readable ON the box — and a pill is the one place every other picture already
-    puts a fact like this."""
-    return str(graph["nodes"][area]["name"]) if area in graph["nodes"] else ""
 
 
 def gen_container_mermaid(graph: GraphDict) -> str:
