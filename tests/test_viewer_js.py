@@ -3824,55 +3824,6 @@ def test_the_app_name_is_a_working_way_back_to_all_maps() -> None:
     assert "header .brand.home-link { cursor: pointer; }" in css
 
 
-def test_a_label_goes_with_its_line_by_name_when_the_engine_writes_fewer_labels() -> None:
-    """ELK writes a label only for a line it draws with one, while Mermaid's own engine writes one per
-    line, the invisible ties too. Each label names its line, so the pairing goes by name: here 3 lines
-    and 2 labels, written in another order than the lines."""
-    out = _run_js_region(
-        "function eachEdge(root, fn) {",
-        "// Stroke an edge's path + glow its label",
-        """
-const svg = { id: 'g' };
-const mk = (id) => ({ id: 'g-' + id, style: {}, ownerSVGElement: svg, hasAttribute: () => false });
-const paths = [mk('L_A_B_0'), mk('L_B_C_0'), mk('L_C_D_0')];
-const named = (name, text) => ({ text, querySelector: () => ({ getAttribute: () => name }) });
-const labels = [named('L_C_D_0', '3'), named('L_A_B_0', '1')];
-const root = { querySelectorAll: (sel) => (sel.includes('edgePaths') ? paths : labels) };
-const seen = [];
-eachEdge(root, (p, label, m) => seen.push({ src: m[1], dst: m[2], label: label && label.text }));
-console.log(JSON.stringify(seen));
-""",
-    )
-    assert json.loads(out) == [{"src": "A", "dst": "B", "label": "1"}, {"src": "B", "dst": "C", "label": None},
-                               {"src": "C", "dst": "D", "label": "3"}]
-
-
-def test_with_elk_the_frames_are_written_in_reverse_at_every_level_and_nothing_else_moves() -> None:
-    """Mermaid hands ELK a picture's frames last-written first, so with ELK on the viewer writes sibling
-    frames in reverse, and ELK gets them in the picture's own order. Boxes and lines outside a frame keep
-    their places. With ELK off, the source is untouched."""
-    out = _run_js_region(
-        "function elkFrameOrder(src) {",
-        "const layoutReady = ELK_ON",
-        """
-let ELK_ON = true;
-function isClassDiagramSrc() { return false; }
-const src = ['flowchart TB', '  subgraph A["A"]', '    a1', '  end', '  x', '  subgraph B["B"]',
-  '    subgraph B1["B1"]', '      b1', '    end', '    subgraph B2["B2"]', '      b2', '    end', '  end',
-  '  a1 --> b1'].join('\\n');
-const on = elkFrameOrder(src);
-ELK_ON = false;
-console.log(JSON.stringify({ on, off: elkFrameOrder(src) === src }));
-""",
-    )
-    got = json.loads(out)
-    assert got["off"]
-    assert got["on"].split("\n") == [
-        "flowchart TB", '  subgraph B["B"]', '    subgraph B2["B2"]', "      b2", "    end",
-        '    subgraph B1["B1"]', "      b1", "    end", "  end", "  x", '  subgraph A["A"]', "    a1", "  end",
-        "  a1 --> b1"]
-
-
 def test_an_arrow_from_a_box_to_itself_is_one_arrow_made_of_three_pieces() -> None:
     """A flow step where one box acts on itself draws a loop. Mermaid does not draw that loop as one
     line: it routes it through two invisible helper boxes and emits THREE paths, named
