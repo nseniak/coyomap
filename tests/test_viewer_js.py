@@ -5594,7 +5594,7 @@ def test_a_pointer_that_did_not_move_is_not_hovering() -> None:
     assert "Math.abs(e.clientX - cursorHeldAt.x) < POINTER_MOVE_PX" in mv, "a move is a change of place, not an event"
     assert "if (!pointerFresh && !still) releasePointer();" in mv
     # the three hovers read the gate, keep the denied enter, and drop it on a leave
-    for fn, enter in (("function previewOnHover(scene, els, show, anchor) {", "whenPointerMoves(enter)"),
+    for fn, enter in (("function previewOnHover(scene, els, show, anchor, inner) {", "whenPointerMoves(enter)"),
                       ("function bindHoverGlow(scene, el, id) {", "whenPointerMoves(on)"),
                       ("function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actionFn) {", "whenPointerMoves(on)")):
         body = js[js.index(fn): js.index("\n}", js.index(fn))]
@@ -5630,8 +5630,8 @@ def test_hovering_a_box_shows_its_card_and_leaving_puts_back_what_was_there() ->
     The LINE follows the pointer too: it would otherwise point at the last thing clicked while the card
     described something else."""
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
-    fn = js[js.index("function previewOnHover(scene, els, show, anchor) {"):
-            js.index("\n}", js.index("function previewOnHover(scene, els, show, anchor) {"))]
+    fn = js[js.index("function previewOnHover(scene, els, show, anchor, inner) {"):
+            js.index("\n}", js.index("function previewOnHover(scene, els, show, anchor, inner) {"))]
     assert "HOVER_CARD_MS" in fn and "if (panelDrag || srcSliding) return;" in fn
     # A DELAYED leave, cancelled by a re-enter: moving from an arrow's line onto its own number fires
     # leave-then-enter, and restoring in between blinked the card on a pointer that never left.
@@ -6009,7 +6009,9 @@ def test_every_box_is_bound_through_one_binder() -> None:
     calls = [ln.strip() for ln in js.splitlines() if "bindHoverGlow(" in ln and "function bindHoverGlow" not in ln]
     assert calls == ["bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins"], calls
     box = js[js.index("function bindBox(scene, el, id, opts) {"):js.index("\n}", js.index("function bindBox("))]
-    assert "if (opts.show) previewOnHover(scene, el, opts.show);" in box
+    assert "previewOnHover(scene, el, opts.show, null, BOX_TAG);" in box
+    # …and every tag inside the box shows ITS card, the line pointing at the tag
+    assert "if (GRAPH.nodes[tid]) previewOnHover(scene, t, boxCard(tid), t);" in box
     assert "if (el.classList.contains('envout')) return;" in box
     for binder in ("function bindNodes(", "function bindGroupContainer(", "function bindClassBoxes(",
                    "function bindAliasBox("):

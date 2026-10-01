@@ -4474,6 +4474,46 @@ def test_picking_a_box_changes_nothing_inside_it() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def test_a_part_tag_shows_its_own_card_and_the_box_takes_its_card_back() -> None:
+    """Resting on a part's tag inside its subsystem's box shows the PART's card, its line pointing at the
+    tag; back on the box's own body, the subsystem's card returns. The box's card stands aside while the
+    pointer is on a tag, or the two would fight over the one card."""
+    with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        card = "() => (document.querySelector('#panel .ibox-name') || {}).textContent || ''"
+        # A BOX ON SCREEN, top and bottom: the picture is wider and taller than the window.
+        k = page.evaluate("""() => [...document.querySelectorAll('#diagram g.node .ibox-map')].findIndex((b) => {
+            const r = b.getBoundingClientRect(), d = document.querySelector('#diagram').getBoundingClientRect();
+            return b.querySelector('.item-pill[data-item]') && r.top > d.top + 10 && r.bottom < d.bottom - 150
+              && r.left > d.left + 10 && r.right < d.right - 10; })""")
+        assert k >= 0, "no box with a tag fully on screen"
+        box = page.locator("#diagram g.node .ibox-map").nth(k)
+        tag = box.locator(".item-pill[data-item]").first
+        sub_name = box.locator(".ibox-name").first.text_content().strip()
+        part_name = tag.text_content().strip()
+        bb, tb = box.bounding_box(), tag.bounding_box()
+        assert bb and tb
+        body = (bb["x"] + bb["width"] - 3, bb["y"] + 4)   # the top-right corner: the tag's card opens below
+        page.mouse.move(body[0] - 1, body[1])
+        page.mouse.move(*body)
+        page.wait_for_timeout(500)
+        assert page.evaluate(card).strip() == sub_name
+        page.mouse.move(tb["x"] + tb["width"] / 2, tb["y"] + tb["height"] / 2, steps=4)
+        page.wait_for_timeout(500)
+        assert page.evaluate(card).strip() == part_name
+        # the line lands on the tag, not on the box around it
+        end = page.evaluate("""() => { const l = document.querySelector('#callout .co-line'), m = l.getScreenCTM();
+            const at = (x, y) => [m.a * x + m.e, m.d * y + m.f], v = (k) => l[k].baseVal.value;
+            return [at(v('x1'), v('y1')), at(v('x2'), v('y2'))]; }""")
+        near = lambda pt: (tb["x"] - 3 <= pt[0] <= tb["x"] + tb["width"] + 3
+                           and tb["y"] - 3 <= pt[1] <= tb["y"] + tb["height"] + 3)
+        assert any(near(pt) for pt in end), (end, tb)
+        page.mouse.move(*body, steps=4)
+        page.wait_for_timeout(500)
+        assert page.evaluate(card).strip() == sub_name
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""

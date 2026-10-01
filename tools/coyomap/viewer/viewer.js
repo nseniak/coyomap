@@ -4474,12 +4474,21 @@ function tryDataDrillClick(id, e) {
 // A box the environment filter excluded is inert: `pointer-events:none` already stops a real cursor,
 // but the guard also covers a click that arrives any other way, so "not selectable" is a property of
 // the box rather than of CSS hit-testing.
+const BOX_TAG = '.item-pill[data-item]';
 function bindBox(scene, el, id, opts) {
   scene.nodeEls[id] = el;
   el.style.cursor = 'pointer';
   bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins
   if (opts.tip) attachTip(el, opts.tip);
-  if (opts.show) previewOnHover(scene, el, opts.show);
+  if (opts.show) {
+    previewOnHover(scene, el, opts.show, null, BOX_TAG);
+    // A TAG IN A BOX — a part in its subsystem's box, a person or a record on a shared sub-use case's —
+    // shows ITS card on a hover, and the line points at the tag, the way a box's card points at the box.
+    el.querySelectorAll(BOX_TAG).forEach((t) => {
+      const tid = t.getAttribute('data-item');
+      if (GRAPH.nodes[tid]) previewOnHover(scene, t, boxCard(tid), t);
+    });
+  }
   el.addEventListener('click', (ev) => {
     if (isDrag(ev)) return;  // tail of a drag-pan, not a real click
     if (el.classList.contains('envout')) return;
@@ -7998,9 +8007,18 @@ const HOVER_LEAVE_MS = 90;
 //
 // The leave is DELAYED, and a re-enter cancels it: moving from an arrow's line onto its own number fires
 // leave-then-enter, and restoring in between made the card blink on a pointer that never left.
-function previewOnHover(scene, els, show, anchor) {
+// `inner` (optional): a selector for things INSIDE these elements that show a card of their own — a
+// part tag inside a box. While the pointer is on one, this card stands aside; when the pointer comes
+// back to the box's own body, this card returns.
+function previewOnHover(scene, els, show, anchor, inner) {
   const list = (Array.isArray(els) ? els : [els]).filter(Boolean);
   const at = anchor || list[0];
+  const onInner = () => {
+    if (!inner || !pointerAt) return false;
+    const e = document.elementFromPoint(pointerAt.x, pointerAt.y);
+    const hit = e && e.closest && e.closest(inner);
+    return !!hit && at.contains(hit);
+  };
   // THE SCREEN THIS PREVIEW BELONGS TO. A hover started just before a click fires its timer AFTER the
   // click has navigated, and wrote the old screen's card onto the new one — measured, a 160ms window,
   // and the card then named a step number the new screen does not have. The timer carries the
@@ -8011,9 +8029,13 @@ function previewOnHover(scene, els, show, anchor) {
   const enter = () => {
     if (!pointerFresh) { whenPointerMoves(enter); return; }   // not a hover yet — see holdPointer
     clearTimeout(outTimer); outTimer = null;
+    if (inTimer) return;   // already armed: one wait per hover, however many events asked
+    hoverArming++;
     inTimer = setTimeout(() => {
+      hoverArming--; inTimer = null;
       if (gen !== sceneGen || !at.isConnected) return;
       if (panelDrag || srcSliding) return;   // not while the reader is moving the card or the column
+      if (onInner()) return;                 // a tag inside has a card of its own, and it shows that
       // A PIN BEATS A HOVER. Once the reader has clicked something they have asked for that card and
       // said so; a pointer crossing a neighbour on its way somewhere else has asked for nothing. The
       // Interfaces picture has always worked this way (`if (!pinned) show(iid)`), and this is the same
@@ -8028,9 +8050,12 @@ function previewOnHover(scene, els, show, anchor) {
   };
   const leave = () => {
     forgetPointerMove(enter);
-    clearTimeout(inTimer); inTimer = null;
+    if (inTimer) { clearTimeout(inTimer); inTimer = null; hoverArming--; }
     if (gen !== sceneGen || hoverPreview !== at) return;
     outTimer = setTimeout(() => {
+      // ANOTHER CARD IS ON ITS WAY: the pointer left a tag for the box around it, or the other way
+      // round. Putting the default card back in between would blink it for one frame.
+      if (hoverArming > 0) { outTimer = null; return; }
       // THE POINTER IS STANDING IN THE CARD. Leaving the thing does not mean leaving its answer: the
       // card comes to what you hovered, so it can arrive under the pointer — and then hiding it puts
       // the pointer back on the thing, which shows it again, which hides it again. Measured as an
@@ -8057,8 +8082,15 @@ function previewOnHover(scene, els, show, anchor) {
   for (const el of list) {
     el.addEventListener('mouseenter', enter);
     el.addEventListener('mouseleave', leave);
+    // Back from a tag onto the box's own body: no `mouseenter` fires on the box, which the pointer
+    // never left, so its card is asked for again here.
+    if (inner) el.addEventListener('mouseover', (ev) => {
+      if (hoverPreview !== at && !(ev.target.closest && ev.target.closest(inner))) enter();
+    });
   }
 }
+// How many hover cards are armed and waiting to show (see previewOnHover's leave).
+let hoverArming = 0;
 // IF THE CARD COVERS WHAT IT DESCRIBES, MOVE THE CARD. The card is the thing that can move: the element
 // is where the drawing put it, and shifting the drawing instead would move everything else with it.
 //
