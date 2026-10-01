@@ -1185,8 +1185,8 @@ SOURCE: [grammar.py](tools/coyomap/grammar.py:318)
 
 ## T7 — Business logic (the decisions this product makes)
 
-One decision per rule, with every place it is enforced. The component on each site line and the
-use-case steps under it are DERIVED from the site anchors — no field carries them.
+One decision per rule, with every place it is enforced. The component on each site line is
+DERIVED from the site anchor — no field carries it.
 
 ### What gets mapped *(BLK1)*
 
@@ -1212,7 +1212,6 @@ Decides which of a project's files a map describes, and how coarsely.
 - [tools/coyomap/scope.py:133](tools/coyomap/scope.py:133) — Build briefing (C26) · Prints one line per pattern in the briefing a person reads before a build.
 - [tools/coyomap/ignorefile.py:129](tools/coyomap/ignorefile.py:129) — Ignore list (C46) · Builds the line saying how many files each pattern removed.
 - [tools/coyomap/validate_analysis.py:336](tools/coyomap/validate_analysis.py:336) — Shape checks (C6) · Names the patterns that removed nothing, which read as coverage the author never got.
-- enforced at: Leave code off the map (UC3) step 9 · Leave code off the map (UC3) step 16
 
 **BR5 — One box is a folder-sized unit** — One box covers about one folder of code, at most ten files or three thousand lines.  *(verified)*
 - [tools/coyomap/preindex_lib.py:599](tools/coyomap/preindex_lib.py:599) — Code survey (C45) · A folder inside both limits becomes one box and is not opened further.
@@ -1342,7 +1341,6 @@ Decides which findings stop a build, which only advise, and what a written reaso
 - [tools/coyomap/records.py:286](tools/coyomap/records.py:286) — Shared map grammar (C2) · reports a reason that failed to parse instead of dropping it in silence
 - [tools/coyomap/anchor_drift.py:199](tools/coyomap/anchor_drift.py:199) — Map checks (C21) · collects a line that tries to be a reason and answers nothing, so the build reports it
 - [tests/test_method_contract.py:671](tests/test_method_contract.py:671) — *unverified — no component claims this file* · keeps the announcement of a silence out of reach of any recorded reason
-- enforced at: Leave code off the map (UC3) step 15
 
 **BR65 — Some findings carry no excuse** — A finding whose only honest answer is a fix cannot be silenced by a recorded reason.  *(inferred)*
 - [tests/test_method_contract.py:531](tests/test_method_contract.py:531) — *unverified — no component claims this file* · holds the findings no recorded reason may silence, each beside the reason it cannot
@@ -1540,7 +1538,6 @@ Decides which files a build may open, and where a change has to be written to su
 - [tools/coyomap/validate_model.py:6288](tools/coyomap/validate_model.py:6288) — Shape checks (C6), Story checks (C7), Rule checks (C8), Wiring checks (C9), Data checks (C10) · Names the patterns on every check run, including the cheap pass a lead runs most often.
 - [tools/coyomap/ignorefile.py:133](tools/coyomap/ignorefile.py:133) — Ignore list (C46) · Collects each pattern that removed nothing, so a typo cannot read as coverage the map never got.
 - [tools/coyomap/scope.py:131](tools/coyomap/scope.py:131) — Build briefing (C26) · Puts the same per pattern account in the briefing, printed before a build reads any code.
-- enforced at: Build a project's first map (UC2) → SF1 step 5 · Leave code off the map (UC3) step 8 · See what a code change did to the map (UC7) → SF1 step 5 · Fold a change report into the baseline (UC8) → SF1 step 5 · Change the map by asking (UC9) → SF1 step 5 · Leave code off the map (UC3) step 9
 
 **BR163 — Previous map stays closed** — A build never opens the map it is replacing, so the new map cannot quietly copy the old one.  *(verified)*
 - [method/dispatch.md:135](method/dispatch.md:135) — Mode dispatch instructions (C130) · Bans opening the map being replaced, including the one version history still holds and one already filed away.
@@ -1567,7 +1564,6 @@ Decides which files a build may open, and where a change has to be written to su
 - [tools/coyomap/provenance.py:191](tools/coyomap/provenance.py:191) — Build log (C27) · appends the mark to the version name when anything is uncommitted
 - [tools/coyomap/provenance.py:164](tools/coyomap/provenance.py:164) — Build log (C27) · asks version control what is uncommitted, ignoring the map's own folder
 - [method/change-impact.md:129](method/change-impact.md:129) — Change impact instructions (C131) · tells the agent to offer the choice, and to mark the pin only if the person declines to commit
-- enforced at: Fold a change report into the baseline (UC8) step 10
 
 ### Who may reach a served map *(BLK10)*
 
@@ -1583,7 +1579,6 @@ Decides which requests the local map server answers, and which files it will han
 - [tools/coyomap/viewer/serve.py:697](tools/coyomap/viewer/serve.py:697) — Map server (C83) · Refuses to add a folder that holds no coyomap data folder inside it.
 - [tools/coyomap/viewer/serve.py:878](tools/coyomap/viewer/serve.py:878) — Map server (C83) · Applies the same check to a folder named when the server is started.
 - [tools/coyomap/viewer/serve.py:658](tools/coyomap/viewer/serve.py:658) — Map server (C83) · Refuses a change to the remembered list unless the request came from this server's own start page.
-- enforced at: Serve the maps on this machine (UC4) step 4
 
 **BR182 — No path leaves the project** — A request for a file can only ever reach inside the mapped project's own folder.  *(access)*  *(verified)*
 - [tools/coyomap/viewer/serve.py:778](tools/coyomap/viewer/serve.py:778) — Map server (C83) · Rejects a file request whose path is absolute or climbs above the project folder.

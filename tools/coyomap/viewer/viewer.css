@@ -3589,8 +3589,6 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .archtext-filter[hidden], .archtext-line[hidden], .archtext-step[hidden], .archtext-keepsec[hidden] { display: none; }
 .archtext-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
                 color: #64748b; margin-right: 6px; }
-.archtext-rules { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 3px 0 0; }
-.archtext-cond { margin: 3px 0 0; font-size: 12px; line-height: 17px; color: #334155; }
 .archtext-keeps-head { margin-top: 14px; }
 .archtext-storyname { font-size: 14px; font-weight: 600; color: #1f2937; margin: 0 0 6px; }
 .archtext-start, .archtext-end { display: flex; gap: 8px; align-items: baseline; margin: 6px 0;
@@ -3621,4 +3619,3 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
                dominant-baseline: middle; cursor: pointer; }
 .arch-ov-numbg { fill: #eef2ff; stroke: #c7d2fe; }
 .arch-following path.flowchart-link.arch-story-on { stroke: #4f46e5 !important; stroke-width: 2.2px !important; }
-.flow-rule-mark { color: #6d28d9; }

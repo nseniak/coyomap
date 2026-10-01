@@ -3015,29 +3015,19 @@ def test_a_record_page_says_who_owns_it_only_when_the_map_does() -> None:
 
 
 
-def test_a_feature_page_never_claims_more_certainty_than_the_join_has() -> None:
-    """Two silences the page must break. Rules enforced where NO use-case walk passes cannot be placed
-    on any feature (27 of 66 on one live map, 47 of 96 on another), so a page listing only the joined
-    ones claims the feature decides less than it does. And with no code index a rule is linked only on
-    an exact line match, which makes every rule list a floor. Both notes sit directly under the count
-    they qualify, not somewhere in the middle of the page."""
+def test_no_page_reports_a_rule_join_through_the_steps() -> None:
+    """A feature's rules are the decision areas specified under it. No rule is tied to a feature through
+    the steps its flows take any more (2026-10-01), so the System tab's notes about that join went with it:
+    "N other rules are enforced where no use-case walk passes" and "every rule list is a floor"."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    notes = js[js.index("function featRuleNotes() {"):
-               js.index("\nfunction ", js.index("function featRuleNotes() {") + 10)]
-    assert "FEAT_COVERAGE.rulesUnjoined" in notes and "no use-case walk passes" in notes
-    assert "FEATURES.ruleJoinUsesExtents === false" in notes and "floor" in notes
+    assert "function featRuleNotes(" not in js and "rulesUnjoined" not in js and "ruleJoinUsesExtents" not in js
     secs = js[js.index("function featurePanels(capId) {"):
               js.index("\nfunction ", js.index("function featurePanels(capId) {") + 10)]
-    assert "featRuleNotes()" not in secs, "a product page carries no coyomap statistic"
-    # A feature deciding nothing still says so. The section draws DECISION AREAS now, so the silence
-    # it must name is the area-level one: an area carries the authored list of features it is
-    # specified under, and on coyomap's own map 0 of 11 areas carry one at all.
+    # A feature deciding nothing still says so, at the level of its decision areas.
     assert "featEmpty('Not recorded: no decision area says it is specified under this feature.')" in secs
-    # The notes still exist — on the System tab, with every other fact about coyomap's own analysis.
     cov = js[js.index("function unreachedHtml() {"):
              js.index("\nfunction ", js.index("function unreachedHtml() {") + 10)]
-    assert "featRuleNotes()" in cov and "coverageLineHtml()" in cov
-
+    assert "coverageLineHtml()" in cov
 
 def test_the_feature_page_reads_the_python_join_and_never_redoes_it() -> None:
     """`coyomap.features` joins a feature to its rules through `validate_model.rule_steps` — the SAME

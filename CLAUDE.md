@@ -271,8 +271,6 @@ design principles these come from)
   the Architecture view, never on a use case map; their tips carry the use case's trigger and outcome.
 - **store line** — a line from a box to the database that keeps its records. Its own
   colour, and no step number.
-- **rule mark** — the ⚖ on a line or an arrow where a business rule decides. The text
-  beside the Architecture picture names the rule.
 
 **How coyomap is delivered**
 

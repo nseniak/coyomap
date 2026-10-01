@@ -81,7 +81,6 @@ from coyomap.validate_model import (
     check_operative_lines_model,
     check_rules_model,
     rule_components,
-    rule_entities,
     rule_steps,
     rules_swept,
     site_components,
@@ -619,22 +618,6 @@ def test_an_unanchored_site_reaches_no_step() -> None:
     assert rule_steps(m, m.rules[0], GUARD_EXTENTS) == []
 
 
-# --- entities: only through a step that names one ---------------------------------
-
-def test_a_rule_reaches_an_entity_only_through_a_step_that_names_it() -> None:
-    m = make_extent_model()
-    assert rule_entities(m, m.rules[0], GUARD_EXTENTS) == ["E1"]
-
-
-def test_a_rule_whose_steps_name_no_entity_claims_none() -> None:
-    m = make_extent_model()
-    for f in m.flows:
-        for st in f.steps:
-            if st.dst == "E1":
-                st.dst = "C1"
-    assert rule_entities(m, m.rules[0], GUARD_EXTENTS) == []
-
-
 # --- the shared extents reader ----------------------------------------------------
 
 def test_map_extents_reads_the_preindex_beside_the_map_and_tolerates_its_absence() -> None:
@@ -651,7 +634,7 @@ def make_colliding_step_model() -> ProjectModel:
     `validate` enforces a unique `n` per flow and per sub-flow separately, so this map is legal —
     and on this repo's own map 26 of 86 anchored step keys collide exactly this way. Keying an
     expanded step by `(uc, n)` merges the two: one row disappears and the survivor carries the
-    other's phrase, its site, and — through `rule_entities` — its ENTITY."""
+    other's phrase and its site."""
     m = make_extent_model()
     m.subflows = [SubFlow(id="SF1", name="Owner check", steps=[
         FlowStep(n=2, src="C1", dst="E1", phrase="from the sub-flow", where="src/guard.py:22")])]
@@ -668,15 +651,6 @@ def test_two_steps_sharing_a_number_after_expansion_both_survive() -> None:
     assert {l.phrase for l in links} == {"from the sub-flow", "from the flow"}
 
 
-def test_a_colliding_step_number_cannot_fabricate_an_entity_claim() -> None:
-    """The rule is enforced at BOTH step 2s; only the sub-flow's names an entity. Keying by
-    `(uc, n)` made the flow's own step inherit E1 — an unsupported clause under a real anchor,
-    which is the prototype's most damaging error class."""
-    m = make_colliding_step_model()
-    m.subflows[0].steps[0].dst = "C1"            # now NO reached step names an entity
-    assert rule_entities(m, m.rules[0], GUARD_EXTENTS) == []
-
-
 def test_the_repos_own_map_really_collides_on_uc_and_n() -> None:
     """The measurement behind the container id. If this ever goes to zero the extra key is dead
     weight — but it is 26 of 86 today, so a two-part step identity is simply wrong."""
@@ -686,26 +660,6 @@ def test_the_repos_own_map_really_collides_on_uc_and_n() -> None:
 
 
 # --- entity resolution is against the DEFINED ids, not a prefix --------------------
-
-def test_an_entry_point_id_does_not_leak_through_as_an_entity() -> None:
-    """`ID_SHAPE` accepts `EP1`, so `startswith("E")` is a decorative guard — model.py:583 warns
-    about this exact mistake."""
-    m = make_extent_model()
-    for f in m.flows:
-        for st in f.steps:
-            if st.where:
-                st.dst = "EP1"
-    assert rule_entities(m, m.rules[0], GUARD_EXTENTS) == []
-
-
-def test_a_dangling_entity_reference_is_not_returned_as_an_entity() -> None:
-    m = make_extent_model()
-    for f in m.flows:
-        for st in f.steps:
-            if st.where:
-                st.dst = "E99"
-    assert rule_entities(m, m.rules[0], GUARD_EXTENTS) == []
-
 
 # --- path normalization, both directions ------------------------------------------
 
@@ -1302,14 +1256,6 @@ def test_a_map_with_no_blocks_renders_the_rules_flat() -> None:
     assert "###" not in text and "**BR1" in text
 
 
-def test_the_enforced_at_line_is_derived_not_authored() -> None:
-    text = t7_section(make_rendered_model())
-    assert "- enforced at: View order (UC1) step 2" in text
-    m = make_rendered_model()
-    m.rules[0].sites = [RuleSite(where="src/guard.py:5", why="two lines off")]
-    assert "enforced at" not in t7_section(m).split("**BR2")[0]
-
-
 def test_the_view_is_a_pure_function_of_the_json() -> None:
     """`_check_view_fresh` compares the committed `.md` to `model_to_markdown(m)`. Folding the
     optional pre-index symbol table in would make the view depend on a file the map does not
@@ -1329,21 +1275,6 @@ def make_subflow_rule_model() -> ProjectModel:
     m.flows[0].steps.append(FlowStep(n=3, src="C1", dst="C1", phrase="", subflow="SF1"))
     m.rules[0].sites = [RuleSite(where="src/guard.py:4", why="the owner check")]
     return m
-
-
-def test_the_enforced_at_line_carries_the_authoring_container() -> None:
-    """`n` is unique per container, never per use case: 47 of this repo's 114 anchored steps come
-    from a sub-flow and 26 `(uc, n)` pairs name more than one step, so `(UC1) step 2` points at the
-    wrong row in T6b — and two different steps render as a byte-identical duplicate."""
-    text = t7_section(make_subflow_rule_model())
-    assert "- enforced at: View order (UC1) → SF1 step 2" in text
-
-
-def test_two_distinct_steps_sharing_a_number_render_distinctly() -> None:
-    m = make_subflow_rule_model()
-    m.flows[0].steps[1].where = "src/guard.py:4"          # UC1's OWN step 2, same anchor
-    text = t7_section(m)
-    assert "View order (UC1) step 2 · View order (UC1) → SF1 step 2" in text
 
 
 def test_owners_of_a_shared_file_render_in_element_order() -> None:
@@ -1784,9 +1715,6 @@ def test_the_viewer_payload_equals_the_python_helper() -> None:
         assert [[c["id"] for c in s["components"]] for s in out["sites"]] == [
             site_components(m, site, owners) if (site.where or "").strip() else []
             for site in r.sites]
-        assert [(l["uc"], l["container"], l["n"], l["strength"]) for l in out["steps"]] == [
-            (l.uc, l.container, l.n, l.strength) for l in rule_steps(m, r)]
-        assert [e["id"] for e in out["entities"]] == rule_entities(m, r)
         assert out["swept"] == rules_swept(m)[r.id]
 
 
@@ -1811,7 +1739,7 @@ def test_the_two_inversions_key_the_way_the_panes_look_up() -> None:
     rv = rules_view_of(make_viewer_model())
     assert rv["byComponent"]["C1"] == ["BR1", "BR2"]
     assert rv["byComponent"]["C2"] == ["BR1", "BR2"]     # the shared file, both owners
-    assert rv["byStep"]["UC1:UC1:2"] == ["BR1"]          # (uc, authoring container, n)
+    assert "byStep" not in rv, "no rule is tied to a step (2026-10-01)"
 
 
 def test_blocks_and_rules_are_graph_nodes() -> None:
@@ -1850,7 +1778,7 @@ def _js_function(name: str) -> str:
 # The rules are a tab of their own and each rule's page names every component it is enforced in, so
 # that section was the third place one join was drawn.
 RULE_RENDERERS = ("renderRules", "renderRule", "ruleAnalysisGapsHtml", "ruleSiteRow",
-                  "ruleBlockGroups", "stepRulesHtml")
+                  "ruleBlockGroups")
 
 
 def test_the_frontend_never_re_derives_an_owner_or_a_step_link() -> None:
@@ -1897,17 +1825,6 @@ def test_the_tab_sits_with_the_behavioural_views_and_scrolls() -> None:
     css = (VIEWER / "viewer.css").read_text(encoding="utf-8")
     wrap = css[css.index(".usecases-wrap {"):]
     assert "overflow: auto" in wrap[:wrap.index("}")]
-
-
-def test_the_two_views_number_steps_differently_on_purpose() -> None:
-    """The markdown does NOT expand sub-flows — T6 renders the reference step inline and T6b lists
-    the sub-flow under its own numbering — so the authored `n` is the number ITS reader can look
-    up. Making the two agree would break one of them."""
-    m = make_checkable_model()
-    m.subflows = [SubFlow(id="SF1", name="Owner check", steps=[
-        FlowStep(n=7, src="C1", dst="E1", phrase="checks", where="src/guard.py:3")])]
-    m.flows[0].steps = [FlowStep(n=1, src="C1", dst="C1", phrase="runs it", subflow="SF1")]
-    assert "→ SF1 step 7" in t7_section(m)                  # the AUTHORED n, matching T6b
 
 
 def test_the_readme_names_the_viewer_groups_and_no_tab() -> None:
@@ -2158,8 +2075,7 @@ def test_every_cross_link_into_a_rule_lands_on_the_rules_own_page() -> None:
     assert "function decidesHtml(" not in VIEWER_JS, "the component's copy of the rule list is back"
     assert 'class="brref"' not in VIEWER_JS, "the page-only door into a rule is back"
     assert "bindItemPills(host);" in _js_function("bindFlowStepInfo")
-    # The block id that door read is dead payload now — a link carries only the rule.
-    assert "data-blk" not in _js_function("stepRulesHtml")
+    assert "function stepRulesHtml(" not in VIEWER_JS, "a step names no rule (2026-10-01)"
 
 
 def test_a_rule_whose_area_the_map_never_declared_still_appears() -> None:
@@ -2186,28 +2102,6 @@ def test_same_tab_navigation_carries_the_pane_keys() -> None:
         assert f"'{field}'" in decl, field
 
 
-def test_the_flow_step_pane_uses_a_new_class_and_keys_by_container() -> None:
-    start = VIEWER_JS.index("function flowStepInfoHtml(uc, i)")
-    pane = VIEWER_JS[start:VIEWER_JS.index("\n// One actor's card", start)]
-    assert "stepRulesHtml(uc, st)" in pane
-    # THE CONTAINER IS THE WALK BEING DRAWN, on both kinds of screen. Reading the step's `sf` here was
-    # right while a shared sub-use case's steps were spliced into their host — a reference step's `sf` names the
-    # walk it RUNS, not the one it belongs to, and reading it put 172 rule links on the wrong step and
-    # lost 299 others. On a shared sub-use case's own screen the links are filed under every use case that runs
-    # it, so the use case is not part of the question there.
-    assert "if (l.container !== uc || String(l.n) !== String(st.n)) continue;" in pane
-    assert "const shared = !!SUBFLOW_BY_ID[uc];" in pane
-    assert "if (!shared && l.uc !== uc) continue;" in pane
-    # EACH RULE IS THE SHARED ITEM PILL — its own mark, its own colour, and the one click every pill
-    # has. It was a bare underlined link, the one place naming an element that did not look like the
-    # rest; and the `Decides` heading over it is gone, because a rule's mark already says what it is.
-    assert "itemPillHtml(r.id, { kind: 'rule', name: ruleTitle(r) })" in pane
-    assert "<dt>Decides</dt>" not in pane and 'class="brref"' not in pane
-    # The same four the viewer-js negative contract names, matched in their RENDERED form.
-    for forbidden in ('class="flowpairref"', 'class="endpoints"', "ridesref", 'class="flowref"'):
-        assert forbidden not in _js_code(pane), forbidden
-
-
 def test_the_impact_summary_names_every_bucket_the_ripple_can_produce() -> None:
     """`showImpactSummary` iterates a closed list, so a bucket it cannot name is a row that
     vanishes while the direct/ripple counts still include it."""
@@ -2228,20 +2122,6 @@ def test_the_tab_renders_no_internal_field_name() -> None:
 
 
 # --- reconciled after the phase-7 review -------------------------------------------
-
-def test_the_transport_takes_the_symbol_table_and_the_markdown_view_does_not() -> None:
-    """The viewer's finer answer. `model_to_graph(m, extents)` is what makes "inside the same
-    function as this step" reachable; the markdown view has no table and stays exact-only, so the
-    two views are consistent about what each of them can know."""
-    m = make_swept_model()
-    m.flows[0].steps[1].src = "C2"                       # no structural coverage; the anchor decides
-    m.rules[0].sites = [RuleSite(where="src/guard.py:8", why="3 lines from the step")]
-    ext = {"src/guard.py": [(1, 10, "cancel_order", "function")]}
-    assert [s["strength"] for s in rules_view_of(m)["rules"][0]["steps"]] == []
-    with_ext = cast(dict, model_to_graph(m, ext)["rules_view"])
-    assert [(s["uc"], s["n"], s["strength"]) for s in with_ext["rules"][0]["steps"]] \
-        == [("UC1", 2, "symbol")]
-
 
 def test_a_block_is_never_a_files_primary_in_the_browser() -> None:
     """A node carrying a `file` joins `filetree.node_path_index`, where a non-group kind sorts
@@ -2486,17 +2366,9 @@ def test_a_rules_page_does_not_claim_which_steps_it_is_enforced_at() -> None:
     assert "Enforced at these steps" not in page and "r.steps" not in page
     assert "ruleStepChip" not in VIEWER_JS, "the chip and its style went with the section"
     assert ".br-step {" not in (VIEWER / "viewer.css").read_text(encoding="utf-8")
-    # …and the other direction is untouched: a step still names the rules it decides.
-    assert "itemPillHtml(r.id, { kind: 'rule', name: ruleTitle(r) })" in _js_function("stepRulesHtml")
-
-
-def test_a_rules_page_names_the_data_it_touches_only_when_there_is_some() -> None:
-    """`Touches` said neither what it held nor, when empty, anything worth reading. A rule naming no
-    record is ordinary — most rules are about who may act, not about what is stored — so the box is
-    gone in that case rather than standing there saying nothing."""
-    page = _js_function("renderRule")
-    assert "'Data it touches'" in page
-    assert "(nEnts ? sec('ents', 'Data it touches', countLabel(nEnts, 'entity'), ents) : '')" in page
+    # …and since 2026-10-01 the other direction went too: a step names no rule, and no arrow or line
+    # carries a rule mark. Matching a rule's line of code against a step's missed most real ties.
+    assert "function stepRulesHtml(" not in VIEWER_JS and "RULE_MARK" not in VIEWER_JS
 
 
 # --- a step where a rule decides is a step the rule sits on (retro 2026-09-30, finding 14) --------
@@ -2513,18 +2385,13 @@ def test_the_condition_advisory_lists_only_the_step_a_rule_site_sits_on():
     assert "coyomap fix step-notes" in found[0]
 
 
-def test_the_rule_mark_marks_only_the_step_a_rule_site_sits_on():
-    by_step = cast(dict, model_to_graph(make_extent_model(), GUARD_EXTENTS)["rules_view"])["byStep"]
-    assert sorted(by_step) == ["UC2:UC2:2"], by_step
+def test_no_screen_and_no_map_text_ties_a_rule_to_a_step() -> None:
+    """Matching a rule's line of code against a step's missed about 2 of 3 real ties on mcpolis and could
+    not be explained to a reader, so nothing shown ties the two (2026-10-01): no rule data on a rule,
+    no "enforced at" line, no rule transport keyed by step. `validate`'s condition advisory, which
+    speaks to the building agent, still reads `rule_steps`."""
+    m = make_viewer_model()
+    rv = rules_view_of(m)
+    assert all("steps" not in r and "entities" not in r for r in rv["rules"])
+    assert "enforced at" not in t7_section(m)
 
-
-def test_a_rule_one_line_from_a_step_decides_there_and_two_lines_off_does_not() -> None:
-    """The window the rule mark, a step's "What it decides" and the markdown all read (`link_decides`):
-    a decision written on the line beside the step's own is the step's; two lines off is not."""
-    m = make_rendered_model()
-    m.rules[0].sites = [RuleSite(where="src/guard.py:4", why="the line under the step")]
-    assert "- enforced at: View order (UC1) step 2" in t7_section(m)
-    assert m.rules[0].id in rules_view_of(m)["byStep"].get("UC1:UC1:2", [])
-    m.rules[0].sites = [RuleSite(where="src/guard.py:5", why="two lines off")]
-    assert "enforced at" not in t7_section(m).split("**BR2")[0]
-    assert m.rules[0].id not in rules_view_of(m)["byStep"].get("UC1:UC1:2", [])

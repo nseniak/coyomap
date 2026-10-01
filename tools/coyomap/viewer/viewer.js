@@ -3082,11 +3082,6 @@ function renderFlowStepPage(uc, sn) {
   // heading over one line is a heading that says nothing. Same reason the use case it belongs to is in
   // the TRAIL and not a card — the breadcrumb above already names it, and a card repeated it.
   const secs = [];
-  // THE RULES THIS STEP DECIDES, the same pills the popup carries.
-  // ONE builder for "which rules does this step decide", shared with the popup — two of them would
-  // eventually disagree about which step a rule sits on, and that join is fiddly (see stepRulesHtml).
-  const rules = stepRulesHtml(uc, st);
-  if (rules) secs.push(detailSec('rules', 'What it decides', '', rules));
   // …AND THE OTHER STEPS AT THE SAME PAIR, where there are any. This is the pair page's question, and
   // it is a SECOND question: offered as a line, not as the page.
   const pair = (st.srcId && st.dstId && isLeafPair(st.srcId, st.dstId))
@@ -4062,55 +4057,7 @@ function flowStepInfoHtml(uc, i) {
     // other card in that position takes.
     bare: true,
     cls: 'ecard ecard-step',
-  })
-    + stepRulesHtml(uc, st);
-}
-// The T7 rules enforced at THIS step. Keyed by `(use case, authoring container, n)` — a step's `n`
-// is unique per container, never per use case, so a sub-flow's step 2 and the flow's own step 2 are
-// two different rows and keying on `(uc, n)` would show one rule under both.
-//
-// A NEW class name on purpose. `tests/test_viewer_js.py` holds a negative contract over this pane,
-// naming the four ref classes that must not reappear in it: the pane stays step-specific, and
-// structural relationship navigation belongs to the drawn arrow. (Naming them here would trip that
-// contract on the comment alone — it is a plain substring check.)
-function stepRulesHtml(uc, st) {
-  if (!HAS_RULES) return '';
-  // WHICH WALK AUTHORED THIS STEP. It is the walk being DRAWN — `uc` — on both kinds of screen. A
-  // reference step's `sf` names the walk it RUNS, not the walk it belongs to, and reading it here put
-  // 172 rule links on the wrong step and lost 299 others. On a SHARED SUB-USE CASE's own screen the links are
-  // filed under every use case that runs it, so the use case is not part of the question there; on a
-  // use case's screen it is, or one shared sub-use case's step would answer for every use case at once.
-  const shared = !!SUBFLOW_BY_ID[uc];
-  const seen = new Set();
-  const found = [];
-  for (const r of (RULES_VIEW.rules || [])) {
-    for (const l of (r.steps || [])) {
-      if (l.container !== uc || String(l.n) !== String(st.n)) continue;
-      if (!shared && l.uc !== uc) continue;
-      // ONLY A RULE THAT DECIDES HERE, the same test the arrow's rule mark reads (`link_decides` in
-      // validate_model): a link through the enclosing function said "near", and was listed as deciding.
-      if (!l.decides) continue;
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      found.push([r, l]);
-    }
-  }
-  if (!found.length) return '';
-  // EACH RULE IS AN ITEM PILL, the same tag a rule wears wherever it is named: its own mark, its own
-  // colour, and a click that opens it. It was a bare underlined link, the one place on this viewer that
-  // named an element and did not look like the others.
-  //
-  // AND NO LABEL OVER THEM. `Decides` was a `<dt>` heading one row of pills, and the pills already say
-  // what they are — a rule's mark is on each of them. The word was the card's only heading, so it read
-  // as a section of a form rather than as the one extra fact a step carries.
-  // NO NOTE ABOUT HOW THE LINE WAS MATCHED. Each rule reached this step either on the step's own line
-  // or on another line inside the same function, and the card used to say so on the weaker of the two.
-  // Measured on one live map: 363 of 412 links are the weaker kind, so the note printed on nine rows in
-  // ten and stopped being information — and it inverted the signal, since the 49 STRONGER links carried
-  // no mark at all. How precisely coyomap matched a line is a fact about the MAP, and this product keeps
-  // those together under System › About this map.
-  const links = found.map(([r]) => itemPillHtml(r.id, { kind: 'rule', name: ruleTitle(r) }));
-  return '<div class="br-steprules">' + links.join('<br>') + '</div>';
+  });
 }
 function bindFlowStepInfo(host, uc, i) {
   const st = (FLOWS_NARR[uc] || [])[i];
@@ -6320,9 +6267,6 @@ function flowMapPaintStepLabel(label, stepIdx, current) {
   if (!p) return;
   const want = stepIdx.join(',');
   if (p.dataset.fsteps !== want) {
-    // THE RULE MARK the generator put after the numbers (RULE_MARK) is kept through the repaint: it
-    // says a business rule decides on one of this arrow's steps, and the label was sized with it.
-    const ruled = p.dataset.frule === '1' || p.textContent.includes(RULE_MARK);
     const parts = [];
     stepIdx.forEach((i, k) => {
       if (k) {
@@ -6337,16 +6281,8 @@ function flowMapPaintStepLabel(label, stepIdx, current) {
       number.textContent = String(i + 1);
       parts.push(number);
     });
-    if (ruled) {
-      const mark = document.createElement('span');
-      mark.className = 'flow-rule-mark';
-      mark.title = 'A business rule decides on this arrow';
-      mark.textContent = ' ' + RULE_MARK;
-      parts.push(mark);
-    }
     p.replaceChildren(...parts);
     p.dataset.fsteps = want;
-    p.dataset.frule = ruled ? '1' : '';
   }
   const active = stepIdx.length > 1 && stepIdx.includes(current);
   for (const el of p.children) {
@@ -7810,15 +7746,6 @@ function archEndsHtml(e) {
     ? ` <span class="archtext-via">through ${esc(archList(e.via))}, not shown</span>` : '';
   return `<div class="archtext-ends">${esc(e.src)} <span class="archtext-arrow">→</span> ${esc(e.dst)}${via}</div>`;
 }
-// WHAT A RULE DECIDES ON A LINE: the rules linked to its steps, as the rules' own item pills, and the
-// condition the deciding step's note gives. Following one story, only that story's.
-function archDecidedHtml(e, uc) {
-  const rules = uc ? ((e.rulesByStory || {})[uc] || []) : (e.rules || []);
-  const conds = uc ? ((e.conditionsByStory || {})[uc] || []) : (e.conditions || []);
-  return (rules.length ? '<div class="archtext-rules"><span class="archtext-lbl">Decided here</span>'
-      + rules.map((r) => itemPillHtml(r.id, { kind: 'rule', name: r.name })).join('') + '</div>' : '')
-    + conds.map((c) => `<p class="archtext-cond"><span class="archtext-lbl">Condition</span> ${esc(c)}</p>`).join('');
-}
 // A sentence, then the story it is from. The story's name follows that story; a sentence several
 // stories share names the first and counts the rest, all of them in the tip.
 function archSentenceHtml(x) {
@@ -7840,10 +7767,10 @@ function archMergedHtml(e) {
 }
 function archFlowTextHtml(t) {
   const line = (e) => {
-    if (e.merged) return archLineHtml(e, archDecidedHtml(e, '') + archMergedHtml(e));
+    if (e.merged) return archLineHtml(e, archMergedHtml(e));
     const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(archSentenceHtml).join('');
     const rest = e.sentences.slice(ARCH_TEXT_SHOWN);
-    return archLineHtml(e, archDecidedHtml(e, '') + shown
+    return archLineHtml(e, shown
       + (rest.length ? `<details class="archtext-more"><summary>+${rest.length} more</summary>`
         + rest.map(archSentenceHtml).join('') + '</details>' : ''));
   };
@@ -7875,8 +7802,7 @@ function archStoryTextHtml(t, story) {
     if (!e) return '';
     const said = e.sentences.find((x) => x.ucs.includes(story.uc));
     return `<li class="archtext-step"><span class="archtext-n">${i + 1}</span><div class="archtext-lines">`
-      + archLineHtml(e, archDecidedHtml(e, story.uc)
-        + (said ? `<p class="archtext-sent">${esc(capFirst(said.text))}</p>` : ''))
+      + archLineHtml(e, said ? `<p class="archtext-sent">${esc(capFirst(said.text))}</p>` : '')
       + '</div></li>';
   }).join('');
   return '<div class="archtext-head">Following one story '
@@ -8114,15 +8040,13 @@ function archKeyHtml(t) {
       + `<span>${line(true, '#475569')} only some do</span>`)
     + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
     + `<span>${line(true, ARCH_STORE_LINE)} where a box keeps its records</span>`
-    + `<span><b class="archkey-num">${RULE_MARK}</b> a business rule decides on this line</span>`
     + '<span><b class="archkey-num">3</b> the step: follow 1, 2, 3 and any story reads in order.'
     + ' One number on several lines: the stories take them in different orders, so follow one story</span>'
     + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
     + ' where the story you follow starts and ends</span></div>';
 }
-// The two marks the picture's key names, kept equal to the ones gen_viewer draws (RULE_MARK and
-// ARCH_STORE_LINE there): the key must show the marks the picture actually carries.
-const RULE_MARK = '⚖';
+// The store line's colour the picture's key names, kept equal to gen_viewer's ARCH_STORE_LINE: the
+// key must show the marks the picture actually carries.
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
 const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'instructions',
@@ -9631,24 +9555,6 @@ function rulesByBlock(ids) {
   return [...groups.entries()].map(([bid, rules]) =>
     ({ id: bid, name: blockName.get(bid) || 'Not assigned to a decision area', rules }));
 }
-// What the rule list has to admit beside the rules it CAN name. Both notes are about the JOIN, not about
-// this feature: a page printing only the joined rules claims the feature decides less than it does, and
-// a map built with no code index shows a floor as if it were the answer. They sit directly under the
-// count they qualify, not somewhere in the middle of the page.
-function featRuleNotes() {
-  const out = [];
-  const un = FEAT_COVERAGE.rulesUnjoined || 0;
-  if (un > 0) {
-    out.push(`${countLabel(un, 'other rule')} in this map ${un === 1 ? 'is' : 'are'} enforced `
-      + 'where no use-case walk passes, so no feature could claim '
-      + (un === 1 ? 'it' : 'them') + '.');
-  }
-  if (FEATURES.ruleJoinUsesExtents === false) {
-    out.push('This map carries no code index, so a rule was matched to a step only on an exact line. '
-      + 'Every feature\u2019s rule list is a floor, not the whole answer.');
-  }
-  return out;
-}
 
 
 // The head of a page about ONE element: its name, the pills it earns, the sentence saying what it is,
@@ -10142,10 +10048,7 @@ function unreachedHtml() {
     title, desc: blurb, ids: by[key] || [],
     count: countLabel((by[key] || []).length, 'component'),
   })));
-  // What the RULE join could not reach, said here rather than on a feature's page: a page listing eight
-  // rules is not the place to explain coyomap's join, but the number still has to be somewhere.
-  const notes = featRuleNotes().map((n) => `<p class="feat-note">${esc(n)}</p>`).join('');
-  return coverageLineHtml() + notes
+  return coverageLineHtml()
     + (groups || '<p class="feat-empty">Every component is reached by a feature or a rule.</p>');
 }
 
@@ -14514,22 +14417,15 @@ function renderRule(s) {
   //     through. It read as "no story reaches this rule" and meant "I could not match a line".
   //   PARTIAL on 60 of the other 63. Median: 5 steps listed while 20 sit in the very same FILE as one of
   //     the rule's own call sites. A floor with no stated ceiling, and nothing on screen saying so.
-  // The evidence still reaches the reader from the other side, where the claim is narrow enough to
-  // stand: a step's own card names the rules enforced in the code that step runs.
+  // No other screen ties a rule to a step either (2026-10-01): the same line match missed most real
+  // ties, and a step's "What it decides" and the rule mark went with it.
   //
   // The same framed sections with a strip head every item page draws; the count keeps its noun.
   const secs = [];
   const sec = (key, title, count, body) => itemSectionHtml(secs, key, title, count, '', body);
   const nSites = (r.sites || []).length;
-  const nEnts = (r.entities || []).length;
   const sites = nSites ? `<ul class="br-sites">${r.sites.map(ruleSiteRow).join('')}</ul>`
     : '<p class="empty">No call site is recorded for this rule.</p>';
-  // DROPPED WHEN EMPTY. A rule naming no record is ordinary: most rules are about who may act, not
-  // about what is stored, so an empty box here says nothing a reader needs.
-  const ents = nEnts
-    ? '<div class="br-chips">' + r.entities.map((e) => itemPillHtml(e.id, { name: e.name })).join('')
-      + '</div>'
-    : '';
   // THE SAME CARD every page about one element leads with: the mark in the figure column, `Rule:
   // <name>`, the statement as the sentence, and the reason as its context.
   //
@@ -14543,7 +14439,6 @@ function renderRule(s) {
     + pageHeroHtml({ glyph: itemGlyphSvg('rule'), name: ruleCrumbTitle(s.br), type: elementLabel('rule'),
                      desc: ruleStatementLine(r) ? mdInline(r.statement) : '', noDesc: false, meta: context })
     + sec('sites', 'Where it is enforced', nSites ? countLabel(nSites, 'call site') : '', sites)
-    + (nEnts ? sec('ents', 'Data it touches', countLabel(nEnts, 'entity'), ents) : '')
     + '</div>';
   // The area, the components and the entities are all ITEM PILLS now, and one binder wires every one
   // of them to the same destination: the thing the pill names.
@@ -17626,12 +17521,11 @@ function boxFeatureIds(b) {
     case 'capabilities': return has(b.id) ? [b.id] : [];
     case 'use_cases': return CAP_OF_UC[b.id] ? list(CAP_OF_UC[b.id].id) : [];
     case 'rules': {
-      // The authored join first — the decision area's "specified under", which the feature page's
-      // "What it decides" and the Rules landing draw by — then the step join, for a rule in no area.
+      // The decision area's "specified under", which the feature page's "What it decides" and the Rules
+      // landing draw by. A rule in no area belongs to no feature.
       const rule = GRAPH.nodes[b.id];
       const area = rule && rule.parent ? (((RULES_VIEW || {}).blocks || []).find((x) => x.id === rule.parent) || {}) : {};
-      const authored = list(area.specified_under);
-      return authored.length ? authored : list((FEATURES.ruleFeatures || {})[b.id]);
+      return list(area.specified_under);
     }
     case 'blocks': return list((((RULES_VIEW || {}).blocks || []).find((x) => x.id === b.id) || {}).specified_under);
     case 'interfaces': return list(((FEATURES.interfaces || []).find((i) => i.id === b.id) || {}).features);

@@ -145,17 +145,6 @@ def test_a_story_ends_at_the_door_that_hands_its_result_back():
     assert make_model()["ends"] == {"UC1": "I1", "UC2": "I2"}
 
 
-def test_a_line_where_a_business_rule_decides_carries_the_mark_and_names_the_rule():
-    graph = make_graph()
-    model = gv._arch_model(graph, "", "all")
-    assert model is not None
-    drawing = gv._arch_mermaid(graph, model)
-    assert re.search(rf"S2 --> *\|\"[^|]*{gv.RULE_MARK}\"\| *SF1", drawing)
-    entry = next(e for e in gv._arch_text(graph, model) if e["dstBox"] == "SF1")
-    assert entry["rules"] == [{"id": "BR1", "name": "Asks are checked"}]
-    assert entry["rulesByStory"] == {"UC1": [{"id": "BR1", "name": "Asks are checked"}]}
-
-
 def test_a_grey_line_names_the_boxes_it_passes_through():
     """With room for one box, the Screens box is folded into the line from the web page."""
     graph = make_graph()
@@ -282,9 +271,8 @@ def make_two_server_pipe_map() -> dict[str, Any]:
     return doc
 
 
-def make_step(src: str, dst: str, key: str, phrase: str = "do it") -> gv._ArchStep:
-    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase,
-                        keys=[key], store="")
+def make_step(src: str, dst: str, key: str = "", phrase: str = "do it") -> gv._ArchStep:
+    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase, store="")
 
 
 def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
@@ -297,19 +285,6 @@ def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
     assert ln[("C1", "C6")]["sentences"] == [("UC1", "charge for the thing")]
     assert [s for _, s in next(v for k, v in ln.items() if k[0] == "C1" and k[1] != "C6")["sentences"]] \
         == ["send the thing"]
-
-
-def test_a_step_a_pipe_drops_hands_its_map_steps_to_the_line_before_it():
-    """An answer into a pipe, and a call into a pipe no step leaves, are not drawn. A rule decided on
-    either one must still mark the line the story took to get there."""
-    graph = make_graph(make_kinded_map(C2="pipe"))
-    kept = gv._draw_through(graph, [make_step("I1", "C1", "k1"), make_step("C1", "C2", "k2")])
-    assert [(s["src"], s["dst"]) for s in kept] == [("I1", "C1")]
-    assert kept[0]["keys"] == ["k1", "k2"]
-    kept = gv._draw_through(graph, [make_step("C1", "C2", "k1"), make_step("C2", "C3", "k2"),
-                                    make_step("C3", "C2", "k3"), make_step("C2", "C1", "k4")])
-    assert [(s["src"], s["dst"]) for s in kept] == [("C1", "C3")]
-    assert kept[0]["keys"] == ["k1", "k2", "k3", "k4"]
 
 
 def test_a_store_stands_alone_inside_its_subsystem():
@@ -644,13 +619,6 @@ def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
 
 # --- the use case map marks the same things ---------------------------------------------
 
-def test_a_use_case_map_marks_the_arrow_that_runs_a_deciding_sub_use_case():
-    graph = make_graph()
-    flow = next(f for f in graph["flows"] if f["uc"] == "UC1")
-    drawing = gv.gen_flow_map_mermaid(graph, flow)
-    assert re.search(rf"C3 --> *\|\"5 {gv.RULE_MARK}\"\| *SF1", drawing)
-
-
 # --- the live map: rules that hold on every picture --------------------------------------
 
 def test_on_every_picture_of_the_live_map_no_story_reads_backwards_and_every_box_has_a_way_in():
@@ -671,9 +639,10 @@ def test_on_every_picture_of_the_live_map_no_story_reads_backwards_and_every_box
 
 
 def test_the_viewer_key_shows_the_marks_the_generator_draws():
-    """The key is drawn by the viewer, the marks by the generator: the two must stay the same."""
+    """The key is drawn by the viewer, the marks by the generator: the two must stay the same. No rule
+    mark: no picture ties a rule to a step (2026-10-01)."""
     js = _VIEWER_JS.read_text()
-    assert f"const RULE_MARK = '{gv.RULE_MARK}';" in js
+    assert "RULE_MARK" not in js and not hasattr(gv, "RULE_MARK")
     assert f"const ARCH_STORE_LINE = '{gv.ARCH_STORE_LINE}';" in js
 
 

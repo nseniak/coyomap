@@ -9,33 +9,12 @@ DERIVED, NEVER AUTHORED, for the same reason a rule's components and sweep state
 authored "this feature touches these entities" is unfalsifiable, and a hand-assigned list rendered
 as derived was the rules prototype's most damaging failure — it looked correct on every screen.
 
-ONE EXCEPTION, and it is named where it is built: `FeatureFacts.rules`. A feature's rules are the ones
-in the decision areas SPECIFIED UNDER it, which is authored. The derived answer to a NEARBY question —
-which rules the feature's own flows run into — is still computed below and still feeds the coverage
-line; it simply is not what the feature page calls "What it decides". Two true numbers under one word
-is what this change ends: on mcpolis one feature's join said 12 and its areas hold 16.
-
-THE RULE JOIN IS REUSED, NOT REINVENTED. `validate_model.rule_steps` already answers "which
-use-case steps does this rule\'s sites reach", with the exact-line and same-function strengths the
-Rules view renders. This module walks from those steps to the use case to its feature. A second
-implementation would drift from the Rules view, and the two screens would then disagree about what
-one rule governs.
-
-The obvious join — through the COMPONENT holding the site — was measured and rejected. On two live
-maps (Meerbot 61 rules, mcpolis 66) it reached 92-98% of rules and named a single feature for only
-10-28% of them, because a component is shared and a rule smears across most of the product. The
-step join reaches about half the rules and names one feature four times out of five.
-
-WHAT DOES NOT JOIN IS A FINDING, not a hole to paper over. The unjoined rules on both maps are the
-DEEPEST logic in each product (`policy_engine.py`, `settings_resolver.py`, `reader_runner.py`): a
-flow step anchors at the call BETWEEN two components, a rule anchors INSIDE the decision function one
-level down, so the two are recorded at different depths and never meet. `Coverage.rules_unjoined`
-carries that count so a reader is told, rather than shown a feature's rules as if they were all of
-them.
+A FEATURE'S RULES ARE AUTHORED: the ones in the decision areas SPECIFIED UNDER it (`FeatureFacts.rules`).
+No rule is tied to a feature through the steps its flows take: a rule's code and a step's code were
+matched by line, which missed most real ties and could not be explained to a reader (2026-10-01).
 
 Stdlib-only (the cli.py firewall). Everything it needs already exists: `expanded_flow_steps` (so
-content inside a sub-flow is never invisible), `rule_steps` + `anchored_flow_steps` for the join,
-`impact_git.load_map_extents` for the pre-index table, and `parse_anchor` for a site's file.
+content inside a sub-flow is never invisible), and `parse_anchor` for a site's file.
 """
 from __future__ import annotations
 
@@ -43,19 +22,16 @@ from dataclasses import dataclass, field
 
 from coyomap import grammar
 from coyomap.anchors import parse_anchor
-from coyomap.impact_git import Extents
 from coyomap.areas import DataArea, build_areas, build_record_areas, sorted_ids
 from coyomap.model import (ProjectModel, UseCaseReach, entity_owners, expanded_flow_steps,
                            use_case_interfaces)
 from coyomap.validate_model import (
-    anchored_flow_steps,
     capability_audience,
     interface_actor_use_cases,
     interface_directions,
     interface_steps_by_use_case,
     interface_use_cases,
     interface_walk_order,
-    rule_steps,
 )
 
 
@@ -111,9 +87,6 @@ class Coverage:
     components_in_a_flow: int = 0          # a use-case walk passes through it
     components_in_a_rule: int = 0          # a decision is enforced in it
     components_unreached: list[str] = field(default_factory=list)   # neither — named, not counted
-    rules_total: int = 0
-    rules_joined: int = 0
-    rules_unjoined: int = 0                # enforced where no use-case walk passes
     entry_points_total: int = 0
     entry_points_named: int = 0            # named by some use case
     use_cases_total: int = 0
@@ -236,15 +209,9 @@ class InterfaceFacts:
 
 @dataclass(frozen=True)
 class FeatureIndex:
-    """The whole derivation. `rule_join_uses_extents` is the honesty flag the pages depend on.
-
-    Without the pre-index table the join still runs, but only an EXACT line match links a rule to a
-    step, so a feature's rule list is a floor rather than an answer. A page that does not say so
-    reports a partial list as the whole one. This mirrors `rule_steps`' own degradation rather than
-    inventing a second silence."""
+    """The whole derivation."""
     features: list[FeatureFacts] = field(default_factory=list)
     component_features: dict[str, list[str]] = field(default_factory=dict)
-    rule_features: dict[str, list[str]] = field(default_factory=dict)
     role_features: dict[str, dict[str, int]] = field(default_factory=dict)  # role -> feat -> UCs
     unassigned_use_cases: list[str] = field(default_factory=list)
     coverage: Coverage = field(default_factory=Coverage)
@@ -263,7 +230,6 @@ class FeatureIndex:
     #: Per use case, the interfaces its flow reaches — THE rule (`use_case_interfaces`), shipped so
     #: the viewer's use case cards and boards read it rather than re-deriving it from the steps.
     use_case_interfaces: dict[str, UseCaseReach] = field(default_factory=dict)
-    rule_join_uses_extents: bool = False
 
 
 def _fallback_label(name: str) -> str:
@@ -423,11 +389,8 @@ def build_story(m: ProjectModel) -> Story:
     return Story(spine=spine, off=off, column=column, cast=cast, edges=edges)
 
 
-def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex:
-    """Join every part of the map onto the feature it belongs to.
-
-    `extents` is the pre-index symbol table, from `impact_git.load_map_extents(<map path>)`. Without
-    it the rule join finds exact-line links only, and `rule_join_uses_extents` says so."""
+def build_index(m: ProjectModel) -> FeatureIndex:
+    """Join every part of the map onto the feature it belongs to."""
     caps = {c.id: c for c in m.capabilities}
     uc_by_id = {u.id: u for u in m.use_cases}
     # use case -> feature, and the ones that belong to none. A map with no capabilities at all is
@@ -474,21 +437,6 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
                     feat_ents[cap].add(side)
                     if st.direction:
                         feat_dirs[cap].add(st.direction)
-
-    # The rule join, through `rule_steps` — the SAME reader the Rules view uses, so the two screens
-    # cannot disagree about what one rule governs. A rule reaches a feature when one of its sites
-    # reaches a step of one of that feature's use cases.
-    rule_feats: dict[str, set[str]] = {}
-    # A map with no capabilities cannot join a rule to one. Reporting every rule as "unjoined" there
-    # would read as a gap rather than as the pre-feature shape the map actually has.
-    can_join = bool(caps)
-    if can_join:
-        steps = anchored_flow_steps(m)
-        for r in m.rules:
-            hit = {uc_cap[link.uc] for link in rule_steps(m, r, extents, steps)
-                   if link.uc in uc_cap}
-            if hit:
-                rule_feats[r.id] = hit
 
     # A rule's own component reach is NOT a feature join (it smears) — but it IS how a component
     # earns "a decision is enforced here", which the coverage line counts.
@@ -664,9 +612,6 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
         components_in_a_flow=len(comp_in_flow),
         components_in_a_rule=len(comp_in_rule),
         components_unreached=unreached,
-        rules_total=len(m.rules),
-        rules_joined=len(rule_feats),
-        rules_unjoined=(len(m.rules) - len(rule_feats)) if can_join else 0,
         entry_points_total=len(m.entry_points),
         entry_points_named=len({e.id for e in m.entry_points if e.id and e.id in named_eps}),
         use_cases_total=len(m.use_cases),
@@ -676,7 +621,6 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
         features=features,
         use_case_interfaces=use_case_interfaces(m),
         component_features={k: sorted_ids(set(v)) for k, v in comp_feats.items()},
-        rule_features={k: sorted_ids(v) for k, v in rule_feats.items()},
         role_features=role_feat,
         unassigned_use_cases=sorted_ids(set(unassigned)),
         coverage=coverage,
@@ -685,7 +629,6 @@ def build_index(m: ProjectModel, extents: Extents | None = None) -> FeatureIndex
         areas_are_records=areas_are_records,
         entity_owners=entity_owners(m),
         interfaces=interfaces,
-        rule_join_uses_extents=bool(extents),
     )
 
 
@@ -729,7 +672,6 @@ def as_bundle(ix: FeatureIndex) -> dict[str, object]:
         "areasAreRecords": ix.areas_are_records,
         "entityOwners": ix.entity_owners,
         "componentFeatures": ix.component_features,
-        "ruleFeatures": ix.rule_features,
         "roleFeatures": ix.role_features,
         "unassignedUseCases": ix.unassigned_use_cases,
         "story": {
@@ -741,15 +683,11 @@ def as_bundle(ix: FeatureIndex) -> dict[str, object]:
                        "authored": e.authored, "step": e.step}
                       for e in ix.story.edges],
         },
-        "ruleJoinUsesExtents": ix.rule_join_uses_extents,
         "coverage": {
             "componentsTotal": ix.coverage.components_total,
             "componentsInAFlow": ix.coverage.components_in_a_flow,
             "componentsInARule": ix.coverage.components_in_a_rule,
             "componentsUnreached": ix.coverage.components_unreached,
-            "rulesTotal": ix.coverage.rules_total,
-            "rulesJoined": ix.coverage.rules_joined,
-            "rulesUnjoined": ix.coverage.rules_unjoined,
             "entryPointsTotal": ix.coverage.entry_points_total,
             "entryPointsNamed": ix.coverage.entry_points_named,
             "useCasesTotal": ix.coverage.use_cases_total,

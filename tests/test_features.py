@@ -80,8 +80,8 @@ def feature(ix, fid: str = "CAP1"):
     return hits[0]
 
 
-def index_of(doc: dict, extents: dict | None = EXTENTS):
-    return build_index(load_model(json.dumps(doc)), extents)
+def index_of(doc: dict):
+    return build_index(load_model(json.dumps(doc)))
 
 
 # --- what a feature gathers ------------------------------------------------------
@@ -130,70 +130,15 @@ def test_a_use_case_with_no_feature_is_reported_rather_than_dropped():
     assert feature(ix).use_cases == []
 
 
-# --- the rule join ---------------------------------------------------------------
+# --- no rule join ----------------------------------------------------------------
 
-def test_a_rule_enforced_in_the_same_function_as_a_step_joins_to_that_feature():
+def test_a_feature_s_rules_are_its_areas_and_no_step_ties_a_rule_to_it():
+    """A rule enforced in the same function as one of a feature's steps is NOT the feature's rule:
+    a rule's code and a step's code were matched by line, which missed most real ties (2026-10-01).
+    The feature's rules are the decision areas specified under it, and nothing else."""
     ix = index_of(make_map())
-    # THE JOIN, not the feature's own list. `FeatureFacts.rules` answers a different question now — the
-    # rules in the decision areas SPECIFIED UNDER the feature, which is authored — and this join is what
-    # still feeds the coverage line and `rule_features`.
-    assert ix.rule_features == {"BR1": ["CAP1"]}
-    assert ix.coverage.rules_joined == 1 and ix.coverage.rules_unjoined == 0
-
-
-def test_a_rule_in_another_function_of_the_same_file_does_not_join():
-    """THE choice this module exists for. `src/a.py:34` is in `refund`, and no step of this feature
-    goes there. Joining it anyway is the component-level join, which on live maps reached 92-98% of
-    rules and named a single feature for 10-28% of them."""
-    doc = make_map(rules=[{"id": "BR1", "name": "Card required",
-                           "statement": "A payment needs a card.", "block": "BLK1",
-                           "sites": [{"where": "src/a.py:34", "why": "in the refund path"}]}])
-    ix = index_of(doc)
-    assert feature(ix).rules == []
-    assert (ix.coverage.rules_joined, ix.coverage.rules_unjoined) == (0, 1)
-
-
-def test_an_unjoined_rule_is_counted_so_a_feature_page_cannot_imply_it_has_them_all():
-    """A page showing only the joined rules would say a feature decides two things when it decides
-    three. The count is what lets it say so."""
-    doc = make_map(rules=[
-        {"id": "BR1", "name": "In", "statement": "A payment needs a card.", "block": "BLK1",
-         "sites": [{"where": "src/a.py:14", "why": "here"}]},
-        {"id": "BR2", "name": "Out", "statement": "A refund needs a reason.", "block": "BLK1",
-         "sites": [{"where": "src/a.py:34", "why": "elsewhere"}]}])
-    ix = index_of(doc)
-    assert ix.rule_features == {"BR1": ["CAP1"]}
-    assert (ix.coverage.rules_joined, ix.coverage.rules_unjoined) == (1, 1)
-
-
-def test_without_the_preindex_only_an_exact_line_match_links_a_rule():
-    """The degradation is `rule_steps`' own, not a second silence: with no symbol table a site links
-    to a step only when they name the SAME line. On the three live maps that is the difference
-    between 43 rules joined and 13, so a page that does not say which it is reports a floor as an
-    answer."""
-    ix = index_of(make_map(), extents=None)       # site a.py:14, step a.py:12 — same function only
-    assert ix.rule_join_uses_extents is False
-    assert feature(ix).rules == []
-    assert ix.coverage.rules_unjoined == 1
-
-
-def test_an_exact_line_match_still_links_without_the_preindex():
-    doc = make_map(rules=[{"id": "BR1", "name": "Card required",
-                           "statement": "A payment needs a card.", "block": "BLK1",
-                           "sites": [{"where": "src/a.py:12", "why": "on the step's own line"}]}])
-    ix = index_of(doc, extents=None)
-    assert ix.rule_features == {"BR1": ["CAP1"]} and ix.rule_join_uses_extents is False
-
-
-def test_a_map_with_no_features_cannot_join_and_reports_no_gap():
-    """coyomap's own map records no capabilities. Reporting its 14 rules as unjoined would read as a
-    defect rather than as the pre-feature shape the map has."""
-    doc = make_map()
-    doc["capabilities"] = []
-    doc["use_cases"][0]["capability"] = None
-    ix = index_of(doc)
-    assert ix.features == []
-    assert (ix.coverage.rules_joined, ix.coverage.rules_unjoined) == (0, 0)
+    assert not hasattr(ix, "rule_features")
+    assert not hasattr(ix.coverage, "rules_unjoined")
 
 
 # --- coverage --------------------------------------------------------------------
@@ -479,7 +424,7 @@ def test_the_view_bundle_carries_the_feature_block_in_the_viewers_vocabulary():
     f = b["features"]
     assert sorted(f) == ["areas", "areasAreRecords", "componentFeatures", "coverage",
                          "entityOwners", "features", "interfaces", "ownerRecords", "roleFeatures",
-                         "ruleFeatures", "ruleJoinUsesExtents", "story", "unassignedUseCases",
+                         "story", "unassignedUseCases",
                          "useCaseInterfaces"]
     assert f["ownerRecords"] == {}, "a map recording nothing ships an empty answer, never no key"
     assert f["features"][0]["useCases"] == ["UC1"]        # camelCase, not use_cases
@@ -599,7 +544,7 @@ def test_a_feature_says_which_way_its_data_moves():
         {"n": 1, "src": "C1", "dst": "E1", "phrase": "store it", "where": "a.py:1",
          "direction": "out"},
     ])))
-    b = as_bundle(build_index(m, EXTENTS))
+    b = as_bundle(build_index(m))
     assert b["features"][0]["dataDirections"] == ["out"]
 
 
@@ -609,7 +554,7 @@ def test_a_feature_whose_steps_touch_no_record_claims_no_direction():
     m = load_model(json.dumps(make_map(steps=[
         {"n": 1, "src": "C1", "dst": "C2", "phrase": "call it", "where": "a.py:1"},
     ])))
-    b = as_bundle(build_index(m, EXTENTS))
+    b = as_bundle(build_index(m))
     assert b["features"][0]["dataDirections"] == []
 
 

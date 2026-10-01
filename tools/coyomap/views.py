@@ -37,8 +37,6 @@ from coyomap.model import (
 from coyomap.validate_analysis import strip_anchor
 from coyomap.impact_git import Extents
 from coyomap.validate_model import (
-    link_decides,
-    anchored_flow_steps,
     capability_elements,
     completeness_counts,
     component_file_owners,
@@ -47,8 +45,6 @@ from coyomap.validate_model import (
     interface_actors,
     interface_directions,
     rule_components,
-    rule_entities,
-    rule_steps,
     rules_swept,
     site_components,
     unexplained_persistence_pairs,
@@ -566,19 +562,10 @@ def model_to_markdown(m: ProjectModel) -> str:
         # placed yet is visible rather than silently dropped.
         #
         # NOTHING HERE IS AUTHORED except the statement, the sites and the block. The components on
-        # each site line and the use-case steps under it are DERIVED by
-        # `validate_model.site_components` / `rule_steps` — the one implementation, shared with the
-        # checks, the viewer transport and the eval. A second copy here is precisely the drift the
-        # layer exists to prevent.
-        #
-        # EXACT step links only. `rule_steps` gains its second strength ("inside the same function
-        # as this step") from the pre-index symbol table, and the markdown view is a pure function
-        # of the JSON — mixing an optional side file in would make `_check_view_fresh` depend on a
-        # file the map does not contain. The viewer, which has the table, shows both.
+        # each site line are DERIVED by `validate_model.site_components` — the one implementation,
+        # shared with the checks, the viewer transport and the eval.
         owners = component_file_owners(m)
         comp_names = {c.id: c.name for c in m.components}
-        anchored = anchored_flow_steps(m)
-        uc_names = {u.id: u.name for u in m.use_cases}
 
         def _site_line(site: RuleSite) -> str:
             why = f" · {site.why}" if site.why else ""
@@ -602,25 +589,10 @@ def model_to_markdown(m: ProjectModel) -> str:
             return line + ("  *(also declares `no_call_site` — contradictory)*"
                            if site.no_call_site else "")
 
-        def _step_ref(l) -> str:
-            """A step's FULL address. `n` is unique per authoring container, never per use case —
-            47 of this repo's 114 anchored steps come from a sub-flow, and 26 `(uc, n)` pairs name
-            more than one distinct step. Printing `(UC9) step 3` would point at the wrong row in
-            T6b, and two different steps would render as a byte-identical duplicate.
-
-            THE AUTHORED `n` IS RIGHT HERE, and wrong in the viewer. This view does not expand a
-            sub-flow: T6 renders the reference step inline and T6b lists the sub-flow under its own
-            numbering, so `UC9 → SF50 step 4` is a lookup a reader can follow. The VIEWER splices a
-            sub-flow's steps into each referencing flow and numbers the result by POSITION, so a
-            chip there must show the position instead (viewer.js `flowStepIndex`). Two views, two
-            numbering schemes, each matching what its own reader sees."""
-            uc = f"{uc_names.get(l.uc, l.uc)} ({l.uc})"
-            return f"{uc} step {l.n}" if l.container == l.uc else f"{uc} → {l.container} step {l.n}"
-
         body: list[str] = [
             "One decision per rule, with every place it is enforced. The component on each site "
-            "line and the",
-            "use-case steps under it are DERIVED from the site anchors — no field carries them.", ""]
+            "line is",
+            "DERIVED from the site anchor — no field carries it.", ""]
         def _rule_lines(r: BusinessRule) -> list[str]:
             tags = "".join(f"  *({t})*" for t in (["access"] if r.access else [])
                            + ([r.confidence] if r.confidence else []))
@@ -632,12 +604,6 @@ def model_to_markdown(m: ProjectModel) -> str:
             head = f"{r.name.strip()}** — {r.statement}" if r.name.strip() else f"{r.statement}**"
             lines = [f"**{r.id} — {head}{tags}"]
             lines += [_site_line(site) for site in r.sites]
-            # Exact links only, and the filter says so INDEPENDENTLY of `rule_steps` happening to
-            # produce none without a symbol table: the view must stay a pure function of the JSON
-            # even if a caller later hands this one.
-            steps = [l for l in rule_steps(m, r, None, anchored) if link_decides(l.strength)]
-            if steps:
-                lines.append("- enforced at: " + " · ".join(_step_ref(l) for l in steps))
             return lines + [""]
 
         if m.blocks:
@@ -1018,18 +984,13 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
     drift this repo keeps paying for. `tests/test_business_rules.py` asserts this payload equals the
     Python helper, the way `capability_touch` is pinned.
 
-    `byComponent` and `byStep` are INVERSIONS of the same data, not second derivations — the
-    component pane and the flow-step pane look up by key instead of scanning every rule."""
+    `byComponent` is an INVERSION of the same data, not a second derivation — the component pane looks
+    up by key instead of scanning every rule. NO RULE IS TIED TO A STEP: a rule's code and a step's
+    code were matched by line, which missed most real ties and could not be explained to a reader
+    (2026-10-01). `validate`'s condition advisory still reads `rule_steps` for the building agent."""
     owners = component_file_owners(m)
     comp_names = {c.id: c.name for c in m.components}
-    ent_names = {e.id: e.name for e in m.entities}
-    uc_names = {u.id: u.name for u in m.use_cases}
-    # `containerName` rides along because the UI shows NAMES, never ids — and a step's authoring
-    # container is an `SFn` whenever it was written in a sub-flow.
-    sf_names = {sf.id: sf.name for sf in m.subflows}
-    anchored = anchored_flow_steps(m)
     by_component: dict[str, list[str]] = {}
-    by_step: dict[str, list[str]] = {}
     swept = rules_swept(m, extents)
     out_rules: list[dict[str, object]] = []
     for r in m.rules:
@@ -1045,24 +1006,12 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
                 # this layer exists to prevent. The UI renders them all.
                 "components": [{"id": c, "name": comp_names.get(c, c)} for c in comps],
             })
-        steps = [{"uc": l.uc, "ucName": uc_names.get(l.uc, l.uc), "container": l.container,
-                  "containerName": sf_names.get(l.container, ""),
-                  "n": l.n, "strength": l.strength, "decides": link_decides(l.strength), "phrase": l.phrase}
-                 for l in rule_steps(m, r, extents, anchored)]
         for c in rule_components(m, r, owners):
             by_component.setdefault(c, []).append(r.id)
-        # THE RULE MARK READS DECIDING LINKS ONLY (`link_decides`), as `validate`'s condition advisory
-        # and a step's "What it decides" do. A link through the enclosing function put the mark on
-        # about 310 mcpolis steps that decide nothing (retro 2026-09-30, finding 14).
-        for l in steps:
-            if l["decides"]:
-                by_step.setdefault(f"{l['uc']}:{l['container']}:{l['n']}", []).append(r.id)
         out_rules.append({
             "id": r.id, "name": r.name, "statement": r.statement, "block": r.block or "",
             "access": r.access, "risk": r.risk, "confidence": r.confidence,
-            "sites": sites, "steps": steps,
-            "entities": [{"id": e, "name": ent_names.get(e, e)}
-                         for e in rule_entities(m, r, extents, anchored)],
+            "sites": sites,
             "swept": bool(swept.get(r.id)),
             # A rule with an anchored site nobody owns renders bare — a real state, stamped, never
             # blank. `no_call_site` sites are a DECLARED absence and never count as unverified.
@@ -1077,7 +1026,6 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
                    for b in m.blocks],
         "rules": out_rules,
         "byComponent": by_component,
-        "byStep": by_step,
     }
 
 

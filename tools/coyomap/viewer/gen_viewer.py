@@ -1068,7 +1068,6 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 #   fold every other box into the lines that pass through it: A -> (not shown) -> B draws A -> B,
 #     and the text beside the picture names what it passed
 #   number every line by the order the stories take it, so each story reads 1, 2, 3 on the picture
-#   mark a line where a business rule decides (RULE_MARK)
 #
 # WHY SUBSYSTEMS, AND WHICH ONES. A component's OWN subsystem, the smallest one it sits in, is named
 # for a job on the maps measured: "Serving tools", "Client credentials", "Sign-in machinery". Drawn
@@ -1120,20 +1119,9 @@ ARCH_CROWDED_LINES = 40
 #: whole-product picture 5 of 16 layer lines came from a third of their layer's boxes or fewer (UI to
 #: Storage from 1 box of 6), and the next lowest from 4 of 9: the cut sits in that gap.
 ARCH_LAYER_LINE_ONE_IN = 3
-#: THE MARK FOR "A BUSINESS RULE DECIDES HERE", on an Architecture line and a use case map arrow alike. A
-#: character, not the rule's drawn glyph, because it rides inside the arrow's label text, where the drawing
-#: engine measures it before it lays the picture out; a glyph added afterwards would be cut off by the label.
-RULE_MARK = "\u2696"
-
 #: The two sets of stories the Architecture view can be drawn from: every use case's walk, or only
 #: the happy path's. The keys of `gen_arch_views` and the view's `scope` field both use them.
 ARCH_SCOPES = ("all", "happy")
-
-
-def _step_key(uc: str, container: str, n: object) -> str:
-    """A step's key in the rules view's `byStep`: the use case, the walk that WROTE the step (the use
-    case itself, or the shared sub-use case it runs), and the step's own number."""
-    return f"{uc}:{container}:{n}"
 
 
 class _ArchStep(TypedDict):
@@ -1142,7 +1130,6 @@ class _ArchStep(TypedDict):
     from_person: bool   # a person's own step: the way in
     to_person: bool     # the result handed back to a person
     phrase: str         # the step's own sentence
-    keys: list[str]     # the map's steps it stands for (`_step_key`): what the rule marks read
     store: str          # the database it reaches through a record, else ""
 
 
@@ -1178,7 +1165,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
 
     out: list[_ArchStep] = []
 
-    def emit(st: dict[str, Any], s: str, d: str, keys: list[str], phrase: str) -> None:
+    def emit(st: dict[str, Any], s: str, d: str, phrase: str) -> None:
         from_person = is_role_endpoint(bool(st.get("src_is_id"))) and s == str(st.get("src"))
         to_person = is_role_endpoint(bool(st.get("dst_is_id"))) and d == str(st.get("dst"))
         # A record is reached, it never acts: a step FROM one is its data coming back, an answer,
@@ -1190,7 +1177,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
             d = store = store_of(d)
         if s and d and s != d:
             out.append(_ArchStep(src=s, dst=d, from_person=from_person, to_person=to_person,
-                                 phrase=phrase, keys=keys, store=store))
+                                 phrase=phrase, store=store))
 
     left: tuple[str, set[str]] | None = None   # the box of the run a walk just left, and its components
     for st in cast("list[dict[str, Any]]", flow.get("steps") or []):
@@ -1207,15 +1194,13 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
         if sf is not None and inner and layered:
             sid = str(sf["id"])
             for x in inner:
-                emit(x, str(x["src"]), str(x["dst"]), [_step_key(uc, sid, x.get("n"))],
-                     str(x.get("phrase") or "").strip())
+                emit(x, str(x["src"]), str(x["dst"]), str(x.get("phrase") or "").strip())
             continue
         if sf is None or not inner:
-            emit(st, s, str(st["dst"]), [_step_key(uc, uc, st.get("n"))], str(st.get("phrase") or "").strip())
+            emit(st, s, str(st["dst"]), str(st.get("phrase") or "").strip())
             continue
         sid = str(sf["id"])
-        emit(st, s, sid, [_step_key(uc, uc, st.get("n")), *(_step_key(uc, sid, x.get("n")) for x in inner)],
-             str(st.get("phrase") or "").strip() or str(sf.get("name") or sid))
+        emit(st, s, sid, str(st.get("phrase") or "").strip() or str(sf.get("name") or sid))
         members: set[str] = set()
         for x in inner:
             a, b = str(x["src"]), str(x["dst"])
@@ -1225,7 +1210,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
             if kind(b) == "component":
                 members.add(b)
                 b = sid
-            emit(x, a, b, [_step_key(uc, sid, x.get("n"))], str(x.get("phrase") or "").strip())
+            emit(x, a, b, str(x.get("phrase") or "").strip())
         left = (sid, members)
     return out
 
@@ -1285,10 +1270,8 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
 
     ANSWERS STAY ANSWERS. A step into a pipe from a box the pipe called is that box's answer, not a
     new call: it never replaces the step that came in from outside, so a pipe that calls two servers
-    in one story draws A -> B and A -> C, never B -> C. The second call out says its own sentence and
-    carries its own map steps, because A's were told on the first. A step left out, an answer or a call into a pipe no step
-    leaves, still hands its map steps to the kept step before it, so a rule decided there keeps its
-    mark on the line the story took.
+    in one story draws A -> B and A -> C, never B -> C. The second call out says its own sentence,
+    because A's was told on the first.
 
     A DOOR IS NEVER DRAWN THROUGH, on either picture. The layered picture once went from a person
     straight to the part they reach, and lost the product's whole edge: on mcpolis's whole-product
@@ -1330,18 +1313,6 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
     used: set[int] = set()                           # id() of the waiting steps a step out has joined
     called: dict[str, set[str]] = {}                 # a pipe -> the boxes it called in this walk
     out: list[_ArchStep] = []
-    early: list[str] = []                            # map steps left out before the first kept step
-
-    def keep_keys(keys: list[str], before: int) -> None:
-        if before >= 0:
-            out[before]["keys"].extend(keys)
-        else:
-            early.extend(keys)
-
-    def let_go(pipe: str) -> None:
-        held = waiting.pop(pipe, None)
-        if held is not None and id(held[0]) not in used:
-            keep_keys(held[0]["keys"], held[1])
 
     for st in steps:
         src, dst = st["src"], st["dst"]
@@ -1349,7 +1320,6 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
         if held is not None:
             came = held[0]
             if through(dst) and src in called.get(dst, set()):   # one pipe answering the one that called it
-                keep_keys(st["keys"], len(out) - 1)
                 continue
             if edge(came["src"]) and beyond(dst) and dst != came["src"]:
                 needed.add(src)   # the edge straight to the edge: this part is drawn after all
@@ -1358,24 +1328,17 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
             called.setdefault(src, set()).add(dst)
             st = _ArchStep(src=came["src"], dst=dst, from_person=came["from_person"],
                            to_person=st["to_person"], phrase=came["phrase"] if first else st["phrase"],
-                           keys=[*(came["keys"] if first else []), *st["keys"]], store=st["store"])
+                           store=st["store"])
             src = st["src"]
         if through(dst) and not st["to_person"]:
             if src in called.get(dst, set()):   # the answer of a box this pipe called
-                keep_keys(st["keys"], len(out) - 1)
                 continue
-            let_go(dst)
             waiting[dst] = (st, len(out) - 1)
             continue
         if src == dst:   # an answer that came back through a pipe to the box that called it
-            keep_keys(st["keys"], len(out) - 1)
             continue
         out.append(_ArchStep(src=src, dst=dst, from_person=st["from_person"],
-                             to_person=st["to_person"], phrase=st["phrase"],
-                             keys=[*early, *st["keys"]], store=st["store"]))
-        early = []
-    for pipe in list(waiting):
-        let_go(pipe)
+                             to_person=st["to_person"], phrase=st["phrase"], store=st["store"]))
     return out, needed
 
 
@@ -1383,8 +1346,6 @@ class _ArchFlow(TypedDict):
     walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
     phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
                                                     # order, beside `walks` (what the flow text prints)
-    keys: dict[str, list[list[str]]]                # use case -> each kept step's map steps, beside
-                                                    # `walks` (what the rule marks read)
     people: list[str]                               # the people the walks name, first met first
     doors: list[str]                                # the interfaces a person steps straight into
     stores: list[str]                               # the databases reached through records
@@ -1398,10 +1359,7 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
     same walk: a walk records the answer coming back as a step of its own, and drawn it is a second
     line pointing back up that says nothing the call did not. And a step INTO a person or INTO a door,
     which is the result going back out: this picture draws the way in. What hands the LAST result to a
-    person is kept aside, as where that story ends.
-
-    A step left out still keeps its map steps: they join the kept step before it, so a rule decided
-    on an answer is still marked on the line the story took to get there."""
+    person is kept aside, as where that story ends."""
     nodes = graph["nodes"]
     flows = {str(f.get("uc")): f for f in graph["flows"]}
     stepped = [(uc, _draw_through(graph, _arch_steps(graph, flows[uc], layered)))
@@ -1416,33 +1374,26 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                     doors.setdefault(st["dst"], None)
     out: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
-    keys: dict[str, list[list[str]]] = {}
     stores: dict[str, None] = {}
     ends: dict[str, str] = {}
     for uc, sts in stepped:
         callers: dict[str, set[str]] = {}
         steps: list[tuple[str, str]] = []
         said: list[str] = []
-        held: list[list[str]] = []
-        waiting: list[str] = []   # map steps of the left-out steps before the first kept one
         for st in sts:
             s, d = st["src"], st["dst"]
             if st["to_person"]:
                 ends[uc] = s
             if st["to_person"] or (d in doors and not st["from_person"]) or d in callers.get(s, set()):
-                (held[-1] if held else waiting).extend(st["keys"])
                 continue
             callers.setdefault(d, set()).add(s)
             if st["store"]:
                 stores.setdefault(st["store"], None)
             steps.append((s, d))
             said.append(st["phrase"])
-            held.append([*waiting, *st["keys"]])
-            waiting = []
         out.append((uc, steps))
         phrases[uc] = said
-        keys[uc] = held
-    return _ArchFlow(walks=out, phrases=phrases, keys=keys, people=list(people), doors=list(doors),
+    return _ArchFlow(walks=out, phrases=phrases, people=list(people), doors=list(doors),
                      stores=list(stores), ends=ends)
 
 
@@ -1593,28 +1544,21 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
                   for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
-    keys: dict[str, list[list[str]]] = {}
     for uc, steps in flow["walks"]:
         callers: dict[str, set[str]] = {}
         lifted: list[tuple[str, str]] = []
         said: list[str] = []
-        held: list[list[str]] = []
-        waiting: list[str] = []
-        for (s, d), text, ks in zip(steps, flow["phrases"][uc], flow["keys"][uc]):
+        for (s, d), text in zip(steps, flow["phrases"][uc]):
             a, b = box_of.get(s, s), box_of.get(d, d)
             if a == b or b in callers.get(a, set()):
-                (held[-1] if held else waiting).extend(ks)
                 continue
             callers.setdefault(b, set()).add(a)
             lifted.append((a, b))
             said.append(text)
-            held.append([*waiting, *ks])
-            waiting = []
         walks.append((uc, lifted))
         phrases[uc] = said
-        keys[uc] = held
     ends = {uc: box_of.get(x, x) for uc, x in flow["ends"].items()}
-    return _ArchLifted(walks=walks, phrases=phrases, keys=keys, people=flow["people"], doors=flow["doors"],
+    return _ArchLifted(walks=walks, phrases=phrases, people=flow["people"], doors=flow["doors"],
                        stores=flow["stores"], ends=ends, box_of=box_of, cells=cells)
 
 
@@ -1703,8 +1647,6 @@ class _ArchLine(TypedDict):
     number: int     # its step in the macro flow (_story_order_numbers)
     sentences: list[tuple[str, str]]   # (use case, its own sentence for the step that starts this
                                        # line), one per story taking it, first met first
-    keys: list[str]  # the map's steps behind the line, the folded ones too (`_step_key`)
-    story_keys: dict[str, list[str]]   # …and per story taking it, for the view that follows one story
     store: bool      # a line into a database: where a box keeps what it saves, not a step of the flow
     up: bool         # the layered picture only: it runs from a lower layer up to a higher one, so it
                      # is drawn from the upper box (see `_arch_lines_mermaid`)
@@ -1783,43 +1725,37 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     taken: dict[tuple[str, str], set[str]] = {}          # (a, b) -> the stories taking it
     via_of: dict[tuple[str, str], dict[str, None]] = {}   # (a, b) -> the boxes folded into it
     direct: set[tuple[str, str]] = set()                  # …unless some story takes it as one step
-    keys_of: dict[tuple[str, str], dict[str, None]] = {}  # (a, b) -> the map steps behind it
-    story_keys: dict[tuple[str, str], dict[str, dict[str, None]]] = {}   # …per story taking it
     said: dict[tuple[str, str], dict[str, str]] = {}      # (a, b) -> story -> the sentence of its step
     stories: dict[str, list[tuple[str, str]]] = {}
     for uc, steps in flow["walks"]:
-        held = flow["keys"][uc]
         seq: list[tuple[str, str]] = []
         for i, (s, d) in enumerate(steps):
             if s not in kept:
                 continue
-            found: list[tuple[str, list[str], list[int]]] = []   # (end, boxes passed, steps taken)
+            found: list[tuple[str, list[str]]] = []   # (end, boxes passed)
             if d in kept:
-                found.append((d, [], [i]))
+                found.append((d, []))
             else:
-                todo: list[tuple[str, int, list[str], list[int]]] = [(d, i, [d], [i])]
+                todo: list[tuple[str, int, list[str]]] = [(d, i, [d])]
                 seen = {d}
                 while todo:
-                    head, at, path, hops = todo.pop()
+                    head, at, path = todo.pop()
                     for j in range(at + 1, len(steps)):
                         hs, hd = steps[j]
                         if hs != head:
                             continue
                         if hd in kept:
-                            found.append((hd, path, [*hops, j]))
+                            found.append((hd, path))
                         elif hd not in seen:
                             seen.add(hd)
-                            todo.append((hd, j, [*path, hd], [*hops, j]))
-            for b, path, hops in found:
+                            todo.append((hd, j, [*path, hd]))
+            for b, path in found:
                 if b == s:
                     continue
                 taken.setdefault((s, b), set()).add(uc)
                 via_of.setdefault((s, b), {}).update(dict.fromkeys(path))
                 if not path:
                     direct.add((s, b))
-                keys_of.setdefault((s, b), {}).update(dict.fromkeys(k for j in hops for k in held[j]))
-                story_keys.setdefault((s, b), {}).setdefault(uc, {}).update(
-                    dict.fromkeys(k for j in hops for k in held[j]))
                 # THE LINE'S SENTENCE is the one of the step that starts it: for a one-step line the
                 # step itself, for a folded line the step leaving its first box. First step wins.
                 said.setdefault((s, b), {}).setdefault(uc, flow["phrases"][uc][i])
@@ -1870,8 +1806,7 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
         lines.append(_ArchLine(src=a, dst=b, stories=sorted(walks_of),
                                always=(a, b) not in kept_lines and walks_of == leaving[a],
                                hidden=len(via), via=via, verb=verb, number=numbers.get((a, b), 0),
-                               sentences=list(said.get((a, b), {}).items()), keys=list(keys_of[(a, b)]),
-                               story_keys={uc: list(ks) for uc, ks in story_keys[(a, b)].items()},
+                               sentences=list(said.get((a, b), {}).items()),
                                store=(a, b) in kept_lines, up=False))
     # Reading order: the flow's lines by number, then the lines into a database, each in first-met order.
     lines.sort(key=lambda ln: (ln["store"], ln["number"], first[(ln["src"], ln["dst"])]))
@@ -2137,7 +2072,6 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     def box_id(x: str) -> str:
         return _arch_box_id(model, x)
 
-    by_step = cast("dict[str, list[str]]", cast("dict[str, Any]", graph.get("rules_view") or {}).get("byStep") or {})
     folded: list[str] = []
     keeping: list[str] = []
     # A CROWDED PICTURE (`layer_lines`) draws none of its boxes' own lines: see `_arch_mermaid`.
@@ -2147,8 +2081,6 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         # for a line, and the link list has none for this pair; a filler verb was tried and took
         # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries its number.
         words = f"via {ln['hidden']}" if ln["hidden"] else ln["verb"]
-        if any(by_step.get(k) for k in ln["keys"]):
-            words = f"{words} {RULE_MARK}".strip()
         if ln["store"]:   # where a box keeps what it saves: no number, its own style (see _arch_model)
             label = _edge_label(words or "keeps")
             keeping.append(str(n_line))
@@ -2186,20 +2118,6 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     return "\n".join(lines)
 
 
-def _step_notes(graph: GraphDict) -> dict[tuple[str, str], str]:
-    """Every written step's note, by the walk that wrote it and its number. A shared sub-use case's
-    step is written once and run by many use cases, so its note is looked up by the sub-use case."""
-    out: dict[tuple[str, str], str] = {}
-    walks = [(str(f.get("uc")), f) for f in graph["flows"]]
-    walks += [(str(sf.get("id")), sf) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])]
-    for container, w in walks:
-        for st in cast("list[dict[str, Any]]", w.get("steps") or []):
-            note = str(st.get("note") or "").strip()
-            if note:
-                out[(container, str(st.get("n")))] = note
-    return out
-
-
 def _arch_text(graph: GraphDict, model: _ArchModel,
                merged: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """THE FLOW, TOLD STEP BY STEP: the text beside an Architecture picture, one entry per line in
@@ -2213,9 +2131,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
     Only DISTINCT sentences are kept, each with the stories that say it, so 3 stories saying the
     same thing are one sentence with 3 names rather than the same words 3 times.
 
-    Each entry also says what the picture cannot: the boxes a grey line passes through (`via`), the
-    business rules decided on its steps (`rules`), and the condition a decided step's note gives
-    (`conditions`). The rules are the rules view's own links from a step to a rule, by code line.
+    Each entry also says what the picture cannot: the boxes a grey line passes through (`via`).
 
     A line with two or more different sentences also carries its MERGED text when the map keeps one
     (`merged`, from `line_texts`): one sentence for all of them, which the view shows first."""
@@ -2223,10 +2139,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
     titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
     subflow_names = {str(sf.get("id")): str(sf.get("name") or sf.get("id"))
                      for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
-    rv = cast("dict[str, Any]", graph.get("rules_view") or {})
-    by_step = cast("dict[str, list[str]]", rv.get("byStep") or {})
-    rule_names = {str(r["id"]): str(r["name"]) for r in cast("list[dict[str, Any]]", rv.get("rules") or [])}
-    notes = _step_notes(graph)
 
     def name(x: str) -> str:
         # A group of parts is its subsystem in one layer, and the layer is said: the same subsystem
@@ -2242,15 +2154,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
         for uc, text in ln["sentences"]:
             if text:
                 by_text.setdefault(text, []).append(uc)
-        def decided_by(keys: list[str]) -> tuple[list[dict[str, str]], list[str]]:
-            decided = [k for k in keys if by_step.get(k)]
-            rules = dict.fromkeys(r for k in decided for r in by_step[k])
-            conditions = dict.fromkeys(notes[(k.split(":")[1], k.split(":")[2])] for k in decided
-                                       if (k.split(":")[1], k.split(":")[2]) in notes)
-            return [{"id": r, "name": rule_names.get(r, r)} for r in rules], list(conditions)
-
-        rules, conditions = decided_by(ln["keys"])
-        per_story = {uc: decided_by(ks) for uc, ks in ln["story_keys"].items()}
         together = line_texts.text_for(merged or {}, by_text)
         out.append({
             "n": ln["number"],
@@ -2262,10 +2165,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
             "via": [name(x) for x in ln["via"]],
             "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}
                           for t, ucs in by_text.items()],
-            "rules": rules,
-            "conditions": conditions,
-            "rulesByStory": {uc: r for uc, (r, _) in per_story.items() if r},
-            "conditionsByStory": {uc: c for uc, (_, c) in per_story.items() if c},
             **({"merged": together} if together else {}),
         })
     return out
@@ -4378,29 +4277,11 @@ def gen_flow_map_mermaid(graph: GraphDict, flow: dict[str, Any]) -> str:
     # every arrowhead ended 30 units short of the box it points at, and the drawing paid the width for
     # the gap. Set for this diagram alone, in its own source: on every other map a label is plain text
     # and needs the padding to stand off its border.
-    decided = _decided_positions(graph, flow, steps)
     lines = [SLOT_MAP_INIT, "flowchart LR", *decls]
     for (a, b), ns in pairs.items():
-        mark = f" {RULE_MARK}" if any(n in decided for n in ns) else ""
-        lines.append(f"  {a} -->|{_edge_label(_flow_map_arrow_label(ns) + mark)}| {b}")
+        lines.append(f"  {a} -->|{_edge_label(_flow_map_arrow_label(ns))}| {b}")
     lines.append(ITEM_SLOT_CLASSDEF)
     return "\n".join(lines)
-
-
-def _decided_positions(graph: GraphDict, flow: dict[str, Any], steps: list[dict[str, Any]]) -> set[int]:
-    """The 1-based positions of a walk's own steps where a business rule decides: the rules view's links
-    from a rule to a step, by code line (`byStep`). A step that runs a shared sub-use case counts when a
-    rule decides inside that run, for this use case. On a shared sub-use case's own map its steps are
-    filed under every use case that runs it, so any of those counts, as the step's own popup reads them
-    (`stepRulesHtml`)."""
-    uc = str(flow.get("uc"))
-    shared = uc in {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
-    by_step = cast("dict[str, Any]", cast("dict[str, Any]", graph.get("rules_view") or {}).get("byStep") or {})
-    parts = [k.split(":") for k in by_step if k.count(":") == 2]
-    own = {(c, n) for u, c, n in parts if shared or u == uc}
-    runs = {c for u, c, _ in parts if u == uc}
-    return {i + 1 for i, st in enumerate(steps)
-            if (str(st["sf"]) in runs if st.get("sf") else (uc, str(st.get("n"))) in own)}
 
 
 def flow_narrative(graph: GraphDict, flow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4671,7 +4552,7 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
                 extents = load_map_extents(map_json)
         except (OSError, ModelError):
             model = None
-    feature_block: dict[str, Any] = as_bundle(build_index(model, extents)) if model else {}
+    feature_block: dict[str, Any] = as_bundle(build_index(model)) if model else {}
     # The recorded answers ride ALONGSIDE the derivation rather than inside it: `as_bundle` is the
     # feature-led derivation of the MAP, and a recorded exception is the author's note about the
     # map's own build record. The Features page joins the two by area id.

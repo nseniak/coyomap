@@ -1539,28 +1539,6 @@ def rule_steps(m: ProjectModel, rule: BusinessRule,
                                  l.container != l.uc, element_sort_key(l.container), l.n))
 
 
-def rule_entities(m: ProjectModel, rule: BusinessRule,
-                  extents: Extents | None = None,
-                  steps: list[tuple[str, str, FlowStep]] | None = None) -> list[str]:
-    """The entity ids a rule reaches — ONLY through a step that itself names one as an endpoint.
-
-    Deliberately narrow. A rule does not get to claim an entity because its component happens to
-    touch one somewhere: the step it is enforced at has to name the entity, or the link is a guess.
-    The endpoint is matched against the DEFINED entity ids, not a prefix test — `ID_SHAPE` accepts
-    `EP1`, so `startswith("E")` alone would let an entry point through as an entity."""
-    if steps is None:
-        steps = anchored_flow_steps(m)
-    defined = {e.id for e in m.entities}
-    by_key = {(uc, container, st.n): st for uc, container, st in steps}
-    out: set[str] = set()
-    for link in rule_steps(m, rule, extents, steps):
-        st = by_key.get((link.uc, link.container, link.n))
-        if st is None:
-            continue
-        out.update(e for e in (st.src, st.dst) if e in defined)
-    return sorted(out, key=element_sort_key)
-
-
 # ── sweep state: DERIVED, never authored ──────────────────────────────────────────────────────────
 # There is deliberately no `swept` field. An authored boolean asserting "I searched the whole repo"
 # is unfalsifiable, and every one of the prototype's worst errors was hand-assigned data rendered as
