@@ -4554,3 +4554,23 @@ def test_a_subsystem_box_counts_its_components_and_its_popup_also_names_their_ki
         assert seen["box"]["S4"] == ["3 components"], f"the count alone, and no kinds: {seen}"
         assert seen["popup"] == ["3 components", "UI · logic"], f"the same count, then the kinds: {seen}"
         assert not page.js_errors, page.js_errors
+
+
+def test_a_component_s_kind_is_its_type_pill() -> None:
+    """A component's kind ("UI", "logic") stands where its type pill said "component", on its popup
+    and on its box, once. A component the map gives no kind still says "component"."""
+    read = """() => ({
+        popup: [...document.querySelectorAll('#panel .pane-card .ecard-type, #panel .pane-card .ibox-pill')]
+          .map((x) => x.textContent),
+        box: [...document.querySelectorAll('#diagram g.node .ibox[data-id="C14"] .ibox-pill')].map((x) => x.textContent),
+    })"""
+    with _served_map(make_one_part_a_screen) as url, _page(url + "#v=subsystem&sid=S4&sel=node%3AC14") as page:
+        _settle(page)
+        seen = page.evaluate(read)
+        assert seen["popup"] == ["UI"], f"the kind, in place of the word component: {seen}"
+        assert seen["box"] == ["UI"], f"the box says the kind once: {seen}"
+        assert not page.js_errors, page.js_errors
+    with _served() as url, _page(url + "#v=subsystem&sid=S4&sel=node%3AC14") as page:
+        _settle(page)
+        assert page.evaluate(read)["popup"] == ["component"], "no kind in the map, so the word stays"
+        assert not page.js_errors, page.js_errors

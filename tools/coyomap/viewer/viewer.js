@@ -893,16 +893,17 @@ function cardFacts(id) {
   // An actor's nature and its SIDE, in one pill each — see actorSidePills for the four readings.
   if (isActor) for (const p of actorSidePills(n.kind, n.audience)) pills.push(p);
   if (n.kind === 'dep' && f.Kind) pills.push({ text: f.Kind, cls: '' });
-  // A COMPONENT'S KIND beside its name ("Team MCPs · screen"): the name alone did not say whether a
-  // box is a page, the logic or the data, and the kind says it once, as a dependency's does.
-  if (n.kind === 'component' && f.Kind) pills.push({ text: f.Kind, cls: 'comp-kind' });
   // …and whether it STARTS ON ITS OWN, a timer or the product's start: its kind says what it does,
   // and this says what its ways in say about how it starts (views.py `Starts`).
   if (n.kind === 'component' && f.Starts) pills.push({ text: 'starts on its own', cls: 'comp-starts' });
   // …and whether it RUNS BEFORE THE APIS, on a request on its way in: where its ways in put it, which
   // is why the Architecture picture draws it with them (views.py `Runs`).
   if (n.kind === 'component' && f.Runs) pills.push({ text: 'runs before the APIs', cls: 'comp-before' });
-  return { id, kind: n.kind, name: n.name || id, type: elementLabel(n.kind), desc, pills };
+  // A COMPONENT'S KIND IS ITS TYPE PILL ("UI", "logic"), as an interface's kind is: the name alone did
+  // not say whether a box is a page, the logic or the data, and "component" beside a kind said the
+  // type twice. `type` stays the element's own label, for the sentences that name what it is.
+  const word = n.kind === 'component' && f.Kind ? f.Kind : '';
+  return { id, kind: n.kind, name: n.name || id, type: elementLabel(n.kind), word, desc, pills };
 }
 
 // An entity's card earns one extra line: WHERE it is kept. The spec names this case, and it is the one
@@ -1153,7 +1154,7 @@ const ITEM_VARIANT = {
 // `spec` is what a thing IS, with no view in it:
 //   { id, k, name, word, ikind, what, pills:[{text,cls}], facts:[[label,value,valueIsHtml?]],
 //     band:[text], bandDetail:[text] (the band's tail where the box shows its facts),
-//     chips:[{name,kind}], edge, dashed }
+//     chips:[{name,kind}], edge, dashed, kindWord (the word is the thing's kind: shown on every box) }
 // `opts`: { tinted, name (override), what (override the sentence), extra (caller HTML on the pill
 // row), nameLink, nameCls (an extra class on the NAME — a long title sets its own weight), cls
 // (extra classes the CALLER needs on the box — a picture that positions or wires it), attrs (extra
@@ -1177,7 +1178,7 @@ function itemBoxHtml(spec, variant, opts) {
   // picture's three columns are labelled, so a word on every card is the heading repeated on
   // every row. An interface still keeps its word by default, for the reason above.
   const word = o.word === false ? ''
-    : (o.word === true || v.word || spec.k === 'interface') ? itemWord(spec) : '';
+    : (o.word === true || v.word || spec.k === 'interface' || spec.kindWord) ? itemWord(spec) : '';
   const pills = (o.wordHtml !== undefined ? o.wordHtml
                  : word ? `<span class="ibox-pill">${esc(word)}</span>` : '')
     + (spec.pills || []).map((p) =>
@@ -1281,8 +1282,11 @@ function itemSpecOf(id) {
   const c = cardFacts(id);
   if (!c) return null;
   const n = GRAPH.nodes[id] || {};
-  const spec = { id, k: itemKind(n.kind), name: c.name, word: c.type, what: c.desc,
+  const spec = { id, k: itemKind(n.kind), name: c.name, word: c.word || c.type, what: c.desc,
                  pills: c.pills || [], facts: [], band: [], chips: [] };
+  // A word that is the thing's KIND keeps its place on every box, the way an interface's does: a
+  // component's "UI" or "logic" was a pill on the picture's boxes before it became the type word.
+  if (c.word) spec.kindWord = true;
   if (n.kind === 'interface') {
     spec.ikind = String((n.fields || {}).Kind || '').trim();
     ifaceSpecFacts(spec, id);
