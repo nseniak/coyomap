@@ -29,7 +29,6 @@ from urllib.request import urlopen
 import pytest
 
 from browser_harness import new_page
-from coyomap import line_texts
 from coyomap.model import load_model
 from coyomap.viewer.gen_viewer import gen_arch_views
 from coyomap.viewer.recents import RecentsStore
@@ -4290,59 +4289,47 @@ def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_e
         assert not page.js_errors, page.js_errors
 
 
-def make_one_merged_text(folder: Path) -> None:
-    """A kept merged text beside the map, for the first line of the whole-product picture that
-    carries two different sentences."""
-    graph = model_to_graph(load_model((folder / "project-map.json").read_text()))
-    _drawings, texts = gen_arch_views(graph)
-    said = next([x["text"] for x in e["sentences"]] for e in texts["all|"]["lines"]
-                if line_texts.wants_text(x["text"] for x in e["sentences"]))
-    line_texts.save(folder, {line_texts.line_key(said): "Test words for the whole line"})
-
-
-def test_a_line_with_a_merged_text_shows_it_first_and_folds_every_storys_sentence() -> None:
-    """One sentence for the whole line, then a closed fold holding each story's own sentence, each
-    still a button that follows its story."""
-    with _served_map(lambda m: None, beside=make_one_merged_text) as url, \
-            _page(url + "#v=arch&cap=all") as page:
+def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
+    """A line says which use cases take it: the use case is what a line is for, and a step sentence only
+    says how, in one story's words. Past a few use cases from several features, a line lists its
+    features, each with a count, and each opens to its use cases; a use case opens to its own step
+    sentence and follows its story."""
+    text = make_whole_product_text(lambda m: None)
+    def ucs(e: dict[str, Any]) -> set[str]:
+        return {u for x in e["sentences"] for u in x["ucs"]}
+    busy = [e for e in text["lines"] if not e["store"] and len(ucs(e)) > 3]
+    assert busy, "the fixture's whole product needs a line taken by more than 3 use cases"
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        seen = page.evaluate("""() => {
-            const p = document.querySelector('#archtext .archtext-merged');
-            const fold = p && p.closest('.archtext-line').querySelector('.archtext-more');
-            return { text: p ? p.textContent : '', count: document.querySelectorAll('#archtext .archtext-merged').length,
-                     summary: fold ? fold.querySelector('summary').textContent : '',
-                     folded: fold ? fold.querySelectorAll('.archtext-sent').length : 0,
-                     buttons: fold ? fold.querySelectorAll('[data-archstory]').length : 0,
-                     open: fold ? fold.open : null };
-        }""")
-        assert seen["text"] == "Test words for the whole line", seen
-        assert seen["count"] >= 1, seen
-        assert seen["folded"] >= 2 and seen["summary"] == f"The {seen['folded']} sentences it merges", seen
-        assert seen["buttons"] == seen["folded"], seen
-        assert seen["open"] is False, seen
+        seen = page.evaluate("""() => [...document.querySelectorAll('#archtext .archtext-steps .archtext-line')].map((l) => ({
+            src: l.dataset.src, dst: l.dataset.dst,
+            feats: [...l.querySelectorAll(':scope .archtext-feat > summary .archtext-count')].map((c) => +c.textContent),
+            ucs: l.querySelectorAll('.archtext-uc').length,
+            follows: l.querySelectorAll('.archtext-uc .archtext-story[data-archstory]').length,
+            sents: l.querySelectorAll('.archtext-uc .archtext-sent').length }))""")
+        by = {(r["src"], r["dst"]): r for r in seen}
+        for e in [e for e in text["lines"] if not e["store"]]:
+            r = by[(e["srcBox"], e["dstBox"])]
+            assert r["ucs"] == len(ucs(e)) == r["follows"], (e["srcBox"], e["dstBox"], r)
+            assert r["sents"] >= r["ucs"], r   # every use case opens to the sentence it says here
+            if r["feats"]:
+                assert sum(r["feats"]) == r["ucs"] and len(r["feats"]) > 1 and r["ucs"] > 3, r
+        assert any(r["feats"] for r in seen), "a busy line from several features is grouped by feature"
         assert not page.js_errors, page.js_errors
 
 
-def test_following_a_story_on_a_merged_line_shows_that_storys_own_sentence() -> None:
-    """A merged text stands for every story on its line. Following ONE story must tell that story's
-    own sentence, and show no merged text at all."""
-    with _served_map(lambda m: None, beside=make_one_merged_text) as url, \
-            _page(url + "#v=arch&cap=all") as page:
+def test_following_a_story_from_a_use_case_shows_that_storys_own_sentence() -> None:
+    """A use case's row follows its story: its lines light up in its own order, and the text tells the
+    story's own sentence on each line."""
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        said = page.evaluate("""() => {
-            const b = document.querySelector('#archtext .archtext-merged').closest('.archtext-line')
-              .querySelector('.archtext-more [data-archstory]');
-            const text = b.closest('.archtext-sent').firstChild.textContent.trim();
-            b.click();
-            return text;
-        }""")
+        said = page.evaluate("""() => { const row = document.querySelector('#archtext .archtext-uc');
+            const text = row.querySelector('.archtext-sent').textContent.trim();
+            row.querySelector('.archtext-story').click(); return text; }""")
         page.wait_for_function("() => location.hash.includes('story=')")
         _arch_ready(page)
-        seen = page.evaluate("""() => ({
-            merged: document.querySelectorAll('#archtext .archtext-merged').length,
-            sentences: [...document.querySelectorAll('#archtext .archtext-sent')].map((p) => p.textContent.trim()) })""")
-        assert seen["merged"] == 0, seen
-        assert said in seen["sentences"], (said, seen)
+        sentences = page.evaluate("() => [...document.querySelectorAll('#archtext .archtext-sent')].map((p) => p.textContent.trim())")
+        assert said in sentences, (said, sentences)
         assert not page.js_errors, page.js_errors
 
 

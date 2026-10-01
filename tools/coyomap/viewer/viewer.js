@@ -7428,11 +7428,9 @@ function archFeatureHtml() {
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
 // pasted address and a switch flip both land on a drawing that exists.
 // THE FLOW, TOLD STEP BY STEP: the Architecture view's text column. One entry per numbered step,
-// each line of the drawing under it with its two ends and, for every story taking it, the story's own
-// sentence for that step and the story's name. A line many stories take shows its first two
-// sentences and folds the rest ("+22 more"): the team admin's line into the Dashboard carries 24.
+// each line of the drawing under it with its two ends and the use cases that take it (see
+// archUseCasesHtml), each opening to its own step sentence.
 const archtext = document.getElementById('archtext');
-const ARCH_TEXT_SHOWN = 2;
 // BESIDE THE DRAWING, OR UNDER IT. Beside, the text keeps at least 260px, so on a narrow pane it took
 // the whole row: measured at a 340px-wide page, the drawing was left 38px. Under ARCH_TEXT_BESIDE_MIN
 // the text moves below the drawing and takes the full width instead, and the drawing is re-fitted,
@@ -7483,34 +7481,43 @@ function archEndsHtml(e) {
     ? ` <span class="archtext-via">through ${esc(archList(e.via))}, not shown</span>` : '';
   return `<div class="archtext-ends">${esc(e.src)} <span class="archtext-arrow">→</span> ${esc(e.dst)}${via}</div>`;
 }
-// A sentence, then the story it is from. The story's name follows that story; a sentence several
-// stories share names the first and counts the rest, all of them in the tip.
-function archSentenceHtml(x) {
-  const who = x.stories.length > 1 ? `${x.stories[0]} +${x.stories.length - 1}` : x.stories[0];
-  return `<p class="archtext-sent">${esc(capFirst(x.text))}`
-    + ` <button type="button" class="archtext-story" data-archstory="${esc(x.ucs[0])}"`
-    + ` title="${esc('Follow this story: ' + x.stories.join(', '))}">${esc(who)}</button></p>`;
-}
 function archLineHtml(e, body) {
   return `<div class="archtext-line" tabindex="0" data-src="${esc(e.srcBox)}" data-dst="${esc(e.dstBox)}">`
     + archEndsHtml(e) + body + '</div>';
 }
-// ONE SENTENCE FOR A WHOLE LINE, when the map keeps one (`coyomap line-texts`): it covers every
-// story's sentence, and those are folded under it, each still a button that follows its story.
-function archMergedHtml(e) {
-  return `<p class="archtext-merged">${esc(capFirst(e.merged))}</p>`
-    + `<details class="archtext-more"><summary>The ${e.sentences.length} sentences it merges</summary>`
-    + e.sentences.map(archSentenceHtml).join('') + '</details>';
+// A LINE SAYS WHICH USE CASES TAKE IT. The use case is what a line is FOR; a step sentence says how,
+// in one story's words, and a line taken by many stories read as a pile of them. On mcpolis's whole
+// product a line carries a median of 2 use cases and up to 35, so a line with more than ARCH_UC_FLAT
+// of them, from more than one feature, lists its FEATURES, each with a count, and opens to its use
+// cases: at most 9 rows on mcpolis's busiest line. Each use case opens to the step sentence it takes
+// here, and follows its story from there.
+const ARCH_UC_FLAT = 3;
+function archUseCasesHtml(e) {
+  const said = new Map();   // use case -> the sentences it says on this line, in the line's order
+  for (const x of e.sentences) for (const uc of x.ucs) {
+    if (!said.has(uc)) said.set(uc, []);
+    if (!said.get(uc).includes(x.text)) said.get(uc).push(x.text);
+  }
+  const ucs = [...said.keys()];
+  const row = (uc) => `<details class="archtext-uc"><summary>${esc(elName(uc))}</summary>`
+    + said.get(uc).map((text) => `<p class="archtext-sent">${esc(capFirst(text))}</p>`).join('')
+    + `<button type="button" class="archtext-story" data-archstory="${esc(uc)}">Follow this story</button></details>`;
+  const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
+  const feats = [...new Set(ucs.map(featureOf))];
+  if (ucs.length <= ARCH_UC_FLAT || feats.length < 2) return `<div class="archtext-ucs">${ucs.map(row).join('')}</div>`;
+  // The Features page's order, which is the order of the view's own feature buttons.
+  const order = (ARCH_FEATURES || []).map((f) => f.id);
+  const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
+  feats.sort((a, b) => at(a) - at(b));
+  return feats.map((f) => {
+    const mine = ucs.filter((uc) => featureOf(uc) === f);
+    return `<details class="archtext-feat"><summary>${esc(f ? featureName(f) : 'In no feature')}`
+      + ` <span class="archtext-count">${mine.length}</span></summary>`
+      + `<div class="archtext-ucs">${mine.map(row).join('')}</div></details>`;
+  }).join('');
 }
 function archFlowTextHtml(t) {
-  const line = (e) => {
-    if (e.merged) return archLineHtml(e, archMergedHtml(e));
-    const shown = e.sentences.slice(0, ARCH_TEXT_SHOWN).map(archSentenceHtml).join('');
-    const rest = e.sentences.slice(ARCH_TEXT_SHOWN);
-    return archLineHtml(e, shown
-      + (rest.length ? `<details class="archtext-more"><summary>+${rest.length} more</summary>`
-        + rest.map(archSentenceHtml).join('') + '</details>' : ''));
-  };
+  const line = (e) => archLineHtml(e, archUseCasesHtml(e));
   const steps = [];
   for (const e of t.lines) {
     if (e.store) continue;
