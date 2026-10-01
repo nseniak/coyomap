@@ -2155,6 +2155,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
             "srcBox": _arch_box_id(model, ln["src"]), "dstBox": _arch_box_id(model, ln["dst"]),
             "hidden": ln["hidden"],
             "store": ln["store"],
+            "verb": ln["verb"],
             **({"up": True} if ln["up"] else {}),
             "via": [name(x) for x in ln["via"]],
             "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}

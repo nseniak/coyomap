@@ -482,7 +482,9 @@ const GLOSS_MATCHER = buildGlossMatcher(GRAPH.glossary);
 // for "Reminder owner" underlined the first word of its own name, and the rule "Named person or
 // group" underlined the last. A page's subject is not decorated with a link to itself — whether the
 // title is that term or merely contains it.
-const GLOSS_SKIP = 'a, button, code, pre, kbd, svg, h1, h2, h3, h4, .page-hero-name, '
+// A `summary` is a row that opens and closes on a click, so a link inside it took that click away: a
+// use case named on an Architecture line's card opened the glossary instead of its sentence.
+const GLOSS_SKIP = 'a, button, summary, code, pre, kbd, svg, h1, h2, h3, h4, .page-hero-name, '
   + '.ibox-name, .tb-trig, '
   + '.feat-ep-plain, .glossary-wrap, .gloss-plain, .ecard-pill, .ecard-type, .dv-tag, '
   + '.dv-kindpill, .dv-coll, .ibox-name, .ibox-pill, .ibox-count, .item-pill, '
@@ -4645,11 +4647,16 @@ function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actio
   // two thirds of the loop unclickable — the exact "hovering it does nothing" the loop had before.
   const hits = edgeSegs(p).map((seg) => {
     const h = seg.cloneNode(false);
-    h.removeAttribute('id'); h.removeAttribute('marker-end'); h.removeAttribute('class');
+    // A copy keeps no head at EITHER end, and not the flag of a line drawn the other way round
+    // (markFlippedLines): a line up the layers has its head at the start, and every reader of the
+    // flag would count the copy as a second line.
+    h.removeAttribute('id'); h.removeAttribute('marker-end'); h.removeAttribute('marker-start');
+    h.removeAttribute('class'); h.removeAttribute('data-cy-flip');
     h.style.setProperty('stroke', 'transparent', 'important');
     h.style.setProperty('stroke-width', '14px', 'important');
     h.style.setProperty('fill', 'none', 'important');
     h.style.setProperty('marker-end', 'none', 'important');
+    h.style.setProperty('marker-start', 'none', 'important');
     h.style.pointerEvents = 'stroke'; h.style.cursor = 'pointer';
     h.classList.add('cy-edgehit');   // findable: an arrow's real hit area is these clones, not the path
     if (onDrill) h.classList.add('drill');  // ⌘-held cursor affordance
@@ -4868,11 +4875,20 @@ function archOverlay(items) {
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
     hit.setAttribute('class', 'arch-ov-hit'); hit.removeAttribute('marker-end');
+    g.appendChild(line); g.appendChild(hit);
+    const desc = archOverlayDesc(it.src, it.dst);
     // …and the click stops here: on the empty space behind it, it would let go of the box or the
     // layer line these lines were drawn for, and take them away again.
-    const find = (ev) => { ev.stopPropagation(); archMarkText(it.src, it.dst, true); archMarkArrow(it.src, it.dst); };
+    const find = (ev) => {
+      ev.stopPropagation();
+      archMarkText(it.src, it.dst, true);
+      if (desc) pickSel(mainScene, desc, ev);
+    };
     hit.addEventListener('click', find);
-    g.appendChild(line); g.appendChild(hit);
+    if (desc) {
+      if (selHas(mainScene, desc.key)) line.classList.add('is-selected', 'arch-ov-picked');
+      previewOnHover(mainScene, [hit], desc.show, line);
+    }
     if (it.label) {
       const tx = document.createElementNS(SVGNS, 'text');
       tx.setAttribute('x', String((x1 + x2) / 2)); tx.setAttribute('y', String(ym));
@@ -4886,8 +4902,29 @@ function archOverlay(items) {
       bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg');
       g.insertBefore(bg, tx);
       tx.addEventListener('click', find);
+      if (desc) previewOnHover(mainScene, [tx], desc.show, line);
     }
   }
+}
+// A LINE DRAWN ON TOP OF A CROWDED PICTURE is picked like a drawn one, under the same key. The overlay
+// is drawn again whenever what it shows changes, so the glow finds the line as it stands, and a picked
+// line drawn again comes back lit (archOverlay).
+function archOverlayLineEl(src, dst) {
+  return [...diagram.querySelectorAll('.arch-overlay path.arch-ov-line')]
+    .find((x) => x.dataset.src === src && x.dataset.dst === dst) || null;
+}
+function archOverlayDesc(src, dst) {
+  const s = (hi >= 0 && history[hi]) || {};
+  const t = archTextOf(s);
+  const e = archLineOf(t, src, dst);
+  if (!e || !mainScene) return null;
+  const story = archStoryOf(s, t);
+  const mark = (on) => {
+    const el = archOverlayLineEl(src, dst);
+    if (el) { el.classList.toggle('is-selected', on); el.classList.toggle('arch-ov-picked', on); }
+  };
+  return { key: 'arch:' + src + '>' + dst, focus: null, show: () => showArchLine(e, story),
+           glow: () => { mark(true); return () => mark(false); } };
 }
 // A LINE UP THE LAYERS of the layered Architecture picture is written from the box it goes TO, with a
 // head at both ends, so the layout keeps the layers stacked (gen_viewer `_arch_lines_mermaid`). The
@@ -7662,14 +7699,53 @@ function archMarkText(src, dst, scroll) {
   });
   if (hit && scroll) hit.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
-archtext.addEventListener('click', (e) => {
+// FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The button is in the
+// text and on a line's card, the main one or the second one, so one listener serves each of them.
+function archStoryClick(e) {
   const pick = e.target.closest && e.target.closest('[data-archstory]');
-  if (pick) {   // follow a story, or ("") show every story again: its own screen, its own address
-    e.stopPropagation();
-    const cur = (hi >= 0 && history[hi]) || {};
-    go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
-    return;
-  }
+  if (!pick) return false;
+  e.stopPropagation();
+  const cur = (hi >= 0 && history[hi]) || {};
+  go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
+  return true;
+}
+[PANEL_HOST, PEEK_CARD].forEach((card) => card && card.addEventListener('click', archStoryClick));
+// A LINE'S CARD: its two ends, its step, and the use cases that take it, each opening to its own step
+// sentence and following its story from there. While one story is followed, the card says that story's
+// own sentence for the line first, under the story's own step number.
+function showArchLine(e, story) {
+  const own = story ? story.lines.findIndex(([a, b]) => a === e.srcBox && b === e.dstBox) : -1;
+  const said = own >= 0 ? e.sentences.find((x) => x.ucs.includes(story.uc)) : null;
+  const badge = e.store ? 'keeps records' : 'step ' + (own >= 0 ? own + 1 : Number(e.n));
+  // What the code does along it (the link list's verb, "calls ×2"), and the boxes a grey line passes.
+  const via = (e.via || []).length
+    ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>`
+    : e.verb ? `<p class="archcard-via">${esc(capFirst(e.verb))}</p>` : '';
+  panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
+    + `<span class="badge edge">${esc(badge)}</span></div>` + via
+    + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
+      + `<p class="archtext-sent">${esc(capFirst(said.text))}</p></div>` : '')
+    + '<div class="archcard-lbl">Use cases that take this line</div>'
+    + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
+  cvElement = null;
+  setTreeSelection(null);
+  highlightTreePath(null);
+}
+function archLineOf(t, src, dst) {
+  return ((t && t.lines) || []).find((x) => x.srcBox === src && x.dstBox === dst) || null;
+}
+// A LINE IS PICKED LIKE A BOX: its card stays, and a hover on another line shows that one's card beside
+// it. Every drawn box line takes its card here; a crowded picture's lines are drawn by archOverlay.
+function archLineResolver(t, story) {
+  return (m) => {
+    const e = archLineOf(t, m[1], m[2]);
+    if (!e) return null;
+    return { e: { src: m[1], dst: m[2] }, selKey: 'arch:' + m[1] + '>' + m[2],
+             showFn: () => showArchLine(e, story), opts: { hover: true } };
+  };
+}
+archtext.addEventListener('click', (e) => {
+  if (archStoryClick(e)) return;
   if (e.target.closest && e.target.closest('[data-archfilter-clear]')) { archFilterBox(''); return; }
   const el = e.target.closest && e.target.closest('.archtext-line');
   if (!el || (e.target.closest && e.target.closest('summary, .item-pill, button'))) return;
@@ -7728,7 +7804,8 @@ function bindArch() {
       go(next);
     });
   });
-  bindEdges(mainScene, resolveComponentEdge);
+  // A crowded picture draws only its lines between layers, which stand for many lines each.
+  if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t, story));
   markLayerLines(mainScene.root, t);
   bindArchText(t, story);   // …and every arrow finds its line in the text
   if (story) archFollow(story);

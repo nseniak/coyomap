@@ -132,6 +132,14 @@ def test_a_record_is_drawn_as_its_database_with_no_step_number():
     assert line["verb"] == "persists"   # the code's link to the record counts for its database
 
 
+def test_a_lines_card_names_what_the_code_does_along_it():
+    graph = make_graph()
+    model = gv._arch_model(graph, "", "all")
+    assert model is not None
+    entry = next(e for e in gv._arch_text(graph, model) if (e["srcBox"], e["dstBox"]) == ("S2", "D1"))
+    assert entry["verb"] == "persists"
+
+
 def test_every_story_reads_forward_and_answers_are_not_drawn():
     model = make_model()
     numbers = {(ln["src"], ln["dst"]): ln["number"] for ln in model["lines"] if not ln["store"]}

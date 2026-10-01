@@ -969,6 +969,12 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
                   padding: 0 6px; }
 .archtext-story { font-size: 11px; color: #64748b; white-space: nowrap; }
 .archtext-more summary { cursor: pointer; font-size: 12px; color: #4f46e5; margin-top: 3px; }
+/* A LINE'S CARD on the Architecture picture (showArchLine): the same use case rows as the text. */
+.archcard-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: #64748b; margin: 10px 0 4px; }
+.archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
+.archcard-story .archtext-sent { margin: 0; }
+.archcard-ucs { max-height: 50vh; overflow: auto; }
 /* …and the arrow a line of the text is about, lit on the drawing. */
 #diagram path.arch-hl { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
 #diagram g.edgeLabel.arch-hl .label, #diagram g.edgeLabel.arch-hl span { background: #e0e7ff !important;
@@ -1410,16 +1416,18 @@ body.panel-dragging { user-select: none; }
               background: transparent; font-size: 17px; line-height: 1; color: #9ca3af; cursor: pointer;
               padding: 2px 4px; }
 #panelclose:hover { color: #374151; }
-#panel .empty { color: #9ca3af; }
-#panel h2 { font-size: 16px; margin: 0 0 6px; }
+/* The second card (#peekcard) takes any card the main one can, an arrow's included, so it reads the
+   same rules. */
+#panel .empty, #peekcard .empty { color: #9ca3af; }
+#panel h2, #peekcard h2 { font-size: 16px; margin: 0 0 6px; }
 /* name + kind tag (and any change badge) on one line — the identity a box/edge keeps even once its
    other fields are pruned down to what isn't already visible on the diagram. */
-#panel .pane-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-#panel .pane-title h2 { margin: 0; }
+#panel .pane-title, #peekcard .pane-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+#panel .pane-title h2, #peekcard .pane-title h2 { margin: 0; }
 /* the element's one free-text description (Purpose/Used for/Meaning/Wants/Why) — plain prose, no label. */
-#panel .explain { color: #374151; line-height: 1.4; margin: 0 0 12px; }
-#panel .badges { margin-bottom: 12px; }
-#panel .badge { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+#panel .explain, #peekcard .explain { color: #374151; line-height: 1.4; margin: 0 0 12px; }
+#panel .badges, #peekcard .badges { margin-bottom: 12px; }
+#panel .badge, #peekcard .badge { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
                 padding: 1px 7px; border-radius: 10px; margin-right: 6px; }
 .badge.kind { background: #eef2ff; color: #3730a3; }
 .badge.edge { background: #e2e8f0; color: #334155; }
@@ -1430,12 +1438,12 @@ body.panel-dragging { user-select: none; }
 .badge.named { background: #eef2ff; color: #3730a3; }    /* an update log names the box without editing it */
 .badge.update { background: #eef2ff; color: #3730a3; }   /* a timeline row that carries an update log */
 .badge.role { background: #dcfce7; color: #166534; }     /* a dep's DERIVED role (bus/store/…), read off its incoming edge verbs */
-#panel dl { margin: 0; }
-#panel dt { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin-top: 10px; }
-#panel dd { margin: 2px 0 0; }
-#panel dd .muted { color: #9ca3af; font-style: italic; }
-#panel h3 { font-size: 14px; margin: 0 0 2px; }
-#panel hr { border: 0; border-top: 1px solid #e5e7eb; margin: 14px 0; }
+#panel dl, #peekcard dl { margin: 0; }
+#panel dt, #peekcard dt { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin-top: 10px; }
+#panel dd, #peekcard dd { margin: 2px 0 0; }
+#panel dd .muted, #peekcard dd .muted { color: #9ca3af; font-style: italic; }
+#panel h3, #peekcard h3 { font-size: 14px; margin: 0 0 2px; }
+#panel hr, #peekcard hr { border: 0; border-top: 1px solid #e5e7eb; margin: 14px 0; }
 /* "Locate in full map" link on a Happy Path step panel */
 #panel .locate { display: inline-block; margin-top: 16px; font-size: 13px; color: #2563eb; text-decoration: none; }
 #panel .locate:hover { text-decoration: underline; }
@@ -1469,7 +1477,7 @@ body.panel-dragging { user-select: none; }
    panel (no extra chrome). A multi-selection (⌘-click) stacks one card per selected element, in click
    order, each separated from the previous by a rule so it reads as its own distinct element. */
 #panel .sel-card + .sel-card { margin-top: 16px; padding-top: 16px; border-top: 2px solid #e5e7eb; }
-#panel .xcount { color: #6b7280; margin-bottom: 10px; }
+#panel .xcount, #peekcard .xcount { color: #6b7280; margin-bottom: 10px; }
 /* The same crossing rows, on a PAGE rather than in the floating card. The card's rules are all scoped to
    `#panel`, so the page restates the few that carry the shape: no bullets, one row under the next, and
    the row's own indent for the line under the pair. Colours and sizes come from the page, not the card. */
@@ -1480,12 +1488,12 @@ body.panel-dragging { user-select: none; }
 .xlist-page .xwhy { margin-top: 3px; color: #4b5563; line-height: 1.5; }
 /* The way out of a card that was cut to three rows. A link, not a button chip: it goes somewhere, and
    the card is small enough that a filled control would be the loudest thing in it. */
-#panel .xmore { display: inline-block; margin-top: 12px; padding: 0; border: 0; background: none;
+#panel .xmore, #peekcard .xmore { display: inline-block; margin-top: 12px; padding: 0; border: 0; background: none;
                 font: inherit; font-size: 13px; color: #2563eb; cursor: pointer; }
-#panel .xmore:hover { text-decoration: underline; }
-#panel .xlist { margin: 0; padding-left: 18px; }
-#panel .xlist li { margin-top: 12px; }
-#panel .xlist li:first-child { margin-top: 0; }
+#panel .xmore:hover, #peekcard .xmore:hover { text-decoration: underline; }
+#panel .xlist, #peekcard .xlist { margin: 0; padding-left: 18px; }
+#panel .xlist li, #peekcard .xlist li { margin-top: 12px; }
+#panel .xlist li:first-child, #peekcard .xlist li:first-child { margin-top: 0; }
 /* "Triggered by" — a component's entry points. Each one is a selectable paragraph (mirrors the
    arrow/crossing rows): a kind chip, the trigger, and its call site as the shared source pill. Hover +
    selected states match .xrow so the two read as one idiom; selecting also reveals the source.
@@ -1522,7 +1530,7 @@ body.panel-dragging { user-select: none; }
 .tb-kind--self { color: #b45309; background: #fff7ed; }
 .tb-ep--self td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 .tb-ep--self.sel td:first-child { box-shadow: inset 3px 0 0 #b45309; }
-#panel .xwhy { padding-left: 14px; margin-top: 2px; }
+#panel .xwhy, #peekcard .xwhy { padding-left: 14px; margin-top: 2px; }
 /* A crossing row that carries a call site is selectable: click reveals its location in the code viewer.
    A hover tint + pointer signal the affordance; the selected row keeps an indigo tint + left accent.
    Rows with no local source have no [data-where] and stay plain, non-interactive text — BUT the padded,
@@ -1530,18 +1538,18 @@ body.panel-dragging { user-select: none; }
    entity relation) gets the same tidy accent bar as a component arrow, not a cramped one. */
 /* crossings rows are inert text (an arrow's `where` is only an example call site — no code link,
    no hover affordance); only the single-arrow view's own row keeps the selected state. */
-#panel .xlist li.xrow.sel { border-radius: 4px; padding: 3px 6px; margin-left: -6px;
+#panel .xlist li.xrow.sel, #peekcard .xlist li.xrow.sel { border-radius: 4px; padding: 3px 6px; margin-left: -6px;
           background: #e0e7ff; box-shadow: inset 3px 0 0 #4f46e5; }
 /* The relation facts (cardinality / implemented-by / keyed-by) live INSIDE the selected arrow row —
    part of the item, aligned under its why line — not as a separate block below. */
-#panel .xlist .xfacts { padding-left: 14px; }
-#panel .xlist .xfacts dt:first-child { margin-top: 8px; }
+#panel .xlist .xfacts, #peekcard .xlist .xfacts { padding-left: 14px; }
+#panel .xlist .xfacts dt:first-child, #peekcard .xlist .xfacts dt:first-child { margin-top: 8px; }
 /* A concrete (single) arrow renders as its own selection card — bare content, no list bullet, no
    selected-row side bar, and no row indentation (the card itself frames it). The from→to pair reads as
    the card's lead; the why line + relation facts sit flush beneath it. */
-#panel .xarrow .xpair { font-weight: 600; }
-#panel .xarrow .xwhy { padding-left: 0; }
-#panel .xarrow .xfacts { padding-left: 0; }
+#panel .xarrow .xpair, #peekcard .xarrow .xpair { font-weight: 600; }
+#panel .xarrow .xwhy, #peekcard .xarrow .xwhy { padding-left: 0; }
+#panel .xarrow .xfacts, #peekcard .xarrow .xfacts { padding-left: 0; }
 #panel .xarrow .xfacts dt:first-child { margin-top: 8px; }
 
 /* While ⌥ (Option/Alt) is held (body.altmod), drillable subsystem boxes + inter-subsystem arrows show a
@@ -3571,6 +3579,7 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
+.arch-ov-line.arch-ov-picked { stroke: #2563eb; stroke-width: 3.2px; }   /* picked: glowEdge's blue */
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
 .arch-ov-num { font: 600 11px system-ui, sans-serif; fill: #312e81; text-anchor: middle;

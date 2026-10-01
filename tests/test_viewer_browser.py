@@ -4289,6 +4289,93 @@ def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_e
         assert not page.js_errors, page.js_errors
 
 
+# A line's card, read off the screen: the address's pick, the card's title and badge, its use case rows.
+LINE_CARD = """(card) => { const c = document.querySelector(card);
+    return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
+             title: (c.querySelector('.pane-title h2') || {}).textContent || '',
+             badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
+             ucs: [...c.querySelectorAll('.archtext-uc .archtext-story')].map((x) => x.dataset.archstory),
+             story: (c.querySelector('.archcard-story .archtext-sent') || {}).textContent || '' }; }"""
+
+
+def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
+    pick = hash_.split("sel=arch:")[1].split("&")[0]
+    src, dst = pick.split(">")
+    return next(e for e in text["lines"] if (e["srcBox"], e["dstBox"]) == (src, dst))
+
+
+def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use_cases() -> None:
+    """A click on a line picks it, as a click on a box does: the address keeps it, and its card names its
+    two ends, its step and the use cases that take it. A use case opens to its own step sentence and
+    follows its story; with that story followed, the card says the story's own sentence first, under
+    the story's own step number."""
+    text = make_whole_product_text(lambda m: None)
+    assert not text.get("layerLines"), "the fixture's whole product must not be crowded"
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        page.evaluate("""() => document.querySelector('#diagram .cy-edgehit')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.wait_for_function("() => location.hash.includes('sel=arch')")
+        seen = page.evaluate(LINE_CARD, "#panel")
+        e = _arch_line(text, seen["hash"])
+        named = {uc for x in e["sentences"] for uc in x["ucs"]}
+        assert seen["shown"] and seen["title"] == f"{e['src']} \u2192 {e['dst']}", seen
+        assert seen["badge"] == ("keeps records" if e["store"] else f"step {e['n']}"), seen
+        assert set(seen["ucs"]) == named, (seen, named)
+        # a reload keeps the pick, as it keeps a box's
+        page.reload()
+        _arch_ready(page)
+        assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
+        uc = page.evaluate("""() => { const row = document.querySelector('#panel .archtext-uc');
+            row.querySelector('summary').click();
+            const btn = row.querySelector('.archtext-story'); const uc = btn.dataset.archstory;
+            btn.click(); return uc; }""")
+        page.wait_for_function(f"() => location.hash.includes('story={uc}')")
+        _arch_ready(page)
+        story = next(x for x in text["stories"] if x["uc"] == uc)
+        k = story["lines"].index([e["srcBox"], e["dstBox"]])
+        page.evaluate(f"""() => {{ for (const p of document.querySelectorAll('#diagram .edgePaths path.flowchart-link'))
+            if (p.id.includes('L_{e["srcBox"]}_{e["dstBox"]}_')) p.__cyHits[0].dispatchEvent(new MouseEvent('click', {{ bubbles: true }})); }}""")
+        seen = page.evaluate(LINE_CARD, "#panel")
+        said = next(x["text"] for x in e["sentences"] if uc in x["ucs"])
+        assert seen["badge"] == f"step {k + 1}" and seen["story"].lower() == said.lower(), (seen, said)
+        assert not page.js_errors, page.js_errors
+
+
+def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_one() -> None:
+    """A picked line keeps its card. Resting on another line shows that one's card in the second card,
+    beside it, and the picked card stays."""
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        page.evaluate("""() => document.querySelector('#diagram .cy-edgehit')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.wait_for_function("() => location.hash.includes('sel=arch')")
+        picked = page.evaluate(LINE_CARD, "#panel")["title"]
+        # the middle of another line, on screen and clear of both cards
+        at = page.evaluate("""() => {
+            const cards = ['#panel', '#peekcard'].map((s) => document.querySelector(s))
+              .filter((c) => !c.hidden).map((c) => c.getBoundingClientRect());
+            const free = (x, y) => !cards.some((r) => x > r.left && x < r.right && y > r.top && y < r.bottom);
+            const labels = [...document.querySelectorAll('#diagram .edgeLabels > g.edgeLabel')];
+            const paths = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
+            for (let i = 0; i < paths.length; i++) {
+              const l = labels[i];
+              if (paths[i].classList.contains('is-selected') || !l || !l.textContent.trim()) continue;
+              const r = l.getBoundingClientRect(), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+              const el = document.elementFromPoint(x, y);
+              if (free(x, y) && el && l.contains(el)) return { x, y };
+            }
+            return null; }""")
+        assert at, "no other line to rest on"
+        page.mouse.move(at["x"] - 30, at["y"] - 30)
+        page.mouse.move(at["x"], at["y"], steps=4)
+        page.wait_for_function("() => !document.getElementById('peekcard').hidden")
+        peek = page.evaluate(LINE_CARD, "#peekcard")
+        assert peek["title"] and peek["title"] != picked and peek["ucs"], peek
+        assert page.evaluate(LINE_CARD, "#panel")["title"] == picked
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
     """A line says which use cases take it: the use case is what a line is for, and a step sentence only
     says how, in one story's words. Past a few use cases from several features, a line lists its
@@ -4757,6 +4844,28 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         other = next(e["dstBox"] if e["srcBox"] == box else e["srcBox"] for e in text["lines"]
                      if box in (e["srcBox"], e["dstBox"]) and not {e["srcBox"], e["dstBox"]} & people)
         assert not page.evaluate(f"() => document.querySelector('#diagram g.cy-{other}').classList.contains('dim')")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> None:
+    """The box lines a crowded picture draws on top of itself are picked like any line: a click lights
+    the line, names it in the address and shows its card."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        page.evaluate("""() => document.querySelector('#diagram path.arch-layerline')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.evaluate("""() => document.querySelector('#diagram .arch-ov-hit')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.wait_for_function("() => location.hash.includes('sel=arch')")
+        seen = page.evaluate(LINE_CARD, "#panel")
+        e = _arch_line(text, seen["hash"])
+        assert seen["shown"] and seen["title"] == f"{e['src']} \u2192 {e['dst']}", seen
+        lit = page.evaluate("""() => [...document.querySelectorAll('#diagram .arch-ov-line.arch-ov-picked')]
+            .map((l) => [l.dataset.src, l.dataset.dst])""")
+        assert lit == [[e["srcBox"], e["dstBox"]]], lit
+        # the overlay's other lines are still drawn: picking one line does not take its neighbours away
+        assert page.evaluate(VISIBLE_LINES)["box"] > 1
         assert not page.js_errors, page.js_errors
 
 
