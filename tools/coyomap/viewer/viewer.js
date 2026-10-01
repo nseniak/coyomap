@@ -7656,11 +7656,21 @@ function bindArch() {
   bindArchPeople(t, pickBox);
   // "+N MORE" OPENS THE BOX: the picture is drawn again with that subsystem's every part named. It is a
   // new screen, so Back closes it again and a link keeps it open.
+  // …AND THE CAMERA STAYS: the reader opened one box where they were looking, so the new drawing opens
+  // at the same zoom with that box where it stood on screen (see `pendingHoldAt` in render). A fresh fit
+  // threw the reader to the other end of the picture.
   mainScene.root.querySelectorAll('.ibox-more[data-opens]').forEach((b) => {
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const open = [...archOpenOf(s), b.getAttribute('data-opens')];
-      go(archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(',')));
+      const next = archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(','));
+      const node = b.closest('g.node');
+      if (mainPz && node) {
+        next.vp = { zoom: mainPz.getZoom(), real: mainPz.getSizes().realZoom, pan: mainPz.getPan() };
+        const r = node.getBoundingClientRect();
+        pendingHoldAt = { id: idOf(node), x: r.left, y: r.top };
+      }
+      go(next);
     });
   });
   bindEdges(mainScene, resolveComponentEdge);
@@ -7806,6 +7816,29 @@ function archState(scope, cap, story, open) {
 // THE SUBSYSTEMS A PICTURE LISTS IN FULL, from the screen being drawn (`s.open`). Read by itemSpecCell
 // while the boxes are built, so it is set just before (see render).
 let archOpenSubs = new Set();
+// A BOX TO KEEP WHERE IT STOOD ON SCREEN across the next drawing: { id, x, y } in screen pixels, set
+// by a click that redraws the same picture around that box ("+N more"), used once by render.
+let pendingHoldAt = null;
+// Pan so the box `at.id` has its top-left at screen point (at.x, at.y). Worked out from the drawing's
+// own geometry rather than measured on screen: the pan and zoom just set are painted on the NEXT frame,
+// so a measurement now would read the camera before them. The box's place inside the pan-and-zoom
+// group does not depend on the camera at all.
+function holdBoxAt(at) {
+  const el = mainScene && mainScene.nodeEls[at.id];
+  const svg = diagram.querySelector('svg');
+  const view = svg && svg.querySelector('.svg-pan-zoom_viewport');
+  if (!el || !view || !mainPz) return;
+  const viewInv = invertibleCTM(view.getScreenCTM()), elCtm = el.getScreenCTM();
+  if (!viewInv || !elCtm) return;
+  const m = viewInv.multiply(elCtm);   // the box's own space -> the pan-and-zoom group's space
+  const box = el.getBBox();
+  const p = svg.createSVGPoint();
+  p.x = box.x; p.y = box.y;
+  const v = p.matrixTransform(m);
+  const real = mainPz.getSizes().realZoom, sr = svg.getBoundingClientRect();
+  if (!usableScale(real)) return;
+  mainPz.pan({ x: at.x - sr.left - real * v.x, y: at.y - sr.top - real * v.y });
+}
 function archOpenOf(s) {
   return new Set(s && s.kind === 'arch' && s.open ? String(s.open).split(',').filter(Boolean) : []);
 }
@@ -14608,6 +14641,7 @@ async function renderView(sArg, transient, seq) {
       const base = mainPz.getSizes().realZoom;   // this build's fit — the number `zoom()` counts from
       mainPz.zoom(usableScale(vp.real) && usableScale(base) ? mainPz.getZoom() * vp.real / base : vp.zoom);
       mainPz.pan(vp.pan);
+      if (pendingHoldAt) holdBoxAt(pendingHoldAt);
     }
     // A FRESH FIT IS CLAMPED (see clampFitZoom). Not a restored camera, which is where the reader left
     // it; and not before a move that measures the screen (matchTextSize, a focus-drill centre, a framed
@@ -14616,6 +14650,7 @@ async function renderView(sArg, transient, seq) {
     else if (!pendingMatchTextId && !pendingCenterId) clampFitZoom(true);
     if (pendingMatchTextId) matchTextSize(mainScene.nodeEls[pendingMatchTextId]);
     else if (pendingCenterId) { applyZoomAndCenter(mainScene.nodeEls[pendingCenterId], 1); clampFitZoom(false); }  // centre only, then the clamp about that centre
+    pendingHoldAt = null;   // used once, whichever way the camera was set
     updateZoomLevel();
     // ARRIVING AT A PAGE THAT NAMES A STEP CHANGES NO CAMERA. The page opens at its own fit, the step
     // selected on it, and that is the same screen whichever route brought the reader — its address typed

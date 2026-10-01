@@ -4522,7 +4522,7 @@ def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
 def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
     """A group box names its first parts and says "+N more" for the rest. Clicking that opens the box:
     the picture is drawn again with every part named, the address says which box is open, and Back
-    closes it."""
+    closes it. The camera stays: same zoom, and the clicked box where it stood on screen."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
     big = [g for g in groups.values() if len(g["parts"]) > 4]
     assert big, "the changed map must have a group with more parts than a box names"
@@ -4530,9 +4530,17 @@ def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
         _arch_ready(page)
         sub = page.evaluate("() => document.querySelector('#diagram .ibox-more').dataset.opens")
         held = max(len(g["parts"]) for g in groups.values() if g["sub"] == sub)
+        where = """() => { const n = document.querySelector('#diagram g.node[data-held]'); const r = n.getBoundingClientRect();
+            return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }"""   # the width is the scale on screen
+        box_id = page.evaluate("""() => { const n = document.querySelector('#diagram .ibox-more').closest('g.node');
+            n.dataset.held = '1'; return n.id.split('-').slice(-2, -1)[0]; }""")
+        before = page.evaluate(where)
         page.evaluate("() => document.querySelector('#diagram .ibox-more').click()")
         page.wait_for_function(f"() => location.hash.includes('open={sub}')")
         _arch_ready(page)
+        page.wait_for_timeout(300)
+        page.evaluate(f"() => [...document.querySelectorAll('#diagram g.node')].find((n) => n.id.includes('-{box_id}-')).dataset.held = '1'")
+        assert page.evaluate(where) == before, (box_id, before, page.evaluate(where))
         tags = page.evaluate(f"""() => Math.max(...[...document.querySelectorAll('#diagram .ibox-map')]
             .filter((b) => b.querySelector('.item-pill[data-item]') && b.closest('g.node').getAttribute('class').includes('cy-CYG') && b.closest('g.node').getAttribute('class').includes('{sub}'))
             .map((b) => b.querySelectorAll('.item-pill[data-item]').length))""")
