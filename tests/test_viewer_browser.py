@@ -4682,6 +4682,12 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
               return [cs.stroke, Math.round(parseFloat(cs.strokeWidth) * p.getScreenCTM().a * 10) / 10]; })
             .toArray()""")
         assert drawn and all(d == ["rgb(100, 116, 139)", 3.0] for d in drawn), drawn
+        # …and painted ABOVE the frames, or a frame painted after them covers the end that meets its border
+        on_top = page.evaluate("""() => { const t = document.querySelector('#diagram g.arch-layer-top');
+            return !!t && t === t.parentNode.lastElementChild
+              && t.querySelectorAll('path.flowchart-link.arch-layerline').length
+                 === document.querySelectorAll('#diagram path.flowchart-link.arch-layerline').length; }""")
+        assert on_top, "the layer lines are not the last thing their drawing paints"
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')
