@@ -4535,3 +4535,22 @@ def test_a_line_up_the_layers_points_the_way_it_runs_and_finds_its_text() -> Non
             return el ? [el.dataset.src, el.dataset.dst] : null; }""")
         assert on is not None and tuple(on) in up, (on, up)
         assert not page.js_errors, page.js_errors
+
+
+def test_a_subsystem_box_counts_its_components_and_its_popup_also_names_their_kinds() -> None:
+    """A subsystem's box on a picture says how many components it holds, nested subsystems included,
+    the way a subdomain's box counts its entities. The kinds of those components took a lot of the
+    box's room for little a reader scanning the picture needs, so only the subsystem's popup and card
+    name them, after the same count."""
+    read = """() => ({
+        box: Object.fromEntries([...document.querySelectorAll('#diagram g.node .ibox[data-id]')].map((b) =>
+          [b.dataset.id, [...b.querySelectorAll('.ibox-band .ibox-count')].map((x) => x.textContent)])),
+        popup: [...document.querySelectorAll('#panel .pane-card .ibox-band .ibox-count')].map((x) => x.textContent),
+    })"""
+    with _served_map(make_one_part_a_screen) as url, _page(url + "#v=container&sel=node%3AS4") as page:
+        _settle(page)
+        seen = page.evaluate(read)
+        assert seen["box"]["S5"] == ["21 components"], f"every component under it, nested ones too: {seen}"
+        assert seen["box"]["S4"] == ["3 components"], f"the count alone, and no kinds: {seen}"
+        assert seen["popup"] == ["3 components", "UI · logic"], f"the same count, then the kinds: {seen}"
+        assert not page.js_errors, page.js_errors

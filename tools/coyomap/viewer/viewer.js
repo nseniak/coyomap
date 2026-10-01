@@ -1152,7 +1152,7 @@ const ITEM_VARIANT = {
 };
 // `spec` is what a thing IS, with no view in it:
 //   { id, k, name, word, ikind, what, pills:[{text,cls}], facts:[[label,value,valueIsHtml?]],
-//     band:[text],
+//     band:[text], bandDetail:[text] (the band's tail where the box shows its facts),
 //     chips:[{name,kind}], edge, dashed }
 // `opts`: { tinted, name (override), what (override the sentence), extra (caller HTML on the pill
 // row), nameLink, nameCls (an extra class on the NAME — a long title sets its own weight), cls
@@ -1210,7 +1210,10 @@ function itemBoxHtml(spec, variant, opts) {
     }
   }
   if (v.band) {
-    const bits = (spec.band || []).map((b) => `<span class="ibox-count">${esc(b)}</span>`).join('')
+    // `bandDetail` joins the band only where the box shows its facts (a card, its popup): detail a
+    // picture's box has no room for.
+    const bandText = (spec.band || []).concat(v.facts ? spec.bandDetail || [] : []);
+    const bits = bandText.map((b) => `<span class="ibox-count">${esc(b)}</span>`).join('')
       // A CHIP CARRIES ITS OWN KIND'S GLYPH, and that glyph is the only coloured thing on it. On a
       // collapsed shared sub-use case the chips are the only thing saying the product's edge and its saved
       // data are inside, and the mark says which is which without spending a word on it. The chip
@@ -1299,12 +1302,12 @@ function itemSpecOf(id) {
     // those are saved records (the Data tab counts "82 entities" by the same rule).
     const leaf = n.kind === 'subsystem' ? 'component' : 'entity';
     const members = Object.keys(GRAPH.nodes).filter((x) => GRAPH.nodes[x].kind === leaf && isAncestorOf(id, x));
-    const kids = members.length;
-    // …and WHAT it holds, once its components say what they are: "screen · API · logic · store"
-    // answers "is this the data or the logic?" on the box itself, where a count could not.
+    if (members.length) spec.band.push(countLabel(members.length, leaf));
+    // …and WHAT a subsystem holds, once its components say what they are ("UI · API · logic ·
+    // store"), on its card and its popup only. On a picture's box the list took a lot of room for
+    // little a reader scanning the picture needs, so the box shows the count as a subdomain's does.
     const kinds = n.kind === 'subsystem' ? componentKindsLabel(members) : '';
-    if (kinds) spec.band.push(kinds);
-    else if (kids) spec.band.push(kids + (n.kind === 'subsystem' ? ' components' : ' entities'));
+    if (kinds) spec.bandDetail = [kinds];
     // A CONTAINER IS DASHED, as a shared sub-use case is: a dashed line says "there is more inside".
     spec.dashed = true;
   }
