@@ -646,13 +646,18 @@ function elName(id) { return (GRAPH.nodes[id] || {}).name || UNKNOWN_NAME; }
 // The reader's word for each element type. ONE map: the card's type pill, the info pane's pill and the
 // search badge all read it, so the product's vocabulary changes in one place. Three copies of this map
 // used to exist and two of them disagreed.
+// THE ACTOR KINDS, the map's `grammar.ROLE_KINDS`. ONE LIST, because a table keyed by element kind
+// that names the actors by hand misses one: the AI agent was left out of the type pill's words, then of
+// the card's sentence (the Headless agent's card said no goal), then of "show in context". Every table
+// below that has an entry per actor kind builds it from this list.
+const ACTOR_KINDS = ['human', 'service', 'ai-agent'];
 const ELEMENT_LABEL = {
   capability: 'feature', usecase: 'use case',
   // EVERY ACTOR KIND READS "actor" HERE. This pill says WHAT KIND OF ELEMENT a thing is, and all
   // three are actors; which kind of actor is the pill beside it (`actorSidePills`). Missing the
   // third entry printed the raw `ai-agent` next to the reader's "AI agent", so one card
   // carried the same fact twice, once in the code's words.
-  human: 'actor', service: 'actor', 'ai-agent': 'actor',
+  ...Object.fromEntries(ACTOR_KINDS.map((k) => [k, 'actor'])),
   component: 'component', subsystem: 'subsystem', entity: 'entity', subdomain: 'subdomain',
   dep: 'dependency', process: 'process', rule: 'rule', block: 'decision area',
   system: 'system',
@@ -663,7 +668,7 @@ function elementLabel(kind) { return ELEMENT_LABEL[kind] || kind || ''; }
 // field name, and reading the wrong one is the difference between a card that says something and a card
 // that is blank — so the mapping lives here rather than at each call site.
 const CARD_DESC_FIELD = {
-  capability: ['Purpose'], usecase: ['Trigger', 'Outcome'], human: ['Wants'], service: ['Wants'],
+  capability: ['Purpose'], usecase: ['Trigger', 'Outcome'], ...Object.fromEntries(ACTOR_KINDS.map((k) => [k, ['Wants']])),
   component: ['Purpose'], subsystem: ['Purpose'], subdomain: ['Purpose'], block: ['Purpose'],
   entity: ['Meaning'], dep: ['Used for', 'Type'], process: ['Runs on'], rule: ['Decision'],
   system: ['Overview'], interface: ['What it is'],
@@ -14792,7 +14797,7 @@ function selectTargetFor(id) {
         return { state: { kind: 'usecases' }, selectId: null, storyPin: { key: 'sfeat', id } };
       }
       return { state: { kind: 'usecases' }, selectId: null, flashId: id };
-    case 'human': case 'service': {
+    case 'human': case 'service': case 'ai-agent': {   // ACTOR_KINDS
       const role = ROLE_BY_NAME[(n.name || '').trim().toLowerCase()];
       if (role && storyDiagramDraws()) {
         return { state: { kind: 'usecases' }, selectId: null,

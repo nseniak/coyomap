@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from coyomap import grammar
+
 VIEWER_DIR = Path(__file__).resolve().parent.parent / "tools" / "coyomap" / "viewer"
 
 
@@ -6035,3 +6037,17 @@ def test_every_picture_shows_a_box_card_on_hover() -> None:
             assert "hover: true" in call, call[:120]
     card = js[js.index("function boxCard(id) {"):js.index("\n}", js.index("function boxCard(id) {"))]
     assert "showLibsFold()" in card and "showBucketFold(id)" in card and "showDeploymentGroup(id)" in card
+
+
+def test_every_actor_kind_reads_as_an_actor_everywhere() -> None:
+    """The AI agent was left out of three tables that named the actor kinds by hand: the type pill's
+    word, the card's sentence (the Headless agent's card had no goal) and "show in context". The viewer
+    names the actor kinds once, as the map does, and those tables build from that one list."""
+    js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
+    listed = js[js.index("const ACTOR_KINDS = ["):js.index("];", js.index("const ACTOR_KINDS = ["))]
+    assert [k.strip(" '") for k in listed.split("[", 1)[1].split(",")] == list(grammar.ROLE_KINDS)
+    desc = js[js.index("const CARD_DESC_FIELD = {"):js.index("};", js.index("const CARD_DESC_FIELD = {"))]
+    assert "...Object.fromEntries(ACTOR_KINDS.map((k) => [k, ['Wants']]))" in desc and "human:" not in desc
+    label = js[js.index("const ELEMENT_LABEL = {"):js.index("};", js.index("const ELEMENT_LABEL = {"))]
+    assert "ACTOR_KINDS.map((k) => [k, 'actor'])" in label
+    assert "case 'human': case 'service': case 'ai-agent': {" in js
