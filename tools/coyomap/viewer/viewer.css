@@ -947,12 +947,6 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 12px; color: #475569; }
 .archkey span { display: inline-flex; align-items: center; gap: 6px; }
 .archkey-num { font-weight: 600; color: #334155; min-width: 26px; text-align: center; }
-/* THE FLOW TEXT, to the right of the Architecture drawing (see #archtext in viewer.html). A fixed share
-   of the row, so the drawing is fitted to what is left; the floaters anchored to the right edge move
-   left by the same amount, or the zoom control and the selection card would sit on the text. */
-#archtext { flex: 0 0 clamp(260px, 32%, 380px); box-sizing: border-box; overflow: auto;
-            border-left: 1px solid #e5e7eb; background: #fff; padding: 12px 14px 20px; }
-#archtext[hidden] { display: none; }
 /* THE STORY PLAYER: a slim strip at the foot of the Architecture drawing, centred, while one story is
    followed. The story's name and its two ends on the left, the step walk on the right. */
 #archplayer { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
@@ -973,50 +967,28 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archplay-x { flex: 0 0 auto; font: inherit; font-size: 16px; line-height: 1; border: 0; background: none;
   color: #9ca3af; cursor: pointer; padding: 2px 4px; }
 .archplay-x:hover { color: #374151; }
-#diagwrap:has(> #archtext:not([hidden])):not(.archtext-below) :is(#zoomctl, #panel) { right: calc(clamp(260px, 32%, 380px) + 12px); }
-#diagwrap:has(> #archtext:not([hidden])):not(.archtext-below) #archplayer { left: calc((100% - clamp(260px, 32%, 380px)) / 2); max-width: calc(100% - clamp(260px, 32%, 380px) - 24px); }
-/* A narrow drawing area stacks the text UNDER the drawing (viewer.js placeArchText sets the class). */
-#diagwrap.archtext-below { flex-direction: column; }
-#diagwrap.archtext-below > #archtext { flex: 0 0 45%; border-left: 0; border-top: 1px solid #e5e7eb; }
-.archtext-head { font-size: 13px; font-weight: 600; color: #1f2937; margin: 0 0 10px; }
-.archtext-steps { list-style: none; margin: 0; padding: 0; }
-.archtext-step { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; }
-.archtext-n { flex: 0 0 22px; font-weight: 600; color: #334155; font-size: 13px; line-height: 20px;
-              text-align: right; }
-.archtext-lines { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.archtext-line { border-radius: 6px; padding: 3px 6px; margin: -3px -6px; cursor: pointer; }
-.archtext-line:hover { background: #f8fafc; }
-.archtext-line.archtext-on { background: #eef2ff; box-shadow: inset 2px 0 0 #4f46e5; }
-.archtext-ends { font-size: 12px; font-weight: 600; color: #334155; line-height: 18px; }
-.archtext-arrow { color: #94a3b8; font-weight: 400; }
-.archtext-via { font-weight: 400; color: #64748b; }
-.archtext-sent { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; }
+.archuc-sent { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; }
 /* A LINE'S USE CASES (archUseCasesHtml): each a row that opens to its step sentence and its story;
    past a few, from several features, grouped under a feature with a count. */
-.archtext-ucs { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
-.archtext-uc > summary, .archtext-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; }
-.archtext-uc > summary:hover, .archtext-feat > summary:hover { color: #4f46e5; }
-.archtext-uc[open] { padding-bottom: 4px; }
-.archtext-uc .archtext-sent, .archtext-uc .archtext-story { margin-left: 14px; }
-.archtext-feat > .archtext-ucs { margin-left: 14px; }
-.archtext-count { font-size: 11px; font-weight: 600; color: #64748b; background: #f1f5f9; border-radius: 8px;
+.archuc-list { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
+.archuc > summary, .archuc-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; }
+.archuc > summary:hover, .archuc-feat > summary:hover { color: #4f46e5; }
+.archuc[open] { padding-bottom: 4px; }
+.archuc .archuc-sent, .archuc .archuc-follow { margin-left: 14px; }
+.archuc-feat > .archuc-list { margin-left: 14px; }
+.archuc-count { font-size: 11px; font-weight: 600; color: #64748b; background: #f1f5f9; border-radius: 8px;
                   padding: 0 6px; }
-.archtext-story { font-size: 11px; color: #64748b; white-space: nowrap; }
-.archtext-more summary { cursor: pointer; font-size: 12px; color: #4f46e5; margin-top: 3px; }
-/* A LINE'S CARD on the Architecture picture (showArchLine): the same use case rows as the text. */
+.archuc-follow { font-size: 11px; color: #64748b; white-space: nowrap; }
+/* A LINE'S CARD on the Architecture picture (showArchLine, showArchLayerLine). */
 .archcard-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   color: #64748b; margin: 10px 0 4px; }
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
-.archcard-story .archtext-sent { margin: 0; }
+.archcard-story .archuc-sent { margin: 0; }
 .archcard-ucs { max-height: 50vh; overflow: auto; }
 .archcard-line > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; font-weight: 600; }
 .archcard-line > summary:hover { color: #4f46e5; }
-.archcard-line > .archtext-ucs, .archcard-line > .archtext-feat { margin-left: 14px; }
+.archcard-line > .archuc-list, .archcard-line > .archuc-feat { margin-left: 14px; }
 .archcard-line[open] { padding-bottom: 6px; }
-/* …and the arrow a line of the text is about, lit on the drawing. */
-#diagram path.arch-hl { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
-#diagram g.edgeLabel.arch-hl .label, #diagram g.edgeLabel.arch-hl span { background: #e0e7ff !important;
-                                                                          color: #312e81 !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
    column heads and the "The product" tag are drawn inside that air, and the wrap is what clips. */
 .item-sec-frame .ifd-wrap, .item-sec-frame .hfade-wrap > .ifd-wrap { padding: 16px 0; }
@@ -3574,28 +3546,11 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 #diagram .ibox-picked:focus-visible, #diagram .ibox-picked:focus-visible .ibox-name:focus-visible,
 #pagehero .ibox-picked:focus-visible, .ibox-picked:focus-visible { outline: none; }
 
-/* ── The Architecture view's text: a story to follow, one box's steps, the rules decided on a line ── */
-.archtext-follow { margin: 0 0 10px; font-size: 12px; }
-.archtext-follow > summary { cursor: pointer; color: #4f46e5; font-weight: 600; }
-.archtext-follow-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.archtext-storybtn { font: inherit; font-size: 12px; border: 1px solid #cbd5e1; border-radius: 12px;
-                     background: #fff; color: #334155; padding: 2px 9px; cursor: pointer; text-align: left; }
-.archtext-storybtn:hover { border-color: #4f46e5; color: #312e81; background: #eef2ff; }
-.archtext-story { font: inherit; font-size: 11px; color: #64748b; white-space: nowrap; background: none;
+/* ── A line's card on the Architecture view: following a use case's story from it ── */
+.archuc-follow { font: inherit; font-size: 11px; color: #64748b; white-space: nowrap; background: none;
                   border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
-.archtext-story:hover { color: #4f46e5; }
-.archtext-all { font: inherit; font-size: 12px; font-weight: 400; color: #4f46e5; background: none; border: 0;
-                padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; }
-.archtext-filter { margin: -4px 0 10px; font-size: 12px; color: #334155; background: #f8fafc;
-                   border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; }
-.archtext-filter[hidden], .archtext-line[hidden], .archtext-step[hidden], .archtext-keepsec[hidden] { display: none; }
-.archtext-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-                color: #64748b; margin-right: 6px; }
-.archtext-keeps-head { margin-top: 14px; }
-.archtext-storyname { font-size: 14px; font-weight: 600; color: #1f2937; margin: 0 0 6px; }
-.archtext-start, .archtext-end { display: flex; gap: 8px; align-items: baseline; margin: 6px 0;
-                                 font-size: 12.5px; line-height: 18px; color: #1f2937; }
-/* THE TWO MARKS OF A STORY'S ENDS, in the key and in the text: a filled circle where it starts, a bar
+.archuc-follow:hover { color: #4f46e5; }
+/* THE TWO MARKS OF A STORY'S ENDS, in the key and in the story player: a filled circle where it starts, a bar
    where it ends, as Use Case Maps draw a path. The same shapes markStartEnd draws on a picture. */
 .ucm-key-start, .ucm-key-end { display: inline-block; flex: none; background: #0f172a; }
 .ucm-key-start { width: 10px; height: 10px; border-radius: 50%; }
@@ -3618,7 +3573,6 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
-.arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
 .arch-ov-line.arch-ov-picked { stroke: #2563eb; stroke-width: 3.2px; }   /* picked: glowEdge's blue */
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }

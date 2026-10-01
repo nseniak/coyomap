@@ -1066,7 +1066,7 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 #     databases (at most 4)
 #   keep the ARCH_BOX_BUDGET boxes the most stories pass through
 #   fold every other box into the lines that pass through it: A -> (not shown) -> B draws A -> B,
-#     and the text beside the picture names what it passed
+#     and that line's card names what it passed
 #   number every line by the order the stories take it, so each story reads 1, 2, 3 on the picture
 #
 # WHY SUBSYSTEMS, AND WHICH ONES. A component's OWN subsystem, the smallest one it sits in, is named
@@ -2040,8 +2040,8 @@ def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLin
     """A CROWDED PICTURE'S LINES: one per pair of layers, standing for every line of the
     picture from a box in the one to a box in the other. Measured on mcpolis with a kind on every
     part: 116 lines between boxes became 18 between layers, and a line inside one layer (8 of the
-    116) is not drawn at all. Each box's own lines are one click away in the view, and the text
-    beside the picture still tells every one of them.
+    116) is not drawn at all. Each box's own lines are one click away in the view, and each line
+    between layers lists them on its card.
 
     A LAYER LINE IS A RULE of the architecture only when enough of the boxes of the layer it leaves
     have a line to the other layer (`ARCH_LAYER_LINE_ONE_IN`). A layer holding boxes that go
@@ -2118,13 +2118,13 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
 
 
 def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
-    """THE FLOW, TOLD STEP BY STEP: the text beside an Architecture picture, one entry per line in
-    reading order (by step number, then first met). Each entry names its two ends and gives, for
-    every story taking the line, that story's own sentence for the step and the story's name.
+    """WHAT EACH LINE OF AN ARCHITECTURE PICTURE TELLS on its card: one entry per line in reading
+    order (by step number, then first met). Each entry names its two ends and gives, for every story
+    taking the line, that story's own sentence for the step and the story's name.
 
-    Why a text and not words on the lines: a step's sentence is 48 characters at the median, and
+    Why a card and not words on the lines: a step's sentence is 48 characters at the median, and
     one line can carry many of them (24 on the team admin's line into the Dashboard, one per story).
-    The picture keeps the numbers; the text keeps the sentences; the numbers join the two.
+    The picture keeps the numbers; the card keeps the sentences.
 
     Only DISTINCT sentences are kept, each with the stories that say it, so 3 stories saying the
     same thing are one sentence with 3 names rather than the same words 3 times.
@@ -2195,12 +2195,12 @@ def arch_layered(graph: GraphDict) -> bool:
 
 def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
                    ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
-    """Every Architecture drawing the view's two toggles can ask for, and the flow text beside each,
+    """Every Architecture drawing the view's two toggles can ask for, and what the view tells of each,
     keyed `<scope>|<feature id>`: `all|` is the whole product over every walk, `happy|CAP3` is one
     feature over the happy path alone. Pre-rendered side by side, the way every other per-element
-    drawing already is, from ONE model per key so the text can never describe another drawing.
+    drawing already is, from ONE model per key so the cards can never describe another drawing.
 
-    The text is `{lines, stories, cells}`: the flow told step by step (`_arch_text`), each story on
+    What it tells is `{lines, stories, cells}`: each line's card (`_arch_text`), each story on
     its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
     it holds, which the view opens and marks through. A layered picture with more than `crowded`
     lines also carries its lines between layers (`layerLines`), which it draws instead of its
@@ -4429,7 +4429,7 @@ class ViewBundle(TypedDict):
     mermaidContainer: str
     mermaidArch: str               # the Architecture view, everyone over every walk; "" = no walks
     mermaidArchBy: dict[str, str]  # every drawing its two toggles can ask for, "<scope>|<person>"
-    archText: dict[str, dict[str, Any]]  # …and the text beside each, same keys: {lines, stories}
+    archText: dict[str, dict[str, Any]]  # …and what the view tells of each, same keys: {lines, stories}
     archFeatures: list[dict[str, str]]  # the features any walk belongs to, {id, name}, map order
     mermaidBySub: dict[str, str]
     mermaidEdgeCard: dict[str, str]

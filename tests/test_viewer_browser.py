@@ -4244,7 +4244,7 @@ def test_a_pages_own_title_carries_no_glossary_link() -> None:
 # --- the Architecture view: one feature first, one story followed, one box's steps ------------------
 
 def _arch_ready(page: Any) -> None:
-    page.wait_for_selector("#archtext:not([hidden]) .archtext-line")
+    page.wait_for_selector("#diagram .edgePaths path.flowchart-link", state="attached")
     _settle(page)
 
 
@@ -4270,21 +4270,22 @@ def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_e
     circle and an end bar. It is a screen of its own: the story is in the address."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        page.evaluate("() => document.querySelector('.archtext-storybtn').click()")
+        page.select_option("[data-archfollow]", page.evaluate(
+            "() => document.querySelector('[data-archfollow] optgroup option').value"))
         page.wait_for_function("() => location.hash.includes('story=')")
         _arch_ready(page)
         seen = page.evaluate("""() => {
           const lit = [...document.querySelectorAll('#diagram g.edgeLabel.arch-story-on')].map((l) => l.textContent.trim());
           return { lit, marks: [...document.querySelectorAll('#diagram .ucm-mark')].map((m) => m.firstElementChild.getAttribute('class')),
-                   steps: document.querySelectorAll('#archtext .archtext-step').length,
-                   start: (document.querySelector('#archtext .archtext-start') || {}).textContent || '' };
+                   steps: document.querySelector('.archplay-count').textContent,
+                   start: document.querySelector('#archplayer .archplay-ends').textContent };
         }""")
         numbers = sorted(int(t) for t in seen["lit"])
         assert numbers == list(range(1, len(numbers) + 1)) and numbers, seen
         assert sorted(seen["marks"]) == ["ucm-end", "ucm-start"], seen
-        assert seen["steps"] == len(numbers)
+        assert seen["steps"] == f"{len(numbers)} steps", seen
         assert seen["start"].startswith("Starts when:"), seen
-        page.evaluate("() => document.querySelector('#archtext [data-archstory=\"\"]').click()")
+        page.evaluate("() => document.querySelector('#archplayer [data-archstory=\"\"]').click()")
         page.wait_for_function("() => !location.hash.includes('story=')")
         assert not page.js_errors, page.js_errors
 
@@ -4294,8 +4295,8 @@ LINE_CARD = """(card) => { const c = document.querySelector(card);
     return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
              title: (c.querySelector('.pane-title h2') || {}).textContent || '',
              badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
-             ucs: [...c.querySelectorAll('.archtext-uc .archtext-story')].map((x) => x.dataset.archstory),
-             story: (c.querySelector('.archcard-story .archtext-sent') || {}).textContent || '' }; }"""
+             ucs: [...c.querySelectorAll('.archuc .archuc-follow')].map((x) => x.dataset.archstory),
+             story: (c.querySelector('.archcard-story .archuc-sent') || {}).textContent || '' }; }"""
 
 
 def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
@@ -4326,9 +4327,9 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         page.reload()
         _arch_ready(page)
         assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
-        uc = page.evaluate("""() => { const row = document.querySelector('#panel .archtext-uc');
+        uc = page.evaluate("""() => { const row = document.querySelector('#panel .archuc');
             row.querySelector('summary').click();
-            const btn = row.querySelector('.archtext-story'); const uc = btn.dataset.archstory;
+            const btn = row.querySelector('.archuc-follow'); const uc = btn.dataset.archstory;
             btn.click(); return uc; }""")
         page.wait_for_function(f"() => location.hash.includes('story={uc}')")
         _arch_ready(page)
@@ -4469,13 +4470,19 @@ def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
     assert busy, "the fixture's whole product needs a line taken by more than 3 use cases"
     with _served() as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        seen = page.evaluate("""() => [...document.querySelectorAll('#archtext .archtext-steps .archtext-line')].map((l) => ({
-            src: l.dataset.src, dst: l.dataset.dst,
-            feats: [...l.querySelectorAll(':scope .archtext-feat > summary .archtext-count')].map((c) => +c.textContent),
-            ucs: l.querySelectorAll('.archtext-uc').length,
-            follows: l.querySelectorAll('.archtext-uc .archtext-story[data-archstory]').length,
-            sents: l.querySelectorAll('.archtext-uc .archtext-sent').length }))""")
+        # EVERY LINE'S CARD, one click each: the card is what tells a line's use cases.
+        seen = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')]
+          .filter((p) => p.__cyHits && p.__cyHits.length).map((p) => {
+            p.__cyHits[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            const [src, dst] = decodeURIComponent(location.hash).split('sel=arch:')[1].split('&')[0].split('>');
+            const l = document.getElementById('panel');
+            return { src, dst,
+              feats: [...l.querySelectorAll('.archuc-feat > summary .archuc-count')].map((c) => +c.textContent),
+              ucs: l.querySelectorAll('.archuc').length,
+              follows: l.querySelectorAll('.archuc .archuc-follow[data-archstory]').length,
+              sents: l.querySelectorAll('.archuc .archuc-sent').length }; })""")
         by = {(r["src"], r["dst"]): r for r in seen}
+        assert len(by) == len(text["lines"]), "every line of the picture has a card"
         for e in [e for e in text["lines"] if not e["store"]]:
             r = by[(e["srcBox"], e["dstBox"])]
             assert r["ucs"] == len(ucs(e)) == r["follows"], (e["srcBox"], e["dstBox"], r)
@@ -4483,21 +4490,6 @@ def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
             if r["feats"]:
                 assert sum(r["feats"]) == r["ucs"] and len(r["feats"]) > 1 and r["ucs"] > 3, r
         assert any(r["feats"] for r in seen), "a busy line from several features is grouped by feature"
-        assert not page.js_errors, page.js_errors
-
-
-def test_following_a_story_from_a_use_case_shows_that_storys_own_sentence() -> None:
-    """A use case's row follows its story: its lines light up in its own order, and the text tells the
-    story's own sentence on each line."""
-    with _served() as url, _page(url + "#v=arch&cap=all") as page:
-        _arch_ready(page)
-        said = page.evaluate("""() => { const row = document.querySelector('#archtext .archtext-uc');
-            const text = row.querySelector('.archtext-sent').textContent.trim();
-            row.querySelector('.archtext-story').click(); return text; }""")
-        page.wait_for_function("() => location.hash.includes('story=')")
-        _arch_ready(page)
-        sentences = page.evaluate("() => [...document.querySelectorAll('#archtext .archtext-sent')].map((p) => p.textContent.trim())")
-        assert said in sentences, (said, sentences)
         assert not page.js_errors, page.js_errors
 
 
@@ -4519,36 +4511,34 @@ ARCH_BOX_BODY = """() => {
 }"""
 
 
-def test_a_click_on_a_box_keeps_that_boxs_steps_and_the_header_tag_lets_go_of_it() -> None:
-    """The box around the name selects it and keeps only the lines that touch it; a tag in the header
-    says whose lines these are, and its × shows every line again and lets go of the box."""
+def test_a_click_on_a_box_picks_it_and_the_header_tag_lets_go_of_it() -> None:
+    """The box around the name selects it and steps back what does not touch it; a tag in the header
+    says whose lines these are, and its × lets go of the box."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
         spot = page.evaluate(ARCH_BOX_BODY)
-        before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({
-            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
+            dim: document.querySelectorAll('#diagram g.node.dim').length,
             head: document.querySelector('.archthrough').hidden ? '' :
                   document.querySelector('.archthrough').textContent })""")
-        assert 0 < seen["shown"] < before, (before, seen)
-        assert seen["head"].startswith("Through"), seen
+        assert seen["dim"] > 0, seen
+        assert seen["head"] == f"Through {spot['name']} \u00d7", seen
         page.evaluate("() => document.querySelector('.archthrough [data-archthrough-clear]').click()")
         page.wait_for_timeout(300)
         seen = page.evaluate("""() => ({ hash: location.hash, tag: !document.querySelector('.archthrough').hidden,
-            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length })""")
-        assert seen == {"hash": seen["hash"], "tag": False, "shown": before} and "sel=" not in seen["hash"], seen
+            dim: document.querySelectorAll('#diagram g.node.dim').length })""")
+        assert not seen["tag"] and not seen["dim"] and "sel=" not in seen["hash"], seen
         assert not page.js_errors, page.js_errors
 
 
 def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -> None:
     """Four gestures every other picture has, which the Architecture picture lacked: resting on a box
     shows its card and no corner magnifier, a person's box picks like any other box and lights its
-    lines, and a click on empty space lets go of the box, in the text as well as on the drawing."""
+    lines, and a click on empty space lets go of the box, in the header's tag as well as on the drawing."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
         box = page.evaluate(ARCH_BOX_BODY)
         page.mouse.move(box["x"], box["y"])
         page.mouse.move(box["x"] + 1, box["y"])
@@ -4567,10 +4557,9 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({ hash: location.hash,
             dim: document.querySelectorAll('#diagram g.node.dim').length,
-            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
             head: document.querySelector('.archthrough').textContent })""")
         assert "sel=node%3ACYP" in seen["hash"], seen
-        assert seen["dim"] > 0 and 0 < seen["shown"] < before, (before, seen)
+        assert seen["dim"] > 0, seen
         assert seen["head"].startswith("Through"), seen
         # EMPTY SPACE: a point of the drawing with nothing drawn under it.
         empty = page.evaluate("""() => {
@@ -4584,10 +4573,9 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
         page.wait_for_timeout(500)
         seen = page.evaluate("""() => ({ hash: location.hash,
             selected: document.querySelectorAll('#diagram .is-selected').length,
-            shown: document.querySelectorAll('#archtext .archtext-line:not([hidden])').length,
             filtered: !document.querySelector('.archthrough').hidden })""")
         assert "sel=" not in seen["hash"] and seen["selected"] == 0, seen
-        assert seen["shown"] == before and not seen["filtered"], (before, seen)
+        assert not seen["filtered"], seen
         assert not page.js_errors, page.js_errors
 
 
@@ -4816,7 +4804,7 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
     """A group of parts is its subsystem's box on the layered picture. It names the parts it holds,
     each a tag that opens that part, with no sentence and no type word: every box inside the product
     is a subsystem on this picture, and its card is one hover away. The box around the name
-    selects it, shows the subsystem's card and keeps the group's own steps in the text; the name
+    selects it, shows the subsystem's card and names the group in the header's tag; the name
     opens the subsystem."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
     with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
@@ -4881,7 +4869,7 @@ VISIBLE_LINES = """() => {
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
     """A picture with more lines than a reader can follow draws one line per pair of layers that most of
     its layer takes, with no number, and none of its boxes' own. A click on a layer line draws the box
-    lines it stands for on top of the picture and keeps them alone in the text; a click on a box draws
+    lines it stands for on top of the picture and names them in the header's tag; a click on a box draws
     its own lines; a second click shows the picture at rest again."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
@@ -4911,7 +4899,7 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         page.evaluate(click)
         # the layer line stood for these lines: drawn beside them, it would say the same thing twice
         assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]) - 1, "box": under}
-        assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == under
+        assert page.evaluate("() => document.querySelector('.archthrough').textContent").startswith("From ")
         page.evaluate(click)
         assert page.evaluate(VISIBLE_LINES)["box"] == rest
         # THE BOX WITH THE MOST LINES, clicked on its body: the picture is wider than the window, so a
@@ -4964,7 +4952,7 @@ def test_a_line_between_layers_is_picked_and_its_card_lists_the_lines_it_stands_
         .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
     read = """() => ({ hash: decodeURIComponent(location.hash), shown: !document.getElementById('panel').hidden,
         rows: document.querySelectorAll('#panel .archcard-line').length,
-        ucs: document.querySelectorAll('#panel .archcard-line .archtext-story').length,
+        ucs: document.querySelectorAll('#panel .archcard-line .archuc-follow').length,
         drawn: document.querySelectorAll('#diagram .arch-ov-line').length })"""
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
@@ -5029,10 +5017,10 @@ def test_a_story_followed_from_its_address_draws_its_lines_on_a_crowded_picture(
         assert not page.js_errors, page.js_errors
 
 
-def test_a_line_up_the_layers_points_the_way_it_runs_and_finds_its_text() -> None:
+def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_runs() -> None:
     """A line from a lower layer up to a higher one is written the other way round, so the layers stay
-    stacked. On screen it keeps one head, at the box it goes to, and a click on it marks its own line
-    in the text, the way it runs."""
+    stacked. On screen it keeps one head, at the box it goes to, and a click on it picks the line the
+    way it runs."""
     up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen)["lines"]
           if e.get("up")]
     assert up, "the changed map must draw a line up the layers"
@@ -5045,10 +5033,10 @@ def test_a_line_up_the_layers_points_the_way_it_runs_and_finds_its_text() -> Non
         }""")
         assert seen["n"] == len(up), (seen, up)
         assert all(h == [True, False] for h in seen["heads"]), seen
-        page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]')
+        page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]').__cyHits[0]
             .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
-        on = page.evaluate("""() => { const el = document.querySelector('#archtext .archtext-on');
-            return el ? [el.dataset.src, el.dataset.dst] : null; }""")
+        on = page.evaluate("""() => { const h = decodeURIComponent(location.hash).split('sel=arch:')[1];
+            return h ? h.split('&')[0].split('>') : null; }""")
         assert on is not None and tuple(on) in up, (on, up)
         assert not page.js_errors, page.js_errors
 
