@@ -1331,7 +1331,7 @@ def test_a_line_joins_the_card_to_the_one_element_it_describes() -> None:
     assert wrap.index('id="callout"') < wrap.index('id="panel"'), "…and under the card, not over it"
     lay = css[css.index("#callout {"): css.index("}", css.index("#callout {"))]
     assert "z-index: 3" in lay and "pointer-events: none" in lay
-    pan = css[css.index("#panel {"): css.index("}", css.index("#panel {"))]
+    pan = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
     assert "z-index: 4" in pan, "the card stays above the line that reaches it"
     # ONE subject, or none. `.is-selected` is put on a box by glowNode and on an arrow by glowEdge, so
     # one query covers both — an arrow selection could not answer this before.
@@ -1343,7 +1343,7 @@ def test_a_line_joins_the_card_to_the_one_element_it_describes() -> None:
     # The `hidden` PROPERTY does not exist on an SVG element, so the attribute is set on both sides.
     hide = js[js.index("function hideCallout() {"): js.index("\n}", js.index("function hideCallout() {"))]
     assert "callout.setAttribute('hidden', '')" in hide
-    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function syncCallout() {"))]
+    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function calloutLineHtml("))]
     assert "callout.removeAttribute('hidden')" in draw, "`callout.hidden = false` leaves the attribute on"
     assert "co-case" in draw and "co-line" in draw, "a white casing under the blue line, or it vanishes"
     assert "hideCallout(); return;" in draw, "an element scrolled out of the drawing has no end to point at"
@@ -1438,7 +1438,7 @@ def test_the_line_points_at_an_arrows_own_middle_not_its_boxs() -> None:
     assert "(el && el._segs) || [el]" in fn, "a self-arrow is three paths walked as one length"
     assert "getScreenCTM()" in fn, "the path's own numbers are in the diagram's units, which pan and zoom"
     assert "if (!total) return null;" in fn, "a box has no length — the caller falls back to its border"
-    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function syncCallout() {"))]
+    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function calloutLineHtml("))]
     assert "const mid = arrowMidpoint(el);" in draw
     assert "b = mid || borderPoint(e, pc)" in draw, "an arrow points at its middle, a box at its border"
 
@@ -1599,7 +1599,7 @@ def test_clicking_an_arrow_points_the_line_at_its_number_not_its_middle() -> Non
     assert "resolve(m, p, label)" in bind and "anchor: r.anchor" in bind
     # …and the dot stands BESIDE the digit. A digit is 3x8px at fit zoom, smaller than the dot, so a dot
     # on its border hid the one thing the line was there to point at.
-    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function syncCallout() {"))]
+    draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function calloutLineHtml("))]
     assert "grow(rectOf(el), isStepAnchor(el) ? NUM_DOT_CLEAR : 0)" in draw
     assert "const NUM_DOT_CLEAR = 7;" in js
 
@@ -1610,13 +1610,13 @@ def test_everything_that_floats_over_the_drawing_states_its_layer() -> None:
     one added decides."""
     css = (VIEWER_DIR / "viewer.css").read_text()
     layers = {}
-    for sel in ("#callout", "#panel", "#envpicker", "#flowpicker"):
+    for sel in ("#callout", "#panel, #tagcard", "#envpicker", "#flowpicker"):
         # line-anchored, so a rule qualified by an ancestor selector cannot answer for the element.
         at = css.index("\n" + sel + " {") + 1
         block = css[at: css.index("}", at)]
         assert "z-index" in block, sel
         layers[sel] = int(block.split("z-index:")[1].split(";")[0].strip())
-    assert layers["#callout"] < layers["#panel"], "the line ends at the card's edge, never across its face"
+    assert layers["#callout"] < layers["#panel, #tagcard"], "the line ends at a card's edge, never across its face"
     assert layers["#callout"] < layers["#envpicker"], "…and never across a floater's face either"
 
 
@@ -1658,7 +1658,7 @@ def test_the_card_comes_to_what_you_picked_and_stays_put_while_it_can() -> None:
     down would be one the very next click overrules. A drag writes only to `lastCardPlace`, which rule
     four then honours for as long as it holds."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    fn = js[js.index("function placeCardNear(el) {"): js.index("\n}", js.index("function placeCardNear(el) {"))]
+    fn = js[js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"): js.index("\n}", js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"))]
     assert "if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE)" in fn, \
         "rule four, and it is tried FIRST — against the strictest set"
     # The floor is on the line that will actually be DRAWN — to a box's border, an arrow's middle.
@@ -2056,7 +2056,7 @@ def test_a_text_view_has_no_selection_card_and_a_diagram_only_has_one_when_it_sa
     assert "paneSync();" in js[js.index("function applyDefaultPanel(s) {"):
                                 js.index("\n}", js.index("function applyDefaultPanel(s) {"))]
     # It floats over the drawing, and #diagwrap is what it floats in.
-    pane = css[css.index("#panel {"): css.index("}", css.index("#panel {"))]
+    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
     assert "position: absolute" in pane and "top: 12px" in pane and "right: 12px" in pane, \
         "top-right: #envpicker owns the bottom-left corner"
     assert "max-height" in pane, "a few states run long and must scroll rather than fill the screen"
@@ -2147,7 +2147,7 @@ def test_the_card_is_dragged_by_its_bar_and_sized_by_nothing() -> None:
     assert "closest('#panelbar')" in js, "the bar is the handle"
     assert "panelBox" not in js and "appliedBox" not in js, "the remembered box is back"
     assert "coyomap.panelBox" not in js, "…and so is the key it was written under"
-    pane = css[css.index("#panel {"): css.index("}", css.index("#panel {"))]
+    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
     assert "resize:" not in pane, "the corner grip is back"
     assert "overflow: auto" in pane, "a card past its ceiling scrolls inside itself"
     assert "min-width" in pane, "it must not shrink to an unreadable stub sideways"
@@ -2349,9 +2349,9 @@ def test_the_card_dodges_the_hand_that_opened_it_and_never_the_one_that_moved_af
     selection, same box: x=702 with the pointer away, x=222 with the pointer on the card. Frozen, both
     are 702."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    place = js[js.index("function placeCardNear(el) {"):
-               js.index("\n}", js.index("function placeCardNear(el) {"))]
-    assert "const hand = handAt" in place, "the hand is the frozen one"
+    place = js[js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"):
+               js.index("\n}", js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"))]
+    assert "const hand = main && handAt" in place, "the hand is the frozen one, and only the box's card dodges it"
     assert "pointerAt" not in place, "the live pointer is back in the placement"
     # …frozen at the ONE place a card is put up for a new selection, so the hand it dodges is the hand
     # that opened it.
@@ -2466,7 +2466,7 @@ def test_the_zoom_control_is_absent_on_a_page_with_no_diagram() -> None:
     assert keep.count("...fixed") == 4, "in every set: a control is never the concession to make"
     # Its ceiling keeps it inside the box #diagwrap clips; the placement, not the ceiling, is what
     # keeps it off the control.
-    pane = css[css.index("#panel {"): css.index("}", css.index("#panel {"))]
+    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
     assert "calc(100% - 24px)" in pane, "the card must stay inside the drawing #diagwrap clips"
 
 def test_a_sentence_is_never_set_as_a_pill() -> None:
@@ -5596,7 +5596,7 @@ def test_a_pointer_that_did_not_move_is_not_hovering() -> None:
     assert "Math.abs(e.clientX - cursorHeldAt.x) < POINTER_MOVE_PX" in mv, "a move is a change of place, not an event"
     assert "if (!pointerFresh && !still) releasePointer();" in mv
     # the three hovers read the gate, keep the denied enter, and drop it on a leave
-    for fn, enter in (("function previewOnHover(scene, els, show, anchor, inner) {", "whenPointerMoves(enter)"),
+    for fn, enter in (("function previewOnHover(scene, els, show, anchor) {", "whenPointerMoves(enter)"),
                       ("function bindHoverGlow(scene, el, id) {", "whenPointerMoves(on)"),
                       ("function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actionFn) {", "whenPointerMoves(on)")):
         body = js[js.index(fn): js.index("\n}", js.index(fn))]
@@ -5632,8 +5632,8 @@ def test_hovering_a_box_shows_its_card_and_leaving_puts_back_what_was_there() ->
     The LINE follows the pointer too: it would otherwise point at the last thing clicked while the card
     described something else."""
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
-    fn = js[js.index("function previewOnHover(scene, els, show, anchor, inner) {"):
-            js.index("\n}", js.index("function previewOnHover(scene, els, show, anchor, inner) {"))]
+    fn = js[js.index("function previewOnHover(scene, els, show, anchor) {"):
+            js.index("\n}", js.index("function previewOnHover(scene, els, show, anchor) {"))]
     assert "HOVER_CARD_MS" in fn and "if (panelDrag || srcSliding) return;" in fn
     # A DELAYED leave, cancelled by a re-enter: moving from an arrow's line onto its own number fires
     # leave-then-enter, and restoring in between blinked the card on a pointer that never left.
@@ -5717,7 +5717,8 @@ def test_the_in_a_box_pill_is_one_component_that_no_page_restyles() -> None:
         ".item-pill-door",                                # the form that acts
         ".item-pill-door:hover",                          # …and the only thing hover changes
         "#diagram .item-pill .ibox-gly, #diagram .item-pill .story-glyph, "
-        "#panel .item-pill .ibox-gly, #panel .item-pill .story-glyph",   # one size on a diagram
+        "#panel .item-pill .ibox-gly, #panel .item-pill .story-glyph, "
+        "#tagcard .item-pill .ibox-gly, #tagcard .item-pill .story-glyph",   # one size on a diagram and its cards
         ".ibox-band .item-pill, .journey-ifs .item-pill",                # …and one inside a box
         ".ibox-band .item-pill .ibox-gly, .ibox-band .item-pill .story-glyph, "
         ".journey-ifs .item-pill .ibox-gly",
@@ -6011,9 +6012,9 @@ def test_every_box_is_bound_through_one_binder() -> None:
     calls = [ln.strip() for ln in js.splitlines() if "bindHoverGlow(" in ln and "function bindHoverGlow" not in ln]
     assert calls == ["bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins"], calls
     box = js[js.index("function bindBox(scene, el, id, opts) {"):js.index("\n}", js.index("function bindBox("))]
-    assert "previewOnHover(scene, el, opts.show, null, BOX_TAG);" in box
-    # …and every tag inside the box shows ITS card, the line pointing at the tag
-    assert "if (GRAPH.nodes[tid]) previewOnHover(scene, t, boxCard(tid), t);" in box
+    assert "previewOnHover(scene, el, opts.show);" in box
+    # …and every tag inside the box shows ITS card as a second card, the box's card staying up
+    assert "if (GRAPH.nodes[tid]) previewTagOnHover(t, tid);" in box
     assert "if (el.classList.contains('envout')) return;" in box
     for binder in ("function bindNodes(", "function bindGroupContainer(", "function bindClassBoxes(",
                    "function bindAliasBox("):

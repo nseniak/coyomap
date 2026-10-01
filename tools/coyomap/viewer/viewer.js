@@ -261,6 +261,7 @@ diaghead.addEventListener('click', (e) => {
   const sw = e.target.closest && e.target.closest('[data-archhp]');
   if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
 });
+const TAG_CARD = document.getElementById('tagcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
 const tip = document.getElementById('tip');
@@ -1807,6 +1808,7 @@ let sceneGen = 0;
 function makeScene(root, defaultPanel) {
   sceneGen++;
   hoverPreview = null;   // nothing on the new drawing is being previewed yet
+  hideTagCard();         // …and no tag of the old one has a card up
   holdPointer();         // …and the cursor already over it is not hovering until it moves
   // dimEls: a flat list of extra focusable elements (the Happy Path's actor figures, lifelines and
   // message text/lines) that the standard node/edge focus model doesn't cover — dimmed/restored together.
@@ -4486,12 +4488,12 @@ function bindBox(scene, el, id, opts) {
   bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins
   if (opts.tip) attachTip(el, opts.tip);
   if (opts.show) {
-    previewOnHover(scene, el, opts.show, null, BOX_TAG);
+    previewOnHover(scene, el, opts.show);
     // A TAG IN A BOX — a part in its subsystem's box, a person or a record on a shared sub-use case's —
-    // shows ITS card on a hover, and the line points at the tag, the way a box's card points at the box.
+    // shows ITS card on a hover, as a second card beside the box's, its line pointing at the tag.
     el.querySelectorAll(BOX_TAG).forEach((t) => {
       const tid = t.getAttribute('data-item');
-      if (GRAPH.nodes[tid]) previewOnHover(scene, t, boxCard(tid), t);
+      if (GRAPH.nodes[tid]) previewTagOnHover(t, tid);
     });
   }
   el.addEventListener('click', (ev) => {
@@ -7988,9 +7990,9 @@ function setStepAnchor(el) { stepAnchorEl = (el && el.isConnected) ? el : null; 
 let pointerAt = null;
 document.addEventListener('pointermove', (e) => { pointerAt = { x: e.clientX, y: e.clientY }; },
                           { passive: true, capture: true });
-function pointerInCard() {
-  if (!pointerAt || PANEL_HOST.hidden) return false;
-  const r = PANEL_HOST.getBoundingClientRect();
+function pointerIn(card) {
+  if (!pointerAt || !card || card.hidden) return false;
+  const r = card.getBoundingClientRect();
   return pointerAt.x >= r.left && pointerAt.x <= r.right
       && pointerAt.y >= r.top && pointerAt.y <= r.bottom;
 }
@@ -8012,18 +8014,9 @@ const HOVER_LEAVE_MS = 90;
 //
 // The leave is DELAYED, and a re-enter cancels it: moving from an arrow's line onto its own number fires
 // leave-then-enter, and restoring in between made the card blink on a pointer that never left.
-// `inner` (optional): a selector for things INSIDE these elements that show a card of their own — a
-// part tag inside a box. While the pointer is on one, this card stands aside; when the pointer comes
-// back to the box's own body, this card returns.
-function previewOnHover(scene, els, show, anchor, inner) {
+function previewOnHover(scene, els, show, anchor) {
   const list = (Array.isArray(els) ? els : [els]).filter(Boolean);
   const at = anchor || list[0];
-  const onInner = () => {
-    if (!inner || !pointerAt) return false;
-    const e = document.elementFromPoint(pointerAt.x, pointerAt.y);
-    const hit = e && e.closest && e.closest(inner);
-    return !!hit && at.contains(hit);
-  };
   // THE SCREEN THIS PREVIEW BELONGS TO. A hover started just before a click fires its timer AFTER the
   // click has navigated, and wrote the old screen's card onto the new one — measured, a 160ms window,
   // and the card then named a step number the new screen does not have. The timer carries the
@@ -8034,13 +8027,9 @@ function previewOnHover(scene, els, show, anchor, inner) {
   const enter = () => {
     if (!pointerFresh) { whenPointerMoves(enter); return; }   // not a hover yet — see holdPointer
     clearTimeout(outTimer); outTimer = null;
-    if (inTimer) return;   // already armed: one wait per hover, however many events asked
-    hoverArming++;
     inTimer = setTimeout(() => {
-      hoverArming--; inTimer = null;
       if (gen !== sceneGen || !at.isConnected) return;
       if (panelDrag || srcSliding) return;   // not while the reader is moving the card or the column
-      if (onInner()) return;                 // a tag inside has a card of its own, and it shows that
       // A PIN BEATS A HOVER. Once the reader has clicked something they have asked for that card and
       // said so; a pointer crossing a neighbour on its way somewhere else has asked for nothing. The
       // Interfaces picture has always worked this way (`if (!pinned) show(iid)`), and this is the same
@@ -8055,18 +8044,15 @@ function previewOnHover(scene, els, show, anchor, inner) {
   };
   const leave = () => {
     forgetPointerMove(enter);
-    if (inTimer) { clearTimeout(inTimer); inTimer = null; hoverArming--; }
+    clearTimeout(inTimer); inTimer = null;
     if (gen !== sceneGen || hoverPreview !== at) return;
     outTimer = setTimeout(() => {
-      // ANOTHER CARD IS ON ITS WAY: the pointer left a tag for the box around it, or the other way
-      // round. Putting the default card back in between would blink it for one frame.
-      if (hoverArming > 0) { outTimer = null; return; }
       // THE POINTER IS STANDING IN THE CARD. Leaving the thing does not mean leaving its answer: the
       // card comes to what you hovered, so it can arrive under the pointer — and then hiding it puts
       // the pointer back on the thing, which shows it again, which hides it again. Measured as an
       // endless blink on a step arrow. While the pointer is inside the card, the card stays; the
       // pointer leaving the card runs this again and it goes then.
-      if (pointerInCard()) { outTimer = null; return; }
+      if (pointerIn(PANEL_HOST) || pointerIn(TAG_CARD)) { outTimer = null; return; }
       hoverPreview = null;
       selApply(scene);     // the selection's card again, or this view's default
       paneSync();
@@ -8087,15 +8073,50 @@ function previewOnHover(scene, els, show, anchor, inner) {
   for (const el of list) {
     el.addEventListener('mouseenter', enter);
     el.addEventListener('mouseleave', leave);
-    // Back from a tag onto the box's own body: no `mouseenter` fires on the box, which the pointer
-    // never left, so its card is asked for again here.
-    if (inner) el.addEventListener('mouseover', (ev) => {
-      if (hoverPreview !== at && !(ev.target.closest && ev.target.closest(inner))) enter();
-    });
   }
 }
-// How many hover cards are armed and waiting to show (see previewOnHover's leave).
-let hoverArming = 0;
+// THE TAG'S CARD, BESIDE THE BOX'S. A part's tag inside its subsystem's box shows the part's card as a
+// SECOND card, and the box's card stays: the reader asked about the part without leaving the box, and
+// the box's card is the context the part is read in. Its own line points at the tag. It goes when the
+// pointer leaves the tag, unless the pointer went into it; the card's own mouseleave then finishes.
+let tagCardFor = null;   // the tag the second card is about, while it is up
+function showTagCard(t, id) {
+  TAG_CARD.innerHTML = `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
+  bindElementCards(TAG_CARD);
+  TAG_CARD.hidden = false;
+  tagCardFor = t;
+  // It keeps clear of the box's card as well as of the tag: two cards on top of each other are one.
+  const main = PANEL_HOST.hidden ? [] : [grow(rectOf(PANEL_HOST), CARD_CLEAR)];
+  placeCardNear(t, TAG_CARD, main);
+  syncCallout();
+}
+function hideTagCard() {
+  if (!TAG_CARD || TAG_CARD.hidden) return;
+  TAG_CARD.hidden = true;
+  TAG_CARD.innerHTML = '';
+  tagCardFor = null;
+  syncCallout();
+}
+function previewTagOnHover(t, id) {
+  const gen = sceneGen;
+  let inTimer = null, outTimer = null;
+  t.addEventListener('mouseenter', () => {
+    if (!pointerFresh) return;   // not a hover yet — see holdPointer
+    clearTimeout(outTimer);
+    inTimer = setTimeout(() => {
+      if (gen !== sceneGen || !t.isConnected || panelDrag || srcSliding) return;
+      showTagCard(t, id);
+    }, HOVER_CARD_MS);
+  });
+  t.addEventListener('mouseleave', () => {
+    clearTimeout(inTimer);
+    outTimer = setTimeout(() => {
+      if (pointerIn(TAG_CARD)) return;
+      if (tagCardFor === t) hideTagCard();
+    }, HOVER_LEAVE_MS);
+  });
+}
+if (TAG_CARD) TAG_CARD.addEventListener('mouseleave', () => hideTagCard());
 // IF THE CARD COVERS WHAT IT DESCRIBES, MOVE THE CARD. The card is the thing that can move: the element
 // is where the drawing put it, and shifting the drawing instead would move everything else with it.
 //
@@ -8230,11 +8251,15 @@ function cardBoxOk(box, w, keep, a, e) {
 function cardRectAt(left, top, W, H) {
   return { left, top, right: left + W, bottom: top + H, width: W, height: H };
 }
-function placeCardNear(el) {
+// `card`: which card to place, the box's (PANEL_HOST, the default) or a tag's (TAG_CARD). Only the
+// box's card remembers where it stood and keeps clear of the hand that opened it. `also`: more shapes
+// to keep clear of, in every set — for a tag's card, the box's card.
+function placeCardNear(el, card = PANEL_HOST, also = []) {
+  const main = card === PANEL_HOST;
   const wrap = document.getElementById('diagwrap');
-  if (!wrap || !el || PANEL_HOST.hidden) return;
+  if (!wrap || !el || card.hidden) return;
   const w = wrap.getBoundingClientRect();
-  const p = PANEL_HOST.getBoundingClientRect();
+  const p = card.getBoundingClientRect();
   const W = p.width, H = p.height;
   if (!W || !H) return;
   // WHERE THE LINE LANDS: an arrow's own middle, or the box's centre. The card is not placed yet, so a
@@ -8246,24 +8271,24 @@ function placeCardNear(el) {
   // A BOX's line ends on its border, an arrow's on the arrow itself — `e` is null for an arrow so the
   // length is measured to the middle the line really meets.
   const e = mid ? null : own;
-  const sets = cardKeepSets(el);
+  const sets = cardKeepSets(el).map((set) => [...set, ...also]);
   // The reader's own hand is a shape to keep clear of, the same as the thing itself — but the first
   // sets only. By the last one there is barely room for the card at all.
-  const hand = handAt
+  const hand = main && handAt
     ? { left: handAt.x - 14, top: handAt.y - 14, right: handAt.x + 14,
         bottom: handAt.y + 14, width: 28, height: 28 }
     : null;
   const put = (left, top) => {
-    const st = PANEL_HOST.style;
+    const st = card.style;
     st.right = 'auto';
     st.left = Math.round(left - w.left) + 'px';
     st.top = Math.round(top - w.top) + 'px';
-    lastCardPlace = { left: Math.round(left - w.left), top: Math.round(top - w.top) };
+    if (main) lastCardPlace = { left: Math.round(left - w.left), top: Math.round(top - w.top) };
   };
   // RULE 4 FIRST: a card already standing somewhere that works stays there, so clicking along a walk
   // does not send it round the screen. The cap is what stops "stays there" turning into "never moves".
   const keep0 = hand ? [...sets[0], hand] : sets[0];
-  if (lastCardPlace) {
+  if (main && lastCardPlace) {
     const box = cardRectAt(w.left + lastCardPlace.left, w.top + lastCardPlace.top, W, H);
     if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE) {
       put(box.left, box.top); return;
@@ -8304,13 +8329,25 @@ function hideCallout() {
   callout.setAttribute('hidden', '');
   callout.innerHTML = '';
 }
+// ONE LINE PER CARD THAT IS UP: the box's card to what it describes, and a tag's card to its tag.
 function syncCallout() {
   if (!callout) return;
   const wrap = document.getElementById('diagwrap');
-  const el = soleSelectedEl();
-  if (!wrap || !el || PANEL_HOST.hidden) { hideCallout(); return; }
+  if (!wrap) { hideCallout(); return; }
   const w = wrap.getBoundingClientRect();
-  const p = PANEL_HOST.getBoundingClientRect();
+  const el = soleSelectedEl();
+  const html = (el && !PANEL_HOST.hidden ? calloutLineHtml(PANEL_HOST.getBoundingClientRect(), el, w) : '')
+    + (tagCardFor && TAG_CARD && !TAG_CARD.hidden ? calloutLineHtml(TAG_CARD.getBoundingClientRect(), tagCardFor, w) : '');
+  if (!html) { hideCallout(); return; }
+  callout.setAttribute('viewBox', `0 0 ${Math.round(w.width)} ${Math.round(w.height)}`);
+  callout.setAttribute('width', Math.round(w.width));
+  callout.setAttribute('height', Math.round(w.height));
+  callout.innerHTML = html;
+  callout.removeAttribute('hidden');
+}
+// One card's line, from the card `p` to the element `el`, in the line layer's coordinates (`w`); ''
+// when the element is out of the drawing area.
+function calloutLineHtml(p, el, w) {
   // A NUMBER IS SMALLER THAN THE DOT. A digit on the map is a few pixels of text at fit zoom (3x8px on
   // mcpolis UC1), so a dot on its border sat on the digit and hid the one thing the line was there to
   // point at. The line stops short of a number, or of the row of them, by the picked highlight's own
@@ -8318,23 +8355,17 @@ function syncCallout() {
   const e = grow(rectOf(el), isStepAnchor(el) ? NUM_DOT_CLEAR : 0);
   // An element scrolled out of the drawing area has no end to point at, and a line to a point beyond the
   // edge would run off the layer. The card's title still names it.
-  if (e.right <= w.left || e.left >= w.right || e.bottom <= w.top || e.top >= w.bottom) {
-    hideCallout(); return;
-  }
+  if (e.right <= w.left || e.left >= w.right || e.bottom <= w.top || e.top >= w.bottom) return '';
   const pc = { x: (p.left + p.right) / 2, y: (p.top + p.bottom) / 2 };
   // An arrow points at its own middle; a box points at the border you meet coming from the card.
   const mid = arrowMidpoint(el);
   const ec = mid || { x: (e.left + e.right) / 2, y: (e.top + e.bottom) / 2 };
   const a = borderPoint(p, ec), b = mid || borderPoint(e, pc);
   const ox = w.left, oy = w.top;   // the layer's own origin, so both ends are in its coordinates
-  callout.setAttribute('viewBox', `0 0 ${Math.round(w.width)} ${Math.round(w.height)}`);
-  callout.setAttribute('width', Math.round(w.width));
-  callout.setAttribute('height', Math.round(w.height));
   const seg = `x1="${a.x - ox}" y1="${a.y - oy}" x2="${b.x - ox}" y2="${b.y - oy}"`;
   // The casing goes down first, so the blue line rides in a white gap and reads over box, arrow or blank.
-  callout.innerHTML = `<line class="co-case" ${seg}></line><line class="co-line" ${seg}></line>`
+  return `<line class="co-case" ${seg}></line><line class="co-line" ${seg}></line>`
     + `<circle class="co-dot" cx="${b.x - ox}" cy="${b.y - oy}" r="3.5"></circle>`;
-  callout.removeAttribute('hidden');
 }
 // MEASURE AFTER THE PAINT, NOT BEFORE IT.
 //

@@ -573,7 +573,7 @@ body:not(.served) #leftcol { flex: 1 1 auto; width: auto; }
 /* NO RULE HERE ANY MORE. The frameless look is `bare`, an option ON the box (see itemBoxHtml), not
    three declarations reaching in from its container — reaching in is how the same box came to read
    one way on one screen and another on the next. */
-#panel .pane-card .ecard:hover .ibox-name { text-decoration: underline; }
+#panel .pane-card .ecard:hover .ibox-name, #tagcard .pane-card .ecard:hover .ibox-name { text-decoration: underline; }
 /* No size bump. It was set when the pane was a 300px band under the diagram and the card in it was the
    only thing there; now the card floats and a reader meets the SAME use case in a grid and over a
    drawing, so a 15px name against a 14px one is one of the six differences that made them read as two
@@ -722,7 +722,8 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
              background: #fbfbfe; color: #374151; border: 1px solid #dfe2ec; }
 .item-pill .ibox-gly, .item-pill .story-glyph { width: 12px; height: 12px; flex: 0 0 auto; }
 #diagram .item-pill .ibox-gly, #diagram .item-pill .story-glyph,
-#panel .item-pill .ibox-gly, #panel .item-pill .story-glyph { width: 12px; height: 12px; }
+#panel .item-pill .ibox-gly, #panel .item-pill .story-glyph,
+#tagcard .item-pill .ibox-gly, #tagcard .item-pill .story-glyph { width: 12px; height: 12px; }
 /* …and only the DOOR form takes a pointer. A pill whose thing is already on the reader's screen is
    the same pill with no click, and it must not look like one that acts. */
 .item-pill-door { cursor: pointer; }
@@ -1349,7 +1350,7 @@ body.tree-browsing #codeview { display: none; }
    over — measured on argus, an actor's card ran 362px of a 736px drawing and a busier one goes further.
    55% leaves the drawing the larger half whatever the window, with a floor so a short pane still shows
    a usable card; past it the card scrolls inside itself. */
-#panel { position: absolute; top: 12px; right: 12px; z-index: 4; width: 380px; max-width: calc(100% - 24px);
+#panel, #tagcard { position: absolute; top: 12px; right: 12px; z-index: 4; width: 380px; max-width: calc(100% - 24px);
 /* …and never past the bottom of the drawing, which #diagwrap clips. The 200px floor is a floor, so a
    short drawing (a 900x420 window leaves 203px) pushed the card out through the bottom edge. `min()`
    keeps the 55%/200px rule wherever there is room and yields only in that sliver; the card scrolls. */
@@ -1359,7 +1360,10 @@ body.tree-browsing #codeview { display: none; }
          padding: 14px 16px; overflow: auto;
          background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
          box-shadow: 0 6px 22px rgba(15, 23, 42, .16); }
-#panel[hidden] { display: none; }
+#panel[hidden], #tagcard[hidden] { display: none; }
+/* THE TAG'S CARD (a part's tag inside its subsystem's box): the same card, beside the box's, a little
+   narrower, so the two read as the box and one thing in it. */
+#tagcard { width: 320px; min-width: 0; }
 /* PLACED BUT NOT YET SHOWN: the card is measured (it keeps its box) and painted nothing, while the
    drawing finishes travelling under it. `visibility`, never `display`, because the placement at the
    end of the move has to measure the real card's width and height. */

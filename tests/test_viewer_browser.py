@@ -4474,13 +4474,18 @@ def test_picking_a_box_changes_nothing_inside_it() -> None:
         assert not page.js_errors, page.js_errors
 
 
-def test_a_part_tag_shows_its_own_card_and_the_box_takes_its_card_back() -> None:
-    """Resting on a part's tag inside its subsystem's box shows the PART's card, its line pointing at the
-    tag; back on the box's own body, the subsystem's card returns. The box's card stands aside while the
-    pointer is on a tag, or the two would fight over the one card."""
+def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
+    """Resting on a part's tag inside its subsystem's box shows the PART's card as a second card, and the
+    box's card stays: the part is read in its box's context. Each card has its own line, the second one
+    pointing at the tag. Back on the box's own body, the part's card goes and the box's stays."""
     with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        card = "() => (document.querySelector('#panel .ibox-name') || {}).textContent || ''"
+        cards = """() => { const n = (c) => { const e = document.querySelector(c);
+            return !e || e.hidden ? '' : ((e.querySelector('.ibox-name') || {}).textContent || '').trim(); };
+          const r = (c) => { const e = document.querySelector(c); return e && !e.hidden ? e.getBoundingClientRect() : null; };
+          const a = r('#panel'), b = r('#tagcard');
+          return { box: n('#panel'), tag: n('#tagcard'), lines: document.querySelectorAll('#callout .co-line').length,
+                   overlap: !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) }; }"""
         # A BOX ON SCREEN, top and bottom: the picture is wider and taller than the window.
         k = page.evaluate("""() => [...document.querySelectorAll('#diagram g.node .ibox-map')].findIndex((b) => {
             const r = b.getBoundingClientRect(), d = document.querySelector('#diagram').getBoundingClientRect();
@@ -4493,24 +4498,24 @@ def test_a_part_tag_shows_its_own_card_and_the_box_takes_its_card_back() -> None
         part_name = tag.text_content().strip()
         bb, tb = box.bounding_box(), tag.bounding_box()
         assert bb and tb
-        body = (bb["x"] + bb["width"] - 3, bb["y"] + 4)   # the top-right corner: the tag's card opens below
+        body = (bb["x"] + bb["width"] - 3, bb["y"] + 4)
         page.mouse.move(body[0] - 1, body[1])
         page.mouse.move(*body)
         page.wait_for_timeout(500)
-        assert page.evaluate(card).strip() == sub_name
+        assert page.evaluate(cards) == {"box": sub_name, "tag": "", "lines": 1, "overlap": False}
         page.mouse.move(tb["x"] + tb["width"] / 2, tb["y"] + tb["height"] / 2, steps=4)
         page.wait_for_timeout(500)
-        assert page.evaluate(card).strip() == part_name
-        # the line lands on the tag, not on the box around it
-        end = page.evaluate("""() => { const l = document.querySelector('#callout .co-line'), m = l.getScreenCTM();
-            const at = (x, y) => [m.a * x + m.e, m.d * y + m.f], v = (k) => l[k].baseVal.value;
-            return [at(v('x1'), v('y1')), at(v('x2'), v('y2'))]; }""")
+        assert page.evaluate(cards) == {"box": sub_name, "tag": part_name, "lines": 2, "overlap": False}
+        # the second line lands on the tag, not on the box around it
+        ends = page.evaluate("""() => [...document.querySelectorAll('#callout .co-line')].map((l) => {
+            const m = l.getScreenCTM(), v = (k) => l[k].baseVal.value;
+            return [m.a * v('x2') + m.e, m.d * v('y2') + m.f]; })""")
         near = lambda pt: (tb["x"] - 3 <= pt[0] <= tb["x"] + tb["width"] + 3
                            and tb["y"] - 3 <= pt[1] <= tb["y"] + tb["height"] + 3)
-        assert any(near(pt) for pt in end), (end, tb)
+        assert any(near(pt) for pt in ends), (ends, tb)
         page.mouse.move(*body, steps=4)
         page.wait_for_timeout(500)
-        assert page.evaluate(card).strip() == sub_name
+        assert page.evaluate(cards) == {"box": sub_name, "tag": "", "lines": 1, "overlap": False}
         assert not page.js_errors, page.js_errors
 
 
