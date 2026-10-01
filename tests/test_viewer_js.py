@@ -1331,7 +1331,7 @@ def test_a_line_joins_the_card_to_the_one_element_it_describes() -> None:
     assert wrap.index('id="callout"') < wrap.index('id="panel"'), "…and under the card, not over it"
     lay = css[css.index("#callout {"): css.index("}", css.index("#callout {"))]
     assert "z-index: 3" in lay and "pointer-events: none" in lay
-    pan = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
+    pan = css[css.index("#panel, #peekcard {"): css.index("}", css.index("#panel, #peekcard {"))]
     assert "z-index: 4" in pan, "the card stays above the line that reaches it"
     # ONE subject, or none. `.is-selected` is put on a box by glowNode and on an arrow by glowEdge, so
     # one query covers both — an arrow selection could not answer this before.
@@ -1610,13 +1610,13 @@ def test_everything_that_floats_over_the_drawing_states_its_layer() -> None:
     one added decides."""
     css = (VIEWER_DIR / "viewer.css").read_text()
     layers = {}
-    for sel in ("#callout", "#panel, #tagcard", "#envpicker", "#flowpicker"):
+    for sel in ("#callout", "#panel, #peekcard", "#envpicker", "#flowpicker"):
         # line-anchored, so a rule qualified by an ancestor selector cannot answer for the element.
         at = css.index("\n" + sel + " {") + 1
         block = css[at: css.index("}", at)]
         assert "z-index" in block, sel
         layers[sel] = int(block.split("z-index:")[1].split(";")[0].strip())
-    assert layers["#callout"] < layers["#panel, #tagcard"], "the line ends at a card's edge, never across its face"
+    assert layers["#callout"] < layers["#panel, #peekcard"], "the line ends at a card's edge, never across its face"
     assert layers["#callout"] < layers["#envpicker"], "…and never across a floater's face either"
 
 
@@ -2056,7 +2056,7 @@ def test_a_text_view_has_no_selection_card_and_a_diagram_only_has_one_when_it_sa
     assert "paneSync();" in js[js.index("function applyDefaultPanel(s) {"):
                                 js.index("\n}", js.index("function applyDefaultPanel(s) {"))]
     # It floats over the drawing, and #diagwrap is what it floats in.
-    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
+    pane = css[css.index("#panel, #peekcard {"): css.index("}", css.index("#panel, #peekcard {"))]
     assert "position: absolute" in pane and "top: 12px" in pane and "right: 12px" in pane, \
         "top-right: #envpicker owns the bottom-left corner"
     assert "max-height" in pane, "a few states run long and must scroll rather than fill the screen"
@@ -2147,7 +2147,7 @@ def test_the_card_is_dragged_by_its_bar_and_sized_by_nothing() -> None:
     assert "closest('#panelbar')" in js, "the bar is the handle"
     assert "panelBox" not in js and "appliedBox" not in js, "the remembered box is back"
     assert "coyomap.panelBox" not in js, "…and so is the key it was written under"
-    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
+    pane = css[css.index("#panel, #peekcard {"): css.index("}", css.index("#panel, #peekcard {"))]
     assert "resize:" not in pane, "the corner grip is back"
     assert "overflow: auto" in pane, "a card past its ceiling scrolls inside itself"
     assert "min-width" in pane, "it must not shrink to an unreadable stub sideways"
@@ -2466,7 +2466,7 @@ def test_the_zoom_control_is_absent_on_a_page_with_no_diagram() -> None:
     assert keep.count("...fixed") == 4, "in every set: a control is never the concession to make"
     # Its ceiling keeps it inside the box #diagwrap clips; the placement, not the ceiling, is what
     # keeps it off the control.
-    pane = css[css.index("#panel, #tagcard {"): css.index("}", css.index("#panel, #tagcard {"))]
+    pane = css[css.index("#panel, #peekcard {"): css.index("}", css.index("#panel, #peekcard {"))]
     assert "calc(100% - 24px)" in pane, "the card must stay inside the drawing #diagwrap clips"
 
 def test_a_sentence_is_never_set_as_a_pill() -> None:
@@ -5718,7 +5718,7 @@ def test_the_in_a_box_pill_is_one_component_that_no_page_restyles() -> None:
         ".item-pill-door:hover",                          # …and the only thing hover changes
         "#diagram .item-pill .ibox-gly, #diagram .item-pill .story-glyph, "
         "#panel .item-pill .ibox-gly, #panel .item-pill .story-glyph, "
-        "#tagcard .item-pill .ibox-gly, #tagcard .item-pill .story-glyph",   # one size on a diagram and its cards
+        "#peekcard .item-pill .ibox-gly, #peekcard .item-pill .story-glyph",   # one size on a diagram and its cards
         ".ibox-band .item-pill, .journey-ifs .item-pill",                # …and one inside a box
         ".ibox-band .item-pill .ibox-gly, .ibox-band .item-pill .story-glyph, "
         ".journey-ifs .item-pill .ibox-gly",

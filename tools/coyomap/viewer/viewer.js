@@ -261,7 +261,7 @@ diaghead.addEventListener('click', (e) => {
   const sw = e.target.closest && e.target.closest('[data-archhp]');
   if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
 });
-const TAG_CARD = document.getElementById('tagcard');   // the second card: a tag inside a box, beside the box's own
+const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
 const tip = document.getElementById('tip');
@@ -1812,7 +1812,7 @@ let sceneGen = 0;
 function makeScene(root, defaultPanel) {
   sceneGen++;
   hoverPreview = null;   // nothing on the new drawing is being previewed yet
-  hideTagCard();         // …and no tag of the old one has a card up
+  hidePeekCard();         // …and no tag of the old one has a card up
   holdPointer();         // …and the cursor already over it is not hovering until it moves
   // dimEls: a flat list of extra focusable elements (the Happy Path's actor figures, lifelines and
   // message text/lines) that the standard node/edge focus model doesn't cover — dimmed/restored together.
@@ -1838,6 +1838,7 @@ function selHas(scene, key) { return scene.selKeys.has(key); }
 // CSS-filter swap, no visible flicker) so an element leaving the set can't strand a highlight, and shared
 // highlights (a step lit by both a participant and its own selection) stay consistent.
 function selApply(scene) {
+  hidePeekCard();   // a new pick answers for itself; a card still up from a hover would be a third voice
   if (scene._selClear) { scene._selClear(); scene._selClear = null; }
   const undos = scene.selection.map((d) => d.glow());
   scene._selClear = () => undos.forEach((f) => f && f());
@@ -8152,11 +8153,13 @@ function previewOnHover(scene, els, show, anchor) {
     inTimer = setTimeout(() => {
       if (gen !== sceneGen || !at.isConnected) return;
       if (panelDrag || srcSliding) return;   // not while the reader is moving the card or the column
-      // A PIN BEATS A HOVER. Once the reader has clicked something they have asked for that card and
-      // said so; a pointer crossing a neighbour on its way somewhere else has asked for nothing. The
-      // Interfaces picture has always worked this way (`if (!pinned) show(iid)`), and this is the same
-      // rule for every diagram — hover ANSWERS a question, a click SETTLES one.
-      if (scene.selection && scene.selection.length) return;
+      // A PIN KEEPS ITS CARD. Once the reader has clicked something they have asked for that card and
+      // said so, so a hover does not take it away: the hovered thing's card shows BESIDE it, in the
+      // second card, and goes when the pointer leaves. Hovering the picked thing itself adds nothing.
+      if (scene.selection && scene.selection.length) {
+        if (!selHas(scene, 'node:' + idOf(at)) && !at.classList.contains('is-selected')) showPeekCard(at, show);
+        return;
+      }
       hoverPreview = at;
       panel = PANEL_HOST;
       show();
@@ -8167,14 +8170,19 @@ function previewOnHover(scene, els, show, anchor) {
   const leave = () => {
     forgetPointerMove(enter);
     clearTimeout(inTimer); inTimer = null;
-    if (gen !== sceneGen || hoverPreview !== at) return;
+    if (gen !== sceneGen) return;
+    if (peekCardFor === at) {   // its card is the second one: it goes, unless the pointer went into it
+      outTimer = setTimeout(() => { if (!pointerIn(PEEK_CARD) && peekCardFor === at) hidePeekCard(); }, HOVER_LEAVE_MS);
+      return;
+    }
+    if (hoverPreview !== at) return;
     outTimer = setTimeout(() => {
       // THE POINTER IS STANDING IN THE CARD. Leaving the thing does not mean leaving its answer: the
       // card comes to what you hovered, so it can arrive under the pointer — and then hiding it puts
       // the pointer back on the thing, which shows it again, which hides it again. Measured as an
       // endless blink on a step arrow. While the pointer is inside the card, the card stays; the
       // pointer leaving the card runs this again and it goes then.
-      if (pointerIn(PANEL_HOST) || pointerIn(TAG_CARD)) { outTimer = null; return; }
+      if (pointerIn(PANEL_HOST) || pointerIn(PEEK_CARD)) { outTimer = null; return; }
       hoverPreview = null;
       selApply(scene);     // the selection's card again, or this view's default
       paneSync();
@@ -8201,23 +8209,36 @@ function previewOnHover(scene, els, show, anchor) {
 // SECOND card, and the box's card stays: the reader asked about the part without leaving the box, and
 // the box's card is the context the part is read in. Its own line points at the tag. It goes when the
 // pointer leaves the tag, unless the pointer went into it; the card's own mouseleave then finishes.
-let tagCardFor = null;   // the tag the second card is about, while it is up
-function showTagCard(t, id) {
-  TAG_CARD.innerHTML = `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
-  bindElementCards(TAG_CARD);
-  TAG_CARD.hidden = false;
-  tagCardFor = t;
+//
+// THE SAME SECOND CARD answers a hover WHILE SOMETHING IS PICKED: the picked card stays, the hovered
+// thing's card shows beside it. Without it a pick silenced every hover, and the reader had to let go of
+// what they picked to ask about its neighbour.
+let peekCardFor = null;   // the element the second card is about, while it is up
+// `fill` writes the card into `panel`, the way every show* function does: it runs with `panel` pointed
+// at the second card, so any card the viewer can show can show there.
+function showPeekCard(t, fill) {
+  const keep = panel;
+  panel = PEEK_CARD;
+  try { fill(); } finally { panel = keep; }
+  PEEK_CARD.hidden = false;
+  peekCardFor = t;
   // It keeps clear of the box's card as well as of the tag: two cards on top of each other are one.
   const main = PANEL_HOST.hidden ? [] : [grow(rectOf(PANEL_HOST), CARD_CLEAR)];
-  placeCardNear(t, TAG_CARD, main);
+  placeCardNear(t, PEEK_CARD, main);
   syncCallout();
 }
-function hideTagCard() {
-  if (!TAG_CARD || TAG_CARD.hidden) return;
-  TAG_CARD.hidden = true;
-  TAG_CARD.innerHTML = '';
-  tagCardFor = null;
+function hidePeekCard() {
+  if (!PEEK_CARD || PEEK_CARD.hidden) return;
+  PEEK_CARD.hidden = true;
+  PEEK_CARD.innerHTML = '';
+  peekCardFor = null;
   syncCallout();
+}
+function elementPeekFill(id) {
+  return () => {
+    PEEK_CARD.innerHTML = `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
+    bindElementCards(PEEK_CARD);
+  };
 }
 function previewTagOnHover(t, id) {
   const gen = sceneGen;
@@ -8227,18 +8248,18 @@ function previewTagOnHover(t, id) {
     clearTimeout(outTimer);
     inTimer = setTimeout(() => {
       if (gen !== sceneGen || !t.isConnected || panelDrag || srcSliding) return;
-      showTagCard(t, id);
+      showPeekCard(t, elementPeekFill(id));
     }, HOVER_CARD_MS);
   });
   t.addEventListener('mouseleave', () => {
     clearTimeout(inTimer);
     outTimer = setTimeout(() => {
-      if (pointerIn(TAG_CARD)) return;
-      if (tagCardFor === t) hideTagCard();
+      if (pointerIn(PEEK_CARD)) return;
+      if (peekCardFor === t) hidePeekCard();
     }, HOVER_LEAVE_MS);
   });
 }
-if (TAG_CARD) TAG_CARD.addEventListener('mouseleave', () => hideTagCard());
+if (PEEK_CARD) PEEK_CARD.addEventListener('mouseleave', () => hidePeekCard());
 // IF THE CARD COVERS WHAT IT DESCRIBES, MOVE THE CARD. The card is the thing that can move: the element
 // is where the drawing put it, and shifting the drawing instead would move everything else with it.
 //
@@ -8373,7 +8394,7 @@ function cardBoxOk(box, w, keep, a, e) {
 function cardRectAt(left, top, W, H) {
   return { left, top, right: left + W, bottom: top + H, width: W, height: H };
 }
-// `card`: which card to place, the box's (PANEL_HOST, the default) or a tag's (TAG_CARD). Only the
+// `card`: which card to place, the box's (PANEL_HOST, the default) or a tag's (PEEK_CARD). Only the
 // box's card remembers where it stood and keeps clear of the hand that opened it. `also`: more shapes
 // to keep clear of, in every set — for a tag's card, the box's card.
 function placeCardNear(el, card = PANEL_HOST, also = []) {
@@ -8459,7 +8480,7 @@ function syncCallout() {
   const w = wrap.getBoundingClientRect();
   const el = soleSelectedEl();
   const html = (el && !PANEL_HOST.hidden ? calloutLineHtml(PANEL_HOST.getBoundingClientRect(), el, w) : '')
-    + (tagCardFor && TAG_CARD && !TAG_CARD.hidden ? calloutLineHtml(TAG_CARD.getBoundingClientRect(), tagCardFor, w) : '');
+    + (peekCardFor && PEEK_CARD && !PEEK_CARD.hidden ? calloutLineHtml(PEEK_CARD.getBoundingClientRect(), peekCardFor, w) : '');
   if (!html) { hideCallout(); return; }
   callout.setAttribute('viewBox', `0 0 ${Math.round(w.width)} ${Math.round(w.height)}`);
   callout.setAttribute('width', Math.round(w.width));

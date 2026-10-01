@@ -4483,8 +4483,8 @@ def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
         cards = """() => { const n = (c) => { const e = document.querySelector(c);
             return !e || e.hidden ? '' : ((e.querySelector('.ibox-name') || {}).textContent || '').trim(); };
           const r = (c) => { const e = document.querySelector(c); return e && !e.hidden ? e.getBoundingClientRect() : null; };
-          const a = r('#panel'), b = r('#tagcard');
-          return { box: n('#panel'), tag: n('#tagcard'), lines: document.querySelectorAll('#callout .co-line').length,
+          const a = r('#panel'), b = r('#peekcard');
+          return { box: n('#panel'), tag: n('#peekcard'), lines: document.querySelectorAll('#callout .co-line').length,
                    overlap: !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) }; }"""
         # A BOX ON SCREEN, top and bottom: the picture is wider and taller than the window.
         k = page.evaluate("""() => [...document.querySelectorAll('#diagram g.node .ibox-map')].findIndex((b) => {
@@ -4571,6 +4571,37 @@ def test_a_two_line_name_opens_only_from_its_words() -> None:
         assert after.split("&sel=")[0] == before.split("&sel=")[0] and "sel=" in after, (before, after)
         page.mouse.click(*spot["words"])
         page.wait_for_function("() => !location.hash.startsWith('#v=arch')")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_hover_while_something_is_picked_shows_its_card_beside_the_pick() -> None:
+    """A pick used to silence every hover: the reader had to let go of what they picked to ask about
+    its neighbour. The picked card stays and the hovered thing's card shows beside it, the second card,
+    with its own line; leaving takes only that one away. The same on every picture, because every
+    picture's hover goes through one function."""
+    spot = """(i) => { const n = [...document.querySelectorAll('#diagram g.node')][i]; const r = n.getBoundingClientRect();
+        for (let y = r.bottom - 3; y > r.top; y -= 3) for (let x = r.right - 3; x > r.left; x -= 3) {
+          const e = document.elementFromPoint(x, y);
+          if (e && n.contains(e) && !e.closest('button, a, .ibox-name, .cyname, .item-pill')) return { x, y }; }
+        return null; }"""
+    cards = """() => { const n = (c) => { const e = document.querySelector(c);
+        return !e || e.hidden ? '' : ((e.querySelector('.ibox-name') || {}).textContent || '').trim(); };
+      return { picked: n('#panel'), peek: n('#peekcard'), lines: document.querySelectorAll('#callout .co-line').length }; }"""
+    with _served() as url, _page(url + "#v=container") as page:
+        _settle(page)
+        a, b = page.evaluate(spot, 0), page.evaluate(spot, 1)
+        page.mouse.click(a["x"], a["y"])
+        page.wait_for_timeout(400)
+        picked = page.evaluate(cards)["picked"]
+        assert picked
+        page.mouse.move(b["x"] - 1, b["y"])
+        page.mouse.move(b["x"], b["y"])
+        page.wait_for_timeout(500)
+        seen = page.evaluate(cards)
+        assert seen["picked"] == picked and seen["peek"] and seen["peek"] != picked and seen["lines"] == 2, seen
+        page.mouse.move(3, 3, steps=3)
+        page.wait_for_timeout(500)
+        assert page.evaluate(cards) == {"picked": picked, "peek": "", "lines": 1}
         assert not page.js_errors, page.js_errors
 
 
