@@ -4459,36 +4459,52 @@ function tryDataDrillClick(id, e) {
   return true;
 }
 
-// `standsFor(id)`: the map element a drawn box stands for, when that is not the box's own id. Only the
-// layered Architecture picture has such boxes: a group of parts is drawn under an id of its own, since
-// its subsystem can have a group in several layers, and it opens and shows that subsystem.
-function bindNodes(scene, onActivate, standsFor) {
-  scene.standsFor = standsFor || null;
+// ONE BOX, ON ANY PICTURE. Every picture binds its boxes through here, so a box answers the pointer
+// the same way everywhere and a fix to that lands on every picture at once: it joins the scene (the
+// focus set, so selecting keeps its neighbours lit), it glows under the pointer, it previews its ⌥-click
+// in a tooltip (`tip`), resting on it shows its card (`show`), and a click that is not the tail of a
+// drag goes to `onClick`. What a click DOES is the one thing pictures differ on.
+// A box the environment filter excluded is inert: `pointer-events:none` already stops a real cursor,
+// but the guard also covers a click that arrives any other way, so "not selectable" is a property of
+// the box rather than of CSS hit-testing.
+function bindBox(scene, el, id, opts) {
+  scene.nodeEls[id] = el;
+  el.style.cursor = 'pointer';
+  bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins
+  if (opts.tip) attachTip(el, opts.tip);
+  if (opts.show) previewOnHover(scene, el, opts.show);
+  el.addEventListener('click', (ev) => {
+    if (isDrag(ev)) return;  // tail of a drag-pan, not a real click
+    if (el.classList.contains('envout')) return;
+    ev.stopPropagation();
+    opts.onClick(ev);
+  });
+}
+// Every box that stands for a map element. `opts.hover`: resting on a box shows its card.
+// `opts.standsFor(id)`: the map element a drawn box stands for, when that is not the box's own id. Only
+// the layered Architecture picture has such boxes: a group of parts is drawn under an id of its own,
+// since its subsystem can have a group in several layers, and it opens and shows that subsystem.
+// Diff badges are NOT added here: applyDiffOverlay() owns them, so they appear only on the
+// Subsystems-family views — never as strays in Context/Libraries where bindNodes also runs.
+function bindNodes(scene, onActivate, opts) {
+  const o = opts || {};
+  scene.standsFor = o.standsFor || null;
   scene.root.querySelectorAll('g.node').forEach((el) => {
     const id = idOf(el);
     const elem = sceneElementOf(scene, id);
     if (!id || !GRAPH.nodes[elem]) return;
-    // Every drawn box joins the focus set, so selecting a node keeps only its connected boxes lit and
-    // dims the rest — collapsed neighbour boxes (subsystems/subdomains) included, the same as the
-    // members. (Their bridge/cross arrows are registered as edges, so focus resolves the connection.)
-    scene.nodeEls[id] = el;
-    el.style.cursor = 'pointer';
     // Only the Context family draws a `human` box, so this reaches every view that has one (Dependencies
     // itself, the Libraries drill, a bucket drill) and is a no-op on the rest.
     if (el.classList.contains('human')) stickFigureNode(el);
     else if (el.classList.contains('agent')) botFigureNode(el);
     markOpenSrc(el, elem);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
-    bindHoverGlow(scene, el, id);  // hover affordance — skip while this node is the active selection, so HILITE wins
-    attachTip(el, () => actionTipNode(elem));  // ⌘-hover shows the open-source action
-    el.addEventListener('click', (e) => {
-      if (isDrag(e)) return;  // tail of a drag-pan, not a real click
-      e.stopPropagation();
-      if (openSrcClick(elem, e)) return;  // ⌘-click a leaf with a source ref opens it instead of selecting
-      onActivate(id, el, e);
-    });
-    // Diff badges are NOT added here: applyDiffOverlay() owns them, so they appear only on the
-    // Subsystems-family views (and the dormant Components view) — never as strays in Context/Libraries
-    // where bindNodes also runs but no diff badge belongs.
+    bindBox(scene, el, id, {
+      tip: () => actionTipNode(elem),
+      show: o.hover ? () => showNode(elem) : null,
+      onClick: (e) => {
+        if (openSrcClick(elem, e)) return;  // ⌥-click a leaf with a source ref opens it instead of selecting
+        onActivate(id, el, e);
+      } });
   });
 }
 
@@ -5662,23 +5678,15 @@ function bindGroupContainer(drillFor, edgeBinder, noDrillId, opts) {
     // GRAPH node — without this it fell through the gate and got no handler at all, leaving the
     // box inert (visible, but neither selectable nor drillable).
     if (!id || !(GRAPH.nodes[id] || isDeploymentGroup(id))) return;
-    mainScene.nodeEls[id] = el;
-    el.style.cursor = 'pointer';
     const target = id === noDrillId ? null : drillFor(id);
     if (target) el.classList.add('drill');
-    bindHoverGlow(mainScene, el, id);
-    attachTip(el, () => actionTipNode(id));
-    if (o.hover && GRAPH.nodes[id]) previewOnHover(mainScene, el, () => showNode(id));
-    el.addEventListener('click', (e) => {
-      if (isDrag(e)) return;
-      // Excluded by the environment filter: inert. `pointer-events:none` already stops a real cursor,
-      // but the guard also covers a click that arrives any other way, so "not selectable" is a property
-      // of the box rather than of CSS hit-testing.
-      if (el.classList.contains('envout')) return;
-      e.stopPropagation();
-      if (target && (isDrillClick(e) || nameClick(e))) { go(target); return; }  // ⌥-click, double-click or the name drills in
-      selectNodeFromCanvas(el, id, e);
-    });
+    bindBox(mainScene, el, id, {
+      tip: () => actionTipNode(id),
+      show: o.hover && GRAPH.nodes[id] ? () => showNode(id) : null,
+      onClick: (e) => {
+        if (target && (isDrillClick(e) || nameClick(e))) { go(target); return; }  // ⌥-click, double-click or the name drills in
+        selectNodeFromCanvas(el, id, e);
+      } });
   });
   eachEdge(mainScene.root, (p, label, m) => {
     const a = m[1], b = m[2];
@@ -6139,11 +6147,7 @@ function bindFlowMap(uc) {
     // stays here and tells you about itself.
     if (nameClick(ev)) { drillInto(id); return; }
     selectNodeFromCanvas(el, id, ev);
-  });
-  scene.root.querySelectorAll('g.node').forEach((el) => {
-    const id = idOf(el);
-    if (id && GRAPH.nodes[id]) previewOnHover(scene, el, () => showNode(id));
-  });
+  }, { hover: true });
 
   scene.root.querySelectorAll('g.node').forEach((el) => {
     const aid = idOf(el);
@@ -6344,37 +6348,9 @@ function bindDomainContainerEdge(scene, p, label, a, b, focusE) {
 // into its own card; each cross arrow SELECTS its crossings and ⌘-drills the two-subdomain edge view.
 // The classDiagram analog of bindSubsystem (entities are g.classGroup, so it can't reuse bindNodes).
 function bindDomainSub(sd) {
-  fixDomainMarkers(mainScene.root);
-  const seen = new Set();
-  mainScene.root.querySelectorAll('g.node, g.classGroup').forEach((el) => {
-    const id = idOf(el);
-    if (!id || !GRAPH.nodes[id] || seen.has(id)) return;
-    seen.add(id);
-    mainScene.nodeEls[id] = el;  // every drawn box joins the focus set — members + collapsed neighbours
-    el.style.cursor = 'pointer';
-    bindHoverGlow(mainScene, el, id);
-    attachTip(el, () => actionTipNode(id));
-    previewOnHover(mainScene, el, () => showNode(id));  // resting on a box shows its card, as on a flow map
-    markClassTitle(el);  // a record's title is its name, and the name is the door
-    const k = GRAPH.nodes[id].kind;
-    if (k === 'subdomain' || k === 'subsystem') {  // a collapsed neighbour box: its name, ⌥ or a double click walk into its own card
-      el.classList.add('drill');
-      const target = k === 'subdomain' ? { kind: 'domsub', sd: id } : { kind: 'subsystem', sid: id };
-      el.addEventListener('click', (ev) => {
-        if (isDrag(ev)) return; ev.stopPropagation();
-        if (isDrillClick(ev) || nameClick(ev)) { go(target); return; }
-        selectNodeFromCanvas(el, id, ev);
-      });
-    } else {  // the focal subdomain's own entity: select / ⌘-open-source, like the flat Domain view; its name opens its page
-      markOpenSrc(el, id);
-      el.addEventListener('click', (ev) => {
-        if (isDrag(ev)) return; ev.stopPropagation();
-        if (openSrcClick(id, ev)) return;
-        if (nameClick(ev)) { drillInto(id); return; }
-        selectNodeFromCanvas(el, id, ev);
-      });
-    }
-  });
+  // a collapsed neighbour box: its name, ⌥ or a double click walk into its own card
+  bindClassBoxes((id, k) => (k === 'subdomain' ? { kind: 'domsub', sd: id }
+    : k === 'subsystem' ? { kind: 'subsystem', sid: id } : null));
   bindEntityBoxLinks();  // every box is in nodeEls now — link its entity-typed fields + its store line
   eachClassEdge(mainScene.root, (p, label, x, y, i) => {
     const kx = GRAPH.nodes[x] && GRAPH.nodes[x].kind;
@@ -6428,14 +6404,11 @@ function bindStructureBoxes() {
     const box = k === 'subsystem' || k === 'subdomain';   // a collapsed group: ⌥ / a double click walk in as well
     if (nameClick(ev) || (box && isDrillClick(ev))) { drillInto(id); return; }
     selectNodeFromCanvas(el, id, ev);
-  });
-  mainScene.root.querySelectorAll('g.node').forEach((el) => {
-    const id = idOf(el);
-    const k = id && GRAPH.nodes[id] && GRAPH.nodes[id].kind;
-    if (!k) return;
-    if (k === 'subsystem' || k === 'subdomain') el.classList.add('drill');  // the cursor says a box walks in
-    previewOnHover(mainScene, el, () => showNode(id));  // resting on a box shows its card, as on a flow map
-  });
+  }, { hover: true });
+  for (const id in mainScene.nodeEls) {   // the cursor says a box walks in
+    const k = GRAPH.nodes[id].kind;
+    if (k === 'subsystem' || k === 'subdomain') mainScene.nodeEls[id].classList.add('drill');
+  }
 }
 function bindSubsystem(sid) {  // neighbourhood: every box and arrow with the Data pictures' gestures
   bindStructureBoxes();
@@ -6637,34 +6610,33 @@ function bindEntityBoxLinks() {
         () => go({ kind: 'data', store: store.dep, entity: id }));
   }
 }
-function bindDomain() {
+// THE BOXES OF A DATA PICTURE (a classDiagram, so a record is a g.classGroup that bindNodes cannot
+// read). Resting on a box shows its card; a record's title is its name, and the name is the door.
+// `drillTo(id, kind)` is the card a box walks into on its name, ⌥ or a double click, or null: such a
+// box is a record (or a child area), which ⌥-click opens in the source and whose name opens its page.
+function bindClassBoxes(drillTo) {
   fixDomainMarkers(mainScene.root);
   mainScene.root.querySelectorAll('g.node, g.classGroup').forEach((el) => {
     const id = idOf(el);
     if (!id || !GRAPH.nodes[id] || mainScene.nodeEls[id]) return;
-    mainScene.nodeEls[id] = el;
-    el.style.cursor = 'pointer';
-    bindHoverGlow(mainScene, el, id);
-    attachTip(el, () => actionTipNode(id));  // ⌘-hover shows the open-source action
-    previewOnHover(mainScene, el, () => showNode(id));  // resting on a box shows its card, as on a flow map
-    markClassTitle(el);  // a record's title is its name, and the name is the door
-    if (GRAPH.nodes[id].kind === 'subsystem') {  // a bridge box (domain edge card): its name or ⌥ drills into its card
-      el.classList.add('drill');
-      el.addEventListener('click', (ev) => {
-        if (isDrag(ev)) return; ev.stopPropagation();
-        if (isDrillClick(ev) || nameClick(ev)) { go({ kind: 'subsystem', sid: id }); return; }
+    markClassTitle(el);
+    const target = drillTo(id, GRAPH.nodes[id].kind);
+    if (target) el.classList.add('drill');
+    else markOpenSrc(el, id);
+    bindBox(mainScene, el, id, {
+      tip: () => actionTipNode(id),
+      show: () => showNode(id),
+      onClick: (ev) => {
+        if (target && (isDrillClick(ev) || nameClick(ev))) { go(target); return; }
+        if (!target && openSrcClick(id, ev)) return;
+        if (!target && nameClick(ev)) { drillInto(id); return; }
         selectNodeFromCanvas(el, id, ev);
-      });
-    } else {  // a domain entity (or a collapsed child area): select / ⌘-open-source; its name opens it
-      markOpenSrc(el, id);
-      el.addEventListener('click', (ev) => {
-        if (isDrag(ev)) return; ev.stopPropagation();
-        if (openSrcClick(id, ev)) return;
-        if (nameClick(ev)) { drillInto(id); return; }
-        selectNodeFromCanvas(el, id, ev);
-      });
-    }
+      } });
   });
+}
+function bindDomain() {
+  // a bridge box (domain edge card): its name or ⌥ drills into its card; a collapsed child area opens by its name
+  bindClassBoxes((id, k) => (k === 'subsystem' ? { kind: 'subsystem', sid: id } : null));
   bindEntityBoxLinks();  // every box is in nodeEls now — link its entity-typed fields + its store line
   eachClassEdge(mainScene.root, (p, label, src, dst, i) => {
     const ks = GRAPH.nodes[src] && GRAPH.nodes[src].kind, kd = GRAPH.nodes[dst] && GRAPH.nodes[dst].kind;
@@ -7596,9 +7568,7 @@ function bindArch() {
     if (nameClick(ev)) { drillInto(elem); return; }
     selectNodeFromCanvas(el, id, ev);
     pickBox(id);
-  }, standsFor);
-  // Resting on a box shows its card, as on every other picture.
-  for (const id in mainScene.nodeEls) previewOnHover(mainScene, mainScene.nodeEls[id], () => showNode(standsFor(id)));
+  }, { standsFor, hover: true });
   bindArchPeople(t, pickBox);
   bindEdges(mainScene, resolveComponentEdge);
   markLayerLines(mainScene.root, t);
@@ -7621,21 +7591,15 @@ function bindArchPeople(t, pickBox) {
 // it, ⌘ adds it), and where `opensOn(ev)` says so the click opens it instead. `afterPick` is what the
 // picture adds to a pick. The one binder for every such box, so a gesture lands on all of them at once.
 function bindAliasBox(scene, el, id, opts) {
-  scene.nodeEls[id] = el;
-  el.style.cursor = 'pointer';
   // Built lazily (like every other node descriptor): `nodeFocus` reads scene.edgeEls, which bindEdges
   // fills in after the boxes are bound.
   const desc = () => ({ key: 'node:' + id, glow: () => glowNode(el), focus: nodeFocus(scene, id), show: opts.show });
   scene.selectors['node:' + id] = () => selAdd(scene, desc());
-  bindHoverGlow(scene, el, id);
-  previewOnHover(scene, el, opts.show);
-  el.addEventListener('click', (ev) => {
-    if (isDrag(ev)) return;
-    ev.stopPropagation();
+  bindBox(scene, el, id, { show: opts.show, onClick: (ev) => {
     if (opts.opensOn && opts.opensOn(ev)) { opts.open(); return; }
     pickSelBox(scene, desc(), el, ev);
     if (opts.afterPick) opts.afterPick();
-  });
+  } });
 }
 // A person's box, on any picture: their card, and their name opens their page.
 function bindActorBox(scene, el, id, a, afterPick) {

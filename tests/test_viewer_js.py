@@ -5546,7 +5546,7 @@ def test_the_subsystems_pictures_take_the_data_pictures_gestures() -> None:
     # every box on a card or a pair: one binder, hover card, the name opens, a container drills
     boxes = js[js.index("function bindStructureBoxes() {"):
                js.index("\n}", js.index("function bindStructureBoxes() {"))]
-    assert "previewOnHover(mainScene, el, () => showNode(id));" in boxes
+    assert "}, { hover: true });" in boxes   # resting on a box shows its card (bindNodes → bindBox)
     assert "if (nameClick(ev) || (box && isDrillClick(ev))) { drillInto(id); return; }" in boxes
     for fn in ("function bindSubsystem(sid) {", "function bindEdgePair(a, b) {"):
         body = js[js.index(fn): js.index("\n}", js.index(fn))]
@@ -5999,3 +5999,19 @@ def test_the_overview_and_the_detail_rows_both_draw_paragraphs_through_the_one_h
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
     assert "proseBlocksHtml(overview, (p) => mdRefs(p, GRAPH.nodes))" in js
     assert "proseBlocksHtml(v, mdInline)" in js
+
+
+def test_every_box_is_bound_through_one_binder() -> None:
+    """Five pictures each set a box up by hand: its glow, its ⌥ tooltip, its hover card and its click.
+    A gesture fixed on one picture was then missing on the next — the Architecture picture had no hover
+    card and its people took no click. Every box goes through `bindBox` now, so a fix lands once."""
+    js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
+    calls = [ln.strip() for ln in js.splitlines() if "bindHoverGlow(" in ln and "function bindHoverGlow" not in ln]
+    assert calls == ["bindHoverGlow(scene, el, id);  // skipped while this box is the selection, so HILITE wins"], calls
+    box = js[js.index("function bindBox(scene, el, id, opts) {"):js.index("\n}", js.index("function bindBox("))]
+    assert "if (opts.show) previewOnHover(scene, el, opts.show);" in box
+    assert "if (el.classList.contains('envout')) return;" in box
+    for binder in ("function bindNodes(", "function bindGroupContainer(", "function bindClassBoxes(",
+                   "function bindAliasBox("):
+        body = js[js.index(binder):js.index("\n}", js.index(binder))]
+        assert "bindBox(" in body and "addEventListener('click'" not in body, binder
