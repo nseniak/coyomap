@@ -3127,7 +3127,7 @@ function bindBucketFold() {
   bindNodes(mainScene, (id, el, e) => {
     if (tryDataDrillClick(id, e)) return;
     selectNodeFromCanvas(el, id, e);
-  });
+  }, { hover: true });
   bindEdges(mainScene, resolveContextEdge);
   markDataDrill();
 }
@@ -4480,6 +4480,14 @@ function bindBox(scene, el, id, opts) {
     opts.onClick(ev);
   });
 }
+// THE CARD A BOX SHOWS, on a hover as on a click: a folded box's roster (the Libraries box, a
+// bucket of dependencies), a product area's members, and every other element's own card.
+function boxCard(id) {
+  if (id === LIBS_ID) return () => showLibsFold();
+  if (isDeploymentGroup(id)) return () => showDeploymentGroup(id);
+  if (GRAPH.nodes[id] && GRAPH.nodes[id].kind === 'bucketfold') return () => showBucketFold(id);
+  return () => showNode(id);
+}
 // Every box that stands for a map element. `opts.hover`: resting on a box shows its card.
 // `opts.standsFor(id)`: the map element a drawn box stands for, when that is not the box's own id. Only
 // the layered Architecture picture has such boxes: a group of parts is drawn under an id of its own,
@@ -4500,7 +4508,7 @@ function bindNodes(scene, onActivate, opts) {
     markOpenSrc(el, elem);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
     bindBox(scene, el, id, {
       tip: () => actionTipNode(elem),
-      show: o.hover ? () => showNode(elem) : null,
+      show: o.hover ? boxCard(elem) : null,
       onClick: (e) => {
         if (openSrcClick(elem, e)) return;  // ⌥-click a leaf with a source ref opens it instead of selecting
         onActivate(id, el, e);
@@ -5613,7 +5621,7 @@ function bindContext() {
     if (tryFoldNodeClick(id, el, e)) return;
     if (tryDataDrillClick(id, e)) return;   // a store/broker box drills into its Data-tab section
     selectNodeFromCanvas(el, id, e);
-  });
+  }, { hover: true });
   bindEdges(mainScene, resolveContextEdge);
   markSysDrill();
   markLibsDrill();
@@ -5650,13 +5658,13 @@ function bindLibs() {
     if (tryFoldNodeClick(id, el, e)) return;
     if (tryDataDrillClick(id, e)) return;
     selectNodeFromCanvas(el, id, e);
-  });
+  }, { hover: true });
   bindEdges(mainScene, resolveContextEdge);
   markDataDrill();
   registerFoldSelectors();
 }
 function bindComponent() {
-  bindNodes(mainScene, (id, el, e) => selectNodeFromCanvas(el, id, e));
+  bindNodes(mainScene, (id, el, e) => selectNodeFromCanvas(el, id, e), { hover: true });
   bindEdges(mainScene, resolveComponentEdge);
 }
 // A "container" altitude (Subsystems or the Domain Subdomains overview): group boxes that
@@ -5682,7 +5690,7 @@ function bindGroupContainer(drillFor, edgeBinder, noDrillId, opts) {
     if (target) el.classList.add('drill');
     bindBox(mainScene, el, id, {
       tip: () => actionTipNode(id),
-      show: o.hover && GRAPH.nodes[id] ? () => showNode(id) : null,
+      show: o.hover ? boxCard(id) : null,
       onClick: (e) => {
         if (target && (isDrillClick(e) || nameClick(e))) { go(target); return; }  // ⌥-click, double-click or the name drills in
         selectNodeFromCanvas(el, id, e);
@@ -5864,7 +5872,7 @@ function depEdgeStoreLinkHtml(b) {
 // `focalUnit` (set on a process card) is the process you're already zoomed into: it drills nowhere
 // further, so it gets no drill affordance/icon — only the OTHER boxes (subsystems it runs) drill.
 function bindDeployment(focalUnit) {
-  bindGroupContainer(deploymentDrill, markDeploymentEdge, focalUnit ? unitProcessNodeId(focalUnit) : null);
+  bindGroupContainer(deploymentDrill, markDeploymentEdge, focalUnit ? unitProcessNodeId(focalUnit) : null, { hover: true });
   applyEnvDim(mainScene);
 }
 // Resolve which unit(s) actually run a self-started entry point: its own `runs_in` wins (precise),

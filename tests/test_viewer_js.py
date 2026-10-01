@@ -6015,3 +6015,21 @@ def test_every_box_is_bound_through_one_binder() -> None:
                    "function bindAliasBox("):
         body = js[js.index(binder):js.index("\n}", js.index(binder))]
         assert "bindBox(" in body and "addEventListener('click'" not in body, binder
+
+
+def test_every_picture_shows_a_box_card_on_hover() -> None:
+    """Three pictures — Deployment, Dependencies and its Libraries list — showed no card when the
+    pointer rested on a box, while every other picture did. Every caller of the two box binders now
+    asks for it, and a folded box's hover card is the roster its click shows (`boxCard`)."""
+    js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
+    for binder in ("bindNodes(", "bindGroupContainer("):
+        starts = [i for i in range(len(js)) if js.startswith(binder, i)
+                  and not js[max(0, i - 9):i].endswith("function ")]
+        assert starts, binder
+        for i in starts:
+            line = js[i:js.index("\n", i)]
+            # a call that opens its callback ends at the line its callback closes on
+            call = line if not line.endswith("{") else js[i:js.index("\n", js.index("\n  }", i) + 1)]
+            assert "hover: true" in call, call[:120]
+    card = js[js.index("function boxCard(id) {"):js.index("\n}", js.index("function boxCard(id) {"))]
+    assert "showLibsFold()" in card and "showBucketFold(id)" in card and "showDeploymentGroup(id)" in card
