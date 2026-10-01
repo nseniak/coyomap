@@ -5401,13 +5401,11 @@ def test_one_function_says_which_arrow_a_step_is_on() -> None:
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
     callers = [ln.strip() for ln in js.splitlines()
                if "flowMapBoxId(" in ln and not ln.startswith("function flowMapBoxId")]
-    # The two that are NOT re-derivations: a shared sub-use case's box shows the run behind it, on click and on
-    # hover, and both need the box the run was called from.
+    # The one that is NOT a re-derivation: a shared sub-use case's box shows the run behind it, on click
+    # and on hover, from one `show`, and it needs the box the run was called from.
     assert callers == ["return [flowMapBoxId(uc, st.srcId, st.src),",
                        "st.sf || flowMapBoxId(uc, st.dstId, st.dst)];",
-                       "show: () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, ref.src), sid) });",
-                       "previewOnHover(scene, el, () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, "
-                       "ref.src), sid));"], \
+                       "show: () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, ref.src), sid),"], \
         f"call flowMapStepArrow instead of re-deriving the pair: {callers}"
 
 
@@ -5494,8 +5492,9 @@ def test_the_name_is_the_words_and_every_box_s_name_opens_a_page() -> None:
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
     assert "t.closest('.ibox-name, .cyname')" in js
     assert "if (nameClick(ev)) { drillInto(id); return; }" in js                    # an element
-    assert "if (nameClick(ev)) { go({ kind: 'actor', act: a.name }); return; }" in js  # an actor
-    assert "if (open && (nameClick(ev) || isDrillClick(ev)))" in js                 # a shared sub-use case
+    assert "opensOn: nameClick,\n                                open: () => go({ kind: 'actor', act: a.name })" in js  # an actor
+    assert "opensOn: (ev) => !!open && (nameClick(ev) || isDrillClick(ev))," in js   # a shared sub-use case
+    assert "if (opts.opensOn && opts.opensOn(ev)) { opts.open(); return; }" in js
     # THE NAME IS A BUTTON, so it is a keyboard stop and it says on hover that it is a door.
     assert '`<button type="button" class="${ncls}"' in js
     css = (VIEWER_DIR / "viewer.css").read_text(encoding="utf-8")

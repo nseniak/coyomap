@@ -6152,23 +6152,9 @@ function bindFlowMap(uc) {
     // actor's card — silence beats a confident wrong name.
     const a = (FLOW_ACTORS[uc] || []).find((x) => x.aid === aid);
     if (!a) return;
-    scene.nodeEls[aid] = el;
     if (el.classList.contains('human')) stickFigureNode(el);
     else if (el.classList.contains('agent')) botFigureNode(el);
-    el.style.cursor = 'pointer';
-    // Built lazily (like every other node descriptor): `nodeFocus` reads scene.edgeEls, which bindEdges
-    // below fills in after this runs.
-    const desc = () => ({ key: 'node:' + aid, glow: () => glowNode(el),
-                          focus: nodeFocus(scene, aid), show: () => showActorCard(a) });
-    scene.selectors['node:' + aid] = () => selAdd(scene, desc());
-    bindHoverGlow(scene, el, aid);
-    previewOnHover(scene, el, () => showActorCard(a));
-    el.addEventListener('click', (ev) => {
-      if (isDrag(ev)) return;
-      ev.stopPropagation();
-      if (nameClick(ev)) { go({ kind: 'actor', act: a.name }); return; }  // the name opens their page
-      pickSelBox(scene, desc(), el, ev);   // shift=frame, ⌘=toggle, plain=replace — as any box
-    });
+    bindActorBox(scene, el, aid, a);
   });
 
   // A COLLAPSED SHARED SUB-USE CASE's box, which like an actor has no GRAPH node for bindNodes to find. A plain
@@ -6179,21 +6165,11 @@ function bindFlowMap(uc) {
     const sid = idOf(el);
     const ref = sid && sfHere.find((st) => st.sf === sid);
     if (!ref) return;
-    scene.nodeEls[sid] = el;
-    el.style.cursor = 'pointer';
     const open = subflowOpenAction(sid, uc);
-    const desc = () => ({ key: 'node:' + sid, glow: () => glowNode(el),
-                          focus: nodeFocus(scene, sid),
-                          show: () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, ref.src), sid) });
-    scene.selectors['node:' + sid] = () => selAdd(scene, desc());
-    bindHoverGlow(scene, el, sid);
-    previewOnHover(scene, el, () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, ref.src), sid));
-    el.addEventListener('click', (ev) => {
-      if (isDrag(ev)) return;
-      ev.stopPropagation();
-      if (open && (nameClick(ev) || isDrillClick(ev))) { open.run(); return; }
-      pickSelBox(scene, desc(), el, ev);
-    });
+    bindAliasBox(scene, el, sid, {
+      show: () => showFlowPair(uc, flowMapBoxId(uc, ref.srcId, ref.src), sid),
+      opensOn: (ev) => !!open && (nameClick(ev) || isDrillClick(ev)),
+      open: () => open.run() });
   });
 
   // Arrows: index them by pair, so both consumers below read one source — the arrow's own selection
@@ -7635,22 +7611,35 @@ function bindArchPeople(t, pickBox) {
   mainScene.root.querySelectorAll('g.node').forEach((el) => {
     const id = idOf(el);
     if (!id || mainScene.nodeEls[id] || !id.startsWith('CYP')) return;
-    const a = { name: archBoxName(t, id) };
-    mainScene.nodeEls[id] = el;
-    el.style.cursor = 'pointer';
-    const desc = () => ({ key: 'node:' + id, glow: () => glowNode(el),
-                          focus: nodeFocus(mainScene, id), show: () => showActorCard(a) });
-    mainScene.selectors['node:' + id] = () => selAdd(mainScene, desc());
-    bindHoverGlow(mainScene, el, id);
-    previewOnHover(mainScene, el, () => showActorCard(a));
-    el.addEventListener('click', (ev) => {
-      if (isDrag(ev)) return;
-      ev.stopPropagation();
-      if (nameClick(ev)) { go({ kind: 'actor', act: a.name }); return; }
-      pickSelBox(mainScene, desc(), el, ev);
-      pickBox(id);
-    });
+    bindActorBox(mainScene, el, id, { name: archBoxName(t, id) }, () => pickBox(id));
   });
+}
+// A BOX WITH NO MAP ELEMENT OF ITS OWN: a person, drawn under an alias because a role is not a map
+// element, or a collapsed shared sub-use case. bindNodes passes it by, so it is bound here, and it takes
+// the gestures of every other box: resting on it shows `show`'s card, a click picks it (shift frames
+// it, ⌘ adds it), and where `opensOn(ev)` says so the click opens it instead. `afterPick` is what the
+// picture adds to a pick. The one binder for every such box, so a gesture lands on all of them at once.
+function bindAliasBox(scene, el, id, opts) {
+  scene.nodeEls[id] = el;
+  el.style.cursor = 'pointer';
+  // Built lazily (like every other node descriptor): `nodeFocus` reads scene.edgeEls, which bindEdges
+  // fills in after the boxes are bound.
+  const desc = () => ({ key: 'node:' + id, glow: () => glowNode(el), focus: nodeFocus(scene, id), show: opts.show });
+  scene.selectors['node:' + id] = () => selAdd(scene, desc());
+  bindHoverGlow(scene, el, id);
+  previewOnHover(scene, el, opts.show);
+  el.addEventListener('click', (ev) => {
+    if (isDrag(ev)) return;
+    ev.stopPropagation();
+    if (opts.opensOn && opts.opensOn(ev)) { opts.open(); return; }
+    pickSelBox(scene, desc(), el, ev);
+    if (opts.afterPick) opts.afterPick();
+  });
+}
+// A person's box, on any picture: their card, and their name opens their page.
+function bindActorBox(scene, el, id, a, afterPick) {
+  bindAliasBox(scene, el, id, { show: () => showActorCard(a), opensOn: nameClick,
+                                open: () => go({ kind: 'actor', act: a.name }), afterPick });
 }
 function bindArchText(t, story) {
   if (!mainScene) return;
