@@ -1180,7 +1180,7 @@ function itemBoxHtml(spec, variant, opts) {
           kind: c.kind, name: c.name, ikind: c.ikind, inBox: true, cls: c.cls })).join('')
       // …and how many a box holds past the tags it names (`spec.more`), after them.
       + (spec.more ? (spec.moreOpens
-        ? `<button type="button" class="ibox-count ibox-more" data-opens="${esc(spec.moreOpens)}"`
+        ? `<button type="button" class="ibox-count ibox-more"`
           + ` title="List every part">+${Number(spec.more)} more</button>`
         : `<span class="ibox-count">+${Number(spec.more)} more</span>`) : '');
     if (bits) out.push(`<span class="ibox-band">${bits}</span>`);
@@ -1296,8 +1296,8 @@ const CELL_NAMES_SHOWN = 3;
 function itemSpecCell(sid, parts) {
   const spec = itemSpecOf(sid);
   if (!spec) return null;
-  const shown = parts.length <= CELL_NAMES_ALL || archOpenSubs.has(sid) ? parts : parts.slice(0, CELL_NAMES_SHOWN);
-  spec.moreOpens = sid;   // "+N more" is a button that lists the rest (bindArch)
+  const shown = parts.length <= CELL_NAMES_ALL || archOpenParts.has(parts[0]) ? parts : parts.slice(0, CELL_NAMES_SHOWN);
+  spec.moreOpens = true;   // "+N more" is a button that lists the rest; the box it opens is the one it sits in (bindArch)
   spec.word = '';
   spec.what = '';
   spec.band = [];
@@ -5118,8 +5118,9 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // `story` is the ONE story the Architecture view follows: its lines lit and
                       // numbered in its own order. Unset = every story, numbered together.
                       'story',
-                      // `open` is the subsystems whose box the Architecture view lists in full, every
-                      // part named, after the reader clicked its "+N more". Comma-separated ids.
+                      // `open` is the BOXES the Architecture view lists in full, every part named, after
+                      // the reader clicked their "+N more". Comma-separated box ids (`CYG2S2`): one
+                      // subsystem has a box in each layer it has parts in, and only the clicked one opens.
                       'open',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
@@ -7659,13 +7660,14 @@ function bindArch() {
   // …AND THE CAMERA STAYS: the reader opened one box where they were looking, so the new drawing opens
   // at the same zoom with that box where it stood on screen (see `pendingHoldAt` in render). A fresh fit
   // threw the reader to the other end of the picture.
-  mainScene.root.querySelectorAll('.ibox-more[data-opens]').forEach((b) => {
+  mainScene.root.querySelectorAll('.ibox-more').forEach((b) => {
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      const open = [...archOpenOf(s), b.getAttribute('data-opens')];
-      const next = archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(','));
       const node = b.closest('g.node');
-      if (mainPz && node) {
+      if (!node) return;
+      const open = [...archOpenOf(s), idOf(node)];
+      const next = archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(','));
+      if (mainPz) {
         next.vp = { zoom: mainPz.getZoom(), real: mainPz.getSizes().realZoom, pan: mainPz.getPan() };
         const r = node.getBoundingClientRect();
         pendingHoldAt = { id: idOf(node), x: r.left, y: r.top };
@@ -7813,9 +7815,15 @@ function archState(scope, cap, story, open) {
   if (open) s.open = open;
   return s;
 }
-// THE SUBSYSTEMS A PICTURE LISTS IN FULL, from the screen being drawn (`s.open`). Read by itemSpecCell
-// while the boxes are built, so it is set just before (see render).
-let archOpenSubs = new Set();
+// THE BOXES A PICTURE LISTS IN FULL, from the screen being drawn (`s.open`), as the FIRST PART each
+// one names: the box is built from its subsystem and its parts (the slot carries no box id), and a
+// part sits in one box only. Read by itemSpecCell while the boxes are built, so it is set just before
+// (see render).
+let archOpenParts = new Set();
+function archOpenPartsOf(s) {
+  const cells = (archTextOf(s) || {}).cells || {};
+  return new Set([...archOpenOf(s)].map((id) => (cells[id] && cells[id].parts[0]) || '').filter(Boolean));
+}
 // A BOX TO KEEP WHERE IT STOOD ON SCREEN across the next drawing: { id, x, y } in screen pixels, set
 // by a click that redraws the same picture around that box ("+N more"), used once by render.
 let pendingHoldAt = null;
@@ -14520,7 +14528,7 @@ async function renderView(sArg, transient, seq) {
     // ITEM SLOTS ARE FILLED BEFORE THE ENGINE SEES THE SOURCE, and sized before it measures — see
     // expandItemSlots. A source carrying none passes through untouched, so a picture that has not
     // been moved onto the item box is unaffected.
-    archOpenSubs = archOpenOf(s);   // which group boxes list every part (itemSpecCell)
+    archOpenParts = archOpenPartsOf(s);   // which group boxes list every part (itemSpecCell)
     const src = expandItemSlots(mermaidFor(s));
     if (!src) throw new Error('no diagram for ' + JSON.stringify(s));
     ({ svg } = await mermaid.render('coyomapGraph' + (rc++), src));

@@ -4520,31 +4520,30 @@ def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
 
 
 def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
-    """A group box names its first parts and says "+N more" for the rest. Clicking that opens the box:
-    the picture is drawn again with every part named, the address says which box is open, and Back
-    closes it. The camera stays: same zoom, and the clicked box where it stood on screen."""
+    """A group box names its first parts and says "+N more" for the rest. Clicking that opens THAT box:
+    the picture is drawn again with its every part named, the address says which box is open, and Back
+    closes it. Only the clicked box opens: one subsystem has a box in each layer it has parts in, and
+    opening by subsystem opened all of them. The camera stays: the clicked box where it stood on screen,
+    at the same size."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
-    big = [g for g in groups.values() if len(g["parts"]) > 4]
-    assert big, "the changed map must have a group with more parts than a box names"
+    assert [g for g in groups.values() if len(g["parts"]) > 4], "the changed map must have a big group"
     with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        sub = page.evaluate("() => document.querySelector('#diagram .ibox-more').dataset.opens")
-        held = max(len(g["parts"]) for g in groups.values() if g["sub"] == sub)
-        where = """() => { const n = document.querySelector('#diagram g.node[data-held]'); const r = n.getBoundingClientRect();
-            return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }"""   # the width is the scale on screen
-        box_id = page.evaluate("""() => { const n = document.querySelector('#diagram .ibox-more').closest('g.node');
-            n.dataset.held = '1'; return n.id.split('-').slice(-2, -1)[0]; }""")
-        before = page.evaluate(where)
+        closed = "() => [...document.querySelectorAll('#diagram .ibox-more')].map((b) => b.closest('g.node').id.split('-').slice(-2, -1)[0])"
+        before_closed = page.evaluate(closed)
+        box_id = before_closed[0]
+        where = f"""() => {{ const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.id.includes('-{box_id}-'));
+            const r = n.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }}"""
+        before = page.evaluate(where)   # the width is the scale on screen
         page.evaluate("() => document.querySelector('#diagram .ibox-more').click()")
-        page.wait_for_function(f"() => location.hash.includes('open={sub}')")
+        page.wait_for_function(f"() => location.hash.includes('open={box_id}')")
         _arch_ready(page)
         page.wait_for_timeout(300)
-        page.evaluate(f"() => [...document.querySelectorAll('#diagram g.node')].find((n) => n.id.includes('-{box_id}-')).dataset.held = '1'")
         assert page.evaluate(where) == before, (box_id, before, page.evaluate(where))
-        tags = page.evaluate(f"""() => Math.max(...[...document.querySelectorAll('#diagram .ibox-map')]
-            .filter((b) => b.querySelector('.item-pill[data-item]') && b.closest('g.node').getAttribute('class').includes('cy-CYG') && b.closest('g.node').getAttribute('class').includes('{sub}'))
-            .map((b) => b.querySelectorAll('.item-pill[data-item]').length))""")
-        assert tags == held, (sub, tags, held)
+        tags = page.evaluate(f"""() => [...document.querySelectorAll('#diagram g.node')].find((x) => x.id.includes('-{box_id}-'))
+            .querySelectorAll('.item-pill[data-item]').length""")
+        assert tags == len(groups[box_id]["parts"]), (box_id, tags, groups[box_id])
+        assert page.evaluate(closed) == before_closed[1:], "every other box stays as it was"
         page.go_back()
         page.wait_for_function("() => !location.hash.includes('open=')")
         assert not page.js_errors, page.js_errors
