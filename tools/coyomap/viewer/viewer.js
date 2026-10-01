@@ -1078,19 +1078,23 @@ function roleChipOf(role, fallbackName) {
 }
 
 // ── the box ──────────────────────────────────────────────────────────────────────────────────────
+// THE ARCHITECTURE PICTURE'S BOX (`map`) SAYS NO SENTENCE. Every box inside the product there is a
+// subsystem, whose name says what it is for and whose part tags say what is in it; 12 of mcpolis's
+// 18 subsystem sentences opened by repeating the name, and the sentence made every box 50px taller
+// and each picture 11% to 16% taller. Resting on a box shows its whole card.
 const ITEM_VARIANT = {
-  full:    { what: true,  facts: true,  band: true,  clamp: 0, word: true },
-  map:     { what: true,  facts: false, band: true,  clamp: 3, word: true },
-  compact: { what: false, facts: false, band: true,  clamp: 0, word: false },
-  tight:   { what: false, facts: false, band: false, clamp: 0, word: false },
+  full:    { what: true,  facts: true,  band: true,  word: true },
+  map:     { what: false, facts: false, band: true,  word: true },
+  compact: { what: false, facts: false, band: true,  word: false },
+  tight:   { what: false, facts: false, band: false, word: false },
   // The PERSON on a use case map, at the size the stick figure has always been drawn there: the
   // glyph leads and the name sits under it. Still this function's output, so the person is not the
   // one box kind that escapes the shared code.
-  figure:  { what: false, facts: false, band: false, clamp: 0, word: false },
+  figure:  { what: false, facts: false, band: false, word: false },
   // A CARD IN A LIST. Same slots as `full` and the same builder, so a thing cannot read one way in a
   // list and another on a picture — but its own reading SIZE, set in the stylesheet: a list is read
   // and a picture is scanned, and the card's 14px name has to survive being stacked twenty deep.
-  card:    { what: true,  facts: true,  band: true,  clamp: 0, word: true },
+  card:    { what: true,  facts: true,  band: true,  word: true },
 };
 // `spec` is what a thing IS, with no view in it:
 //   { id, k, name, word, ikind, what, pills:[{text,cls}], facts:[[label,value,valueIsHtml?]],
@@ -1143,8 +1147,7 @@ function itemBoxHtml(spec, variant, opts) {
   if (kindLine && pills) out.push(`<span class="ibox-kindline">${pills}</span>`);
   const what = o.what !== undefined ? o.what : spec.what;
   if (v.what && what) {
-    out.push(`<span class="ibox-what${v.clamp ? ' ibox-clamp' + v.clamp : ''}">`
-      + `${mdInline(what)}</span>`);
+    out.push(`<span class="ibox-what">${mdInline(what)}</span>`);
   }
   if (v.facts) {
     // A fact's value is TEXT unless the third slot says otherwise. A step's source line is the code
@@ -1273,8 +1276,8 @@ function componentKindsLabel(ids) {
   }
   return words.join(' · ');
 }
-// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, with the subsystem's own
-// sentence, NAMING the parts it holds there, each a tag that opens that part — one part as well as
+// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, NAMING the parts it holds
+// there, each a tag that opens that part — one part as well as
 // ten, so every box of the picture is a subsystem and reads the same way. Every name up to
 // CELL_NAMES_ALL; past that the first CELL_NAMES_SHOWN, which the generator orders by how many of the
 // picture's stories pass through each part, then how many more. No type word: on this picture every
@@ -1286,6 +1289,7 @@ function itemSpecCell(sid, parts) {
   if (!spec) return null;
   const shown = parts.length <= CELL_NAMES_ALL ? parts : parts.slice(0, CELL_NAMES_SHOWN);
   spec.word = '';
+  spec.what = '';
   spec.band = [];
   spec.chips = shown.map((p) => ({ id: p, kind: 'component', name: (GRAPH.nodes[p] || {}).name || p }));
   spec.more = parts.length - shown.length;

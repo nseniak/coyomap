@@ -4346,17 +4346,30 @@ def test_following_a_story_on_a_merged_line_shows_that_storys_own_sentence() -> 
         assert not page.js_errors, page.js_errors
 
 
+# A POINT ON AN ARCHITECTURE BOX'S OWN BODY, clear of its name (which opens it) and its part tags
+# (which open a part): the first spot inside a box, scanned from its bottom-right corner, that the box
+# itself answers for. A box says no sentence there, so there is no line of text to aim at instead.
+ARCH_BOX_BODY = """() => {
+    for (const n of document.querySelectorAll('#diagram g.node')) {
+      const b = n.querySelector('.ibox-map');
+      if (!b) continue;
+      const r = b.getBoundingClientRect();
+      for (let y = r.bottom - 3; y > r.top; y -= 3) for (let x = r.right - 3; x > r.left; x -= 3) {
+        const e = document.elementFromPoint(x, y);
+        if (e && b.contains(e) && !e.closest('button, a, .ibox-name, .item-pill'))
+          return { x, y, name: n.querySelector('.ibox-name').textContent.trim() };
+      }
+    }
+    return null;
+}"""
+
+
 def test_a_click_on_a_box_keeps_that_boxs_steps_in_the_text() -> None:
     """The box around the name selects it and keeps only the lines that touch it in the text; the
     text says whose steps these are, and one click shows every step again."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        # ON THE BOX'S SENTENCE: clear of its name, which opens it.
-        spot = page.evaluate("""() => {
-            const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.querySelector('.ibox-map .ibox-what'));
-            const w = n.querySelector('.ibox-what').getBoundingClientRect();
-            return { x: w.left + w.width / 2, y: w.top + w.height / 2 };
-        }""")
+        spot = page.evaluate(ARCH_BOX_BODY)
         before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)
@@ -4378,12 +4391,7 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
         before = page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length")
-        box = page.evaluate("""() => {
-            const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.querySelector('.ibox-map .ibox-what'));
-            const w = n.querySelector('.ibox-what').getBoundingClientRect();
-            return { x: w.left + w.width / 2, y: w.top + w.height / 2,
-                     name: n.querySelector('.ibox-name').textContent.trim() };
-        }""")
+        box = page.evaluate(ARCH_BOX_BODY)
         page.mouse.move(box["x"], box["y"])
         page.mouse.move(box["x"] + 1, box["y"])
         page.wait_for_timeout(600)
@@ -4488,9 +4496,9 @@ def make_whole_product_text(mutate: Any) -> dict[str, Any]:
 
 
 def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_steps() -> None:
-    """A group of parts is its subsystem's box on the layered picture. It says the subsystem's own
-    sentence and names the parts it holds, each a tag that opens that part, with no type word: every
-    box inside the product is a subsystem on this picture. The box around the name
+    """A group of parts is its subsystem's box on the layered picture. It names the parts it holds,
+    each a tag that opens that part, with no sentence and no type word: every box inside the product
+    is a subsystem on this picture, and its card is one hover away. The box around the name
     selects it, shows the subsystem's card and keeps the group's own steps in the text; the name
     opens the subsystem."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
@@ -4515,7 +4523,7 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
         }""")
         group = groups[spot["id"]]
         named = group["parts"] if len(group["parts"]) <= 4 else group["parts"][:3]
-        assert spot["tags"] == named and spot["sentence"] and not spot["word"], (spot, group)
+        assert spot["tags"] == named and not spot["sentence"] and not spot["word"], (spot, group)
         assert spot["more"] == ("" if len(group["parts"]) <= 4 else f"+{len(group['parts']) - 3} more"), spot
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)

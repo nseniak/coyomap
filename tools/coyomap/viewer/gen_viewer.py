@@ -2006,13 +2006,9 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
 def _arch_inside_box(graph: GraphDict, lines: list[str], bid: str, subflows: set[str],
                      cells: dict[str, _ArchCell]) -> None:
     """One box inside the product on an Architecture picture."""
-    # EVERY BOX INSIDE THE PRODUCT CARRIES ITS OWN SENTENCE, cut to 2 lines (`map`): the name
-    # alone did not say what a box is ("Team MCPs" is a set of screens, "Plan caps" both the
-    # limits and the prompt). A subsystem keeps its component count in the band. A box does NOT name
-    # the subsystem it sits in: the pill took a line of every component box to say what the box's
-    # card says one hover away. A shared sub-use case is its dashed box.
-    # A GROUP OF PARTS is its subsystem's box, and it counts only the parts it holds here: the
-    # same subsystem has a group in each layer it has parts in.
+    # A BOX INSIDE THE PRODUCT IS ITS SUBSYSTEM: its name, and the parts the stories use as tags. No
+    # sentence: the subsystem's name says what the box is for, and its card is one hover away. A
+    # shared sub-use case is its dashed box.
     cell = cells.get(bid)
     if bid in subflows:
         lines.append(f'  {bid}["{_slot("subflow", "map", bid)}"]:::cy-{bid}')

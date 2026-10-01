@@ -3361,17 +3361,9 @@ body.insp-on { cursor: crosshair; }
    user-facing box shows nothing at all, which is the silence features already keep. */
 .ibox-pill.ibox-pill-staff { background: #fef3c7; color: #92400e; border-color: #eed9a0; }
 .ibox-what { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.35; color: #5a6072; }
-/* Two lines, because a component's sentence runs to 188 characters on a live map and a picture has
-   no room for a paragraph. The whole sentence is one click away in the floating card. */
-.ibox-clamp2, .ibox-clamp3 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-                             overflow: hidden; }
-.ibox-clamp3 { -webkit-line-clamp: 3; }
-/* A BOX'S SENTENCE WRAPS INSIDE A DRAWING TOO. The drawing engine styles every label to one unbroken
-   line and gives it a display that ignores a line clamp, in rules scoped to the drawing's own id, so
-   they outrank a plain class. Measured on the Architecture view: a box showed one line of its sentence,
-   cut mid-word, in a box sized for that one line. */
+/* A BOX'S TEXT WRAPS INSIDE A DRAWING TOO. The drawing engine styles every label to one unbroken
+   line, in rules scoped to the drawing's own id, so they outrank a plain class. */
 .ibox-map, .ibox-map * { white-space: normal !important; }
-.ibox-map .ibox-clamp3 { display: -webkit-box !important; }
 .ibox-fact { display: block; margin-top: 4px; font-size: 11.5px; color: #6b7280; }
 .ibox-lbl { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: 9.5px;
             color: #9ca3af; }
