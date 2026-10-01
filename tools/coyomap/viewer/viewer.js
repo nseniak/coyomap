@@ -3244,7 +3244,7 @@ function renderElementDetails(id) {
   // component or a process nothing is left, and the hero is not drawn at all — it was a 48px strip
   // holding the single word `entity` with a rule under it, between the page's title and its first
   // sentence.
-  const extra = kindPillsExtra(n) + chg;
+  const extra = kindWordPillHtml(id) + kindPillsExtra(n) + chg;
   // THE SAME CARD every page about one element leads with (see heroSubjectHtml): mark, `Type: Name`,
   // the pills that vary within the kind, the sentence. The body below drops the sentence it used to
   // open with, since the card now says it.
@@ -7573,7 +7573,7 @@ function heroSubjectHtml(id, chain) {
   const n = GRAPH.nodes[id];
   const c = n ? cardFacts(id) : null;
   if (!c) return '';
-  const pills = kindPillsExtra(n) + cmpBadgeHtml(id);
+  const pills = kindWordPillHtml(id) + kindPillsExtra(n) + cmpBadgeHtml(id);
   return pageHeroHtml({ glyph: elementHeroGlyph(n.kind), name: c.name, type: c.type, pills,
                         desc: c.desc ? mdInline(c.desc) : '', noDesc: false,
                         meta: n.kind === 'process' ? heroDetailsLinkHtml(id) : '' })
@@ -8911,6 +8911,12 @@ function elementPillsHtml(id) {
 }
 // The pills AFTER the type one — which kind of actor, which side of a feature. A page hero says the
 // type in words before the name (`Actor: Prospect`), so it draws only these.
+// A COMPONENT'S KIND beside its name on its own page ("UI", "logic"), the way an actor's page shows
+// "staff": the hero's type word stays "Component", and the kind is what varies within it.
+function kindWordPillHtml(id) {
+  const c = id ? cardFacts(id) : null;
+  return c && c.word ? `<span class="ecard-pill">${esc(c.word)}</span>` : '';
+}
 function elementSidePillsHtml(id) {
   const c = id ? cardFacts(id) : null;
   if (!c) return '';

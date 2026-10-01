@@ -4577,3 +4577,12 @@ def test_a_component_s_kind_is_its_type_pill() -> None:
         _settle(page)
         assert page.evaluate(read)["popup"] == ["component"], "no kind in the map, so the word stays"
         assert not page.js_errors, page.js_errors
+
+
+def test_a_component_page_shows_its_kind_beside_its_name() -> None:
+    """A component's page shows its kind beside its name, the way an actor's page shows "staff"."""
+    read = "() => [...document.querySelectorAll('.page-hero-name .ecard-pill')].map((p) => p.textContent)"
+    with _served_map(make_one_part_a_screen) as url, _page(url + "#v=element&id=C14") as page:
+        _settle(page)
+        assert page.evaluate(read) == ["UI"], page.evaluate(read)
+        assert not page.js_errors, page.js_errors
