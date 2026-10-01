@@ -896,9 +896,6 @@ function cardFacts(id) {
   // …and whether it runs on a SCHEDULE: its kind says what it does, and this says what its ways in say
   // about how it starts (views.py `Starts`).
   if (n.kind === 'component' && f.Starts) pills.push({ text: 'scheduled', cls: 'comp-starts' });
-  // …and whether it RUNS BEFORE THE APIS, on a request on its way in: where its ways in put it, which
-  // is why the Architecture picture draws it with them (views.py `Runs`).
-  if (n.kind === 'component' && f.Runs) pills.push({ text: 'runs before the APIs', cls: 'comp-before' });
   // A COMPONENT'S KIND IS ITS TYPE PILL ("UI", "logic"), as an interface's kind is: the name alone did
   // not say whether a box is a page, the logic or the data, and "component" beside a kind said the
   // type twice. `type` stays the element's own label, for the sentences that name what it is.
