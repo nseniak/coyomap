@@ -4524,12 +4524,19 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         labels = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgeLabel.arch-layerline')]
             .map((l) => l.textContent.trim())""")
         assert labels and not any(labels), labels
+        # DARK AND THICK AT ANY ZOOM: 3 screen pixels of near-black, whatever the picture's size.
+        drawn = page.evaluate("""() => document.querySelectorAll('#diagram path.flowchart-link.arch-layerline')
+            .values().map((p) => { const cs = getComputedStyle(p);
+              return [cs.stroke, Math.round(parseFloat(cs.strokeWidth) * p.getScreenCTM().a * 10) / 10]; })
+            .toArray()""")
+        assert drawn and all(d == ["rgb(15, 23, 42)", 3.0] for d in drawn), drawn
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')
             .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
         page.evaluate(click)
-        assert page.evaluate(VISIBLE_LINES)["box"] == under
+        # the layer line stood for these lines: drawn beside them, it would say the same thing twice
+        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]) - 1, "box": under}
         assert page.evaluate("() => document.querySelectorAll('#archtext .archtext-line:not([hidden])').length") == under
         page.evaluate(click)
         assert page.evaluate(VISIBLE_LINES)["box"] == rest

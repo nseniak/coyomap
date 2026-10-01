@@ -358,7 +358,7 @@ def test_the_products_own_timer_sits_in_the_work_layer_not_with_the_people():
     clock = gv._person_id("Nightly clock")
     drawings, _texts = gv.gen_arch_views(graph, crowded=0)
     assert frames_of(drawings["all|"], (clock, gv._person_id("Admin"))) == {
-        clock: "Checks", gv._person_id("Admin"): "People"}
+        clock: "Checks", gv._person_id("Admin"): "Actors"}
     # a person is still drawn with the people, on a picture with no people frame too
     assert gv._arch_layer(graph, model, "Admin") == -2
     assert gv._arch_layer(graph, model, "Nightly clock") == gv.ARCH_WORK_LAYER
@@ -415,7 +415,7 @@ def test_the_stories_come_in_the_order_a_reader_knows_and_every_row_follows_them
     graph = make_graph(doc)
     assert gv._arch_walks(graph) == ["UC1", "UC3", "UC2"]
     rows = rows_of(gv.gen_arch_views(graph, crowded=0)[0]["all|"])
-    assert rows["People"] == [gv._person_id(p) for p in ("Admin", "Operator", "Member")]
+    assert rows["Actors"] == [gv._person_id(p) for p in ("Admin", "Operator", "Member")]
     assert rows["Interfaces"] == ["I1", "I3", "I2"]
 
 
@@ -439,9 +439,9 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     drawings, texts = gv.gen_arch_views(graph, crowded=0)
     drawing, text = drawings["all|"], texts["all|"]
     who = gv._person_id("Admin")
-    assert frames_of(drawing, (who, "I1")) == {who: "People", "I1": "Interfaces"}
+    assert frames_of(drawing, (who, "I1")) == {who: "Actors", "I1": "Interfaces"}
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
-    assert layer[("People", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
+    assert layer[("Actors", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
     assert layer[("APIs", "Checks")] == [["C3", "C4"]]
     # no box's own line is drawn: each frame is then laid out on its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
@@ -495,7 +495,7 @@ def test_a_layer_line_few_boxes_of_its_layer_take_is_not_drawn():
     assert "exceptions" not in text
     assert any(e["srcBox"] == "I1" and e["dstBox"] == "C1" for e in text["lines"])
     # every person comes in through a door: 3 of 3
-    assert len(layer[("People", "Interfaces")]) == 3
+    assert len(layer[("Actors", "Interfaces")]) == 3
     links = [ln for ln in drawing.splitlines() if "-->" in ln]
     assert len(links) == len(text["layerLines"])
 

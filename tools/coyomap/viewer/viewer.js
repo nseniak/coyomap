@@ -4657,11 +4657,39 @@ function markLayerLines(root, t) {
   root.classList.toggle('arch-layers', archIsCrowded(t));
   if (!layers.length) return;
   const labels = [...root.querySelectorAll('.edgeLabels > g.edgeLabel')];
+  const heads = archLayerHeads(root);
   [...root.querySelectorAll('.edgePaths path.flowchart-link')].forEach((p, i) => {
     if (i >= layers.length) return;
-    for (const el of [p, ...(p.__cyHits || []), labels[i]].filter(Boolean)) el.classList.add('arch-layerline');
-    p.dataset.layer = String(i);
+    for (const el of [p, ...(p.__cyHits || []), labels[i]].filter(Boolean)) {
+      el.classList.add('arch-layerline');
+      el.dataset.layer = String(i);
+    }
+    if (p.hasAttribute('marker-end')) p.setAttribute('marker-end', `url(#${heads.end})`);
+    if (p.hasAttribute('marker-start')) p.setAttribute('marker-start', `url(#${heads.start})`);
   });
+}
+// A LAYER LINE IS DARK AND THICK AT ANY ZOOM. The whole product's picture is big, so at the zoom it
+// opens at a line of 2.6 units was 0.76 screen pixels wide and read as grey. Its width is counter-scaled
+// against the zoom (rescaleLayerLines), and its heads are sized by its width (markerUnits
+// strokeWidth), so they keep one screen size with it. Mermaid's own heads are sized in units.
+const ARCH_LAYER_LINE_PX = 3;
+function archLayerHeads(root) {
+  const svg = root.querySelector('svg') || root;
+  const ids = { end: 'arch-layer-end', start: 'arch-layer-start' };
+  if (svg.querySelector('#' + ids.end)) return ids;
+  const defs = document.createElementNS(SVGNS, 'defs');
+  defs.innerHTML = `<marker id="${ids.end}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="strokeWidth"`
+    + ' markerWidth="3.5" markerHeight="3.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-layer-head"/></marker>'
+    + `<marker id="${ids.start}" viewBox="0 0 10 10" refX="1" refY="5" markerUnits="strokeWidth"`
+    + ' markerWidth="3.5" markerHeight="3.5" orient="auto"><path d="M10,0 L0,5 L10,10 z" class="arch-layer-head"/></marker>';
+  svg.insertBefore(defs, svg.firstChild);
+  return ids;
+}
+function rescaleLayerLines() {
+  if (!archCrowded()) return;
+  const w = ARCH_LAYER_LINE_PX * curIconInv() + 'px';
+  mainScene.root.querySelectorAll('path.flowchart-link.arch-layerline')
+    .forEach((p) => paintImportant(p, { stroke: '#0f172a', 'stroke-width': w }));
 }
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
@@ -4716,7 +4744,9 @@ function archOverlay(items) {
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
     hit.setAttribute('class', 'arch-ov-hit'); hit.removeAttribute('marker-end');
-    const find = () => { archMarkText(it.src, it.dst, true); archMarkArrow(it.src, it.dst); };
+    // …and the click stops here: on the empty space behind it, it would let go of the box or the
+    // layer line these lines were drawn for, and take them away again.
+    const find = (ev) => { ev.stopPropagation(); archMarkText(it.src, it.dst, true); archMarkArrow(it.src, it.dst); };
     hit.addEventListener('click', find);
     g.appendChild(line); g.appendChild(hit);
     if (it.label) {
@@ -7486,6 +7516,11 @@ function archStoryTextHtml(t, story) {
 function archFilterLines(key, test, headHtml) {
   archBoxFilter = key || '';
   const on = archBoxFilter ? test : null;
+  // A PICKED LAYER LINE GOES while the lines it stands for are drawn: it stood for them, and drawn
+  // beside them it says the same thing twice.
+  const open = archBoxFilter.startsWith('layer:') ? archBoxFilter.slice(6) : null;
+  if (mainScene) mainScene.root.querySelectorAll('.arch-layerline')
+    .forEach((el) => el.classList.toggle('arch-layer-open', el.dataset.layer === open));
   archtext.querySelectorAll('.archtext-line').forEach((el) => {
     el.hidden = !!on && !on(el.dataset.src, el.dataset.dst);
   });
@@ -7623,7 +7658,8 @@ function bindArchText(t, story) {
     // A LAYER LINE draws the box lines it stands for, and keeps them alone in the text.
     const layer = p.classList.contains('arch-layerline') ? p.dataset.layer : '';
     const find = !layer ? () => { archMarkText(m[1], m[2], true); archMarkArrow(m[1], m[2]); }
-      : () => {
+      : (ev) => {
+        ev.stopPropagation();   // the empty space behind it lets go of what is picked (resetScene)
         if (story) return;
         if (archBoxFilter === 'layer:' + layer) archFilterBox('');
         else archFilterLayerLine(+layer, t);
@@ -7727,7 +7763,7 @@ function archKeyHtml(t) {
     + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
   // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers, so that one
   // takes the place of the two box line styles.
-  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, '#334155', 2.6)}`
+  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, '#0f172a', ARCH_LAYER_LINE_PX)}`
       + ' from one layer to another, when more than a third of the first layer\'s boxes lead there.'
       + ' Click it, or a box, to see the lines themselves</span>' : '';
   return '<div class="archkey">'
@@ -8800,6 +8836,7 @@ function curIconInv() {
 }
 function updateZoomLevel() {  // reflect the current pan-zoom scale in the header control + the badges
   if (zoomlevel) zoomlevel.textContent = mainPz ? Math.round(mainPz.getZoom() * 100) + '%' : '100%';
+  rescaleLayerLines();
   rescaleDiffBadges();
   scheduleCallout(false);   // the element end moved with the drawing — measured once it is painted
 }

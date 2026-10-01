@@ -1439,7 +1439,7 @@ def _arch_frame_label(frame: int) -> str:
 
 
 #: The frames above and below the parts' layers, by their place in `_arch_layer`'s order.
-ARCH_EDGE_FRAMES = {-2: ("CYFP", "People"), -1: ("CYFD", "Interfaces"),
+ARCH_EDGE_FRAMES = {-2: ("CYFP", "Actors"), -1: ("CYFD", "Interfaces"),
                     len(grammar.COMPONENT_KIND_FRAMES) + 1: ("CYFO", "Outside services")}
 
 
@@ -2108,7 +2108,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         lines.append(f"  {a} {head} {b}")
         thick.append(str(len(box_lines) + k))
     if thick:
-        lines.append(f"  linkStyle {','.join(thick)} stroke:#334155,stroke-width:2.6px,color:#334155")
+        lines.append(f"  linkStyle {','.join(thick)} stroke:#0f172a,stroke-width:2.6px,color:#0f172a")
     if folded:
         lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
     if keeping:

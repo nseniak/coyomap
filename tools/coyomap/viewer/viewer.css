@@ -3558,6 +3558,8 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
+.arch-layers .arch-layerline.arch-layer-open { display: none; }
+.arch-layer-head { fill: #0f172a; }
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
