@@ -4405,27 +4405,6 @@ def _decided_positions(graph: GraphDict, flow: dict[str, Any], steps: list[dict[
             if (str(st["sf"]) in runs if st.get("sf") else (uc, str(st.get("n"))) in own)}
 
 
-def flow_map_ends(graph: GraphDict, flow: dict[str, Any]) -> dict[str, str]:
-    """Where one walk STARTS and ENDS on its map, as the map's own box ids: the box its first step leaves
-    from, and the box its last step arrives at. The view marks them the way Use Case Maps draw a path's
-    start point and end bar, with the use case's trigger and outcome on them. The person aliases are the
-    map's own (`FAn`, first appearance over `own_steps`, as `gen_flow_map_mermaid` hands them out), so
-    the marks land on the boxes the map drew."""
-    steps = own_steps(graph, flow)
-    if not steps:
-        return {}
-    alias: dict[str, str] = {}
-
-    def box(tok: str, is_id: bool) -> str:
-        return alias.setdefault(tok, "FA" + str(len(alias))) if is_role_endpoint(is_id) else tok
-
-    ids: list[str] = []
-    for st in steps:
-        ids.append(box(str(st["src"]), bool(st.get("src_is_id"))))
-        ids.append(str(st["sf"]) if st.get("sf") else box(str(st["dst"]), bool(st.get("dst_is_id"))))
-    return {"start": ids[0], "end": ids[-1]}
-
-
 def flow_narrative(graph: GraphDict, flow: dict[str, Any]) -> list[dict[str, Any]]:
     """The readable numbered steps for the side panel — the SAME source the map draws from. Each step
     carries its from/to display names + (clickable) node ids, its own action text, and any note. The panel
@@ -4513,12 +4492,6 @@ def flow_actors(graph: GraphDict, flow: dict[str, Any]) -> list[dict[str, Any]]:
             "stepIdx": idxs,
         })
     return out
-
-
-def flow_ends_map(graph: GraphDict) -> dict[str, dict[str, str]]:
-    """{uc_id: {start, end}} for every use case walk (`flow_map_ends`). A shared sub-use case has no
-    trigger or outcome of its own to put on the marks, so it has no entry."""
-    return {str(f["uc"]): flow_map_ends(graph, f) for f in graph["flows"]}
 
 
 def flow_actors_map(graph: GraphDict) -> dict[str, list[dict[str, Any]]]:
@@ -4625,7 +4598,6 @@ class ViewBundle(TypedDict):
     flowsNarr: dict[str, list[dict[str, Any]]]
     hpActors: list[dict[str, Any]]
     flowActors: dict[str, list[dict[str, Any]]]
-    flowEnds: dict[str, dict[str, str]]   # where each use case map starts and ends (flow_map_ends)
     elementTint: dict[str, dict[str, str]]
     #: {SFn: [chip, …]} — the people, doors and records inside each shared sub-use case, so the
     #: viewer can wear them on that walk's collapsed box without re-deriving the join.
@@ -4789,7 +4761,6 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
         flowsNarr=flow_narratives(graph),
         hpActors=hp_actors(graph) if hp else [],
         flowActors=flow_actors_map(graph),
-        flowEnds=flow_ends_map(graph),
         elementTint=ELEMENT_TINT,
         subflowChips=subflow_chips(graph),
         mermaidLibs=gen_libs_mermaid(graph),

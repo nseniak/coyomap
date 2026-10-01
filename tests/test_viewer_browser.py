@@ -4608,3 +4608,12 @@ def test_a_subsystem_s_popup_lists_the_kinds_in_its_boxes_own_words() -> None:
             .map((x) => x.textContent)""")
         assert popup == ["3 components", "UI · widget · logic"], popup
         assert not page.js_errors, page.js_errors
+
+
+def test_a_use_case_map_draws_no_start_or_end_mark() -> None:
+    """The start circle and end bar belong to a story followed on the Architecture view only."""
+    with _served() as url, _page(url + "#v=usecase&uc=UC1") as page:
+        _settle(page)
+        assert page.evaluate("() => document.querySelectorAll('#diagram g.node').length") > 0
+        assert page.evaluate("() => document.querySelectorAll('.ucm-mark').length") == 0
+        assert not page.js_errors, page.js_errors

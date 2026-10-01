@@ -13,7 +13,6 @@ let GRAPH;
 const MEMBER_BORDER_MIX = 34;
 const CONTAINER_BORDER_MIX = 65;
 let MERMAID_BASE, MERMAID_CONTEXT, MERMAID_CONTAINER, MERMAID_ARCH, MERMAID_ARCH_BY, ARCH_FEATURES, ARCH_TEXT;
-let FLOW_ENDS;          // uc-id -> {start, end}: the boxes a use case map's walk starts and ends at
 let MERMAID_BY_SUB;         // subsystem neighbourhood: sid -> sub-diagram
 let MERMAID_EDGE_CARD;      // edge pair: 'A>B' -> two-subsystem sub-diagram
 let CONTAINER_EDGES;        // inter-subsystem arrow 'A>B' -> [crossing component edges]
@@ -110,7 +109,7 @@ function applyBundle(b) {
   MERMAID_BASE = b.mermaidBase; MERMAID_CONTEXT = b.mermaidContext;
   MERMAID_CONTAINER = b.mermaidContainer; MERMAID_BY_SUB = b.mermaidBySub;
   MERMAID_ARCH = b.mermaidArch; MERMAID_ARCH_BY = b.mermaidArchBy || {}; ARCH_FEATURES = b.archFeatures || [];
-  ARCH_TEXT = b.archText || {}; FLOW_ENDS = b.flowEnds || {};
+  ARCH_TEXT = b.archText || {};
   MERMAID_EDGE_CARD = b.mermaidEdgeCard; CONTAINER_EDGES = b.containerEdges;
   MERMAID_DOMAIN = b.mermaidDomain; MERMAID_DOMAIN_CONTAINER = b.mermaidDomainContainer;
   MERMAID_DOMAIN_SUB = b.mermaidDomainSub; MERMAID_DOMAIN_EDGE_CARD = b.mermaidDomainEdgeCard;
@@ -6683,11 +6682,6 @@ function bindFlowMap(uc) {
   // lifeline columns (x only) there, whole boxes here.
   const partsById = {};
   for (const id in scene.nodeEls) partsById[id] = [scene.nodeEls[id]];
-  // WHERE THE STORY STARTS AND ENDS, marked as the Architecture view marks the story it follows, with
-  // the use case's own trigger and outcome in the tips (markStartEnd).
-  const ends = FLOW_ENDS[uc];
-  const facts = ((GRAPH.nodes[uc] || {}).fields) || {};
-  if (ends && ends.start) markStartEnd(scene, ends.start, ends.end, facts.Trigger || '', facts.Outcome || '');
   flowPlay = steps.length
     ? { uc, kind: 'map', steps, msgEls, partsById, mapArrows: arrows, cur: -1, active: false }
     : null;

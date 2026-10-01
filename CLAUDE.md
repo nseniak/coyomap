@@ -267,8 +267,8 @@ design principles these come from)
   up, numbered 1, 2, 3 in its own order, and the text tells it from its trigger to its
   outcome.
 - **start and end marks** — a filled circle on the box where a story starts and a bar
-  on the box where it ends, as Use Case Maps draw a path. Shown for a followed story and
-  on every use case map; their tips carry the use case's trigger and outcome.
+  on the box where it ends, as Use Case Maps draw a path. Shown for a followed story on
+  the Architecture view, never on a use case map; their tips carry the use case's trigger and outcome.
 - **store line** — a line from a box to the database that keeps its records. Its own
   colour, and no step number.
 - **rule mark** — the ⚖ on a line or an arrow where a business rule decides. The text

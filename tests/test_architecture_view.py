@@ -649,7 +649,6 @@ def test_a_use_case_map_marks_the_arrow_that_runs_a_deciding_sub_use_case():
     flow = next(f for f in graph["flows"] if f["uc"] == "UC1")
     drawing = gv.gen_flow_map_mermaid(graph, flow)
     assert re.search(rf"C3 --> *\|\"5 {gv.RULE_MARK}\"\| *SF1", drawing)
-    assert gv.flow_map_ends(graph, flow) == {"start": "FA0", "end": "FA0"}
 
 
 # --- the live map: rules that hold on every picture --------------------------------------
