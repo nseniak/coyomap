@@ -1837,10 +1837,43 @@ function selHas(scene, key) { return scene.selKeys.has(key); }
 // selected, restore the scene's default panel + full-lit diagram. Glow is fully rebuilt each time (a plain
 // CSS-filter swap, no visible flicker) so an element leaving the set can't strand a highlight, and shared
 // highlights (a step lit by both a participant and its own selection) stay consistent.
+// How much further down the main card's contents start than the second card's: the main card's bar.
+// Measured on the cards as they stand, from each one's first name to its own top edge; 0 when the main
+// card is not up to measure.
+// Set when the pick's card has just taken the second card's place (selApply): placeCardNear keeps that
+// place even when it is closer to the element than a fresh placement would go, so long as it covers
+// nothing and stays inside. It lasts until the next pick, because the card is placed again after the
+// next paint (scheduleCallout) and on every pan, and each of those must keep the same place.
+let cardTookPeekPlace = false;
+function contentsLift() {
+  const off = (card) => {
+    const n = card && !card.hidden && card.querySelector('.ibox-name');
+    return n ? n.getBoundingClientRect().top - card.getBoundingClientRect().top : null;
+  };
+  const a = off(PANEL_HOST), b = off(PEEK_CARD);
+  return a !== null && b !== null ? a - b : 0;
+}
 function selApply(scene) {
-  hidePeekCard();   // a new pick answers for itself; a card still up from a hover would be a third voice
+  // PICKING WHAT THE SECOND CARD SHOWS keeps that card where it is: the pick's card takes its place, so
+  // the reader's eye does not have to find it again (`lastCardPlace` is the place placeCardNear keeps
+  // while it still works). Any other pick answers for itself, and the second card goes.
+  const peek = peekCardFor && PEEK_CARD && !PEEK_CARD.hidden
+    ? { el: peekCardFor, at: { left: parseFloat(PEEK_CARD.style.left), top: parseFloat(PEEK_CARD.style.top) },
+        lift: contentsLift(), height: PEEK_CARD.getBoundingClientRect().height } : null;
+  hidePeekCard();
+  cardTookPeekPlace = false;
   if (scene._selClear) { scene._selClear(); scene._selClear = null; }
   const undos = scene.selection.map((d) => d.glow());
+  if (peek && peek.el.classList.contains('is-selected') && Number.isFinite(peek.at.left) && Number.isFinite(peek.at.top)) {
+    // The main card carries a bar above its contents (the × and the grip) that the second card has not,
+    // so it goes up by the difference: the CARD'S CONTENTS stay where the reader was reading them. And
+    // it is taller by the same, so near the bottom of the drawing it goes up only as far as it must to
+    // stay inside, rather than being placed again somewhere else.
+    const wrap = document.getElementById('diagwrap');
+    const room = wrap ? wrap.getBoundingClientRect().height - CARD_EDGE - (peek.height + peek.lift) : Infinity;
+    lastCardPlace = { left: peek.at.left, top: Math.max(CARD_EDGE, Math.min(peek.at.top - peek.lift, room)) };
+    cardTookPeekPlace = true;
+  }
   scene._selClear = () => undos.forEach((f) => f && f());
   if (scene.selection.length) scene.focusUnion(scene, scene.selection); else clearFocus(scene);
   renderSelPanel(scene);
@@ -8164,6 +8197,8 @@ function previewOnHover(scene, els, show, anchor) {
       // said so, so a hover does not take it away: the hovered thing's card shows BESIDE it, in the
       // second card, and goes when the pointer leaves. Hovering the picked thing itself adds nothing.
       if (scene.selection && scene.selection.length) {
+        // A TAG INSIDE THIS BOX under the pointer has the second card: the box does not take it back.
+        if (pointerOnTagIn(at)) return;
         if (!selHas(scene, 'node:' + idOf(at)) && !at.classList.contains('is-selected')) showPeekCard(at, show);
         return;
       }
@@ -8210,7 +8245,15 @@ function previewOnHover(scene, els, show, anchor) {
   for (const el of list) {
     el.addEventListener('mouseenter', enter);
     el.addEventListener('mouseleave', leave);
+    el.__cyHoverAgain = enter;   // a tag inside, left for the box's own body, asks for this card again
   }
+}
+// Is the pointer on one of the tags inside `box`? A tag shows its own card (previewTagOnHover).
+function pointerOnTagIn(box) {
+  if (!pointerAt) return false;
+  const e = document.elementFromPoint(pointerAt.x, pointerAt.y);
+  const tag = e && e.closest && e.closest(BOX_TAG);
+  return !!tag && box.contains(tag);
 }
 // THE TAG'S CARD, BESIDE THE BOX'S. A part's tag inside its subsystem's box shows the part's card as a
 // SECOND card, and the box's card stays: the reader asked about the part without leaving the box, and
@@ -8263,6 +8306,11 @@ function previewTagOnHover(t, id) {
     outTimer = setTimeout(() => {
       if (pointerIn(PEEK_CARD)) return;
       if (peekCardFor === t) hidePeekCard();
+      // BACK ON THE BOX'S OWN BODY: the box never saw the pointer leave, so it is asked again here, and
+      // its card comes back where a tag's card had stood in for it.
+      const box = t.closest('g.node');
+      const at = pointerAt && document.elementFromPoint(pointerAt.x, pointerAt.y);
+      if (box && box.__cyHoverAgain && at && box.contains(at) && !at.closest(BOX_TAG)) box.__cyHoverAgain();
     }, HOVER_LEAVE_MS);
   });
 }
@@ -8438,6 +8486,17 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   // RULE 4 FIRST: a card already standing somewhere that works stays there, so clicking along a walk
   // does not send it round the screen. The cap is what stops "stays there" turning into "never moves".
   const keep0 = hand ? [...sets[0], hand] : sets[0];
+  // THE SECOND CARD'S PLACE, TAKEN OVER: the reader was reading the card there, so it stays there unless
+  // it would cover something or leave the drawing. Moved up by the bar it gained, it can sit closer to
+  // the element than the shortest line a fresh placement allows, and that is not a reason to move it.
+  if (main && cardTookPeekPlace && lastCardPlace) {
+    const box = cardRectAt(w.left + lastCardPlace.left, w.top + lastCardPlace.top, W, H);
+    const inside = box.left >= w.left + CARD_EDGE && box.top >= w.top + CARD_EDGE
+      && box.right <= w.right - CARD_EDGE && box.bottom <= w.bottom - CARD_EDGE;
+    // Against the shapes THEMSELVES, not the margin a fresh placement keeps round them: the card it took
+    // over stood just outside that margin, and the bar it gained can bring it a few pixels into it.
+    if (inside && !sets[0].some((r) => rectsOverlap(box, grow(r, -CARD_CLEAR)))) { put(box.left, box.top); return; }
+  }
   if (main && lastCardPlace) {
     const box = cardRectAt(w.left + lastCardPlace.left, w.top + lastCardPlace.top, W, H);
     if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE) {

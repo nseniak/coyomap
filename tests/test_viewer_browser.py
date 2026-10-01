@@ -4592,6 +4592,34 @@ def test_a_hover_while_something_is_picked_shows_its_card_beside_the_pick() -> N
         assert not page.js_errors, page.js_errors
 
 
+def test_picking_what_the_second_card_shows_keeps_the_card_where_it_was() -> None:
+    """With something picked, a hover shows the hovered thing's card beside it. Picking that thing used to
+    move its card to wherever the picked card went, so the reader had to find it again: the card takes
+    the second card's place now, its contents exactly where they were read."""
+    spot = """(i) => { const n = [...document.querySelectorAll('#diagram g.node')][i]; const r = n.getBoundingClientRect();
+        for (let y = r.top + 4; y < r.bottom; y += 3) for (let x = r.right - 3; x > r.left; x -= 3) {
+          const e = document.elementFromPoint(x, y);
+          if (e && n.contains(e) && !e.closest('button, a, .ibox-name, .cyname, .item-pill')) return { x, y }; }
+        return null; }"""
+    name = """(c) => { const e = document.querySelector(c); if (e.hidden) return null;
+        const b = e.querySelector('.ibox-name').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top)]; }"""
+    with _served() as url, _page(url + "#v=container") as page:
+        _settle(page)
+        a, b = page.evaluate(spot, 0), page.evaluate(spot, 1)
+        page.mouse.click(a["x"], a["y"])
+        page.wait_for_timeout(400)
+        page.mouse.move(b["x"] - 1, b["y"])
+        page.mouse.move(b["x"], b["y"])
+        page.wait_for_timeout(500)
+        before = page.evaluate(name, "#peekcard")
+        assert before, "the hover shows its card beside the pick"
+        page.mouse.click(b["x"], b["y"])
+        page.wait_for_timeout(800)
+        assert page.evaluate(name, "#panel") == before
+        assert page.evaluate("() => document.querySelector('#peekcard').hidden")
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""

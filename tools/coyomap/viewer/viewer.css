@@ -1369,9 +1369,8 @@ body.tree-browsing #codeview { display: none; }
          background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
          box-shadow: 0 6px 22px rgba(15, 23, 42, .16); }
 #panel[hidden], #peekcard[hidden] { display: none; }
-/* THE TAG'S CARD (a part's tag inside its subsystem's box): the same card, beside the box's, a little
-   narrower, so the two read as the box and one thing in it. */
-#peekcard { width: 320px; min-width: 0; }
+/* THE SECOND CARD (a tag's, or a hover's beside a pick) is the same card at the same width: picking
+   what it shows puts the main card in its place, and a card that changed width there would move. */
 /* PLACED BUT NOT YET SHOWN: the card is measured (it keeps its box) and painted nothing, while the
    drawing finishes travelling under it. `visibility`, never `display`, because the placement at the
    end of the move has to measure the real card's width and height. */
