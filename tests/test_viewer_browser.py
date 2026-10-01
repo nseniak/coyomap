@@ -1478,7 +1478,7 @@ def test_a_surfaces_wire_reaches_its_card_and_lands_on_the_product() -> None:
                                                        n[n.length - 1] - cy) - r),
                      heads: [!!ps[0].getAttribute('marker-start'),
                              !!ps[0].getAttribute('marker-end')],
-                     borderW: getComputedStyle(b).borderRightWidth };
+                     ring: getComputedStyle(b).boxShadow };
         }""")
         assert got["wires"] == 1, got
         assert got["heads"] == [False, False], got   # a plain line: membership, not traffic
@@ -1486,9 +1486,10 @@ def test_a_surfaces_wire_reaches_its_card_and_lands_on_the_product() -> None:
         assert got["startGap"] <= 1, got
         # …and it LANDS ON the product, on the circle itself rather than short of it or inside it.
         assert got["endOffCircle"] <= 1, got
-        # …and the picked card really is wearing the shared 2px edge, so the single line above is
-        # leaving from inside the span that used to close the bracket.
-        assert got["borderW"] == "2px", got
+        # …and the picked card really is wearing the shared picked edge — its border plus a painted
+        # inset ring, which takes no room — so the single line above is leaving from inside the span
+        # that used to close the bracket.
+        assert "inset" in got["ring"] and "rgb(79, 70, 229)" in got["ring"], got
         assert not page.js_errors, page.js_errors
 
 def _wire_ends_on_the_product(page: Any) -> dict:
