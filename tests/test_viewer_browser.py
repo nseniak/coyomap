@@ -4585,4 +4585,6 @@ def test_a_component_page_shows_its_kind_beside_its_name() -> None:
     with _served_map(make_one_part_a_screen) as url, _page(url + "#v=element&id=C14") as page:
         _settle(page)
         assert page.evaluate(read) == ["UI"], page.evaluate(read)
+        rows = page.evaluate("() => [...document.querySelectorAll('dt')].map((d) => d.textContent)")
+        assert "Kind" not in rows, f"the kind is said once, beside the name: {rows}"
         assert not page.js_errors, page.js_errors

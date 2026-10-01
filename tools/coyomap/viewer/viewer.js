@@ -2978,7 +2978,7 @@ function explanationKey(fields) {
 // unconditionally below — no need to list it here too.
 const REDUNDANT_FIELD_BY_KIND = {
   subsystem: ['parent'], subdomain: ['parent'],
-  component: ['subsystem'], dep: ['kind', 'bucket'],
+  component: ['subsystem', 'kind'], dep: ['kind', 'bucket'],
 };
 // A derived dependency ROLE → its short display label. The role SET is derived from the dep's incoming
 // C→D edge verbs (grammar.dep_roles); a dual-role dep (Redis as bus + store) shows both ('bus', 'store').
