@@ -261,6 +261,14 @@ diaghead.addEventListener('click', (e) => {
   const sw = e.target.closest && e.target.closest('[data-archhp]');
   if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
 });
+// LETTING GO OF A BOX'S LINES lets go of the box too, as a second click on it does: its lines alone
+// were what picking it showed.
+diaghead.addEventListener('click', (e) => {
+  if (!(e.target.closest && e.target.closest('[data-archthrough-clear]'))) return;
+  const was = archBoxFilter;
+  archFilterBox('');
+  if (mainScene && was && !was.startsWith('layer:')) selRemove(mainScene, 'node:' + was);
+});
 diaghead.addEventListener('change', (e) => {
   const pick = e.target.closest && e.target.closest('[data-archfollow]');
   if (!pick) return;
@@ -7501,12 +7509,24 @@ function archFeatureHtml() {
     + archControlsHtml(s)
     + archKeyHtml(archTextOf({ ...s, kind: 'arch' }));
 }
-// WHAT THE READER NARROWS THE PICTURE TO, under the features: one story to follow.
+// WHAT THE READER NARROWS THE PICTURE TO, under the features: one story to follow, and the box (or
+// the line between layers) whose lines alone are shown, as a tag that lets go of it.
 function archControlsHtml(s) {
   const t = archTextOf({ ...s, kind: 'arch' });
   const stories = (t && t.stories) || [];
-  if (!stories.length) return '';
-  return `<div class="archctl-row">${archFollowSelectHtml(stories, s.story || '')}</div>`;
+  return '<div class="archctl-row">' + (stories.length ? archFollowSelectHtml(stories, s.story || '') : '')
+    + `<span class="archthrough"${archFilterLabel ? '' : ' hidden'}>${archThroughHtml()}</span></div>`;
+}
+function archThroughHtml() {
+  return archFilterLabel ? `${archFilterLabel} <button type="button" class="archthrough-x" data-archthrough-clear`
+    + ' aria-label="Show every line" title="Show every line">\u00d7</button>' : '';
+}
+// The tag is written in place, as the reader picks: the header is drawn again only with the screen.
+function syncArchThrough() {
+  const tag = diaghead.querySelector('.archthrough');
+  if (!tag) return;
+  tag.hidden = !archFilterLabel;
+  tag.innerHTML = archThroughHtml();
 }
 // FOLLOW A STORY: every story of the picture, grouped by its feature in the Features page's order. The
 // first entry says what the list is for while nothing is followed, and lets go of the story once one is.
@@ -7559,12 +7579,15 @@ function archStoryOf(s, t) {
 // A story list this long or shorter opens by itself; a longer one (the All picture's 52) stays folded.
 const ARCH_FOLLOW_OPEN = 8;
 let archBoxFilter = '';
+let archFilterLabel = '';   // what the header's tag says while a box's lines alone are shown
 function syncArchText(s) {
   const t = archTextOf(s);
   const entries = t ? (t.lines || []) : null;
   archtext.hidden = !entries || !entries.length;
   placeArchText();
   archBoxFilter = '';
+  archFilterLabel = '';
+  syncArchThrough();
   if (archtext.hidden) { archtext.innerHTML = ''; return; }
   const story = archStoryOf(s, t);
   archtext.innerHTML = story ? archStoryTextHtml(t, story) : archFlowTextHtml(t);
@@ -7663,6 +7686,8 @@ function archStoryTextHtml(t, story) {
 function archFilterLines(key, test, headHtml) {
   archBoxFilter = key || '';
   const on = archBoxFilter ? test : null;
+  archFilterLabel = on ? headHtml : '';
+  syncArchThrough();
   // A PICKED LAYER LINE GOES while the lines it stands for are drawn: it stood for them, and drawn
   // beside them it says the same thing twice.
   const open = archBoxFilter.startsWith('layer:') ? archBoxFilter.slice(6) : null;
@@ -7683,7 +7708,7 @@ function archFilterLines(key, test, headHtml) {
 }
 // ONE BOX'S STEPS: the lines with this box at either end. An empty id shows every line again.
 function archFilterBox(id, name) {
-  archFilterLines(id, (a, b) => a === id || b === id, `Only the steps through <b>${esc(name || id)}</b>`);
+  archFilterLines(id, (a, b) => a === id || b === id, `Through <b>${esc(name || id)}</b>`);
 }
 // ONE LAYER LINE'S STEPS: the box lines it stands for.
 function archFilterLayerLine(k, t) {
@@ -7691,7 +7716,7 @@ function archFilterLayerLine(k, t) {
   if (!ll) return;
   const pairs = new Set(ll.lines.map(([a, b]) => a + '>' + b));
   archFilterLines('layer:' + k, (a, b) => pairs.has(a + '>' + b),
-    `Only the steps from <b>${esc(ll.src)}</b> to <b>${esc(ll.dst)}</b>`);
+    `From <b>${esc(ll.src)}</b> to <b>${esc(ll.dst)}</b>`);
 }
 function archBoxName(t, id) {
   for (const e of (t && t.lines) || []) {

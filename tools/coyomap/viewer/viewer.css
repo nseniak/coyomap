@@ -937,6 +937,12 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archfollow select { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #cbd5e1;
   border-radius: 6px; background: #fff; color: #1f2937; max-width: 340px; cursor: pointer; }
 .archfollow select:hover { border-color: #94a3b8; }
+.archthrough { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #312e81;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 3px 4px 3px 10px; }
+.archthrough[hidden] { display: none; }
+.archthrough-x { font: inherit; font-size: 14px; line-height: 1; border: 0; background: none; color: #4f46e5;
+  cursor: pointer; padding: 0 4px; border-radius: 999px; }
+.archthrough-x:hover { background: #c7d2fe; }
 /* …and under it, the key to the two line styles, drawn as the lines themselves. */
 .archkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 12px; color: #475569; }
 .archkey span { display: inline-flex; align-items: center; gap: 6px; }
