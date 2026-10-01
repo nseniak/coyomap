@@ -1318,10 +1318,16 @@ function itemSpecOf(id) {
   }
   return spec;
 }
-// What a set of components is made of, in the kinds' own order: "screen · API · logic · store".
+// What a set of components is made of, in the words their boxes say ("UI · widget · API · logic"): a
+// word the map minted ("widget") is listed as itself, where the known word it acts as decides its place.
 function componentKindsLabel(ids) {
-  return COMPONENT_KIND_ORDER.filter((k) => ids.some((x) => ((GRAPH.nodes[x] || {}).component_kind || '') === k))
-    .map((k) => COMPONENT_KIND_WORD[k] || k).join(' · ');
+  const words = [];
+  for (const k of COMPONENT_KIND_ORDER) {
+    const here = ids.filter((x) => ((GRAPH.nodes[x] || {}).component_kind || '') === k)
+      .map((x) => ((GRAPH.nodes[x].fields || {}).Kind || COMPONENT_KIND_WORD[k] || k));
+    for (const w of [...new Set(here)].sort()) words.push(w);
+  }
+  return words.join(' · ');
 }
 // A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, NAMING the parts it holds
 // there, each a tag that opens that part. The names take the place of the subsystem's sentence, which
@@ -2975,7 +2981,7 @@ function explanationKey(fields) {
 // unconditionally below — no need to list it here too.
 const REDUNDANT_FIELD_BY_KIND = {
   subsystem: ['parent'], subdomain: ['parent'],
-  component: ['subsystem', 'kind'], dep: ['kind', 'bucket'],
+  component: ['subsystem', 'kind', 'runs'], dep: ['kind', 'bucket'],
 };
 // A derived dependency ROLE → its short display label. The role SET is derived from the dep's incoming
 // C→D edge verbs (grammar.dep_roles); a dual-role dep (Redis as bus + store) shows both ('bus', 'store').

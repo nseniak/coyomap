@@ -4588,3 +4588,23 @@ def test_a_component_page_shows_its_kind_beside_its_name() -> None:
         rows = page.evaluate("() => [...document.querySelectorAll('dt')].map((d) => d.textContent)")
         assert "Kind" not in rows, f"the kind is said once, beside the name: {rows}"
         assert not page.js_errors, page.js_errors
+
+
+def make_one_part_a_widget(m: dict[str, Any]) -> None:
+    """The dashboard API router a screen, and one of its neighbours a minted "widget" acting as one."""
+    make_one_part_a_screen(m)
+    m["component_kinds"] = [{"word": "widget", "meaning": "a piece of a screen", "acts_as": "screen"}]
+    for c in m["components"]:
+        if c["id"] == "C17":
+            c["kind"] = "widget"
+
+
+def test_a_subsystem_s_popup_lists_the_kinds_in_its_boxes_own_words() -> None:
+    """A minted kind ("widget") is listed as itself in its subsystem's popup, the word its box says,
+    placed where the known word it acts as goes."""
+    with _served_map(make_one_part_a_widget) as url, _page(url + "#v=container&sel=node%3AS4") as page:
+        _settle(page)
+        popup = page.evaluate("""() => [...document.querySelectorAll('#panel .pane-card .ibox-band .ibox-count')]
+            .map((x) => x.textContent)""")
+        assert popup == ["3 components", "UI · widget · logic"], popup
+        assert not page.js_errors, page.js_errors
