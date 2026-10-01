@@ -4424,6 +4424,26 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
         assert not page.js_errors, page.js_errors
 
 
+def test_a_long_box_name_wraps_inside_its_box() -> None:
+    """The drawing engine sets `nowrap` on every label, and a box inherited it: a name longer than the
+    box's ceiling ran past its right edge. It wraps now, whole, never cut and never an ellipsis."""
+    def make_long_names(m: dict[str, Any]) -> None:
+        for key in ("subsystems", "components", "dependencies"):
+            for x in m.get(key, []):
+                x["name"] = x["name"] + " with a tail that runs well past any box's ceiling"
+    with _served_map(make_long_names) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => [...document.querySelectorAll('#diagram .ibox')].map((b) => {
+            const n = b.querySelector('.ibox-name'), r = b.getBoundingClientRect();
+            const t = n ? n.getBoundingClientRect() : r;
+            return { name: n ? n.textContent : '', out: t.right > r.right + 0.5,
+                     cut: n ? getComputedStyle(n).textOverflow : '' }; })""")
+        assert any("well past" in s["name"] for s in seen), "the long name is drawn"
+        assert not [s for s in seen if s["out"]], [s for s in seen if s["out"]]
+        assert all(s["cut"] != "ellipsis" for s in seen)
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""
@@ -4524,12 +4544,12 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         labels = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgeLabel.arch-layerline')]
             .map((l) => l.textContent.trim())""")
         assert labels and not any(labels), labels
-        # DARK AND THICK AT ANY ZOOM: 3 screen pixels of near-black, whatever the picture's size.
+        # THICK AT ANY ZOOM: 3 screen pixels of slate grey, whatever the picture's size.
         drawn = page.evaluate("""() => document.querySelectorAll('#diagram path.flowchart-link.arch-layerline')
             .values().map((p) => { const cs = getComputedStyle(p);
               return [cs.stroke, Math.round(parseFloat(cs.strokeWidth) * p.getScreenCTM().a * 10) / 10]; })
             .toArray()""")
-        assert drawn and all(d == ["rgb(15, 23, 42)", 3.0] for d in drawn), drawn
+        assert drawn and all(d == ["rgb(71, 85, 105)", 3.0] for d in drawn), drawn
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')

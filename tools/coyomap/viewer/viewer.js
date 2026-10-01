@@ -4668,11 +4668,12 @@ function markLayerLines(root, t) {
     if (p.hasAttribute('marker-start')) p.setAttribute('marker-start', `url(#${heads.start})`);
   });
 }
-// A LAYER LINE IS DARK AND THICK AT ANY ZOOM. The whole product's picture is big, so at the zoom it
+// A LAYER LINE IS THICK AT ANY ZOOM, in a grey dark enough to read over the frames. The whole product's picture is big, so at the zoom it
 // opens at a line of 2.6 units was 0.76 screen pixels wide and read as grey. Its width is counter-scaled
 // against the zoom (rescaleLayerLines), and its heads are sized by its width (markerUnits
 // strokeWidth), so they keep one screen size with it. Mermaid's own heads are sized in units.
 const ARCH_LAYER_LINE_PX = 3;
+const ARCH_LAYER_LINE_COLOR = '#475569';   // also the heads' fill in viewer.css
 function archLayerHeads(root) {
   const svg = root.querySelector('svg') || root;
   const ids = { end: 'arch-layer-end', start: 'arch-layer-start' };
@@ -4689,7 +4690,7 @@ function rescaleLayerLines() {
   if (!archCrowded()) return;
   const w = ARCH_LAYER_LINE_PX * curIconInv() + 'px';
   mainScene.root.querySelectorAll('path.flowchart-link.arch-layerline')
-    .forEach((p) => paintImportant(p, { stroke: '#0f172a', 'stroke-width': w }));
+    .forEach((p) => paintImportant(p, { stroke: ARCH_LAYER_LINE_COLOR, 'stroke-width': w }));
 }
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
@@ -7752,7 +7753,7 @@ function archKeyHtml(t) {
     + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
   // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers, so that one
   // takes the place of the two box line styles.
-  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, '#0f172a', ARCH_LAYER_LINE_PX)}`
+  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, ARCH_LAYER_LINE_COLOR, ARCH_LAYER_LINE_PX)}`
       + ' from one layer to another, when more than a third of the first layer\'s boxes lead there.'
       + ' Click it, or a box, to see the lines themselves</span>' : '';
   return '<div class="archkey">'

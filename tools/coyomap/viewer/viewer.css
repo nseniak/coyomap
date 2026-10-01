@@ -3293,6 +3293,11 @@ body.insp-on { cursor: crosshair; }
    would fill whatever container it was measured in and every box would come out the same width. */
 .ibox-map, .ibox-compact, .ibox-tight { display: inline-block; width: auto; min-width: 200px;
                                         max-width: 300px; }
+/* A NAME LONGER THAN THE CEILING WRAPS, inside the box. The drawing engine sets `nowrap` on every
+   label it draws, and a box inherited it: a dependency named with its two registries ran 150px past
+   its box's right edge on mcpolis's whole-product picture. Never cut, never an ellipsis: the box grows
+   a line taller instead. `anywhere` breaks a single word only when it alone is wider than the box. */
+.ibox-map, .ibox-compact, .ibox-tight { white-space: normal; overflow-wrap: anywhere; }
 /* THE ARCHITECTURE VIEW'S BOX (`map`, the one picture that shows a box's sentence) IS NARROWER AND
    TALLER. The picture fits its width and scrolls down, so width is what a box costs. Measured on
    mcpolis's first feature picture, against the boxes with no sentence: 300px boxes of 2 lines made it
@@ -3559,7 +3564,7 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
 .arch-layers .arch-layerline.arch-layer-open { display: none; }
-.arch-layer-head { fill: #0f172a; }
+.arch-layer-head { fill: #475569; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
