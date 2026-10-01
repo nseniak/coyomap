@@ -19,12 +19,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from coyomap import line_texts
 from coyomap.model import Component, ProjectModel, to_canonical_json
 from coyomap.viewer import serve as serve_mod
 from coyomap.viewer.serve import ensure_fresh, load_project, project_view
-
-from test_line_texts import make_two_story_map
 
 
 # --- builders -------------------------------------------------------------------
@@ -58,40 +55,6 @@ def test_edited_map_is_served_after_ensure_fresh() -> None:
         assert proj.view is None and proj.tree is None and proj.symbols is None
         assert proj.title == "New title"
         assert "NewBox" in bundle_text(proj) and "OldBox" not in bundle_text(proj)
-
-
-def write_texts(root: Path, body: str, mtime_ns: int) -> None:
-    """The merged line texts beside the map, with a forced mtime (see `write_map`)."""
-    p = root / ".coyomap" / line_texts.FILE_NAME
-    p.write_text(body, encoding="utf-8")
-    os.utime(p, ns=(mtime_ns, mtime_ns))
-
-
-def merged_texts(proj) -> list[str]:  # noqa: ANN001
-    return [e["merged"] for t in project_view(proj)["archText"].values() for e in t["lines"]
-            if e.get("merged")]
-
-
-def test_line_texts_written_while_serving_reach_the_next_view() -> None:
-    """`coyomap line-texts record` writes beside a map the viewer may already have cached. The next
-    request must show the texts without a restart; a malformed file must show none, not fail."""
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
-        (root / ".coyomap").mkdir()
-        (root / ".coyomap" / "project-map.json").write_text(json.dumps(make_two_story_map()))
-        proj = load_project(str(root))
-        assert proj is not None
-        entries = [e for t in project_view(proj)["archText"].values() for e in t["lines"]
-                   if line_texts.wants_text(x["text"] for x in e["sentences"])]
-        assert entries and not merged_texts(proj)
-        key = line_texts.line_key(x["text"] for x in entries[0]["sentences"])
-        write_texts(root, json.dumps({key: "post or delete the thing"}), 3_000_000_000)
-        ensure_fresh(proj)
-        assert proj.view is None
-        assert "post or delete the thing" in merged_texts(proj)
-        write_texts(root, "[1, 2]", 4_000_000_000)
-        ensure_fresh(proj)
-        assert merged_texts(proj) == []
 
 
 def test_unchanged_map_keeps_the_cached_bundle() -> None:

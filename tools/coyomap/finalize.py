@@ -64,7 +64,6 @@ from coyomap.audit_model import l2_worklist_model
 from coyomap.credentials import map_folder_files, redact, scan as scan_credentials
 from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
 from coyomap.contract import BUDGETS_FILE
-from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
 from coyomap.model import ModelError, access_rules, load_model, load_model_path, resolve_map_path
 from coyomap.preindex_lib import expected_components, granularity_band
 from coyomap.provenance import session_transcript
@@ -1578,12 +1577,6 @@ def force_added(map_path: Path) -> ForceAdded:
                 map_path.parent / "preindex.json", map_path.parent / "provenance.json"]
     present = [p for p in required if p.exists()]
     missing = [p for p in required if not p.exists()]
-    # THE LINE TEXTS SHIP WITH THE MAP (closing step 5b): the viewer reads them beside it, and a
-    # clone without them shows every Architecture line's sentences instead of its merged text. Not
-    # `required`: a map with no line several stories take has none, and so has a build that kept none.
-    line_texts = map_path.parent / LINE_TEXTS_JSON
-    if line_texts.exists():
-        present.append(line_texts)
     # THE RECONCILE FILE IS AN ASSEMBLE INPUT, and the only mechanism that carries a reconcile
     # decision across a rebuild (method.md). It was missing from this line entirely — not ignored by
     # `.coyomap/.gitignore`, just never named — so a commit that followed the printed command

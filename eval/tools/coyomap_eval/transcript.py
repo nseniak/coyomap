@@ -487,7 +487,7 @@ _COYOMAP_SUBCOMMANDS = frozenset({
     "anchor-drift", "archive", "arrows", "assemble", "audit", "balance", "bless", "changes", "claims",
     "compare", "credentials", "impact", "reanchor",
     "contract", "cost", "diff", "dump", "field-score", "finalize", "fix", "grounding", "hash", "judge",
-    "ledger", "line-texts", "lint-fragment", "live-numbers",
+    "ledger", "lint-fragment", "live-numbers",
     "mutate", "preindex",
     "process", "protocol", "provenance", "reconcile", "record", "render", "retro-precheck", "walk-score",
     "context", "export", "run", "score", "scope", "serve", "url", "ship", "timings", "transcript",

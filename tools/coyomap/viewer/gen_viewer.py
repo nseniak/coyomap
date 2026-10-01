@@ -43,7 +43,7 @@ from urllib.parse import quote
 from coyomap.viewer.build_graph import GraphDict
 from coyomap.features import as_bundle, build_index
 from coyomap.model import ModelError, ProjectModel, load_model
-from coyomap import line_texts, records
+from coyomap import records
 from coyomap.validate_model import DATA_OWNER_EXCEPTIONS_HEADING
 from coyomap.impact_git import Extents, load_map_extents
 from coyomap import grammar
@@ -2117,8 +2117,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     return "\n".join(lines)
 
 
-def _arch_text(graph: GraphDict, model: _ArchModel,
-               merged: dict[str, str] | None = None) -> list[dict[str, Any]]:
+def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
     """THE FLOW, TOLD STEP BY STEP: the text beside an Architecture picture, one entry per line in
     reading order (by step number, then first met). Each entry names its two ends and gives, for
     every story taking the line, that story's own sentence for the step and the story's name.
@@ -2130,10 +2129,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
     Only DISTINCT sentences are kept, each with the stories that say it, so 3 stories saying the
     same thing are one sentence with 3 names rather than the same words 3 times.
 
-    Each entry also says what the picture cannot: the boxes a grey line passes through (`via`).
-
-    A line with two or more different sentences also carries its MERGED text when the map keeps one
-    (`merged`, from `line_texts`): one sentence for all of them, which the view shows first."""
+    Each entry also says what the picture cannot: the boxes a grey line passes through (`via`)."""
     nodes = graph["nodes"]
     titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
     subflow_names = {str(sf.get("id")): str(sf.get("name") or sf.get("id"))
@@ -2153,7 +2149,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
         for uc, text in ln["sentences"]:
             if text:
                 by_text.setdefault(text, []).append(uc)
-        together = line_texts.text_for(merged or {}, by_text)
         out.append({
             "n": ln["number"],
             "src": name(ln["src"]), "dst": name(ln["dst"]),
@@ -2164,7 +2159,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel,
             "via": [name(x) for x in ln["via"]],
             "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}
                           for t, ucs in by_text.items()],
-            **({"merged": together} if together else {}),
         })
     return out
 
@@ -2198,7 +2192,7 @@ def arch_layered(graph: GraphDict) -> bool:
                for n in graph["nodes"].values())
 
 
-def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowded: int = ARCH_CROWDED_LINES
+def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
                    ) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
     """Every Architecture drawing the view's two toggles can ask for, and the flow text beside each,
     keyed `<scope>|<feature id>`: `all|` is the whole product over every walk, `happy|CAP3` is one
@@ -2207,9 +2201,9 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
 
     The text is `{lines, stories, cells}`: the flow told step by step (`_arch_text`), each story on
     its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
-    it holds, which the view opens and marks through. `merged` is the map's kept line texts
-    (`line_texts.load`), key to text. A layered picture with more than `crowded` lines also carries
-    its lines between layers (`layerLines`), which it draws instead of its boxes' own.
+    it holds, which the view opens and marks through. A layered picture with more than `crowded`
+    lines also carries its lines between layers (`layerLines`), which it draws instead of its
+    boxes' own.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -2226,7 +2220,7 @@ def gen_arch_views(graph: GraphDict, merged: dict[str, str] | None = None, crowd
             layer_lines = _arch_layer_lines(graph, model) if whole else []
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered, whole)
             texts[f"{scope}|{feature}"] = {
-                "lines": _arch_text(graph, model, merged), "stories": _arch_stories(graph, model),
+                "lines": _arch_text(graph, model), "stories": _arch_stories(graph, model),
                 "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()},
                 **({"layerLines": [{"src": _arch_frame_title(graph, model, ll["src"]),
                                     "dst": _arch_frame_title(graph, model, ll["dst"]),
@@ -4553,13 +4547,7 @@ def build_view_bundle(graph: GraphDict, anchor: Path,
     base_mm = gen_mermaid(graph)
     context_mm = gen_context_mermaid(graph)
     context_edges = gen_context_edges(graph)
-    # The merged line texts kept beside the map. A file that cannot be read shows every line's own
-    # sentences, the way a map with no file does: the viewer still opens.
-    try:
-        merged = line_texts.load(anchor)
-    except (OSError, ValueError):
-        merged = {}
-    arch_drawings, arch_texts = gen_arch_views(graph, merged) if has_grouping(graph) else ({}, {})
+    arch_drawings, arch_texts = gen_arch_views(graph) if has_grouping(graph) else ({}, {})
     # (= `grouping`, which is set further down, beside the other grouped pictures; the Architecture
     # view needs both dicts from one pass, so it is worked out here)
     # Source-link config, derived from the mapped repo (the anchor dir sits inside its work tree).

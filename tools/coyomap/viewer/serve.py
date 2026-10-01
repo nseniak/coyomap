@@ -46,7 +46,6 @@ from coyomap.impact_git import WORKTREE as IMPACT_WORKTREE
 from coyomap.impact_git import PREINDEX_JSON, compute_impact, load_map_extents
 from coyomap.impact_git import resolve_ref as impact_resolve_ref
 from coyomap.impact_ripple import RippleOptions, build_impact_result
-from coyomap.line_texts import FILE_NAME as LINE_TEXTS_JSON
 from coyomap.model import old_map_folder_hint
 from coyomap.changelog import commit_matches, load_log, to_view
 from coyomap.mapdiff import kinds_json
@@ -112,9 +111,6 @@ class Project:
     title: str = ""   # the map's human title (shown on the landing card) — folder name if the map has none
     goal: str = ""    # the map's one-paragraph goal (shown, clamped, under the title)
     map_mtime: int | None = None      # st_mtime_ns of map_json when loaded — the staleness key
-    #: The same for the merged line texts beside the map (`coyomap line-texts record`), which only
-    #: the view reads: a new file drops the cached view and nothing else.
-    texts_mtime: int | None = None
     tree: FileTreeNode | None = None  # cached tree (built once per map version, on first /api/tree)
     view: ViewBundle | None = None    # cached view bundle (built once per map version, on first /api/view)
     symbols: list[dict[str, object]] | None = None  # cached code symbols (built once per map version)
@@ -172,16 +168,7 @@ def load_project(folder: str) -> Project | None:
         mtime = None
     return Project(slug=root.name or "project", repo_root=root, map_json=map_json, commit=commit,
                    title=str(graph.get("title") or "").strip() or (root.name or "project"),
-                   goal=str(graph.get("goal") or "").strip(), map_mtime=mtime,
-                   texts_mtime=_texts_mtime(map_json))
-
-
-def _texts_mtime(map_json: Path) -> int | None:
-    """st_mtime_ns of the merged line texts beside a map, or None when there are none."""
-    try:
-        return (map_json.parent / LINE_TEXTS_JSON).stat().st_mtime_ns
-    except OSError:
-        return None
+                   goal=str(graph.get("goal") or "").strip(), map_mtime=mtime)
 
 
 # ── stale-process guard ──────────────────────────────────────────────────────────────────────────
@@ -301,10 +288,6 @@ def ensure_fresh(proj: Project) -> None:
     on the next refresh. Failure modes stay serve-friendly: an unstat-able file keeps the cached copy;
     a map that no longer loads (e.g. caught mid-write) keeps the cached copy AND leaves ``map_mtime``
     stale, so the very next request retries the reload."""
-    texts = _texts_mtime(proj.map_json)
-    if texts != proj.texts_mtime:
-        proj.texts_mtime = texts
-        proj.view = None
     try:
         mtime = proj.map_json.stat().st_mtime_ns
     except OSError:
@@ -836,14 +819,8 @@ def project_view(proj: Project) -> ViewBundle:
     # The feature derivation needs the MODEL, not the graph projected from it, and both are already
     # in hand here — passing them keeps `build_view_bundle` from reading and parsing the same map a
     # second time on every cold request.
-    texts_before = _texts_mtime(proj.map_json)
-    view = build_view_bundle(graph, proj.map_json.parent, model=model, extents=extents)
-    # A line-texts file written WHILE this view was built may or may not be in it, and caching it
-    # would keep the older texts after `ensure_fresh` has recorded the newer file. Serve it this once;
-    # the next request builds again.
-    if _texts_mtime(proj.map_json) == texts_before:
-        proj.view = view
-    return view
+    proj.view = build_view_bundle(graph, proj.map_json.parent, model=model, extents=extents)
+    return proj.view
 
 
 def project_symbols(proj: Project) -> list[dict[str, object]]:

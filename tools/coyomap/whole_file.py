@@ -1,10 +1,9 @@
 """Write a file whole or not at all: a temporary file beside it, then one rename.
 
-Two writers need it. `assemble` writes the map while agents read it, and a map rewritten in place can
-be read half-written. `line-texts record` writes the texts a running viewer re-reads when the file
-changes. One implementation, so a fix lands once: the two copies this replaced both left their file
-readable by its owner only, because `tempfile.mkstemp` creates its file 0600 and the rename carries
-that over. The map had been 0644 until the first of them.
+`assemble` writes the map while agents read it, and a map rewritten in place can be read
+half-written. The copies this replaced left their file readable by its owner only, because
+`tempfile.mkstemp` creates its file 0600 and the rename carries that over. The map had been 0644
+until the first of them.
 
 Stdlib-only (the cli.py firewall).
 """

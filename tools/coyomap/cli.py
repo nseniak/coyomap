@@ -108,10 +108,6 @@ Commands:
              (git decides — .gitignore is out), what `.coyomap/.ignore` removed, and
              which commit the map will be pinned to, warning when uncommitted code
              would put the map and its pin out of step.
-  line-texts The Architecture picture's merged texts: one sentence for each line several stories
-             take (`pending` / `lint` / `check-input` / `record`). An agent writes them at the end
-             of a build or an update, a fresh one checks each against its sentences, and `record`
-             keeps only what the check passed, in .coyomap/line-texts.json.
   balance    Report per-diagram fan-out (target 5±2), the inter-subsystem edge
              matrix, and advisory split proposals for over-dense diagrams —
              apply accepted proposals via a Direct map change.
@@ -261,9 +257,6 @@ def _dispatch(cmd: str, rest: list[str]) -> int:
     if cmd == "provenance":
         from coyomap import provenance  # stdlib-only; the file finalize requires before a commit
         return provenance.main(rest)
-    if cmd == "line-texts":
-        from coyomap import line_texts_cmd  # stdlib-only; the viewer's own generator names the lines
-        return line_texts_cmd.main(rest)
     if cmd == "ship":
         from coyomap import ship  # stdlib-only; orchestrates the other subcommands in-process
         return ship.main(rest)
