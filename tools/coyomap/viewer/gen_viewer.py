@@ -1988,12 +1988,10 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
             lines.append(f'  subgraph {fid}["{label}"]')
             # A ROW, IN THE WRITTEN ORDER. A crowded picture ties each box of a frame to the next one
             # (`order` below) and the frame runs left to right, so its boxes stand in one row, in the
-            # order the stories reach them (`_ArchModel.rank`). Both layout engines keep that. Untied in
-            # a frame running top to bottom, dagre made a row, in its own order, and ELK a grid.
-            # ANY OTHER FRAME SAYS NO DIRECTION. Lines reach into it, so dagre never honoured one, and
-            # ELK lays a frame that says one out on its own, packing its boxes in no set order: 7 box
-            # pairs of mcpolis's pictures stood the wrong way round. Said by no frame, the whole picture
-            # is one layout, whose rows keep the written order.
+            # order the stories reach them (`_ArchModel.rank`). Untied in a frame running top to bottom,
+            # the layout made a row in its own order.
+            # ANY OTHER FRAME SAYS NO DIRECTION: lines reach into it, so the layout never honoured one,
+            # and the whole picture is one layout, whose rows keep the written order.
             if whole:
                 lines.append("    direction LR")
 
