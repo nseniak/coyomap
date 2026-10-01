@@ -3365,6 +3365,8 @@ body.insp-on { cursor: crosshair; }
 .ibox-compact .ibox-head { justify-content: center; }
 .ibox-compact .ibox-title { flex: 0 1 auto; justify-content: center; }
 .ibox-compact .ibox-band { justify-content: flex-start; }
+/* A component's kind under its name on a picture's small box (`kindLine` in itemBoxHtml). */
+.ibox-kindline { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
 .ibox-full { width: 320px; }
 /* The PERSON on a map, at the size the stick figure has always been drawn there.
    IT IS STILL A BOX. It carried `border: 0`, and a box with no border has nothing for the hover and

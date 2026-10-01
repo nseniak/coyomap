@@ -4563,12 +4563,15 @@ def test_a_component_s_kind_is_its_type_pill() -> None:
         popup: [...document.querySelectorAll('#panel .pane-card .ecard-type, #panel .pane-card .ibox-pill')]
           .map((x) => x.textContent),
         box: [...document.querySelectorAll('#diagram g.node .ibox[data-id="C14"] .ibox-pill')].map((x) => x.textContent),
+        line: [...document.querySelectorAll('#diagram g.node .ibox[data-id="C14"] .ibox-kindline .ibox-pill')]
+          .map((x) => x.textContent),
     })"""
     with _served_map(make_one_part_a_screen) as url, _page(url + "#v=subsystem&sid=S4&sel=node%3AC14") as page:
         _settle(page)
         seen = page.evaluate(read)
         assert seen["popup"] == ["UI"], f"the kind, in place of the word component: {seen}"
         assert seen["box"] == ["UI"], f"the box says the kind once: {seen}"
+        assert seen["line"] == ["UI"], f"…on a line of its own, under the name: {seen}"
         assert not page.js_errors, page.js_errors
     with _served() as url, _page(url + "#v=subsystem&sid=S4&sel=node%3AC14") as page:
         _settle(page)

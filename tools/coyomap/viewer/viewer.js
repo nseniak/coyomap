@@ -1194,8 +1194,12 @@ function itemBoxHtml(spec, variant, opts) {
       + `title="Open ${nm}">${nm}</button>`;
   const gly = o.glyph === false ? ''
     : `<span class="ibox-glybox">${itemGlyphSvg(spec.k, spec.ikind)}</span>`;
+  // A COMPONENT'S KIND ON A LINE OF ITS OWN, on a picture's small box: beside a long name it widened
+  // the box, and under the name it reads as the line saying what the box is. Its other pills go with it.
+  const kindLine = spec.kindWord && variant === 'tight';
   const out = [`<span class="ibox-head">${gly}`
-    + `<span class="ibox-title">${name}${pills}</span></span>`];
+    + `<span class="ibox-title">${name}${kindLine ? '' : pills}</span></span>`];
+  if (kindLine && pills) out.push(`<span class="ibox-kindline">${pills}</span>`);
   const what = o.what !== undefined ? o.what : spec.what;
   if (v.what && what) {
     out.push(`<span class="ibox-what${v.clamp ? ' ibox-clamp' + v.clamp : ''}">`
