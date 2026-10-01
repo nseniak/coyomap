@@ -4717,19 +4717,19 @@ function markLayerLines(root, t) {
     }
     if (p.hasAttribute('marker-end')) p.setAttribute('marker-end', `url(#${heads.end})`);
     if (p.hasAttribute('marker-start')) p.setAttribute('marker-start', `url(#${heads.start})`);
-    // ABOVE THE FRAMES. The drawing engine paints a picture's lines before the frames inside it, so a
-    // layer's frame, painted later, covered the end of every line that met its border: the line came out
-    // from under the frame. Moved to a group painted last in the same drawing, so the coordinates stay.
-    const root = p.parentNode && p.parentNode.parentNode;
-    if (!root) return;
-    let top = root.querySelector(':scope > g.arch-layer-top');
-    if (!top) {
-      top = document.createElementNS(SVGNS, 'g');
-      top.setAttribute('class', 'arch-layer-top');
-      root.appendChild(top);
-    }
-    top.append(p, ...(p.__cyHits || []));
   });
+  // ABOVE THE FRAMES. The drawing engine paints a picture's lines before the frames inside it, so a
+  // layer's frame, painted later, covered the end of every line that met its border: the line came out
+  // from under the frame, and a head on a frame's edge showed half of itself. The lines and their labels
+  // move, AS TWO WHOLE GROUPS, to be painted last in the same drawing: the coordinates stay, and so does
+  // the order inside each group, which is what pairs a line with its label (`eachEdge`). Safe here
+  // because a crowded picture draws no box line, so every line of the drawing is a layer line.
+  const first = root.querySelector('.edgePaths path.arch-layerline');
+  const paths = first && first.parentNode, top = paths && paths.parentNode;
+  if (!top) return;
+  const labelGroup = top.querySelector(':scope > .edgeLabels');
+  top.append(paths);
+  if (labelGroup) top.append(labelGroup);
 }
 // A LAYER LINE IS THICK AT ANY ZOOM, in a grey dark enough to read over the frames. The whole product's picture is big, so at the zoom it
 // opens at a line of 2.6 units was 0.76 screen pixels wide and read as grey. Its width is counter-scaled
