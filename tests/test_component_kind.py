@@ -82,13 +82,17 @@ def test_how_a_part_starts_is_not_a_kind():
         assert any(f"'{word}' names how a part starts" in p for p in problems), (word, problems)
 
 
-def test_a_part_whose_way_in_runs_on_its_own_says_it_starts_on_its_own():
+def test_only_a_part_with_a_timed_way_in_says_it_runs_on_a_schedule():
     doc = make_map(C1="screen", C2="logic")
+    doc["components"].append({"id": "C3", "name": "Boot", "purpose": "starts the app", "files": ["src/boot.py"],
+                              "kind": "logic"})
     doc["entry_points"] = [{"kind": "job", "trigger": "every hour", "component": "C2", "source": "src/store.py:9"},
-                           {"kind": "ui-route", "trigger": "open /team", "component": "C1", "source": "src/page.ts:1"}]
+                           {"kind": "ui-route", "trigger": "open /team", "component": "C1", "source": "src/page.ts:1"},
+                           {"kind": "startup-hook", "trigger": "at start", "component": "C3", "source": "src/boot.py:3"}]
     nodes = model_to_graph(load_model(json.dumps(doc)))["nodes"]
-    assert nodes["C2"]["fields"].get("Starts") == "on its own"
+    assert nodes["C2"]["fields"].get("Starts") == "on a schedule"
     assert "Starts" not in nodes["C1"]["fields"]
+    assert "Starts" not in nodes["C3"]["fields"], "a startup hook is not a schedule"
 
 
 def test_a_part_whose_way_in_filters_requests_says_it_runs_before_the_apis():
