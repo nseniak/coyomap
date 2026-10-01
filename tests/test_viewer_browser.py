@@ -4677,6 +4677,35 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         assert not page.js_errors, page.js_errors
 
 
+def test_a_picked_box_from_its_address_draws_its_lines_over_the_top_with_true_heads() -> None:
+    """A box picked by the ADDRESS draws its lines on a crowded picture, as a click does. A line between
+    two boxes of one row goes over the top, top to top, rather than out of one's bottom and into the
+    other's, through the row below. And every line arrives straight into its box: its last stretch
+    points the way its head does."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    box = max(set(ends), key=ends.count)
+    with _served_map(make_parts_in_every_layer) as url, \
+            _page(url + f"#v=arch&cap=all&sel=node%3A{box}") as page:
+        _settle(page)   # not `_arch_ready`: the text is filtered to this box's steps, so its first line is hidden
+        page.wait_for_selector(".arch-ov-line", state="attached")
+        page.wait_for_timeout(500)
+        seen = page.evaluate("""() => {
+            const rect = (id) => { const n = [...document.querySelectorAll('#diagram g.node')].find((x) => x.getAttribute('class').includes('cy-' + id + ' '));
+                                   return (n.querySelector('.ibox') || n).getBoundingClientRect(); };
+            return [...document.querySelectorAll('.arch-ov-line')].map((l) => {
+              const L = l.getTotalLength(), m = l.getScreenCTM(), at = (t) => { const q = l.getPointAtLength(t); return [m.a * q.x + m.e, m.d * q.y + m.f]; };
+              const s = rect(l.dataset.src), d = rect(l.dataset.dst), [x0, y0] = at(0), [xa, ya] = at(L - 6), [xz, yz] = at(L);
+              return { sameRow: s.top < d.bottom && d.top < s.bottom,
+                       fromTop: Math.abs(y0 - s.top) < 2, intoTop: Math.abs(yz - d.top) < 6,
+                       steep: Math.abs(yz - ya) > Math.abs(xz - xa) }; }); }""")
+        own = sum(1 for e in text["lines"] if box in (e["srcBox"], e["dstBox"]))
+        assert len(seen) == own, (box, own, seen)
+        assert all(x["steep"] for x in seen), seen
+        assert all(x["fromTop"] and x["intoTop"] for x in seen if x["sameRow"]), seen
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_story_followed_from_its_address_draws_its_lines_on_a_crowded_picture() -> None:
     """A crowded picture draws a followed story's lines on top of itself, and hides its layer lines. The
     picture is bound before its pan and zoom exists, so a story opened from its address once drew no

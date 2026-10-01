@@ -4757,6 +4757,32 @@ function archShowLines(test) {
   const t = archCurrentText();
   archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox)).map(archOverlayItem) : []);
 }
+// ONE BOX LINE'S CURVE, from box `s` to box `d` (each { x1, y1, x2, y2, cx, cy }), as
+// [x1, y1, the two control heights, x2, y2]: it leaves and arrives straight up or down, at the boxes'
+// middles.
+//
+// TWO BOXES IN ONE ROW are joined OVER THE TOP, top to top: a line from one's bottom to the other's top
+// ran down through the row below and back up, across the boxes in between. Measured on mcpolis's
+// whole-product picture, a picked box in the first layer drew 2 of its 7 lines that way.
+//
+// THE LAST STRETCH IS STRAIGHT ENOUGH TO SEE. The head turns with the line's direction at its very end,
+// which is straight down into the box. With the control points only half the gap away, a line between
+// two boxes a few pixels apart in height ran flat and turned down in its last pixels, so a flat line
+// wore a head pointing down. Every control point is at least ARCH_OV_LEAD away, so the line visibly
+// comes in from above (or below) before the head.
+const ARCH_OV_LEAD = 40;
+function archOverlayCurve(s, d) {
+  const x1 = s.cx, x2 = d.cx;
+  if (s.y1 < d.y2 && d.y1 < s.y2) {   // the two boxes share a row
+    const lift = Math.min(120, ARCH_OV_LEAD + Math.abs(x2 - x1) * 0.12);
+    const over = Math.min(s.y1, d.y1) - lift;
+    return [x1, s.y1, over, over, x2, d.y1 - 3];
+  }
+  const down = d.cy >= s.cy;
+  const y1 = down ? s.y2 : s.y1, y2 = down ? d.y1 - 3 : d.y2 + 3;
+  const k = Math.max(Math.abs(y2 - y1) / 2, ARCH_OV_LEAD) * (down ? 1 : -1);
+  return [x1, y1, y1 + k, y2 - k, x2, y2];
+}
 // THE BOX LINES A CROWDED PICTURE DRAWS, on top of the drawing and inside its pan and zoom: one curve
 // per line from the box it leaves to the box it reaches, a head at that end, and its number at the
 // middle. A click on one finds its entry in the text, as a drawn line's does.
@@ -4786,11 +4812,11 @@ function archOverlay(items) {
   for (const it of items) {
     const s = rectOf(it.src), d = rectOf(it.dst);
     if (!s || !d) continue;
-    const down = d.cy >= s.cy;
-    const [x1, y1, x2, y2] = [s.cx, down ? s.y2 : s.y1, d.cx, down ? d.y1 - 3 : d.y2 + 3];
-    const ym = (y1 + y2) / 2;
+    const [x1, y1, c1, c2, x2, y2] = archOverlayCurve(s, d);
+    // The number sits on the curve's own middle (t = 1/2 of the Bezier), wherever the curve bends to.
+    const ym = (y1 + 3 * c1 + 3 * c2 + y2) / 8;
     const line = document.createElementNS(SVGNS, 'path');
-    line.setAttribute('d', `M${x1},${y1} C${x1},${ym} ${x2},${ym} ${x2},${y2}`);
+    line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${y2}`);
     line.setAttribute('class', 'arch-ov-line' + (it.store ? ' arch-ov-store' : '') + (it.hl ? ' arch-ov-hl' : ''));
     line.setAttribute('marker-end', 'url(#arch-ov-head)');
     line.dataset.src = it.src; line.dataset.dst = it.dst;
@@ -7608,6 +7634,12 @@ function bindArch() {
     selectNodeFromCanvas(el, id, ev);
     pickBox(id);
   }, { standsFor, hover: true });
+  // A BOX SELECTED BY THE ADDRESS — a reload, a shared link, Back — draws its lines and filters the text
+  // exactly as a click does; before, only the click did, and a link to a picked box showed none of them.
+  for (const id in mainScene.nodeEls) {
+    const el = mainScene.nodeEls[id];
+    mainScene.selectors['node:' + id] = () => { selAdd(mainScene, nodeDesc(mainScene, el, id)); pickBox(id); };
+  }
   bindArchPeople(t, pickBox);
   // "+N MORE" OPENS THE BOX: the picture is drawn again with that subsystem's every part named. It is a
   // new screen, so Back closes it again and a link keeps it open.
@@ -7642,7 +7674,7 @@ function bindAliasBox(scene, el, id, opts) {
   // Built lazily (like every other node descriptor): `nodeFocus` reads scene.edgeEls, which bindEdges
   // fills in after the boxes are bound.
   const desc = () => ({ key: 'node:' + id, glow: () => glowNode(el), focus: nodeFocus(scene, id), show: opts.show });
-  scene.selectors['node:' + id] = () => selAdd(scene, desc());
+  scene.selectors['node:' + id] = () => { selAdd(scene, desc()); if (opts.afterPick) opts.afterPick(); };
   bindBox(scene, el, id, { show: opts.show, onClick: (ev) => {
     if (opts.opensOn && opts.opensOn(ev)) { opts.open(); return; }
     pickSelBox(scene, desc(), el, ev);
