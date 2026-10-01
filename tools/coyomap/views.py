@@ -37,7 +37,7 @@ from coyomap.model import (
 from coyomap.validate_analysis import strip_anchor
 from coyomap.impact_git import Extents
 from coyomap.validate_model import (
-    STEP_LINK_EXACT,
+    link_decides,
     anchored_flow_steps,
     capability_elements,
     completeness_counts,
@@ -635,7 +635,7 @@ def model_to_markdown(m: ProjectModel) -> str:
             # Exact links only, and the filter says so INDEPENDENTLY of `rule_steps` happening to
             # produce none without a symbol table: the view must stay a pure function of the JSON
             # even if a caller later hands this one.
-            steps = [l for l in rule_steps(m, r, None, anchored) if l.strength == STEP_LINK_EXACT]
+            steps = [l for l in rule_steps(m, r, None, anchored) if link_decides(l.strength)]
             if steps:
                 lines.append("- enforced at: " + " · ".join(_step_ref(l) for l in steps))
             return lines + [""]
@@ -1047,15 +1047,15 @@ def _build_rules_view(m: ProjectModel, extents: Extents | None) -> dict[str, obj
             })
         steps = [{"uc": l.uc, "ucName": uc_names.get(l.uc, l.uc), "container": l.container,
                   "containerName": sf_names.get(l.container, ""),
-                  "n": l.n, "strength": l.strength, "phrase": l.phrase}
+                  "n": l.n, "strength": l.strength, "decides": link_decides(l.strength), "phrase": l.phrase}
                  for l in rule_steps(m, r, extents, anchored)]
         for c in rule_components(m, r, owners):
             by_component.setdefault(c, []).append(r.id)
-        # THE RULE MARK READS EXACT LINKS ONLY, as `validate`'s condition advisory does: a site on
-        # the step's own line. A link through the enclosing function put the mark on about 310
-        # mcpolis steps that decide nothing (retro 2026-09-30, finding 14).
+        # THE RULE MARK READS DECIDING LINKS ONLY (`link_decides`), as `validate`'s condition advisory
+        # and a step's "What it decides" do. A link through the enclosing function put the mark on
+        # about 310 mcpolis steps that decide nothing (retro 2026-09-30, finding 14).
         for l in steps:
-            if l["strength"] == STEP_LINK_EXACT:
+            if l["decides"]:
                 by_step.setdefault(f"{l['uc']}:{l['container']}:{l['n']}", []).append(r.id)
         out_rules.append({
             "id": r.id, "name": r.name, "statement": r.statement, "block": r.block or "",

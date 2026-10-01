@@ -4141,6 +4141,9 @@ function stepRulesHtml(uc, st) {
     for (const l of (r.steps || [])) {
       if (l.container !== uc || String(l.n) !== String(st.n)) continue;
       if (!shared && l.uc !== uc) continue;
+      // ONLY A RULE THAT DECIDES HERE, the same test the arrow's rule mark reads (`link_decides` in
+      // validate_model): a link through the enclosing function said "near", and was listed as deciding.
+      if (!l.decides) continue;
       if (seen.has(r.id)) continue;
       seen.add(r.id);
       found.push([r, l]);

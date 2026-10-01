@@ -1374,6 +1374,21 @@ def element_sort_key(eid: str) -> tuple[str, int, str]:
 #: the step names, at a different line). There is deliberately no `file` strength.
 STEP_LINK_EXACT = "exact"
 STEP_LINK_SYMBOL = "symbol"
+#: `adjacent` = same file, the site's line at most STEP_DECIDE_WINDOW lines from the step's. A decision
+#: written one line above or below the step's own line ("the credential's role replaces the member
+#: lookup" at :159, the step reading the role at :160) is the step's; a line further off was often a
+#: neighbouring statement (measured on the 2026-10-01 mcpolis map).
+STEP_LINK_ADJACENT = "adjacent"
+STEP_DECIDE_WINDOW = 1
+_STEP_LINK_RANK = {STEP_LINK_EXACT: 0, STEP_LINK_ADJACENT: 1, STEP_LINK_SYMBOL: 2}
+
+
+def link_decides(strength: str) -> bool:
+    """Does a rule DECIDE on the step a link of this strength reaches? The ONE answer every reader
+    uses: the picture's rule mark, a step's "What it decides", the condition advisory and the
+    markdown view. A link through the enclosing function (`symbol`) says the rule is near, not that
+    it decides here: it put the mark on about 310 mcpolis steps that decide nothing (retro 2026-09-30)."""
+    return strength in (STEP_LINK_EXACT, STEP_LINK_ADJACENT)
 
 
 @dataclass(frozen=True)
@@ -1385,7 +1400,7 @@ class RuleStepLink:
                               # `n` is unique per CONTAINER, never per use case, so this is half the
                               # step's identity — see `model.expanded_steps_with_container`.
     n: int                    # the step's number within that container
-    strength: str             # STEP_LINK_EXACT | STEP_LINK_SYMBOL
+    strength: str             # STEP_LINK_EXACT | STEP_LINK_ADJACENT | STEP_LINK_SYMBOL
     site: str                 # the rule site anchor that reached it
     phrase: str = ""          # the step's own action text — display only
 
@@ -1488,7 +1503,7 @@ def rule_steps(m: ProjectModel, rule: BusinessRule,
     def offer(link: RuleStepLink) -> None:
         key = (link.uc, link.container, link.n)
         cur = best.get(key)
-        if cur is None or (cur.strength == STEP_LINK_SYMBOL and link.strength == STEP_LINK_EXACT):
+        if cur is None or _STEP_LINK_RANK[link.strength] < _STEP_LINK_RANK[cur.strength]:
             best[key] = link
 
     for site in rule.sites:
@@ -1509,6 +1524,10 @@ def rule_steps(m: ProjectModel, rule: BusinessRule,
             if (step_path, step_lo) == (site_path, site_lo):
                 offer(RuleStepLink(uc, container, st.n, STEP_LINK_EXACT, raw, st.phrase))
                 continue
+            if (step_path == site_path and site_lo is not None and step_lo is not None
+                    and abs(step_lo - site_lo) <= STEP_DECIDE_WINDOW):
+                offer(RuleStepLink(uc, container, st.n, STEP_LINK_ADJACENT, raw, st.phrase))
+                continue
             if site_ext is None or step_lo is None or step_path != site_path:
                 continue                       # no symbol table / no enclosing symbol: exact only
             if enclosing_extent(ext.get(step_path, []), step_lo) == site_ext:
@@ -1516,7 +1535,7 @@ def rule_steps(m: ProjectModel, rule: BusinessRule,
     # Exact before symbol; within a use case, its OWN steps before the ones it inherits from a
     # sub-flow (`SF1` would otherwise sort ahead of `UC1` and read as the use case's first step).
     return sorted(best.values(),
-                  key=lambda l: (l.strength != STEP_LINK_EXACT, element_sort_key(l.uc),
+                  key=lambda l: (_STEP_LINK_RANK[l.strength], element_sort_key(l.uc),
                                  l.container != l.uc, element_sort_key(l.container), l.n))
 
 
@@ -1904,7 +1923,7 @@ def check_rules_model(m: ProjectModel,
     # with a count, it never blocks, and the count IS the debt the next build or update pays down.
     # Scoping it to new maps would need a build-date marker the map does not carry, and would hide the
     # debt on exactly the maps that have it.
-    # EXACT LINKS ONLY: a rule site on the step's own line. A link through the enclosing function
+    # DECIDING LINKS ONLY (`link_decides`): a rule site on the step's own line, or the line beside it. A link through the enclosing function
     # says the rule decides somewhere near the step, not at it, and on the 2026-09-30 mcpolis map
     # 147 of the 166 steps this listed were such links — a condition nobody could write because the
     # step decides nothing. The picture's rule mark reads the same exact links (`views.rules_view`).
@@ -1913,7 +1932,7 @@ def check_rules_model(m: ProjectModel,
     written.update({(sf.id, str(st.n)): st for sf in m.subflows for st in sf.steps})
     decided = sorted({(link.container, str(link.n)) for r in m.rules
                       for link in rule_steps(m, r, extents, anchored)
-                      if link.strength == STEP_LINK_EXACT},
+                      if link_decides(link.strength)},
                      key=lambda cn: (element_sort_key(cn[0]), int(cn[1]) if cn[1].isdigit() else 0))
     recorded_conditions = _recorded_line_keys(m, "condition exceptions")
     silent = [f"{c} step {n}" for c, n in decided if (c, n) in written

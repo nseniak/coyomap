@@ -1306,7 +1306,7 @@ def test_the_enforced_at_line_is_derived_not_authored() -> None:
     text = t7_section(make_rendered_model())
     assert "- enforced at: View order (UC1) step 2" in text
     m = make_rendered_model()
-    m.rules[0].sites = [RuleSite(where="src/guard.py:4", why="a different line")]
+    m.rules[0].sites = [RuleSite(where="src/guard.py:5", why="two lines off")]
     assert "enforced at" not in t7_section(m).split("**BR2")[0]
 
 
@@ -1766,7 +1766,7 @@ def make_viewer_model() -> ProjectModel:
     m.components.append(Component(id="C2", name="Billing", purpose="p", files=["src/guard.py"]))
     m.rules.append(BusinessRule(id="BR2", name="No double cancellation", statement="A cancelled order cannot be cancelled again.",
                                 block="BLK1", access=True, sites=[
-                                    RuleSite(where="src/guard.py:4", why="short-circuits"),
+                                    RuleSite(where="src/guard.py:5", why="short-circuits"),
                                     RuleSite(why="the status enum forbids it", no_call_site=True)]))
     m.rules.append(BusinessRule(id="BR3", name="Admin-only refunds", statement="Only an admin may refund.",
                                 sites=[RuleSite(where="src/nobody.py:9", why="the admin gate")]))
@@ -2516,3 +2516,15 @@ def test_the_condition_advisory_lists_only_the_step_a_rule_site_sits_on():
 def test_the_rule_mark_marks_only_the_step_a_rule_site_sits_on():
     by_step = cast(dict, model_to_graph(make_extent_model(), GUARD_EXTENTS)["rules_view"])["byStep"]
     assert sorted(by_step) == ["UC2:UC2:2"], by_step
+
+
+def test_a_rule_one_line_from_a_step_decides_there_and_two_lines_off_does_not() -> None:
+    """The window the rule mark, a step's "What it decides" and the markdown all read (`link_decides`):
+    a decision written on the line beside the step's own is the step's; two lines off is not."""
+    m = make_rendered_model()
+    m.rules[0].sites = [RuleSite(where="src/guard.py:4", why="the line under the step")]
+    assert "- enforced at: View order (UC1) step 2" in t7_section(m)
+    assert m.rules[0].id in rules_view_of(m)["byStep"].get("UC1:UC1:2", [])
+    m.rules[0].sites = [RuleSite(where="src/guard.py:5", why="two lines off")]
+    assert "enforced at" not in t7_section(m).split("**BR2")[0]
+    assert m.rules[0].id not in rules_view_of(m)["byStep"].get("UC1:UC1:2", [])
