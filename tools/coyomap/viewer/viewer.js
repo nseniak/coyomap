@@ -4673,7 +4673,7 @@ function markLayerLines(root, t) {
 // against the zoom (rescaleLayerLines), and its heads are sized by its width (markerUnits
 // strokeWidth), so they keep one screen size with it. Mermaid's own heads are sized in units.
 const ARCH_LAYER_LINE_PX = 3;
-const ARCH_LAYER_LINE_COLOR = '#475569';   // also the heads' fill in viewer.css
+const ARCH_LAYER_LINE_COLOR = '#64748b';   // also the heads' fill in viewer.css
 function archLayerHeads(root) {
   const svg = root.querySelector('svg') || root;
   const ids = { end: 'arch-layer-end', start: 'arch-layer-start' };

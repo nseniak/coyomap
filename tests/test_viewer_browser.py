@@ -4444,6 +4444,27 @@ def test_a_long_box_name_wraps_inside_its_box() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def test_picking_a_box_changes_nothing_inside_it() -> None:
+    """A click marks a box; it does not lay it out again. The pick drew a wider border and shrank the
+    padding to match, and the browser rounds the two borders differently, so a box lost a pixel inside
+    and a pill that fitted exactly dropped to a new line. Every box, every part of it, to the half pixel."""
+    snap = """(b) => { const r0 = b.getBoundingClientRect();
+        return [r0.width, r0.height, ...[...b.querySelectorAll('*')].map((e) => {
+          const r = e.getBoundingClientRect();
+          return Math.round((r.left - r0.left) * 2) / 2 + ',' + Math.round((r.top - r0.top) * 2) / 2; })]; }"""
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        boxes = page.locator("#diagram g.node .ibox")
+        assert boxes.count() > 5
+        for i in range(boxes.count()):
+            box = boxes.nth(i)
+            before = box.evaluate(snap)
+            box.evaluate("(b) => b.dispatchEvent(new MouseEvent('click', { bubbles: true }))")
+            assert box.evaluate("(b) => b.classList.contains('ibox-picked')")
+            assert box.evaluate(snap) == before, box.evaluate("(b) => b.textContent")
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""
@@ -4544,12 +4565,12 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         labels = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgeLabel.arch-layerline')]
             .map((l) => l.textContent.trim())""")
         assert labels and not any(labels), labels
-        # THICK AT ANY ZOOM: 3 screen pixels of slate grey, whatever the picture's size.
+        # THICK AT ANY ZOOM: 3 screen pixels of mid slate grey, whatever the picture's size.
         drawn = page.evaluate("""() => document.querySelectorAll('#diagram path.flowchart-link.arch-layerline')
             .values().map((p) => { const cs = getComputedStyle(p);
               return [cs.stroke, Math.round(parseFloat(cs.strokeWidth) * p.getScreenCTM().a * 10) / 10]; })
             .toArray()""")
-        assert drawn and all(d == ["rgb(71, 85, 105)", 3.0] for d in drawn), drawn
+        assert drawn and all(d == ["rgb(100, 116, 139)", 3.0] for d in drawn), drawn
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
         click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')

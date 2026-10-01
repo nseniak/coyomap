@@ -2108,7 +2108,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         lines.append(f"  {a} {head} {b}")
         thick.append(str(len(box_lines) + k))
     if thick:
-        lines.append(f"  linkStyle {','.join(thick)} stroke:#475569,stroke-width:2.6px,color:#475569")
+        lines.append(f"  linkStyle {','.join(thick)} stroke:#64748b,stroke-width:2.6px,color:#64748b")
     if folded:
         lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
     if keeping:

@@ -3431,13 +3431,15 @@ body.insp-on { cursor: crosshair; }
    `ibox-picked` is the ONE class. Every picture toggles it and none of them styles it, so the two
    states cannot drift apart again.
 
-   THE BOX DOES NOT CHANGE SIZE WHEN IT IS PICKED. The extra border comes out of the padding, because
-   the wires on two of these pictures are measured against these boxes: a card that grew by a pixel
-   on a click would drag every line attached to it.
+   THE BOX DOES NOT CHANGE SIZE OR LAYOUT WHEN IT IS PICKED. The wires on two of these pictures are
+   measured against these boxes, so a card that grew by a pixel would drag every line attached to it.
+   So the border keeps its width and the extra half pixel is a painted inset ring, which takes no
+   room. It was a wider border with the padding shrunk to match, and that matched on paper only: the
+   browser rounds a 1.5px border down to whole pixels and a 2px one does not, so the inside of a box
+   lost a pixel on a click, and a pill that fitted exactly dropped to a new line (I3, "staff").
 
    THE LEFT EDGE IS LEFT ALONE where a box has an identity edge — that stripe is the only place a
-   feature's own colour survives, and `border-width` is a shorthand that would flatten it. That trap
-   has now caught this file twice. */
+   feature's own colour survives, so the ring does not paint over it. */
 .ibox:hover { border-color: #4f46e5; }
 /* A POINTER THAT HAS NOT MOVED since the drawing changed under it is not hovering (holdPointer in
    viewer.js): the box keeps its resting line (`--ibox-rest`, set per kind by injectItemTintCss), its
@@ -3448,16 +3450,11 @@ body.insp-on { cursor: crosshair; }
 #diagram.pointer-held .pickbox:hover:not(.ibox-picked) { box-shadow: none; }
 .ibox.ibox-picked, .ibox.ibox-picked:hover {
   border-top-color: #4f46e5; border-right-color: #4f46e5; border-bottom-color: #4f46e5;
-  border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px;
-  padding-top: 7.5px; padding-right: 10.5px; padding-bottom: 8.5px;
-  box-shadow: 0 3px 14px rgba(79, 70, 229, .28); }
-.ibox.ibox-picked:not(.ibox-idedge) { border-left-color: #4f46e5; border-left-width: 2px;
-                                      padding-left: 10.5px; }
-/* A TIGHT box carries its own smaller padding, so its compensation is its own. */
-.ibox-tight.ibox.ibox-picked { padding: 5.5px 9.5px; }
-.ibox-tight.ibox.ibox-picked:not(.ibox-idedge) { padding-left: 9.5px; }
-.ibox-figure.ibox.ibox-picked { padding: 5.5px 9.5px 7.5px; }
-.ibox-figure.ibox.ibox-picked:not(.ibox-idedge) { padding-left: 9.5px; }
+  box-shadow: inset 0 .5px 0 #4f46e5, inset -.5px 0 0 #4f46e5, inset 0 -.5px 0 #4f46e5,
+              0 3px 14px rgba(79, 70, 229, .28); }
+.ibox.ibox-picked:not(.ibox-idedge), .ibox.ibox-picked:not(.ibox-idedge):hover {
+  border-left-color: #4f46e5;
+  box-shadow: inset 0 0 0 .5px #4f46e5, 0 3px 14px rgba(79, 70, 229, .28); }
 /* A BOX ON A BOARD takes the SAME TWO STATES in the same colours, drawn as an inset ring instead of
    a border. A border is layout: 1.5px of it pushes every bullet off the line the board draws them
    on, which a test measures to the pixel. A ring paints the same box and occupies nothing.
@@ -3564,7 +3561,7 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
 .arch-layers .arch-layerline.arch-layer-open { display: none; }
-.arch-layer-head { fill: #475569; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
+.arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-hl { stroke-width: 3.2px; }
