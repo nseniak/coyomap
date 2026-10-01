@@ -205,16 +205,16 @@ def make_kinded_map(**kinds: str) -> dict[str, Any]:
 
 def test_without_a_kind_the_client_between_page_and_server_is_drawn():
     ln = lines_of(gv._arch_model(make_graph(make_kinded_map()), "", "all") or make_model())
-    assert ("C1", "C2") in ln and ("C2", "S2") in ln
+    assert ("S1", "S3") in ln and ("S3", "S2") in ln
 
 
 def test_a_pipe_is_drawn_through():
     model = gv._arch_model(make_graph(make_kinded_map(C2="pipe")), "", "all")
     assert model is not None
     ln = lines_of(model)
-    assert ("C1", "S2") in ln
-    assert not any("C2" in pair for pair in ln)
-    assert ln[("C1", "S2")]["sentences"] == [("UC1", "send the thing")]
+    assert ("S1", "S2") in ln
+    assert "S3" not in model["inside"] and not any("S3" in pair or "C2" in pair for pair in ln)
+    assert ln[("S1", "S2")]["sentences"] == [("UC1", "send the thing")]
 
 
 def make_map_with_a_deploy() -> dict[str, Any]:
@@ -243,12 +243,17 @@ def test_a_part_skipped_between_an_interface_and_a_database_is_drawn():
     only part between the command line and the database, so it is drawn, in the first layer, which then
     names it. A pipe between two parts is still skipped."""
     graph = make_graph(make_map_with_a_deploy())
-    ln = lines_of(gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True) or make_model())
-    assert ("I3", "C6") in ln and ("C6", "D1") in ln
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    ln = lines_of(model)
+    stack, page, api = gv._arch_cell_id(0, "S3"), gv._arch_cell_id(0, "S1"), gv._arch_cell_id(1, "S2")
+    assert ("I3", stack) in ln and (stack, "D1") in ln
     assert ("I3", "D1") not in ln
-    assert not any("C2" in pair for pair in ln), "the pipe between the page and the API is still skipped"
+    # the pipe shares the stack's subsystem: its box holds the stack only, and the page calls the API
+    assert model["cells"][stack]["parts"] == ["C6"], "the pipe between the page and the API is still skipped"
+    assert (page, api) in ln and (page, stack) not in ln and (stack, api) not in ln
     drawing = gv.gen_arch_views(graph)[0]["all|"]
-    assert frames_of(drawing, ("C6", "C1")) == {"C6": "UI and wiring", "C1": "UI and wiring"}
+    assert frames_of(drawing, (stack, page)) == {stack: "UI and wiring", page: "UI and wiring"}
 
 
 def make_two_server_pipe_map() -> dict[str, Any]:
@@ -281,18 +286,21 @@ def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
     model = gv._arch_model(make_graph(make_two_server_pipe_map()), "", "all")
     assert model is not None
     ln = lines_of(model)
-    assert ("C3", "C6") not in ln and ("S2", "C6") not in ln
-    assert ln[("C1", "C6")]["sentences"] == [("UC1", "charge for the thing")]
-    assert [s for _, s in next(v for k, v in ln.items() if k[0] == "C1" and k[1] != "C6")["sentences"]] \
+    assert ("S2", "S4") not in ln
+    assert ln[("S1", "S4")]["sentences"] == [("UC1", "charge for the thing")]
+    assert [s for _, s in next(v for k, v in ln.items() if k[0] == "S1" and k[1] != "S4")["sentences"]] \
         == ["send the thing"]
 
 
 def test_a_store_stands_alone_inside_its_subsystem():
+    """The Saver is a store: it is drawn as its own box, beside the Server's box, which still holds the
+    API, the one other part of the Server the stories use. Even one part is drawn inside its subsystem."""
     model = gv._arch_model(make_graph(make_kinded_map(C5="store")), "", "all")
     assert model is not None
-    assert "C5" in model["inside"] and "S2" not in model["inside"]
-    assert ("C5", "D1") in lines_of(model)
-    assert ("SF1", "C5") in lines_of(model)   # the save after the check, hidden inside S2 before
+    assert model["inside"] == ["S1", "S3", "S2", "SF1", "C5"]
+    ln = lines_of(model)
+    assert ("S2", "SF1") in ln and ("C5", "D1") in ln and ("S2", "D1") not in ln
+    assert ("SF1", "C5") in ln   # the save after the check, hidden inside S2 before
 
 
 # --- the layered picture: parts in frames by their kind ------------------------------------
@@ -333,9 +341,10 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
         assert f'["{label}"]' in drawing, label
     # on a feature's picture the door is in no frame: it sits between the people and the first
     # frame, tied above it
-    assert frames_of(drawing, ("I1", "C1", "C3", "C4", "C5", "D1")) == {
-        "C1": "UI", "C3": "APIs", "C4": "Checks", "C5": "Storage", "D1": "Databases"}
-    assert "  I1 ~~~ C1" in drawing and "  I2 ~~~ C1" in drawing
+    page, api, checker, saver = (gv._arch_cell_id(f, s) for f, s in ((0, "S1"), (1, "S2"), (2, "S2"), (3, "S2")))
+    assert frames_of(drawing, ("I1", page, api, checker, saver, "D1")) == {
+        page: "UI", api: "APIs", checker: "Checks", saver: "Storage", "D1": "Databases"}
+    assert f"  I1 ~~~ {page}" in drawing and f"  I2 ~~~ {page}" in drawing
 
 
 def make_map_with_a_timer() -> dict[str, Any]:
@@ -380,7 +389,9 @@ def test_a_part_that_runs_before_the_apis_is_drawn_with_them():
         drawings, texts = gv.gen_arch_views(make_graph(make_map_with_a_request_filter(kind)))
         drawing = drawings["all|"]
         # it joins the API of its own subsystem, in one group box in the APIs layer
-        assert texts["all|"]["cells"] == {"CYG1S2": {"sub": "S2", "parts": ["C3", "C4"]}}, kind
+        assert texts["all|"]["cells"] == {"CYG0S1": {"sub": "S1", "parts": ["C1"]},
+                                          "CYG1S2": {"sub": "S2", "parts": ["C3", "C4"]},
+                                          "CYG3S2": {"sub": "S2", "parts": ["C5"]}}, kind
         assert frames_of(drawing, ("CYG1S2",)) == {"CYG1S2": "APIs"}, kind
         # the work layer held the Checker alone: it is not drawn at all now
         assert '["Checks"]' not in drawing and '["Logic"]' not in drawing, kind
@@ -423,7 +434,7 @@ def test_the_products_own_timer_takes_its_place_in_its_row_by_when_it_is_reached
     """The nightly clock starts the last story, so it sits after the Checker, which the first story
     reaches."""
     rows = rows_of(gv.gen_arch_views(make_graph(make_map_with_a_timer()), crowded=0)[0]["all|"])
-    assert rows["Checks"] == ["C4", gv._person_id("Nightly clock")]
+    assert rows["Checks"] == [gv._arch_cell_id(2, "S2"), gv._person_id("Nightly clock")]
 
 
 def test_the_first_layer_names_only_the_kinds_it_holds():
@@ -431,7 +442,8 @@ def test_the_first_layer_names_only_the_kinds_it_holds():
     graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))
     drawing = gv.gen_arch_views(graph)[0]["all|"]
     assert '["UI and scripts"]' in drawing and '["UI"]' not in drawing
-    assert frames_of(drawing, ("C1", "C2")) == {"C1": "UI and scripts", "C2": "UI and scripts"}
+    page, client = gv._arch_cell_id(0, "S1"), gv._arch_cell_id(0, "S3")
+    assert frames_of(drawing, (page, client)) == {page: "UI and scripts", client: "UI and scripts"}
 
 
 def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
@@ -442,7 +454,7 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     assert frames_of(drawing, (who, "I1")) == {who: "Actors", "I1": "Interfaces"}
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     assert layer[("Actors", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
-    assert layer[("APIs", "Checks")] == [["C3", "C4"]]
+    assert layer[("APIs", "Checks")] == [[gv._arch_cell_id(1, "S2"), gv._arch_cell_id(2, "S2")]]
     # no box's own line is drawn: each frame is then laid out on its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
     assert len(links) == len(text["layerLines"]) and links[0] == "CYFP --> CYFD"
@@ -488,12 +500,13 @@ def test_a_layer_line_few_boxes_of_its_layer_take_is_not_drawn():
     drawing, text = drawings["all|"], texts["all|"]
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     # 2 of the 3 doors lead to the API: a rule of the picture
-    assert layer[("Interfaces", "APIs")] == [["I2", "C3"], ["I3", "C3"]]
+    api = gv._arch_cell_id(1, "S2")
+    assert layer[("Interfaces", "APIs")] == [["I2", api], ["I3", api]]
     assert "  CYFD --> CYF1" in drawing
     # 1 of the 3 leads to a screen: an exception, not drawn, and still told in the text
     assert ("Interfaces", "UI") not in layer and "CYFD --> CYF0" not in drawing
     assert "exceptions" not in text
-    assert any(e["srcBox"] == "I1" and e["dstBox"] == "C1" for e in text["lines"])
+    assert any(e["srcBox"] == "I1" and e["dstBox"] == gv._arch_cell_id(0, "S1") for e in text["lines"])
     # every person comes in through a door: 3 of 3
     assert len(layer[("Actors", "Interfaces")]) == 3
     links = [ln for ln in drawing.splitlines() if "-->" in ln]
@@ -512,10 +525,14 @@ def test_the_layered_picture_draws_parts_and_doors_goes_through_pipes_and_writes
     model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None
     ln = lines_of(model)
+    page, api, checker, saver = (gv._arch_cell_id(f, s) for f, s in ((0, "S1"), (1, "S2"), (2, "S2"), (3, "S2")))
+    # each part is drawn in its subsystem's box of its layer, and the pipe in none
+    assert {c: x["parts"] for c, x in model["cells"].items()} == {
+        page: ["C1"], api: ["C3"], checker: ["C4"], saver: ["C5"]}
     assert model["doors"] == ["I1", "I2"] and "SF1" not in model["inside"] and "C2" not in model["inside"]
-    assert ("Admin", "I1") in ln and ("I1", "C1") in ln   # the person comes in through the door
-    assert ("C1", "C3") in ln and ("C3", "C4") in ln and ("C4", "C5") in ln
-    assert ("Member", "I2") in ln and ("I2", "C3") in ln
+    assert ("Admin", "I1") in ln and ("I1", page) in ln   # the person comes in through the door
+    assert (page, api) in ln and (api, checker) in ln and (checker, saver) in ln
+    assert ("Member", "I2") in ln and ("I2", api) in ln
 
 
 def test_the_layered_picture_keeps_the_outside_services_in_the_last_frame():
@@ -546,11 +563,14 @@ def test_the_parts_of_one_subsystem_in_one_layer_are_one_box():
     model = gv._arch_model(make_graph(make_grouped_map()), "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None
     group = gv._arch_cell_id(2, "S2")
-    assert model["cells"] == {group: {"sub": "S2", "frame": 2, "parts": ["C3", "C4"]}}
-    assert model["inside"] == ["C1", group, "C5"]
+    page, saver = gv._arch_cell_id(0, "S1"), gv._arch_cell_id(3, "S2")
+    assert model["cells"] == {page: {"sub": "S1", "frame": 0, "parts": ["C1"]},
+                              group: {"sub": "S2", "frame": 2, "parts": ["C3", "C4"]},
+                              saver: {"sub": "S2", "frame": 3, "parts": ["C5"]}}
+    assert model["inside"] == [page, group, saver]
     ln = lines_of(model)
     # the check runs inside the group, so no line is drawn for it
-    assert set(ln) == {("Admin", "I1"), ("I1", "C1"), ("C1", group), (group, "C5"), ("C5", "D1"),
+    assert set(ln) == {("Admin", "I1"), ("I1", page), (page, group), (group, saver), (saver, "D1"),
                        ("Member", "I2"), ("I2", group)}
 
 
@@ -575,8 +595,10 @@ def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
             f":::cy-{group}") in drawing
     work = drawing.split('["Logic and checks"]')[1].split("\n  end")[0]
     assert f"  {group}[" in work
-    assert texts["all|"]["cells"] == {group: {"sub": "S2", "parts": ["C3", "C4"]}}
-    line = next(e for e in texts["all|"]["lines"] if e["srcBox"] == "C1")
+    assert texts["all|"]["cells"] == {gv._arch_cell_id(0, "S1"): {"sub": "S1", "parts": ["C1"]},
+                                      group: {"sub": "S2", "parts": ["C3", "C4"]},
+                                      gv._arch_cell_id(3, "S2"): {"sub": "S2", "parts": ["C5"]}}
+    line = next(e for e in texts["all|"]["lines"] if e["srcBox"] == gv._arch_cell_id(0, "S1"))
     assert line["dstBox"] == group and line["dst"] == "Server (Logic and checks)"
 
 
@@ -590,12 +612,13 @@ def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_ru
     graph = make_graph(make_map_with_a_line_up())
     model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None
-    assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [("C4", "C5")]
+    checker, saver = gv._arch_cell_id(2, "S2"), gv._arch_cell_id(0, "S2")
+    assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [(checker, saver)]
     drawings, texts = gv.gen_arch_views(graph)
     drawing = drawings["all|"]
-    assert '  C5 <-->|"5"| C4' in drawing and "C4 -->" not in drawing
+    assert f'  {saver} <-->|"5"| {checker}' in drawing and f"{checker} -->" not in drawing
     up = [(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"] if e.get("up")]
-    assert up == [("C4", "C5")]
+    assert up == [(checker, saver)]
 
 
 def test_the_picture_over_subsystems_draws_no_line_flipped():
@@ -613,7 +636,7 @@ def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
     graph = make_graph(make_layered_map())
     _drawings, texts = gv.gen_arch_views(graph)
     story = next(x for x in texts["all|"]["stories"] if x["uc"] == "UC1")
-    assert story["lines"][:2] == [[gv._person_id("Admin"), "I1"], ["I1", "C1"]]
+    assert story["lines"][:2] == [[gv._person_id("Admin"), "I1"], ["I1", gv._arch_cell_id(0, "S1")]]
     assert all(e["n"] >= 1 for e in texts["all|"]["lines"] if not e["store"])
 
 

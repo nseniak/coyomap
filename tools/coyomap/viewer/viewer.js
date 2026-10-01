@@ -1273,19 +1273,19 @@ function componentKindsLabel(ids) {
   }
   return words.join(' · ');
 }
-// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, NAMING the parts it holds
-// there, each a tag that opens that part. The names take the place of the subsystem's sentence, which
-// is the same in every layer's box of one subsystem (4 boxes on mcpolis's Upstream MCPs) and so said
-// nothing about THIS box. Every name up to CELL_NAMES_ALL; past that the first CELL_NAMES_SHOWN,
-// which the generator orders by how many of the picture's stories pass through each part, then how
-// many more. No kind word either: the frame around the box already says the layer.
+// A GROUP OF PARTS on the layered Architecture picture: its subsystem's box, with the subsystem's own
+// sentence, NAMING the parts it holds there, each a tag that opens that part — one part as well as
+// ten, so every box of the picture is a subsystem and reads the same way. Every name up to
+// CELL_NAMES_ALL; past that the first CELL_NAMES_SHOWN, which the generator orders by how many of the
+// picture's stories pass through each part, then how many more. No type word: on this picture every
+// box inside the product is a subsystem, and the frame around it already says the layer.
 const CELL_NAMES_ALL = 4;
 const CELL_NAMES_SHOWN = 3;
 function itemSpecCell(sid, parts) {
   const spec = itemSpecOf(sid);
   if (!spec) return null;
   const shown = parts.length <= CELL_NAMES_ALL ? parts : parts.slice(0, CELL_NAMES_SHOWN);
-  spec.what = '';
+  spec.word = '';
   spec.band = [];
   spec.chips = shown.map((p) => ({ id: p, kind: 'component', name: (GRAPH.nodes[p] || {}).name || p }));
   spec.more = parts.length - shown.length;
@@ -1358,6 +1358,9 @@ function expandItemSlots(src) {
     // A pill the PICTURE knows and the thing itself does not — today only `via AI agent`, which is
     // true of a person in one walk and not in the next, so it cannot live on the role.
     if (pill) spec.pills = (spec.pills || []).concat([{ text: decodeURIComponent(pill), cls: '' }]);
+    // EVERY BOX INSIDE THE PRODUCT ON THE ARCHITECTURE PICTURE (`map`) IS A SUBSYSTEM, so a type word
+    // on each would be the same word on every box; the layered picture's group drops it in itemSpecCell.
+    if (v === 'map' && k === 'subsystem') spec.word = '';
     const html = itemBoxHtml(spec, v, { tinted: true });
     const i = built.length;
     built.push(html);

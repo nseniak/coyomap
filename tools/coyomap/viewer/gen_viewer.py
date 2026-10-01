@@ -1060,8 +1060,8 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 #   merge the walks; leave out replies, and results going back out to a person
 #   draw a shared sub-use case as ONE box, the dashed box the use case maps draw (_arch_steps)
 #   draw a record as the database behind it, with a line of its own style and no number
-#   draw each subsystem the stories use as ONE box, holding the components they use in it; a
-#     component stands alone when it is the only one of its subsystem those stories use
+#   draw each subsystem the stories use as ONE box, holding the components they use in it, even
+#     when they use only one of them
 #   always keep the people, the doors they come through, the outside systems (at most 6) and the
 #     databases (at most 4)
 #   keep the ARCH_BOX_BUDGET boxes the most stories pass through
@@ -1077,11 +1077,12 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 # mcpolis) cross from one area to another, and "Foundations" alone sits on 154 of those crossings,
 # so as one box it becomes a hub named after nothing.
 #
-# WHY ONLY THAT ONE CASE STANDS ALONE. A lone used component says exactly what the box would, and
-# more precisely, so it never costs a box. Three wider signals for "this component matters on its
-# own" were measured and none is safe: how many stories pass through it pulls 9 of a 4-story
-# person's components out of their boxes; deciding a business rule pulls 49 of the everyone
-# picture's 77; and "Application Assembly", which is wiring, ranks near the top on both.
+# WHY EVEN ONE COMPONENT IS WRAPPED IN ITS SUBSYSTEM. A lone component was drawn as itself, because
+# it says what the box would and more precisely. On mcpolis that made 64 boxes parts and 50 boxes
+# subsystems, two kinds of box side by side with different names, pills and bodies, and a reader had
+# to work out each time whether a box was a container or a part. Every box is a subsystem now, saying
+# its own sentence and naming the parts the stories use; the part's own sentence is one hover away.
+# A store and a check still stand alone on a picture with no layers (`alone` in `_arch_lift`).
 #
 # WHY FOLD, NOT SAMPLE. The version before this picked boxes by how busy they were inside each story
 # and cut every line that passed through a box it had not picked. Measured on mcpolis's everyone
@@ -1094,8 +1095,8 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 # client. Telling those apart needs a kind on each component, which the map does not record.
 #
 # NO AREA FRAMES. Every area holds members at opposite ends of a walk (Mounting MCP servers at step 1
-# and at step 11), so a frame would stretch across the whole picture. A box says its area as a pill.
-ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a component standing alone
+# and at step 11), so a frame would stretch across the whole picture. A box is its area instead.
+ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a store or a check standing alone
 ARCH_OUTSIDE_MAX = 6
 ARCH_STORES_MAX = 4     # the databases behind the records the stories reach
 ARCH_STORE_LINE = "#0f766e"   # the colour of a line into a database, on the picture and in its key
@@ -1491,8 +1492,8 @@ def _arch_cell_id(frame: int, sub: str) -> str:
 
 def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _ArchLifted:
     """The merged steps redrawn over BOXES (see the rule above the Architecture section): each
-    component becomes its own subsystem, unless it is the only component of that subsystem the
-    stories use, in which case it stays itself.
+    component becomes its own subsystem, even when it is the only component of that subsystem the
+    stories use.
 
     A step with both ends in one box happens inside it and is dropped. A step back to a box that
     called this one earlier in the same story is a reply at box level, as `_arch_flow` treats one
@@ -1502,10 +1503,10 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
 
     `layered`: the layered picture groups parts by LAYER, in frames drawn around them, and inside a
     layer by subsystem. The parts of one top-level subsystem that sit in one layer are ONE box, a
-    `_ArchCell`, and a part with no other part of its subsystem in its layer stays itself. Measured on
+    `_ArchCell`, even when it is the only part of its subsystem in its layer. Measured on
     mcpolis with a kind on every part: the whole-product picture went from 71 boxes to 24 and from 191
     lines to 107, and a feature's from 13 boxes to 8 at the median. The subsystem is the TOP-LEVEL one,
-    the one every part's box already names in its pill, so a group is named by what the reader saw."""
+    the one a reader meets as the box's name."""
     nodes = graph["nodes"]
     used: dict[str, set[str]] = {}
     met: dict[str, set[str]] = {}   # every component the stories use, first met first -> those stories
@@ -1517,8 +1518,8 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
                     met.setdefault(x, set()).add(uc)
     # A STORE AND A CHECK STAND ALONE (`grammar.COMPONENT_KINDS_STANDING_ALONE`): the records a
     # subsystem keeps and the gate a story passes are the two things a reader looks for inside it,
-    # and inside the subsystem's box neither can be seen. The rest of the subsystem is still one box,
-    # or its one remaining component when only one is left.
+    # and inside the subsystem's box neither can be seen. The rest of the subsystem is one box, even
+    # when only one component of it is left.
     def alone(c: str) -> bool:
         return _component_kind(graph, c) in grammar.COMPONENT_KINDS_STANDING_ALONE
 
@@ -1535,13 +1536,11 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
             # A GROUP'S BOX NAMES ITS PARTS, and names only the first few when it holds many: those are
             # the ones most of this picture's stories pass through.
             parts.sort(key=lambda c: (-len(met[c]), order.index(c)))
-            if len(parts) > 1:
-                cid = _arch_cell_id(frame, area)
-                cells[cid] = _ArchCell(sub=area, frame=frame, parts=parts)
-                box_of.update(dict.fromkeys(parts, cid))
+            cid = _arch_cell_id(frame, area)
+            cells[cid] = _ArchCell(sub=area, frame=frame, parts=parts)
+            box_of.update(dict.fromkeys(parts, cid))
     else:
-        box_of = {c: (c if alone(c) or len([x for x in members if not alone(x)]) < 2 else sid)
-                  for sid, members in used.items() for c in members}
+        box_of = {c: (c if alone(c) or sid == c else sid) for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
     for uc, steps in flow["walks"]:

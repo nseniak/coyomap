@@ -4488,8 +4488,9 @@ def make_whole_product_text(mutate: Any) -> dict[str, Any]:
 
 
 def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_steps() -> None:
-    """A group of parts is its subsystem's box on the layered picture. It names the parts it holds,
-    each a tag that opens that part, in place of the subsystem's sentence; the box around the name
+    """A group of parts is its subsystem's box on the layered picture. It says the subsystem's own
+    sentence and names the parts it holds, each a tag that opens that part, with no type word: every
+    box inside the product is a subsystem on this picture. The box around the name
     selects it, shows the subsystem's card and keeps the group's own steps in the text; the name
     opens the subsystem."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
@@ -4509,11 +4510,12 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
                      tags: [...n.querySelectorAll('.item-pill')].map((t) => t.dataset.item),
                      more: (n.querySelector('.ibox-band .ibox-count') || {}).textContent || '',
                      sentence: !!n.querySelector('.ibox-what'),
+                     word: [...n.querySelectorAll('.ibox-head .ibox-pill')].map((p) => p.textContent),
                      nameX: l.left + l.width / 2, nameY: l.top + l.height / 2 };
         }""")
         group = groups[spot["id"]]
         named = group["parts"] if len(group["parts"]) <= 4 else group["parts"][:3]
-        assert spot["tags"] == named and not spot["sentence"], (spot, group)
+        assert spot["tags"] == named and spot["sentence"] and not spot["word"], (spot, group)
         assert spot["more"] == ("" if len(group["parts"]) <= 4 else f"+{len(group['parts']) - 3} more"), spot
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)
