@@ -4376,6 +4376,29 @@ def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_on
         assert not page.js_errors, page.js_errors
 
 
+def test_follow_a_story_in_the_header_lists_every_story_by_feature_and_follows_the_one_picked() -> None:
+    """The header's "Follow a story" list holds every story of the picture, grouped by feature in the
+    Features page's order. Picking one follows it, as its own screen; its first entry then lets go."""
+    text = make_whole_product_text(lambda m: None)
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => ({
+            groups: [...document.querySelectorAll('[data-archfollow] optgroup')].map((g) => g.label),
+            features: [...document.querySelectorAll('.archwho')].map((b) => b.textContent).slice(1),
+            stories: [...document.querySelectorAll('[data-archfollow] optgroup option')].map((o) => o.value) })""")
+        assert sorted(seen["stories"]) == sorted(x["uc"] for x in text["stories"]), seen
+        assert seen["groups"] == [f for f in seen["features"] if f in seen["groups"]], seen
+        uc = seen["stories"][0]
+        page.select_option("[data-archfollow]", uc)
+        page.wait_for_function(f"() => location.hash.includes('story={uc}')")
+        _arch_ready(page)
+        assert page.evaluate("""() => { const s = document.querySelector('[data-archfollow]');
+            return [s.value, s.options[0].textContent]; }""") == [uc, "Show every story"]
+        page.select_option("[data-archfollow]", "")
+        page.wait_for_function("() => !location.hash.includes('story=')")
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
     """A line says which use cases take it: the use case is what a line is for, and a step sentence only
     says how, in one story's words. Past a few use cases from several features, a line lists its

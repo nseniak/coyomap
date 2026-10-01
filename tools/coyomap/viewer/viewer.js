@@ -261,6 +261,12 @@ diaghead.addEventListener('click', (e) => {
   const sw = e.target.closest && e.target.closest('[data-archhp]');
   if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
 });
+diaghead.addEventListener('change', (e) => {
+  const pick = e.target.closest && e.target.closest('[data-archfollow]');
+  if (!pick) return;
+  const cur = (hi >= 0 && history[hi]) || {};
+  go(archState(cur.scope, cur.cap || '', pick.value || '', cur.open || ''));
+});
 const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
@@ -7492,7 +7498,30 @@ function archFeatureHtml() {
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}</div>`
+    + archControlsHtml(s)
     + archKeyHtml(archTextOf({ ...s, kind: 'arch' }));
+}
+// WHAT THE READER NARROWS THE PICTURE TO, under the features: one story to follow.
+function archControlsHtml(s) {
+  const t = archTextOf({ ...s, kind: 'arch' });
+  const stories = (t && t.stories) || [];
+  if (!stories.length) return '';
+  return `<div class="archctl-row">${archFollowSelectHtml(stories, s.story || '')}</div>`;
+}
+// FOLLOW A STORY: every story of the picture, grouped by its feature in the Features page's order. The
+// first entry says what the list is for while nothing is followed, and lets go of the story once one is.
+function archFollowSelectHtml(stories, now) {
+  const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
+  const order = (ARCH_FEATURES || []).map((f) => f.id);
+  const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
+  const feats = [...new Set(stories.map((x) => featureOf(x.uc)))].sort((a, b) => at(a) - at(b));
+  const opt = (x) => `<option value="${esc(x.uc)}"${x.uc === now ? ' selected' : ''}>${esc(x.name)}</option>`;
+  return '<label class="archfollow"><span class="archfollow-lbl">Follow a story</span>'
+    + `<select data-archfollow aria-label="Follow a story"><option value="">`
+    + `${now ? 'Show every story' : `Pick one of ${stories.length}…`}</option>`
+    + feats.map((f) => `<optgroup label="${esc(f ? featureName(f) : 'In no feature')}">`
+      + stories.filter((x) => featureOf(x.uc) === f).map(opt).join('') + '</optgroup>').join('')
+    + '</select></label>';
 }
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a

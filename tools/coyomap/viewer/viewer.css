@@ -930,6 +930,13 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archhp-box { width: 11px; height: 11px; border: 1.5px solid #64748b; border-radius: 2px; background: #fff; }
 .archhp.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
 .archhp.on .archhp-box { border-color: #4f46e5; background: #4f46e5; }
+/* What the reader narrows the picture to: a story to follow. */
+.archctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.archfollow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #334155; }
+.archfollow-lbl { font-weight: 600; }
+.archfollow select { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #cbd5e1;
+  border-radius: 6px; background: #fff; color: #1f2937; max-width: 340px; cursor: pointer; }
+.archfollow select:hover { border-color: #94a3b8; }
 /* …and under it, the key to the two line styles, drawn as the lines themselves. */
 .archkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 12px; color: #475569; }
 .archkey span { display: inline-flex; align-items: center; gap: 6px; }
