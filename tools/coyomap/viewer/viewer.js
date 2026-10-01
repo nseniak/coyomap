@@ -267,7 +267,7 @@ diaghead.addEventListener('click', (e) => {
   if (!(e.target.closest && e.target.closest('[data-archthrough-clear]'))) return;
   const was = archBoxFilter;
   archFilterBox('');
-  if (mainScene && was && !was.startsWith('layer:')) selRemove(mainScene, 'node:' + was);
+  if (mainScene && was) selRemove(mainScene, was.startsWith('layer:') ? 'archlayer:' + was.slice(6) : 'node:' + was);
 });
 diaghead.addEventListener('change', (e) => {
   const pick = e.target.closest && e.target.closest('[data-archfollow]');
@@ -7886,6 +7886,41 @@ function showArchLine(e, story) {
   setTreeSelection(null);
   highlightTreePath(null);
 }
+// A LINE BETWEEN LAYERS is picked like any line, and its card lists the lines it stands for, each
+// opening to the use cases that take it. Picking it also draws those lines (archFilterLayerLine), from a
+// click as from the address. The drawing holds nothing else on a crowded picture, so the k-th line
+// drawn is the k-th line between layers (markLayerLines).
+function bindArchLayerLines(t, story) {
+  const paths = [...mainScene.root.querySelectorAll('.edgePaths path.flowchart-link')];
+  const layers = (t && t.layerLines) || [];
+  bindEdges(mainScene, (m, p) => {
+    const k = paths.indexOf(p);
+    if (!layers[k]) return null;
+    return { e: { src: m[1], dst: m[2] }, selKey: 'archlayer:' + k,
+             showFn: () => showArchLayerLine(layers[k], t, story), opts: { hover: true } };
+  });
+  layers.forEach((_ll, k) => {
+    const base = mainScene.selectors['archlayer:' + k];
+    if (base) mainScene.selectors['archlayer:' + k] = () => {
+      base();
+      if (!story && archBoxFilter !== 'layer:' + k) archFilterLayerLine(k, t);
+    };
+  });
+}
+function showArchLayerLine(ll, t, story) {
+  const rows = ll.lines.map(([a, b]) => archLineOf(t, a, b)).filter(Boolean);
+  panel.innerHTML = `<div class="pane-title"><h2>${esc(ll.src)} \u2192 ${esc(ll.dst)}</h2>`
+    + '<span class="badge edge">between layers</span></div>'
+    + `<p class="archcard-via">Stands for ${rows.length === 1 ? '1 line' : rows.length + ' lines'} from a box`
+    + ` in ${esc(ll.src)} to a box in ${esc(ll.dst)}.</p>`
+    + '<div class="archcard-ucs">' + rows.map((e) => `<details class="archcard-line"><summary>`
+      + `${esc(e.src)} \u2192 ${esc(e.dst)}`
+      + (e.store ? '' : ` <span class="archtext-count">step ${Number(e.n)}</span>`) + '</summary>'
+      + archUseCasesHtml(e) + '</details>').join('') + '</div>';
+  cvElement = null;
+  setTreeSelection(null);
+  highlightTreePath(null);
+}
 function archLineOf(t, src, dst) {
   return ((t && t.lines) || []).find((x) => x.srcBox === src && x.dstBox === dst) || null;
 }
@@ -7961,6 +7996,7 @@ function bindArch() {
   });
   // A crowded picture draws only its lines between layers, which stand for many lines each.
   if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t, story));
+  else bindArchLayerLines(t, story);
   markLayerLines(mainScene.root, t);
   bindArchText(t, story);   // …and every arrow finds its line in the text
   if (story) archFollow(story);
@@ -8005,8 +8041,10 @@ function bindArchText(t, story) {
       : (ev) => {
         ev.stopPropagation();   // the empty space behind it lets go of what is picked (resetScene)
         if (story) return;
-        if (archBoxFilter === 'layer:' + layer) archFilterBox('');
-        else archFilterLayerLine(+layer, t);
+        if (archBoxFilter === 'layer:' + layer) {
+          archFilterBox('');
+          selRemove(mainScene, 'archlayer:' + layer);
+        } else archFilterLayerLine(+layer, t);
       };
     for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.addEventListener('click', find);
   });

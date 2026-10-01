@@ -4871,7 +4871,7 @@ def make_parts_in_every_layer(m: dict[str, Any]) -> None:
 
 # The lines between layers the drawing shows, and the box lines the view draws on top of it.
 VISIBLE_LINES = """() => {
-    const vis = (el) => getComputedStyle(el).display !== 'none';
+    const vis = (el) => { const cs = getComputedStyle(el); return cs.display !== 'none' && cs.opacity !== '0'; };
     const ps = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
     return { layer: ps.filter((p) => p.classList.contains('arch-layerline') && vis(p)).length,
              box: document.querySelectorAll('#diagram .arch-overlay .arch-ov-line').length };
@@ -4950,6 +4950,37 @@ def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> Non
         assert lit == [[e["srcBox"], e["dstBox"]]], lit
         # the overlay's other lines are still drawn: picking one line does not take its neighbours away
         assert page.evaluate(VISIBLE_LINES)["box"] > 1
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_line_between_layers_is_picked_and_its_card_lists_the_lines_it_stands_for() -> None:
+    """A line between layers is picked like any line: it draws the lines it stands for, and its card
+    lists them, each opening to the use cases that take it. The address keeps it, and a second click
+    lets go of it."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
+    ll = text["layerLines"][k]
+    click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
+        .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
+    read = """() => ({ hash: decodeURIComponent(location.hash), shown: !document.getElementById('panel').hidden,
+        rows: document.querySelectorAll('#panel .archcard-line').length,
+        ucs: document.querySelectorAll('#panel .archcard-line .archtext-story').length,
+        drawn: document.querySelectorAll('#diagram .arch-ov-line').length })"""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        page.evaluate(click)
+        page.wait_for_function("() => location.hash.includes('sel=archlayer')")
+        seen = page.evaluate(read)
+        assert seen["hash"].endswith(f"sel=archlayer:{k}") and seen["shown"], seen
+        assert seen["rows"] == seen["drawn"] == len(ll["lines"]) and seen["ucs"], seen
+        page.reload()
+        _settle(page)
+        page.wait_for_selector(".arch-ov-line", state="attached")
+        assert page.evaluate(read)["rows"] == len(ll["lines"])
+        page.evaluate(click)
+        page.wait_for_timeout(300)
+        seen = page.evaluate(read)
+        assert "sel=" not in seen["hash"] and seen["drawn"] == 0, seen
         assert not page.js_errors, page.js_errors
 
 

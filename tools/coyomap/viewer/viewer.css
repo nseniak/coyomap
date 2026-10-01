@@ -1009,6 +1009,10 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
 .archcard-story .archtext-sent { margin: 0; }
 .archcard-ucs { max-height: 50vh; overflow: auto; }
+.archcard-line > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; font-weight: 600; }
+.archcard-line > summary:hover { color: #4f46e5; }
+.archcard-line > .archtext-ucs, .archcard-line > .archtext-feat { margin-left: 14px; }
+.archcard-line[open] { padding-bottom: 6px; }
 /* …and the arrow a line of the text is about, lit on the drawing. */
 #diagram path.arch-hl { stroke: #4f46e5 !important; stroke-width: 2.6px !important; }
 #diagram g.edgeLabel.arch-hl .label, #diagram g.edgeLabel.arch-hl span { background: #e0e7ff !important;
@@ -3608,7 +3612,9 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
 .arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
-.arch-layers .arch-layerline.arch-layer-open { display: none; }
+/* An open one is not drawn, but keeps its place: its card's line still points where it ran, and a
+   second click on it lets go of it. */
+.arch-layers .arch-layerline.arch-layer-open { opacity: 0 !important; }
 .arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
