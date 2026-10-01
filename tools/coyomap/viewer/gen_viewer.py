@@ -1475,9 +1475,14 @@ def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
         return _arch_layer_label(layer)
     held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == layer
             for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
-    # The first layer also holds a pipe or the wiring drawn as a box (`_arch_frame`), and says so.
-    words = [*frames[layer][1], *(grammar.COMPONENT_KINDS_DRAWN_THROUGH if layer == 0 else ())]
-    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in words if w in held]
+    # The first layer also holds a pipe or the wiring drawn as a box (`_arch_frame`), and its name says so
+    # ONLY when it holds nothing else. Every such part sits inside a subsystem box that also holds
+    # screens: on mcpolis, all 4 of them, on 4 of the 11 pictures. Named for them, the layer read "UI,
+    # scripts, pipes and wiring", a list of whatever happened to be there; the parts are still tags in
+    # their boxes, and their own cards say what kind they are.
+    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in frames[layer][1] if w in held]
+    if not names and layer == 0:
+        names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in grammar.COMPONENT_KINDS_DRAWN_THROUGH if w in held]
     if not names:
         return _arch_layer_label(layer)
     said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"

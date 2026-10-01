@@ -253,7 +253,22 @@ def test_a_part_skipped_between_an_interface_and_a_database_is_drawn():
     assert model["cells"][stack]["parts"] == ["C6"], "the pipe between the page and the API is still skipped"
     assert (page, api) in ln and (page, stack) not in ln and (stack, api) not in ln
     drawing = gv.gen_arch_views(graph)[0]["all|"]
-    assert frames_of(drawing, (stack, page)) == {stack: "UI and wiring", page: "UI and wiring"}
+    # the layer holds a screen too, so its name says only that: the stack is a tag in its box
+    assert frames_of(drawing, (stack, page)) == {stack: "UI", page: "UI"}
+
+
+def test_the_first_layer_names_pipes_and_wiring_only_when_it_holds_nothing_else():
+    """A pipe or the wiring drawn as a box sits in the first layer, but the layer is named for it only when
+    it holds nothing else: beside a screen it is one tag in a subsystem box, and the layer read "UI,
+    scripts, pipes and wiring", a list of whatever happened to be there. The deploy, a feature of its
+    own here, reaches no screen: its first layer holds the container stack alone, and says so."""
+    doc = make_map_with_a_deploy()
+    doc["capabilities"].append({"id": "CAP9", "name": "Deploying", "purpose": "ship it", "happy_path": "expected"})
+    next(u for u in doc["use_cases"] if u["id"] == "UC3")["capability"] = "CAP9"
+    graph = make_graph(doc)
+    drawing = gv.gen_arch_views(graph)[0]["all|CAP9"]
+    stack = gv._arch_cell_id(0, "S3")
+    assert frames_of(drawing, (stack,)) == {stack: "Wiring"}
 
 
 def make_two_server_pipe_map() -> dict[str, Any]:
