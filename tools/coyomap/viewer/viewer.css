@@ -3036,6 +3036,9 @@ svg.ifd-wires marker path { fill: context-stroke; stroke: none; opacity: 1; }
 /* …and the card itself steps back. Dashed rather than faded, because faded reads as "loading" and
    dashed reads as "outside the story", which is what it is. */
 .ifd-box-quiet { border-style: dashed; }
+/* "+N MORE" ON A GROUP BOX OF THE ARCHITECTURE PICTURE is a door: it opens the box to list every part. */
+.ibox-more { cursor: pointer; }
+.ibox-more:hover { border-color: #166534; text-decoration: underline; }
 
 /* WHAT CROSSES, hidden at rest and shown for the surface the reader picked. ONE box per surface,
    both directions inside it. It was one box PER DIRECTION, and on the ten two-way surfaces of MCP

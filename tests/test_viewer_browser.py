@@ -4519,6 +4519,29 @@ def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
+    """A group box names its first parts and says "+N more" for the rest. Clicking that opens the box:
+    the picture is drawn again with every part named, the address says which box is open, and Back
+    closes it."""
+    groups = make_whole_product_text(make_every_part_do_work)["cells"]
+    big = [g for g in groups.values() if len(g["parts"]) > 4]
+    assert big, "the changed map must have a group with more parts than a box names"
+    with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        sub = page.evaluate("() => document.querySelector('#diagram .ibox-more').dataset.opens")
+        held = max(len(g["parts"]) for g in groups.values() if g["sub"] == sub)
+        page.evaluate("() => document.querySelector('#diagram .ibox-more').click()")
+        page.wait_for_function(f"() => location.hash.includes('open={sub}')")
+        _arch_ready(page)
+        tags = page.evaluate(f"""() => Math.max(...[...document.querySelectorAll('#diagram .ibox-map')]
+            .filter((b) => b.querySelector('.item-pill[data-item]') && b.closest('g.node').getAttribute('class').includes('cy-CYG') && b.closest('g.node').getAttribute('class').includes('{sub}'))
+            .map((b) => b.querySelectorAll('.item-pill[data-item]').length))""")
+        assert tags == held, (sub, tags, held)
+        page.go_back()
+        page.wait_for_function("() => !location.hash.includes('open=')")
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""

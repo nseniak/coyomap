@@ -1179,7 +1179,10 @@ function itemBoxHtml(spec, variant, opts) {
       + (spec.chips || []).map((c) => itemPillHtml(c.id || '', {
           kind: c.kind, name: c.name, ikind: c.ikind, inBox: true, cls: c.cls })).join('')
       // …and how many a box holds past the tags it names (`spec.more`), after them.
-      + (spec.more ? `<span class="ibox-count">+${Number(spec.more)} more</span>` : '');
+      + (spec.more ? (spec.moreOpens
+        ? `<button type="button" class="ibox-count ibox-more" data-opens="${esc(spec.moreOpens)}"`
+          + ` title="List every part">+${Number(spec.more)} more</button>`
+        : `<span class="ibox-count">+${Number(spec.more)} more</span>`) : '');
     if (bits) out.push(`<span class="ibox-band">${bits}</span>`);
   }
   // The THING's own last line before the CALLER's: a provider belongs to the door wherever it is
@@ -1293,7 +1296,8 @@ const CELL_NAMES_SHOWN = 3;
 function itemSpecCell(sid, parts) {
   const spec = itemSpecOf(sid);
   if (!spec) return null;
-  const shown = parts.length <= CELL_NAMES_ALL ? parts : parts.slice(0, CELL_NAMES_SHOWN);
+  const shown = parts.length <= CELL_NAMES_ALL || archOpenSubs.has(sid) ? parts : parts.slice(0, CELL_NAMES_SHOWN);
+  spec.moreOpens = sid;   // "+N more" is a button that lists the rest (bindArch)
   spec.word = '';
   spec.what = '';
   spec.band = [];
@@ -5088,6 +5092,9 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // `story` is the ONE story the Architecture view follows: its lines lit and
                       // numbered in its own order. Unset = every story, numbered together.
                       'story',
+                      // `open` is the subsystems whose box the Architecture view lists in full, every
+                      // part named, after the reader clicked its "+N more". Comma-separated ids.
+                      'open',
                       // `sn` is a step's own NUMBER, not its index — the number the reader sees on the
                       // board and in the popup ("step 13"). Unique within a use case on all four live
                       // maps, and looked up by scanning rather than by position, so a flow whose numbers
@@ -5106,6 +5113,7 @@ function stateKey(s) {
                                    // the Architecture view narrowed to one feature
     + (s.act ? ':' + s.act : '')   // …or one ACTOR's, the overview's other axis
     + (s.story ? '@' + s.story : '')  // …following one story: a different screen of one drawing
+    + (s.open ? '+' + s.open : '')    // …with boxes opened to list every part: a different drawing
     + (s.scope ? '~' + s.scope : '')  // the Architecture view on the happy path's stories: a
                                       // different drawing, so it has to key apart or the switch
                                       // is a no-op on the screen
@@ -7566,7 +7574,7 @@ archtext.addEventListener('click', (e) => {
   if (pick) {   // follow a story, or ("") show every story again: its own screen, its own address
     e.stopPropagation();
     const cur = (hi >= 0 && history[hi]) || {};
-    go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || ''));
+    go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
     return;
   }
   if (e.target.closest && e.target.closest('[data-archfilter-clear]')) { archFilterBox(''); return; }
@@ -7601,6 +7609,15 @@ function bindArch() {
     pickBox(id);
   }, { standsFor, hover: true });
   bindArchPeople(t, pickBox);
+  // "+N MORE" OPENS THE BOX: the picture is drawn again with that subsystem's every part named. It is a
+  // new screen, so Back closes it again and a link keeps it open.
+  mainScene.root.querySelectorAll('.ibox-more[data-opens]').forEach((b) => {
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = [...archOpenOf(s), b.getAttribute('data-opens')];
+      go(archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(',')));
+    });
+  });
   bindEdges(mainScene, resolveComponentEdge);
   markLayerLines(mainScene.root, t);
   bindArchText(t, story);   // …and every arrow finds its line in the text
@@ -7732,13 +7749,20 @@ function archFeature(s) {
   return first ? first.id : '';
 }
 function archKey(s) { return archScope(s) + '|' + archFeature(s); }
-function archState(scope, cap, story) {
+function archState(scope, cap, story, open) {
   const s = { kind: 'arch' };
   if (scope === 'happy') s.scope = 'happy';
   if (cap === 'all') s.cap = 'all';
   else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
   if (story) s.story = story;
+  if (open) s.open = open;
   return s;
+}
+// THE SUBSYSTEMS A PICTURE LISTS IN FULL, from the screen being drawn (`s.open`). Read by itemSpecCell
+// while the boxes are built, so it is set just before (see render).
+let archOpenSubs = new Set();
+function archOpenOf(s) {
+  return new Set(s && s.kind === 'arch' && s.open ? String(s.open).split(',').filter(Boolean) : []);
 }
 // THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
 // than they decode a word for one. Solid = every story through that box goes this way, so two solid
@@ -14418,6 +14442,7 @@ async function renderView(sArg, transient, seq) {
     // ITEM SLOTS ARE FILLED BEFORE THE ENGINE SEES THE SOURCE, and sized before it measures — see
     // expandItemSlots. A source carrying none passes through untouched, so a picture that has not
     // been moved onto the item box is unaffected.
+    archOpenSubs = archOpenOf(s);   // which group boxes list every part (itemSpecCell)
     const src = expandItemSlots(mermaidFor(s));
     if (!src) throw new Error('no diagram for ' + JSON.stringify(s));
     ({ svg } = await mermaid.render('coyomapGraph' + (rc++), src));
