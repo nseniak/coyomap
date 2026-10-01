@@ -6190,9 +6190,22 @@ function showFlowPair(uc, a, b) {
 // TWO CLASSES, ONE QUESTION. `.ibox-name` is the item box's name; `.cyname` is what the generators
 // still wrap a name in on the pictures that have not moved onto the item box yet. Both answer "was the
 // click on the words themselves", and this is the one place that asks.
+//
+// ON THE TEXT, NOT THE BUTTON'S BOX. A name that wraps is a button two lines tall and as wide as its
+// longer line, so the space beside the shorter line was the button too, and a click there opened the
+// thing: on the Architecture picture, the blank half of a two-line subsystem name. The click counts
+// only where a line of the name's text is drawn. A click from the KEYBOARD (Enter on the focused name,
+// `detail` 0, no pointer) has no point to test and is always on the name.
 function nameClick(ev) {
   const t = ev && ev.target;
-  return !!(t && t.closest && t.closest('.ibox-name, .cyname'));
+  const name = t && t.closest && t.closest('.ibox-name, .cyname');
+  if (!name) return false;
+  if (!ev.detail || !Number.isFinite(ev.clientX)) return true;
+  const range = document.createRange();
+  range.selectNodeContents(name);
+  const slack = 2;   // a pixel or two round the glyphs, so a click on a letter's edge still counts
+  return [...range.getClientRects()].some((r) => ev.clientX >= r.left - slack && ev.clientX <= r.right + slack
+                                               && ev.clientY >= r.top - slack && ev.clientY <= r.bottom + slack);
 }
 function bindFlowMap(uc) {
   const scene = mainScene;

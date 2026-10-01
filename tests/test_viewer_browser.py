@@ -4542,6 +4542,31 @@ def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def test_a_two_line_name_opens_only_from_its_words() -> None:
+    """A name that wraps is a button two lines tall, and the space beside its shorter line was the
+    button too: a click there opened the thing. Only the words open it now; the space picks the box."""
+    def make_long_names(m: dict[str, Any]) -> None:
+        for x in m.get("subsystems", []):
+            x["name"] = x["name"] + " and a tail long enough to wrap"
+    with _served_map(make_long_names) as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        spot = page.evaluate("""() => { for (const n of document.querySelectorAll('#diagram .ibox-map .ibox-name')) {
+            const range = document.createRange(); range.selectNodeContents(n); const rs = [...range.getClientRects()];
+            const b = n.getBoundingClientRect(), last = rs[rs.length - 1];
+            if (rs.length < 2 || b.right - last.right < 15) continue;
+            return { blank: [last.right + (b.right - last.right) / 2, (last.top + last.bottom) / 2],
+                     words: [(rs[0].left + rs[0].right) / 2, (rs[0].top + rs[0].bottom) / 2] }; } return null; }""")
+        assert spot, "no two-line name with space beside its second line"
+        before = page.evaluate("() => location.hash")
+        page.mouse.click(*spot["blank"])
+        page.wait_for_timeout(600)
+        after = page.evaluate("() => location.hash")
+        assert after.split("&sel=")[0] == before.split("&sel=")[0] and "sel=" in after, (before, after)
+        page.mouse.click(*spot["words"])
+        page.wait_for_function("() => !location.hash.startsWith('#v=arch')")
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""
