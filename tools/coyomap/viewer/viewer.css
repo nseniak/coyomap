@@ -573,7 +573,7 @@ body:not(.served) #leftcol { flex: 1 1 auto; width: auto; }
 /* NO RULE HERE ANY MORE. The frameless look is `bare`, an option ON the box (see itemBoxHtml), not
    three declarations reaching in from its container — reaching in is how the same box came to read
    one way on one screen and another on the next. */
-#panel .pane-card .ecard:hover .ibox-name, #peekcard .pane-card .ecard:hover .ibox-name { text-decoration: underline; }
+#panel .pane-card .ecard .ibox-name:hover, #peekcard .pane-card .ecard .ibox-name:hover { text-decoration: underline; }
 /* No size bump. It was set when the pane was a 300px band under the diagram and the card in it was the
    only thing there; now the card floats and a reader meets the SAME use case in a grid and over a
    drawing, so a 15px name against a 14px one is one of the six differences that made them read as two
@@ -3378,7 +3378,10 @@ body.insp-on { cursor: crosshair; }
    whole content, so a frame of its own would be a frame inside a frame — two objects where there is
    one. It keeps its states: hover and picked still say what they say. */
 .ibox-bare { border-color: transparent; background: transparent; padding: 0; }
-.ibox-bare:hover { border-color: transparent; background: transparent; box-shadow: none; }
+/* `.ibox.` twice over: `.ibox:hover` comes later in this file and drew a frame round a floating card. */
+.ibox.ibox-bare:hover { border-color: transparent; background: transparent; box-shadow: none; }
+/* A floating card is read, and only its title opens it (elementCardHtml). */
+.ecard.ibox-bare { cursor: auto; }
 .ibox-head { display: flex; align-items: flex-start; gap: 6px; }
 .ibox-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0;
               flex: 1 1 auto; }

@@ -3373,12 +3373,14 @@ def test_one_card_design_reaches_the_card_that_floats_over_a_diagram() -> None:
     css = (VIEWER_DIR / "viewer.css").read_text()
     uc = js[js.index("function showUseCaseSummary(uc) {"):
             js.index("\n}", js.index("function showUseCaseSummary(uc) {"))]
-    assert "elementCardHtml(uc," in uc and "pane-card" in uc, "the same card a grid draws"
+    assert "paneCardHtml(uc," in uc, "the same card a grid draws, through the one floating-card builder"
     assert "bindElementCards(panel);" in uc, "…with the same actions"
     assert "badge kind" not in uc and "class=\"explain\"" not in uc, "the hand-built design is gone"
     ap = js[js.index("function actorPanelHtml(a) {"):
             js.index("\n}", js.index("function actorPanelHtml(a) {"))]
-    assert "elementCardHtml(id, { bare: true })" in ap and "pane-card" in ap
+    assert "paneCardHtml(id)" in ap
+    # EVERY FLOATING CARD comes from one builder, and nothing else writes the wrapper by hand.
+    assert js.count('class="pane-card"') == 1 and "function paneCardHtml(" in js
     # `bare` is an OPTION on the box, never three declarations reaching in from its container.
     css = (VIEWER_DIR / "viewer.css").read_text()
     assert ".ibox-bare { border-color: transparent; background: transparent; padding: 0; }" in css

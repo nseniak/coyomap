@@ -1541,9 +1541,12 @@ function elementCardHtml(id, opts) {
   // about the element — which feature a use case belongs to, who drives it. It used to ride the title
   // line as a bare pill, and there `CONVERSATIONAL ASSISTANCE` sat beside `use case` in the same grey
   // at the same size, with nothing saying one was what the thing IS and the other a feature's name.
+  // A FLOATING CARD (`bare`: beside a picked box, the second card) is read, not chosen from a list: its
+  // TITLE is its one door, a button, and the rest of the card is text to read. A click meant for a use
+  // case row, or a drag of the card, opened the thing's page. In a list the whole card stays the door.
   return itemBoxHtml(spec, 'card', {
     name: nm,
-    nameLink: false,
+    nameLink: o.bare ? undefined : false,
     glyph: itemHasGlyph(c.kind) ? undefined : false,
     nameCls: nm.length > 70 ? 'ecard-name-long' : '',
     what: desc,
@@ -1557,8 +1560,13 @@ function elementCardHtml(id, opts) {
     foot: o.foot || '',
     bare: o.bare,
     cls: 'ecard',
-    attrs: ' tabindex="0"',
+    attrs: o.bare ? '' : ' tabindex="0"',
   });
+}
+// THE FLOATING CARD of one element: the card a list shows, with no frame of its own and its title as
+// its door. Every floating card is built here, so the four that were written out by hand cannot drift.
+function paneCardHtml(id, opts) {
+  return `<div class="pane-card">${elementCardHtml(id, { ...(opts || {}), bare: true })}</div>`;
 }
 
 // ── A COUNT, AND THE PILL THAT CARRIES ONE ────────────────────────────────────────────────────────
@@ -1760,6 +1768,17 @@ function bindElementCards(root, onDrill) {
     go({ kind: 'capability', cap: b.getAttribute('data-gofeat') });
   }));
   root.querySelectorAll('.ecard[data-id]').forEach((card) => {
+    // A floating card opens from its title alone (see elementCardHtml); the title is a button, so the
+    // keyboard reaches it without the card taking a stop of its own.
+    if (card.classList.contains('ibox-bare')) {
+      const title = card.querySelector('button.ibox-name');
+      if (title) title.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const id = card.getAttribute('data-id');
+        if (onDrill) onDrill(id); else drillInto(id);
+      });
+      return;
+    }
     const open = (ev) => {
       // The pill has its own action, and so does anything the CALLER put in the card (a Happy-Path
       // jump). Neither is the card's drill, and a click on one must not fire both.
@@ -3033,7 +3052,7 @@ function showNode(id) {
   // The pane shows the element's CARD — the same card a list shows, so a reader meets one design and
   // one pair of actions wherever an element appears. Everything deeper is on the card's own page, which
   // the card itself opens. `.pane-card` only marks the context; the card inside it is unchanged.
-  panel.innerHTML = `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
+  panel.innerHTML = paneCardHtml(id);
   bindElementCards(panel);
   bindNodeDetailHandlers(panel);
   // Source buttons in the pane need binding too. `bindNodeDetailHandlers` wires the navigation
@@ -3393,7 +3412,7 @@ function showUseCaseSummary(uc) {
   //
   // The foot line names the FEATURE, not the actor. On both sequence views the actor is already drawn as
   // a participant on the diagram behind this card, and the feature is the fact that is nowhere on screen.
-  panel.innerHTML = `<div class="pane-card">${elementCardHtml(uc, { bare: true, foot: useCaseFeatureFootHtml(uc) })}</div>`;
+  panel.innerHTML = paneCardHtml(uc, { foot: useCaseFeatureFootHtml(uc) });
   bindElementCards(panel);
 }
 // The `In feature …` line, wherever a use-case card is drawn away from a feature's own page. One builder,
@@ -3917,7 +3936,7 @@ function showFlowStep(uc, i) {
 // That is the whole point of the prefix: one shape everywhere, and it needs no label to be understood.
 function actorPanelHtml(a) {
   const id = actorNodeId(a.name);
-  if (id) return `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
+  if (id) return paneCardHtml(id);
   // An actor a sequence view names but the graph has no node for: no card to draw, so the name and the
   // sentence stand in for one rather than inventing a second card shape for the exception.
   const wants = a.wants ? '<p class="uc-wants">' + mdInline(wantsSentence(a.wants)) + '</p>' : '';
@@ -8490,7 +8509,7 @@ function hidePeekCard() {
 }
 function elementPeekFill(id) {
   return () => {
-    PEEK_CARD.innerHTML = `<div class="pane-card">${elementCardHtml(id, { bare: true })}</div>`;
+    PEEK_CARD.innerHTML = paneCardHtml(id);
     bindElementCards(PEEK_CARD);
   };
 }

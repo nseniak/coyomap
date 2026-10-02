@@ -4727,6 +4727,35 @@ def test_a_two_line_name_opens_only_from_its_words() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def test_a_floating_card_opens_from_its_title_alone_and_draws_no_frame() -> None:
+    """A floating card is read, not chosen from a list: hovering it draws no frame, a click on its body
+    leaves the screen as it is, and its title opens the thing's page. A card in a list still opens from
+    anywhere on it."""
+    with _served() as url, _page(url + "#v=container&sel=node%3AS4") as page:
+        _settle(page)
+        body = page.evaluate("""() => { const r = document.querySelector('#panel .ecard').getBoundingClientRect();
+            return { x: r.right - 12, y: r.bottom - 6 }; }""")
+        page.mouse.move(body["x"], body["y"])
+        page.wait_for_timeout(300)
+        seen = page.evaluate("""() => { const e = document.querySelector('#panel .ecard'), c = getComputedStyle(e);
+            return { border: c.borderColor, stop: e.hasAttribute('tabindex'), title: e.querySelector('.ibox-name').tagName }; }""")
+        assert seen == {"border": "rgba(0, 0, 0, 0)", "stop": False, "title": "BUTTON"}, seen
+        before = page.evaluate("() => location.hash")
+        page.mouse.click(body["x"], body["y"])
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => location.hash") == before, "a click on the card's body opened something"
+        page.click("#panel .ecard .ibox-name")
+        page.wait_for_function("() => location.hash.includes('v=subsystem')")
+        page.goto(url + "#v=element&id=S4")   # an element's page lists its parts as cards
+        page.reload()
+        _settle(page)
+        before = page.evaluate("() => location.hash")
+        page.evaluate("""() => { const c = document.querySelector('#diagram .ecard[data-id]');
+            c.dispatchEvent(new MouseEvent('click', { bubbles: true })); }""")
+        page.wait_for_function(f"() => location.hash !== {before!r}")
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_hover_while_something_is_picked_shows_its_card_beside_the_pick() -> None:
     """A pick used to silence every hover: the reader had to let go of what they picked to ask about
     its neighbour. The picked card stays and the hovered thing's card shows beside it, the second card,
