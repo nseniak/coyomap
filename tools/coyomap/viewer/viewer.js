@@ -8401,17 +8401,23 @@ function showPeekCard(t, fill) {
   // It keeps clear of the box's card as well as of the tag: two cards on top of each other are one.
   const main = PANEL_HOST.hidden ? [] : [grow(rectOf(PANEL_HOST), CARD_CLEAR)];
   placeCardNear(t, PEEK_CARD, main);
-  // NOWHERE TO GO: the last resort pushes the second card inside the drawing whatever it covers, and it
-  // came down on the main card, over its ×. It goes beside the main card instead, on whichever side has
-  // room; with room on no side, the main card is what was asked for, and the second goes.
-  if (PEEK_CARD.dataset.placed === 'clamp' && main.length && rectsOverlap(rectOf(PEEK_CARD), rectOf(PANEL_HOST))) {
-    if (!placePeekBesideMain()) { hidePeekCard(); return; }
+  // NOWHERE TO GO: the last resort pushes the second card inside the drawing whatever it covers. It came
+  // down on the main card, over its ×, or on the very thing under the pointer, so a click on that thing
+  // landed on the card. It goes beside the main card instead, on a side with room that leaves the thing
+  // clear; with no such side, the main card is what was asked for, and the second goes.
+  if (PEEK_CARD.dataset.placed === 'clamp') {
+    const mid = arrowAnchor(t), under = mid ? cardRectAt(mid.x - 14, mid.y - 14, 28, 28) : rectOf(t);
+    const at = rectOf(PEEK_CARD);
+    if ((main.length && rectsOverlap(at, rectOf(PANEL_HOST))) || rectsOverlap(at, under)) {
+      if (!placePeekBesideMain(under)) { hidePeekCard(); return; }
+    }
   }
   syncCallout();
 }
-function placePeekBesideMain() {
+// `under`: the thing the second card is about, which the place beside the main card must leave clear.
+function placePeekBesideMain(under) {
   const wrap = document.getElementById('diagwrap');
-  if (!wrap) return false;
+  if (!wrap || PANEL_HOST.hidden) return false;
   const w = wrap.getBoundingClientRect(), m = rectOf(PANEL_HOST), p = PEEK_CARD.getBoundingClientRect();
   const W = p.width, H = p.height, gap = CARD_CLEAR * 2;
   const fit = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
@@ -8421,7 +8427,7 @@ function placePeekBesideMain() {
     const box = cardRectAt(x, y, W, H);
     const inside = box.left >= w.left + CARD_EDGE && box.top >= w.top + CARD_EDGE
       && box.right <= w.right - CARD_EDGE && box.bottom <= w.bottom - CARD_EDGE;
-    if (inside && !rectsOverlap(box, m)) {
+    if (inside && !rectsOverlap(box, m) && !rectsOverlap(box, under)) {
       PEEK_CARD.style.right = 'auto';
       PEEK_CARD.style.left = Math.round(x - w.left) + 'px';
       PEEK_CARD.style.top = Math.round(y - w.top) + 'px';

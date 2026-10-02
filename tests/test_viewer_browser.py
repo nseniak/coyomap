@@ -15,8 +15,10 @@ Conventions: top-level test functions, no classes/fixtures (helpers are `make_*`
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -4331,6 +4333,9 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         page.wait_for_timeout(600)
         picked = page.evaluate("() => decodeURIComponent(location.hash).split('&').filter((x) => x.startsWith('sel=flowstep:')).length")
         assert picked == len(e["steps"][uc]), (picked, e["steps"][uc])
+        # …and the map lights those steps, each its own badge
+        lit = page.evaluate("() => [...document.querySelectorAll('#diagram .flow-step-num.flow-step-picked')].map((n) => +n.textContent)")
+        assert sorted(lit) == sorted(e["steps"][uc]), (lit, e["steps"][uc])
         assert not page.js_errors, page.js_errors
 
 
@@ -5066,6 +5071,8 @@ def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_ru
         }""")
         assert seen["n"] == len(up), (seen, up)
         assert all(h == [True, False] for h in seen["heads"]), seen
+        # an arrow's invisible click area keeps no head of its own, at either end
+        assert page.evaluate("() => document.querySelectorAll('#diagram .cy-edgehit[marker-start], #diagram .cy-edgehit[marker-end]').length") == 0
         page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]').__cyHits[0]
             .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
         on = page.evaluate("""() => { const h = decodeURIComponent(location.hash).split('sel=arch:')[1];
@@ -5237,14 +5244,14 @@ def test_on_every_picture_a_box_selects_and_shows_itself(where: str) -> None:
 
 
 def test_no_story_is_followed_on_the_architecture_picture() -> None:
-    """Following one story on the picture is gone: no list in the header, no strip under the picture,
-    and an old link that named a story opens the plain picture."""
+    """Following one story on the picture is gone: an old link that named a story opens the plain
+    picture, drops the story from the address, and marks no start or end."""
     with _served() as url, _page(url + "#v=arch&story=UC1") as page:
         _arch_ready(page)
-        seen = page.evaluate("""() => ({ list: !!document.querySelector('[data-archfollow]'),
-            strip: !!document.getElementById('archplayer'), hash: location.hash,
-            dim: document.querySelectorAll('#diagram .arch-following').length })""")
-        assert seen == {"list": False, "strip": False, "hash": seen["hash"], "dim": 0}, seen
+        seen = page.evaluate("""() => ({ story: location.hash.includes('story='),
+            marks: document.querySelectorAll('#diagram .ucm-mark').length,
+            lit: document.querySelectorAll('#diagram .arch-story-on').length })""")
+        assert seen == {"story": False, "marks": 0, "lit": 0}, seen
         assert not page.js_errors, page.js_errors
 
 
@@ -5552,4 +5559,297 @@ def test_a_click_on_an_arrows_label_points_the_card_at_the_label() -> None:
             return c ? { x: +c.getAttribute('cx') + w.left, y: +c.getAttribute('cy') + w.top } : null; }""")
         assert dot and abs(dot["x"] - spots["lx"]) < 15 and abs(dot["y"] - spots["ly"]) < 15, (dot, spots)
         assert not page.js_errors, page.js_errors
+
+
+def test_a_picked_arrows_head_turns_with_it_and_comes_back() -> None:
+    """A picked arrow's head takes the arrow's blue, and letting go puts the head the drawing gave it
+    back; on a crowded picture's drawn-on-top line too."""
+    with _served() as url, _page(url + "#v=container") as page:
+        _settle(page)
+        before = page.evaluate("""() => { const p = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')]
+            .find((x) => x.__cyHits && x.getAttribute('marker-end'));
+            window.__probe = p; return p.getAttribute('marker-end'); }""")
+        page.evaluate("() => window.__probe.__cyHits[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))")
+        page.wait_for_timeout(300)
+        picked = page.evaluate("""() => { const m = window.__probe.getAttribute('marker-end');
+            const head = document.querySelector(m.slice(4, -1)); return [m, head ? getComputedStyle(head.querySelector('path')).fill : '']; }""")
+        assert picked[0].endswith("-cypicked)") and picked[1] == "rgb(37, 99, 235)", picked
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        assert page.evaluate("() => window.__probe.getAttribute('marker-end')") == before
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    box = max(set(ends), key=ends.count)
+    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&sel=node%3A{box}") as page:
+        _settle(page)
+        page.wait_for_selector(".arch-ov-hit", state="attached")
+        page.evaluate("() => document.querySelector('#diagram .arch-ov-hit').dispatchEvent(new MouseEvent('click', { bubbles: true }))")
+        page.wait_for_timeout(300)
+        assert page.evaluate("() => document.querySelector('.arch-ov-line.arch-ov-picked').getAttribute('marker-end')") == "url(#arch-ov-head-picked)"
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_use_case_maps_step_badges_are_whole_on_their_arrows() -> None:
+    """A step badge is bigger than the box the drawing engine sized for the old text, and is drawn whole:
+    the pointer meets the badge itself just inside each of its four edges. Clipped to that box, the
+    top and bottom of every one-digit badge went missing."""
+    with _served() as url, _page(url + "#v=usecase&uc=UC1") as page:
+        _settle(page)
+        seen = page.evaluate("""() => [...document.querySelectorAll('#diagram .flow-step-num[data-fstep]')].map((n) => {
+            const r = n.getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+            const on = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && (e === n || n.contains(e)); };
+            return { h: n.offsetHeight, edges: [on(r.left + 2, cy), on(r.right - 2, cy), on(cx, r.top + 2), on(cx, r.bottom - 2)]
+                .filter(Boolean).length }; })""")
+        assert len(seen) >= 5 and all(x["h"] == 17 for x in seen), seen
+        assert sum(1 for x in seen if x["edges"] == 4) >= len(seen) - 1, seen   # one sits under a box
+        assert not page.js_errors, page.js_errors
+
+
+def make_a_feature_named_by_a_glossary_term(m: dict[str, Any]) -> None:
+    """A glossary term that the first feature's name contains, so a card naming that feature can link it."""
+    m["glossary"].append({"term": "teams", "meaning": "the groups an organization is made of", "source": "README.md:1"})
+
+
+def test_a_line_cards_feature_rows_carry_no_glossary_link() -> None:
+    """A feature row on a line's card opens and closes on a click, so a glossary link inside it took the
+    click away. The card's other text still links its terms."""
+    with _served_map(make_a_feature_named_by_a_glossary_term) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        # The links are put in after the card is written (a watcher on the page), so each card is read
+        # a moment after its click.
+        seen = page.evaluate("""async () => { const out = [];
+            for (const p of [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')].filter((x) => x.__cyHits)) {
+              p.__cyHits[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              await new Promise((r) => setTimeout(r, 50));
+              const rows = [...document.querySelectorAll('#panel .archuc-feat > summary')];
+              if (rows.some((r) => /teams/i.test(r.textContent)))
+                out.push({ inRows: document.querySelectorAll('#panel summary .gloss-link').length,
+                           all: document.querySelectorAll('#panel .gloss-link').length }); }
+            return out; }""")
+        assert seen and all(x["inRows"] == 0 for x in seen), seen
+        assert any(x["all"] for x in seen), "the card's other text links its terms"
+        assert not page.js_errors, page.js_errors
+
+
+# A POINT ON EACH BOX'S OWN BODY that the box itself answers for, clear of its name, its tags and its
+# buttons, and inside the drawing: where a reader rests the pointer to see that box's card.
+BOX_BODIES = """() => { const d = document.getElementById('diagram').getBoundingClientRect(); const out = [];
+  for (const n of document.querySelectorAll('#diagram g.node')) { const r = n.getBoundingClientRect();
+    for (let y = r.top + 6; y < r.bottom - 2; y += 3) { let hit = null;
+      for (let x = r.right - 4; x > r.left + 2; x -= 3) { const e = document.elementFromPoint(x, y);
+        if (x > d.left && x < d.right && y > d.top && y < d.bottom && e && n.contains(e)
+            && !e.closest('button, a, .ibox-name, .cyname, .item-pill')) { hit = { x, y }; break; } }
+      if (hit) { out.push({ id: n.id, ...hit }); break; } } }
+  return out; }"""
+
+
+def _sized_page(url: str, width: int, height: int) -> Any:
+    """`_page` at a screen size of its own, set before the first drawing: a size set afterwards keeps
+    the camera the first one chose."""
+    page = new_page()
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto(url)
+    page.wait_for_selector("#crumb h1", state="attached")
+    _settle(page)
+    return page
+
+
+def _pick_then_rest_on(page: Any, a: dict[str, Any], b: dict[str, Any]) -> None:
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(250)
+    page.mouse.move(a["x"], a["y"], steps=3)
+    page.mouse.click(a["x"], a["y"])
+    page.wait_for_timeout(450)
+    page.mouse.move(b["x"] - 1, b["y"])
+    page.mouse.move(b["x"], b["y"])
+    page.wait_for_timeout(450)
+
+
+def test_the_second_card_never_lands_on_the_main_card_or_on_the_box_under_the_pointer() -> None:
+    """With no free place, the last resort pushed the second card inside the drawing whatever it covered:
+    the main card and its ×, or the very box the pointer rested on, so a click on that box landed on the
+    card. It goes beside the main card instead, or with no room there it is not shown."""
+    seen = """([x, y]) => { const p = document.getElementById('peekcard'), m = document.getElementById('panel');
+        const a = p.getBoundingClientRect(), b = m.getBoundingClientRect(), e = document.elementFromPoint(x, y);
+        return { shown: !p.hidden, placed: p.dataset.placed, under: !!e && p.contains(e),
+                 onMain: !p.hidden && !m.hidden && !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top) }; }"""
+    with _served() as url:
+        for frag, (w, h) in [("#v=container", (800, 560)), ("#v=arch", (1280, 720))]:
+            page = _sized_page(url + frag, w, h)
+            try:
+                boxes = page.evaluate(BOX_BODIES)
+                assert len(boxes) >= 3, (frag, boxes)
+                res = []
+                for b in boxes[1:]:
+                    _pick_then_rest_on(page, boxes[0], b)
+                    res.append(page.evaluate(seen, [b["x"], b["y"]]))
+                assert not any(r["onMain"] or r["under"] for r in res), (frag, res)
+                # the case is met: some hover had no free place, and went beside the main card or away
+                assert any(r["placed"] == "beside" or not r["shown"] for r in res), (frag, res)
+                assert not page.js_errors, page.js_errors
+            finally:
+                page.close()
+
+
+def test_where_no_place_clears_a_boxs_lines_its_card_lies_on_the_fewest() -> None:
+    """The card of a picked box keeps clear of the lines drawn for it. Where no place clears all of them,
+    it takes the place covering the fewest; giving them up all at once let it lie on a quarter of them."""
+    covered = """() => { const c = document.getElementById('panel'), r = c.getBoundingClientRect(); let n = 0, all = 0;
+        for (const l of document.querySelectorAll('#diagram .arch-ov-line')) { const L = l.getTotalLength(), m = l.getScreenCTM();
+          for (let s = 0; s <= L; s += 6) { const q = l.getPointAtLength(s), x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f;
+            all++; if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) n++; } }
+        return { covered: n, all, placed: c.dataset.placed, shown: !c.hidden }; }"""
+    with _served_map(make_parts_in_every_layer) as url:
+        page = _sized_page(url + "#v=arch&cap=all", 1280, 720)
+        try:
+            _arch_ready(page)
+            res = []
+            for b in [b for b in page.evaluate(BOX_BODIES) if "CYP" not in b["id"]]:
+                page.mouse.move(b["x"], b["y"], steps=3)
+                page.mouse.click(b["x"], b["y"])
+                page.wait_for_timeout(600)
+                res.append(page.evaluate(covered))
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+            tight = [r for r in res if r["shown"] and r["placed"] == "1"]   # no place cleared every line
+            assert tight, res
+            assert all(r["covered"] <= r["all"] * 0.15 for r in tight), tight
+            assert not page.js_errors, page.js_errors
+        finally:
+            page.close()
+
+
+def test_a_picture_drawn_again_under_a_resting_pointer_previews_nothing() -> None:
+    """"+N more" draws the picture again, and the box it opened lands under a pointer that has not moved.
+    That is not a hover: no lines are drawn until the pointer moves, and then they are."""
+    more = """() => { const d = document.getElementById('diagram').getBoundingClientRect();
+      for (const b of document.querySelectorAll('#diagram .ibox-more')) { const r = b.getBoundingClientRect();
+        const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2, e = document.elementFromPoint(x, y);
+        if (x > d.left && x < d.right && y > d.top && y < d.bottom && e && b.contains(e)) return { x, y }; }
+      return null; }"""
+    lines = "() => document.querySelectorAll('#diagram .arch-ov-line').length"
+    with _served_map(make_parts_in_every_layer) as url:
+        page = _sized_page(url + "#v=arch&cap=all", 1600, 1300)
+        try:
+            _arch_ready(page)
+            at = page.evaluate(more)
+            assert at, "a box's \"+N more\" on screen"
+            page.mouse.move(at["x"] - 2, at["y"])
+            page.mouse.move(at["x"], at["y"])
+            page.wait_for_timeout(500)
+            page.mouse.click(at["x"], at["y"])
+            page.wait_for_timeout(1500)
+            assert "open=" in page.evaluate("() => decodeURIComponent(location.hash)")
+            assert page.evaluate(lines) == 0
+            page.mouse.move(at["x"] + 6, at["y"] + 6)   # a jitter under 2 px is not a move
+            page.wait_for_timeout(600)
+            assert page.evaluate(lines) > 0, "a move is a hover, and previews the box under the pointer"
+            assert not page.js_errors, page.js_errors
+        finally:
+            page.close()
+
+
+def make_one_use_case_with_no_words(m: dict[str, Any]) -> None:
+    """UC1's steps say nothing: a step with no words still draws its line."""
+    for f in m["flows"]:
+        if f["uc"] == "UC1":
+            for st in f["steps"]:
+                st["phrase"] = ""
+
+
+def test_a_use_case_whose_step_has_no_words_is_still_on_the_lines_card() -> None:
+    """A line's card lists every use case whose steps the line draws. One whose step had no sentence was
+    left off, while the line was drawn for it."""
+    text = make_whole_product_text(make_one_use_case_with_no_words)
+    quiet = [e for e in text["lines"] if "UC1" in e["steps"]]
+    assert quiet and all("UC1" not in x["ucs"] for e in quiet for x in e["sentences"]), "UC1 says nothing on its lines"
+    with _served_map(make_one_use_case_with_no_words) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')]
+          .filter((p) => p.__cyHits && p.__cyHits.length).map((p) => {
+            p.__cyHits[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            const [src, dst] = decodeURIComponent(location.hash).split('sel=arch:')[1].split('&')[0].split('>');
+            return { src, dst, ucs: [...document.querySelectorAll('#panel .archuc-name[data-ucopen]')].map((b) => b.dataset.ucopen) }; })""")
+        by = {(r["src"], r["dst"]): r["ucs"] for r in seen}
+        for e in quiet:
+            assert "UC1" in by[(e["srcBox"], e["dstBox"])], (e["srcBox"], e["dstBox"], by[(e["srcBox"], e["dstBox"])])
+        assert not page.js_errors, page.js_errors
+
+
+def test_picking_what_the_second_card_shows_keeps_its_contents_in_place_near_the_drawings_top() -> None:
+    """The second card leaves room above it for the main card's bar: picking what it shows puts the main
+    card in its place, standing higher by that bar. Against the drawing's top edge it could not, and the
+    contents dropped by the bar's height (on this picture, the second card of the first person's
+    neighbour stood 16 px from the top)."""
+    name = """(c) => { const e = document.querySelector(c); if (e.hidden) return null;
+        const b = e.querySelector('.ibox-name').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top)]; }"""
+    with _served() as url:
+        page = _sized_page(url + "#v=arch", 1280, 720)
+        try:
+            boxes = page.evaluate(BOX_BODIES)
+            moved, shown = [], 0
+            for b in boxes[1:]:
+                _pick_then_rest_on(page, boxes[0], b)
+                before = page.evaluate(name, "#peekcard")
+                if not before:
+                    continue
+                shown += 1
+                page.mouse.click(b["x"], b["y"])
+                page.wait_for_timeout(700)
+                after = page.evaluate(name, "#panel")
+                if after != before:
+                    moved.append((b["id"], before, after))
+            assert shown >= 4 and not moved, (shown, moved)
+            assert not page.js_errors, page.js_errors
+        finally:
+            page.close()
+
+
+def make_committed_sources(coyomap_dir: Path) -> None:
+    """The project beside the map as a git repository holding every file the map points at, and the map
+    pinned to that commit: the file browser lists files only from git, at the map's commit."""
+    root = coyomap_dir.parent
+    f = coyomap_dir / "project-map.json"
+    m = json.loads(f.read_text())
+    paths = sorted(set(re.findall(r'"((?:[\w.-]+/)*[\w.-]+\.(?:py|ts|tsx|js|md|json|ya?ml|toml|html|css|sh))(?::\d+)?"', f.read_text())))
+    for p in paths:
+        q = root / p
+        q.parent.mkdir(parents=True, exist_ok=True)
+        q.write_text("\n" * 400)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    def git(*a: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env).stdout.decode().strip()
+    git("init", "-q")
+    git("add", *paths)
+    git("commit", "-q", "-m", "sources")
+    m["commit"] = git("rev-parse", "HEAD")
+    f.write_text(json.dumps(m))
+
+
+def test_the_second_card_leaves_the_file_tree_to_what_is_picked() -> None:
+    """The file browser shows where the picked box lives. A hover beside the pick filled the second card,
+    and moved the file browser to the hovered box."""
+    tree = "() => [...document.querySelectorAll('.trow.sel')].map((r) => r.textContent.trim())"
+    with _served_map(lambda m: None, make_committed_sources) as url:
+        page = _sized_page(url + "#v=container", 1600, 1000)
+        try:
+            page.evaluate("() => document.getElementById('srcrail').click()")
+            page.wait_for_timeout(800)
+            boxes = page.evaluate(BOX_BODIES)
+            page.mouse.move(boxes[0]["x"], boxes[0]["y"], steps=3)
+            page.mouse.click(boxes[0]["x"], boxes[0]["y"])
+            page.wait_for_timeout(700)
+            picked = page.evaluate(tree)
+            assert picked, "the picked box's folder is selected in the file browser"
+            shown = 0
+            for b in boxes[1:]:
+                page.mouse.move(b["x"], b["y"], steps=4)
+                page.wait_for_timeout(500)
+                shown += page.evaluate("() => !document.getElementById('peekcard').hidden")
+                assert page.evaluate(tree) == picked
+            assert shown >= 3, shown
+            assert not page.js_errors, page.js_errors
+        finally:
+            page.close()
 

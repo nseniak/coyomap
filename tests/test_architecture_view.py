@@ -207,6 +207,16 @@ def test_a_pipe_is_drawn_through():
     assert ln[("S1", "S2")]["steps"] == {"UC1": [3, 4]}, ln[("S1", "S2")]["steps"]
 
 
+def test_a_line_inside_a_shared_sub_use_case_carries_the_step_that_runs_it():
+    """The layered picture writes a shared sub-use case's steps out; each of them belongs, on the use
+    case map, to the step that runs it, so that is the number its line carries."""
+    graph = make_graph(make_layered_map())
+    texts = gv.gen_arch_views(graph)[1]
+    inner = [e for e in texts["all|"]["lines"] if "UC1" in e["steps"]
+             and any(x["text"] == "check the ask" for x in e["sentences"])]
+    assert inner and all(5 in e["steps"]["UC1"] for e in inner), [e["steps"] for e in inner]
+
+
 def make_map_with_a_deploy() -> dict[str, Any]:
     """The layered map plus an operator who deploys from the command line: the container stack, the
     product's wiring, seeds the thing's record when it is missing. The stack is the only code between

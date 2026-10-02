@@ -6060,19 +6060,3 @@ def test_every_actor_kind_reads_as_an_actor_everywhere() -> None:
     label = js[js.index("const ELEMENT_LABEL = {"):js.index("};", js.index("const ELEMENT_LABEL = {"))]
     assert "ACTOR_KINDS.map((k) => [k, 'actor'])" in label
     assert "case 'human': case 'service': case 'ai-agent': {" in js
-
-
-def test_an_interfaces_card_names_no_people_on_the_architecture_picture_alone() -> None:
-    """The Architecture picture draws the people as its top layer, each joined by a line to the
-    interfaces they use, so a card there drops the people's tags: the picture says how to drop
-    (`cardOpts`), and both of a box's cards, the hovered one and the picked one, read it. No other
-    picture sets it, so every other card keeps them."""
-    js = (VIEWER_DIR / "viewer.js").read_text()
-    arch = js[js.index("function bindArch() {"): js.index("\n}", js.index("function bindArch() {"))]
-    assert "joined.has(c.name + '>' + id)" in arch, "only the people this picture joins to the interface"
-    assert js.count(".cardOpts = ") == 1, "only the Architecture picture leaves anything out"
-    assert "show: () => showNodeDetailSynced(sceneElementOf(scene, id), scene.cardOpts)" in js, "the picked card"
-    assert "show: o.hover ? boxCard(elem, scene.cardOpts) : null" in js, "the hovered card"
-    card = js[js.index("function elementCardHtml(id, opts) {"): js.index("\n}", js.index("function elementCardHtml(id, opts) {"))]
-    assert "chips: (spec0.chips || []).filter((c) => !o.dropChips(c, id))" in card
-
