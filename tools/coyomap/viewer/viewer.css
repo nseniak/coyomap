@@ -915,6 +915,9 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
   border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #334155;
 }
 .archwho:hover { border-color: #94a3b8; background: #f8fafc; }
+.archwho { display: inline-flex; align-items: center; gap: 5px; }
+.archwho svg { width: 13px; height: 13px; flex: none; }
+.archwho[disabled] svg { opacity: .45; }
 .archwho.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
 .archwho[disabled] { cursor: default; color: #94a3b8; border-style: dashed; background: #fff; }
 /* The happy-path switch sits after the people, past a thin rule: it narrows WHICH STORIES, not WHO,

@@ -7636,9 +7636,10 @@ function archFeatureHtml() {
   const one = (val, label) => {
     const off = val !== 'all' && !MERMAID_ARCH_BY[scope + '|' + val];
     const on = (val === 'all' ? '' : val) === now;
+    // A FEATURE WEARS ITS MARK, as it does wherever a feature is named; "All" is not a feature.
     return `<button class="archwho${on ? ' on' : ''}" data-archcap="${esc(val)}"`
       + (off ? ' disabled title="No happy-path story in this feature"' : '')
-      + `>${esc(label)}</button>`;
+      + `>${val === 'all' ? '' : itemMarkHtml('capability')}${esc(label)}</button>`;
   };
   const happy = scope === 'happy';
   const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
