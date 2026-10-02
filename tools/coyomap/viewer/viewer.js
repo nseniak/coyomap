@@ -256,7 +256,8 @@ const diaghead = document.getElementById('diaghead');    // …and a walk's own 
 diaghead.addEventListener('click', (e) => {
   const cur = (hi >= 0 && history[hi]) || {};
   const cap = e.target.closest && e.target.closest('[data-archcap]');
-  if (cap && !cap.disabled) go(archState(cur.scope, cap.getAttribute('data-archcap') || ''));
+  // The scope in force, not the address's word for it: a stale one would switch the next feature on.
+  if (cap && !cap.disabled) go(archState(archScope(cur), cap.getAttribute('data-archcap') || ''));
 });
 const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
@@ -7685,7 +7686,10 @@ function archFeatureHtml() {
 // path alone is a feature's question.
 const archhp = document.getElementById('archhp');
 function syncArchHappySwitch(s) {
-  const show = !!(s && s.kind === 'arch' && archFeature(s));
+  // …and only on a feature some of whose use cases are on the happy path: on any other, a click landed
+  // on another feature's picture.
+  const f = s && s.kind === 'arch' ? archFeature(s) : '';
+  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f];
   archhp.hidden = !show;
   if (!show) return;
   const happy = archScope(s) === 'happy';
@@ -7929,7 +7933,13 @@ function bindActorBox(scene, el, id, a, afterPick) {
   bindAliasBox(scene, el, id, { show: () => showActorCard(a), opensOn: nameClick,
                                 open: () => go({ kind: 'actor', act: a.name }), afterPick });
 }
-function archScope(s) { return s && s.scope === 'happy' && s.cap !== 'all' ? 'happy' : 'all'; }   // All has no happy path
+// THE HAPPY PATH ALONE, only where a picture of it exists: never on the whole product, and never on a
+// feature none of whose use cases is on the happy path. A stale `scope=happy` in an address is read as
+// every use case, rather than drawing a picture nobody can reach from the screen.
+function archScope(s) {
+  if (!s || s.scope !== 'happy' || s.cap === 'all') return 'all';
+  return !s.cap || MERMAID_ARCH_BY['happy|' + s.cap] ? 'happy' : 'all';
+}
 // WHICH FEATURE A STATE DRAWS. `all` is the whole product; a feature id is that feature, when this
 // scope draws it; and nothing named opens on the FIRST feature this scope draws, in the Features
 // page's order. The whole product is one click away, but it is the picture with the most lines
@@ -9259,9 +9269,15 @@ function homeRealZoom() {
   const fit = cur.kind === 'arch' ? (s.width - 2 * FIT_EDGE_PX) / vb.width : Math.min(s.width / vb.width, s.height / vb.height);
   return Math.min(FIT_MAX_SCALE, Math.max(FIT_MIN_SCALE, fit));
 }
+// …MEASURED WHERE IT HAPPENED, not worked out. The camera a fresh view opens at and the one a fit
+// gives are recorded as they are set (`homeReal`), because the stage often changes size after the
+// opening fit (Components opened at 0.7785 against 0.7129 for a fit a moment later), and the worked-out
+// fit read 109% at open. The worked-out one stands in only for a camera the view was given back
+// (a reload, Back), which no fit set.
+let homeReal = 0;
 function zoomPercent() {
   if (!mainPz) return 100;
-  const home = homeRealZoom(), real = mainPz.getSizes().realZoom;
+  const home = usableScale(homeReal) ? homeReal : homeRealZoom(), real = mainPz.getSizes().realZoom;
   return usableScale(home) && usableScale(real) ? Math.round(real / home * 100) : Math.round(mainPz.getZoom() * 100);
 }
 function updateZoomLevel() {  // reflect the current pan-zoom scale in the header control + the badges
@@ -9348,6 +9364,8 @@ function fitStage() {
   mainPz.resize(); mainPz.fit(); mainPz.center();
   const cur = (hi >= 0 && history[hi]) || {};
   if (cur.kind === 'arch') fitWidth(); else clampFitZoom(true);
+  homeReal = mainPz.getSizes().realZoom;   // where a fit leaves the camera reads 100% (zoomPercent)
+  updateZoomLevel();
 }
 // THE ARCHITECTURE PICTURE FITS ITS WIDTH, AND SCROLLS DOWN. A fit to the whole drawing made a tall
 // picture small, as the picture is tall; the floor then left it part-drawn anyway. Fitted to the width, a reader starts at the top and pans down. The same floor and
@@ -14904,6 +14922,7 @@ async function renderView(sArg, transient, seq) {
     // it re-aims the camera, and it must measure against the synchronously-applied fresh fit, not a
     // restored vp that svg-pan-zoom won't paint until the next frame.
     const vp = (transient || pendingMatchTextId || pendingCenterId) ? null : (s.vp || vpByView[stateKey(s)]);
+    homeReal = 0;   // a new drawing: its own opening fit, or none for a camera given back
     if (vp) {
       const base = mainPz.getSizes().realZoom;   // this build's fit — the number `zoom()` counts from
       mainPz.zoom(usableScale(vp.real) && usableScale(base) ? mainPz.getZoom() * vp.real / base : vp.zoom);
@@ -14914,7 +14933,7 @@ async function renderView(sArg, transient, seq) {
     // it; and not before a move that measures the screen (matchTextSize, a focus-drill centre, a framed
     // step), because svg-pan-zoom paints a zoom on the next frame and the measurement would read the
     // unclamped fit. The centre move clamps afterwards, about the box it just centred.
-    else if (!pendingMatchTextId && !pendingCenterId) clampFitZoom(true);
+    else if (!pendingMatchTextId && !pendingCenterId) { clampFitZoom(true); homeReal = mainPz.getSizes().realZoom; }
     if (pendingMatchTextId) matchTextSize(mainScene.nodeEls[pendingMatchTextId]);
     else if (pendingCenterId) { applyZoomAndCenter(mainScene.nodeEls[pendingCenterId], 1); clampFitZoom(false); }  // centre only, then the clamp about that centre
     pendingHoldAt = null;   // used once, whichever way the camera was set

@@ -5477,3 +5477,47 @@ def test_an_interfaces_card_drops_only_the_people_this_picture_joins_to_it() -> 
             assert page.evaluate(people) == want, (address, page.evaluate(people))
         assert not page.js_errors, page.js_errors
 
+
+def test_the_zoom_number_reads_100_where_each_view_opens_and_after_a_click_on_it() -> None:
+    """100% is where a view opens, whatever the stage did after its first fit, and a click on the number
+    (a fit) reads 100% again."""
+    with _served() as url, _page(url) as page:
+        for view in ("#v=arch", "#v=container", "#v=context", "#v=deployment", "#v=usecase&uc=UC1"):
+            page.goto(url + view)
+            page.reload()
+            _settle(page)
+            page.wait_for_timeout(500)
+            level = "() => document.getElementById('zoomlevel').textContent"
+            assert page.evaluate(level) == "100%", (view, page.evaluate(level))
+            page.click("#zoomin")
+            page.wait_for_timeout(300)
+            assert page.evaluate(level) != "100%", view
+            page.click("#zoomlevel")
+            page.wait_for_timeout(700)
+            assert page.evaluate(level) == "100%", (view, page.evaluate(level))
+        assert not page.js_errors, page.js_errors
+
+
+def test_the_happy_path_switch_is_only_on_a_feature_with_a_happy_path_picture() -> None:
+    """A feature none of whose use cases is on the happy path has no switch, and an address asking for
+    its happy path draws the feature whole. A stale happy path in the whole product's address does not
+    switch the next feature on."""
+    drawings = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[0]
+    assert "happy|" not in drawings, "the whole product has no happy-path picture"
+    bare = next(k.split("|")[1] for k in drawings if k.startswith("all|CAP") and "happy|" + k.split("|")[1] not in drawings)
+    seen = """() => ({ hidden: document.getElementById('archhp').hidden,
+        on: (document.querySelector('.archwho.on') || { dataset: {} }).dataset.archcap })"""
+    with _served() as url, _page(url) as page:
+        for address in (f"#v=arch&cap={bare}", f"#v=arch&cap={bare}&scope=happy"):
+            page.goto(url + address)
+            page.reload()
+            _arch_ready(page)
+            assert page.evaluate(seen) == {"hidden": True, "on": bare}, (address, page.evaluate(seen))
+        page.goto(url + "#v=arch&cap=all&scope=happy")
+        page.reload()
+        _arch_ready(page)
+        page.evaluate("() => document.querySelectorAll('.archwho')[1].click()")
+        page.wait_for_function("() => !location.hash.includes('cap=all')")
+        assert "scope=happy" not in page.evaluate("() => location.hash")
+        assert not page.js_errors, page.js_errors
+
