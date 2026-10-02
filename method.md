@@ -818,14 +818,14 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   at it.
   **THE TEST IS WHO STANDS AT THE SURFACE IN THIS STORY.** When a person, or a program somebody else
   runs, stands there, every step through that surface keeps its door, including a step the surface
-  hands straight on to a part of ours: the gateway asking a member's AI client to sign in, and the
-  client's answer coming back in, is a crossing each way. When nobody stands there, a step the
+  passes on to a part of ours in the very next step: the gateway asking a member's AI client to sign
+  in, and the client's answer coming back in, is a crossing each way. When nobody stands there, a step the
   surface hands on to a part of ours is the product talking to itself, and takes no door. This is
   about OUR surfaces only: our script reaching someone else's page or service, such as a sign-in
   picker its headless browser clicks, still names that surface, person or not. When somebody really
-  does stand at our surface and the story never shows them there, draw them once, where they really
-  act or receive; one actor step there is enough, and never invent an action they do not take. Never
-  remove the door to quiet the warning. The open sessions told their tool list changed are members'
+  does stand at our surface and the story never shows them there, draw them where they really act
+  or receive, as every crossing asks, and never invent an action they do not take. Never remove the
+  door to quiet the warning. The open sessions told their tool list changed are members'
   clients, for example. A step that ENDS at our surface keeps its door when someone outside receives
   it there, such as a file we write for someone to open or a mail we send; an answer handed back to
   our own caller is not that, and goes straight to the caller.

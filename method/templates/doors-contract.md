@@ -68,13 +68,13 @@ lead; nothing above this line goes into an agent prompt.
 > an answer the story draws goes back the same way. Where the caller runs changes nothing: a script on
 > an operator's laptop is ours. **The test is who stands at the surface in this story.** When a
 > person, or a program somebody else runs, stands there, every step through it keeps its door,
-> including one the surface hands straight on to a part of ours: the gateway asking a member's AI
-> client to sign in, and the answer coming back in. When nobody stands there, that step is the product
+> including one the surface passes on to a part of ours in the very next step: the gateway asking a
+> member's AI client to sign in, and the answer coming back in. When nobody stands there, that step is the product
 > talking to itself and takes no door. This is about OUR surfaces only: our script reaching someone
 > else's page or service (a sign-in picker its headless browser clicks) still names that surface. When
-> somebody does stand at our surface but the story never shows them there, draw them once, where they
-> really act or receive, and never invent an action they do not take; never remove the door to quiet
-> the warning. A step that ends at our surface for someone outside to receive (a file we write, a mail
+> somebody does stand at our surface but the story never shows them there, draw them where they
+> really act or receive, as every crossing asks, and never invent an action they do not take; never
+> remove the door to quiet the warning. A step that ends at our surface for someone outside to receive (a file we write, a mail
 > we send) keeps its door. `lint-fragment` given the map with `--ids` warns on a door nobody stands
 > at, and no recorded line silences it.
 >
