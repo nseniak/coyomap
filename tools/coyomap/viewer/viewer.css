@@ -929,12 +929,6 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archhp-box { width: 11px; height: 11px; border: 1.5px solid #64748b; border-radius: 2px; background: #fff; }
 .archhp.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; font-weight: 600; }
 .archhp.on .archhp-box { border-color: #4f46e5; background: #4f46e5; }
-/* What the reader narrows the picture to, on the same row: a story to follow, and whose lines alone. */
-.archfollow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #334155;
-  margin-left: 8px; }
-.archfollow select { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid #cbd5e1;
-  border-radius: 6px; background: #fff; color: #1f2937; width: 150px; cursor: pointer; }
-.archfollow select:hover { border-color: #94a3b8; }
 .archthrough { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #312e81;
   max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
   background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 3px 4px 3px 10px; }
@@ -942,32 +936,8 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archthrough-x { font: inherit; font-size: 14px; line-height: 1; border: 0; background: none; color: #4f46e5;
   cursor: pointer; padding: 0 4px; border-radius: 999px; }
 .archthrough-x:hover { background: #c7d2fe; }
-/* …and under it, the key to the two line styles, drawn as the lines themselves. */
-.archkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 12px; color: #475569; }
-.archkey span { display: inline-flex; align-items: center; gap: 6px; }
-.archkey-num { font-weight: 600; color: #334155; min-width: 26px; text-align: center; }
-/* THE STORY PLAYER: a slim strip at the foot of the Architecture drawing, centred, while one story is
-   followed. The story's name and its two ends on the left, the step walk on the right. */
-#archplayer { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
-  max-width: calc(100% - 24px); box-sizing: border-box; display: flex; align-items: center; gap: 14px;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 7px 8px 7px 12px;
-  box-shadow: 0 2px 10px rgba(0,0,0,.07); font-size: 12px; color: #334155; }
-#archplayer[hidden] { display: none; }
-.archplay-story { min-width: 0; }
-.archplay-name { font-size: 13px; font-weight: 600; color: #1f2937; }
-.archplay-ends { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; color: #475569; }
-.archplay-end { display: inline-flex; align-items: center; gap: 6px; }
-.archplay-ctl { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.archplay-ctl button { font-size: 12px; line-height: 1; padding: 5px 11px; border: 0; border-radius: 999px;
-  background: #6366f1; color: #fff; cursor: pointer; }
-.archplay-ctl button:hover:not(:disabled) { background: #4f46e5; }
-.archplay-ctl button:disabled { background: #e5e7eb; color: #9ca3af; cursor: default; }
-.archplay-count { font-variant-numeric: tabular-nums; min-width: 78px; text-align: center; white-space: nowrap; }
-.archplay-x { flex: 0 0 auto; font: inherit; font-size: 16px; line-height: 1; border: 0; background: none;
-  color: #9ca3af; cursor: pointer; padding: 2px 4px; }
-.archplay-x:hover { color: #374151; }
 /* A LINE'S USE CASES (archUseCasesHtml): its features, each with its mark and a count, opening to its
-   use cases; each use case with its mark, its step sentences under it, and the follow button. */
+   use cases; each use case with its mark (its name opens its map) and its step sentences under it. */
 .archuc-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937;
   display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .archuc-feat > summary::before { content: ''; flex: none; width: 5px; height: 5px; margin: 0 3px 0 1px;
@@ -1479,8 +1449,7 @@ body.panel-dragging { user-select: none; }
 /* A STEP NUMBER IS A ROUND BADGE ON ITS ARROW, one per step: no grey block taller than its digits, no
    arrow running through it, no "1, 4" sharing one block. The engine sized the label's box from the old
    text, so the badges are let out of it, centred on the arrow (the row is centred, so it spills on both
-   sides alike), rather than widening the box. The badge of a followed story on the Architecture picture
-   is drawn the same (archNumBadge). */
+   sides alike), rather than widening the box. */
 #diagram g.edgeLabel:has(p[data-fsteps]) foreignObject { overflow: visible; }
 /* …and centred in it up and down: the box is the label's line height (24px), and the row sat at its top,
    3px above the arrow. */
@@ -3569,22 +3538,9 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 #diagram .ibox-picked:focus-visible, #diagram .ibox-picked:focus-visible .ibox-name:focus-visible,
 #pagehero .ibox-picked:focus-visible, .ibox-picked:focus-visible { outline: none; }
 
-/* THE TWO MARKS OF A STORY'S ENDS, in the key and in the story player: a filled circle where it starts, a bar
-   where it ends, as Use Case Maps draw a path. The same shapes markStartEnd draws on a picture. */
-.ucm-key-start, .ucm-key-end { display: inline-block; flex: none; background: #0f172a; }
-.ucm-key-start { width: 10px; height: 10px; border-radius: 50%; }
-.ucm-key-end { width: 4px; height: 14px; margin-left: 3px; }
-.ucm-start { fill: #0f172a; }
-.ucm-end { fill: #0f172a; }
-/* FOLLOWING ONE STORY: its lines and boxes stay, everything else steps back. */
-.arch-following path.flowchart-link:not(.arch-story-on) { opacity: .18; }
-.arch-following g.edgeLabel:not(.arch-story-on) { opacity: .18; }
-.arch-following g.node:not(.arch-story-on) { opacity: .3; }
 /* A CROWDED PICTURE (viewer.js markLayerLines) draws only its lines between layers. A box's own lines
-   are drawn on top when asked (archOverlay); a layer line steps back while they show, and goes while a
-   story is followed. */
+   are drawn on top when asked (archOverlay); a layer line steps back while they show. */
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
-.arch-layers.arch-following .arch-layerline { display: none; }
 .arch-layers .arch-layerline { pointer-events: none; }   /* drawing only: a click goes to what is behind */
 .arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
@@ -3592,11 +3548,4 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-head-picked { fill: #2563eb; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
-.arch-ov-num { font: 700 10px system-ui, sans-serif; fill: #3730a3; text-anchor: middle;
-               dominant-baseline: middle; cursor: pointer; }
-.arch-ov-numbg { fill: #fff; stroke: #a5b4fc; }
-/* A followed story's own numbers, drawn on its lines in place of their labels (archFollow): the label
-   goes, and the number lets a click through to the line under it. */
-.arch-following g.edgeLabel.arch-story-on { visibility: hidden; }
-.arch-story-nums { pointer-events: none; }
-.arch-following path.flowchart-link.arch-story-on { stroke: #4f46e5 !important; stroke-width: 2.2px !important; }
+

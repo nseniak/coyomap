@@ -4283,38 +4283,13 @@ def test_the_happy_path_switch_is_on_a_features_picture_and_not_on_all() -> None
         assert not page.js_errors, page.js_errors
 
 
-def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_ends() -> None:
-    """Picking a story lights its lines, numbers them 1, 2, 3 in its own order, and draws a start
-    circle and an end bar. It is a screen of its own: the story is in the address."""
-    with _served() as url, _page(url + "#v=arch") as page:
-        _arch_ready(page)
-        page.select_option("[data-archfollow]", page.evaluate(
-            "() => document.querySelector('[data-archfollow] optgroup option').value"))
-        page.wait_for_function("() => location.hash.includes('story=')")
-        _arch_ready(page)
-        seen = page.evaluate("""() => {
-          const lit = [...document.querySelectorAll('#diagram .arch-story-nums .arch-ov-num')].map((l) => l.textContent.trim());
-          return { lit, marks: [...document.querySelectorAll('#diagram .ucm-mark')].map((m) => m.firstElementChild.getAttribute('class')),
-                   steps: document.querySelector('.archplay-count').textContent,
-                   start: document.querySelector('#archplayer .archplay-ends').textContent };
-        }""")
-        numbers = sorted(int(t) for t in seen["lit"])
-        assert numbers == list(range(1, len(numbers) + 1)) and numbers, seen
-        assert sorted(seen["marks"]) == ["ucm-end", "ucm-start"], seen
-        assert seen["steps"] == f"{len(numbers)} steps", seen
-        assert seen["start"].startswith("Starts when:"), seen
-        page.evaluate("() => document.querySelector('#archplayer [data-archstory=\"\"]').click()")
-        page.wait_for_function("() => !location.hash.includes('story=')")
-        assert not page.js_errors, page.js_errors
-
-
 # A line's card, read off the screen: the address's pick, the card's title and badge, its use case rows.
 LINE_CARD = """(card) => { const c = document.querySelector(card);
     return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
              title: (c.querySelector('.pane-title h2') || {}).textContent || '',
              badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
              ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.ucopen),
-             story: (c.querySelector('.archcard-story .archuc-sent') || {}).textContent || '' }; }"""
+             }; }"""
 
 
 def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
@@ -4326,8 +4301,7 @@ def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
 def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use_cases() -> None:
     """A click on a line picks it, as a click on a box does: the address keeps it, and its card names its
     two ends and the use cases that take it, by feature, and not the code's verb. A use case's name opens
-    its own map. With its story followed on its feature's picture, the same line's card says the
-    story's own sentence first, under the story's own step number."""
+    its own map, with the steps this line draws selected there."""
     text = make_whole_product_text(lambda m: None)
     assert not text.get("layerLines"), "the fixture's whole product must not be crowded"
     with _served() as url, _page(url + "#v=arch&cap=all") as page:
@@ -4356,21 +4330,6 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         page.wait_for_timeout(600)
         picked = page.evaluate("() => decodeURIComponent(location.hash).split('&').filter((x) => x.startsWith('sel=flowstep:')).length")
         assert picked == len(e["steps"][uc]), (picked, e["steps"][uc])
-        # …and with its story followed on its feature's picture, the line's card says the story's sentence
-        graph = model_to_graph(load_model(_FIXTURE_MAP.read_text()))
-        cap = str(graph["nodes"][uc]["parent"])
-        page.goto(url + f"#v=arch&cap={cap}&story={uc}")
-        page.reload()
-        _arch_ready(page)
-        text = gen_arch_views(graph)[1]["all|" + cap]
-        e = next(x for x in text["lines"] if (x["src"], x["dst"]) == (e["src"], e["dst"]))
-        story = next(x for x in text["stories"] if x["uc"] == uc)
-        k = story["lines"].index([e["srcBox"], e["dstBox"]])
-        page.evaluate(f"""() => {{ for (const p of document.querySelectorAll('#diagram .edgePaths path.flowchart-link'))
-            if (p.id.includes('L_{e["srcBox"]}_{e["dstBox"]}_')) p.__cyHits[0].dispatchEvent(new MouseEvent('click', {{ bubbles: true }})); }}""")
-        seen = page.evaluate(LINE_CARD, "#panel")
-        said = next(x["text"] for x in e["sentences"] if uc in x["ucs"])
-        assert seen["badge"] == f"step {k + 1}" and seen["story"].lower() == said.lower(), (seen, said)
         assert not page.js_errors, page.js_errors
 
 
@@ -4421,94 +4380,6 @@ def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_on
         assert peek["title"] and peek["title"] != picked and peek["ucs"], peek
         assert page.evaluate(LINE_CARD, "#panel")["title"] == picked
         assert not page.js_errors, page.js_errors
-
-
-def test_follow_a_story_in_the_header_lists_every_story_by_feature_and_follows_the_one_picked() -> None:
-    """A feature's picture has a "Follow a story" list in its header, holding every story of the
-    picture, grouped by feature in the Features page's order. Picking one follows it, as its own screen;
-    its first entry then lets go. The All picture has no such list."""
-    texts = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[1]
-    with _served() as url, _page(url + "#v=arch&cap=all") as page:
-        _arch_ready(page)
-        assert page.evaluate("() => !document.querySelector('[data-archfollow]')"), "no list on the All picture"
-        page.goto(url + "#v=arch")
-        page.reload()
-        _arch_ready(page)
-        cap = page.evaluate("() => document.querySelector('.archwho.on').dataset.archcap")
-        text = texts["all|" + cap]
-        seen = page.evaluate("""() => ({
-            groups: [...document.querySelectorAll('[data-archfollow] optgroup')].map((g) => g.label),
-            features: [...document.querySelectorAll('.archwho')].map((b) => b.textContent).slice(1),
-            stories: [...document.querySelectorAll('[data-archfollow] optgroup option')].map((o) => o.value) })""")
-        assert sorted(seen["stories"]) == sorted(x["uc"] for x in text["stories"]), seen
-        assert seen["groups"] == [f for f in seen["features"] if f in seen["groups"]], seen
-        uc = seen["stories"][0]
-        page.select_option("[data-archfollow]", uc)
-        page.wait_for_function(f"() => location.hash.includes('story={uc}')")
-        _arch_ready(page)
-        assert page.evaluate("""() => { const s = document.querySelector('[data-archfollow]');
-            return [s.value, s.options[0].textContent]; }""") == [uc, "Show every story"]
-        page.select_option("[data-archfollow]", "")
-        page.wait_for_function("() => !location.hash.includes('story=')")
-        assert not page.js_errors, page.js_errors
-
-
-PLAYER = """() => ({ shown: !document.getElementById('archplayer').hidden,
-    text: document.getElementById('archplayer').textContent,
-    count: (document.querySelector('.archplay-count') || {}).textContent || '',
-    hash: decodeURIComponent(location.hash),
-    badge: (document.querySelector('#panel .pane-title .badge') || {}).textContent || '',
-    picked: [...document.querySelectorAll('#diagram .arch-ov-line.arch-ov-picked')].map((l) => l.dataset.src + '>' + l.dataset.dst) })"""
-
-
-def _walk_a_story(url: str, story: dict[str, Any]) -> list[dict[str, Any]]:
-    """Follow `story` from its address and press Next twice, Left once and the strip's × once,
-    reading the screen after each."""
-    seen = []
-    with _page(url + f"#v=arch&cap=all&story={story['uc']}") as page:
-        _arch_ready(page)
-        seen.append(page.evaluate(PLAYER))
-        for _ in range(2):
-            page.click('[data-archstep="1"]')
-            page.wait_for_timeout(500)
-            seen.append(page.evaluate(PLAYER))
-        page.keyboard.press("ArrowLeft")
-        page.wait_for_timeout(500)
-        seen.append(page.evaluate(PLAYER))
-        page.click("#archplayer .archplay-x")
-        page.wait_for_function("() => !location.hash.includes('story=')")
-        seen.append(page.evaluate(PLAYER))
-        assert not page.js_errors, page.js_errors
-    return seen
-
-
-def test_a_followed_story_is_walked_step_by_step_from_a_strip_under_the_picture() -> None:
-    """Following a story shows a strip under the picture: the story's name, what starts it and what it
-    ends with, and a walk. Each step picks that step's line, so its card says the story's own step;
-    the arrow keys walk too, and the strip's × lets go of the story."""
-    text = make_whole_product_text(lambda m: None)
-    story = max(text["stories"], key=lambda x: len(x["lines"]))
-    n = len(story["lines"])
-    assert n >= 2
-    with _served() as url:
-        start, one, two, back, gone = _walk_a_story(url, story)
-    assert start["shown"] and story["name"] in start["text"] and start["count"] == f"{n} steps", start
-    assert "Starts when" in start["text"] and "Ends with" in start["text"], start
-    for got, k in ((one, 0), (two, 1), (back, 0)):
-        a, b = story["lines"][k]
-        assert got["count"] == f"Step {k + 1} of {n}" and f"sel=arch:{a}>{b}" in got["hash"], (k, got)
-        assert got["badge"] == f"step {k + 1}", (k, got)
-    assert not gone["shown"], gone
-
-
-def test_a_followed_story_is_walked_on_a_crowded_picture_through_the_lines_drawn_on_top() -> None:
-    """On a crowded picture the walk picks the story's lines drawn on top of it."""
-    text = make_whole_product_text(make_parts_in_every_layer)
-    story = max(text["stories"], key=lambda x: len(x["lines"]))
-    with _served_map(make_parts_in_every_layer) as url:
-        _start, one, two, _back, _gone = _walk_a_story(url, story)
-    assert one["picked"] == ["%s>%s" % tuple(story["lines"][0])], one
-    assert two["picked"] == ["%s>%s" % tuple(story["lines"][1])], two
 
 
 def test_a_line_names_its_use_cases_by_feature() -> None:
@@ -5180,22 +5051,6 @@ def test_a_picked_box_from_its_address_draws_its_lines_over_the_top_with_true_he
         assert not page.js_errors, page.js_errors
 
 
-def test_a_story_followed_from_its_address_draws_its_lines_on_a_crowded_picture() -> None:
-    """A crowded picture draws a followed story's lines on top of itself, and hides its layer lines. The
-    picture is bound before its pan and zoom exists, so a story opened from its address once drew no
-    line at all: an empty picture."""
-    text = make_whole_product_text(make_parts_in_every_layer)
-    story = max(text["stories"], key=lambda x: len(x["lines"]))
-    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&story={story['uc']}") as page:
-        _arch_ready(page)
-        page.wait_for_timeout(300)
-        seen = page.evaluate(VISIBLE_LINES)
-        assert seen == {"layer": 0, "box": len(story["lines"])}, (seen, len(story["lines"]))
-        # the lines move with the boxes: they sit inside the pan and zoom's own group
-        assert page.evaluate("() => !!document.querySelector('#diagram .svg-pan-zoom_viewport .arch-overlay')")
-        assert not page.js_errors, page.js_errors
-
-
 def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_runs() -> None:
     """A line from a lower layer up to a higher one is written the other way round, so the layers stay
     stacked. On screen it keeps one head, at the box it goes to, and a click on it picks the line the
@@ -5380,3 +5235,16 @@ def test_on_every_picture_a_box_selects_and_shows_itself(where: str) -> None:
             assert f"node%3A{b['id']}" in seen["hash"], (b, seen)
             assert seen["card"] == b["id"], (b, seen)
         assert not page.js_errors, page.js_errors
+
+
+def test_no_story_is_followed_on_the_architecture_picture() -> None:
+    """Following one story on the picture is gone: no list in the header, no strip under the picture,
+    and an old link that named a story opens the plain picture."""
+    with _served() as url, _page(url + "#v=arch&story=UC1") as page:
+        _arch_ready(page)
+        seen = page.evaluate("""() => ({ list: !!document.querySelector('[data-archfollow]'),
+            strip: !!document.getElementById('archplayer'), hash: location.hash,
+            dim: document.querySelectorAll('#diagram .arch-following').length })""")
+        assert seen == {"list": False, "strip": False, "hash": seen["hash"], "dim": 0}, seen
+        assert not page.js_errors, page.js_errors
+

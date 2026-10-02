@@ -270,12 +270,6 @@ document.getElementById('archthrough').addEventListener('click', (e) => {
   archFilterBox('');
   if (mainScene && was) selRemove(mainScene, 'node:' + was);
 });
-diaghead.addEventListener('change', (e) => {
-  const pick = e.target.closest && e.target.closest('[data-archfollow]');
-  if (!pick) return;
-  const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(cur.scope, cur.cap || '', pick.value || '', cur.open || ''));
-});
 const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
@@ -284,7 +278,6 @@ const zoomin = document.getElementById('zoomin');
 const zoomout = document.getElementById('zoomout');
 const zoomlevel = document.getElementById('zoomlevel');
 const zoomctl = document.getElementById('zoomctl');
-const archplayer = document.getElementById('archplayer');   // the story player under the Architecture drawing
 const flowplayer = document.getElementById('flowplayer');
 const flowprev = document.getElementById('flowprev');
 const flownext = document.getElementById('flownext');
@@ -1935,7 +1928,6 @@ function selApply(scene) {
   // the guard is here so it cannot start when one does.
   if (scene === mainScene && !renderingTransient) refreshUrl();
   flowSuspendIfDeselected(scene);
-  if (scene === mainScene) archPlaySync();
   flowMapRefreshStepLabels();
   // Deselecting the last element (⌘-click it off) returns to the empty state: clear the file-browser
   // highlight + default the code slot to browse, the same cleanup empty-canvas click / Escape do.
@@ -3583,8 +3575,6 @@ function flowVisibleRect() {
   if (overlaps(fp)) top = Math.min(fp.bottom, top + (bottom - top) / 2);
   const pr = panel.getBoundingClientRect();
   if (overlaps(pr)) bottom = Math.max(pr.top, top + (bottom - top) / 2);
-  const ap = archplayer && !archplayer.hidden ? archplayer.getBoundingClientRect() : null;
-  if (overlaps(ap)) bottom = Math.max(ap.top, top + (bottom - top) / 2);
   return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 // items: [{el, xOnly}] -> padded union rect in screen px, or null. `xf` (optional) maps each element's
@@ -3626,7 +3616,7 @@ function flowReveal(els, i) {
 }
 // BRING A STEP INTO VIEW: pan (and zoom, when its label is too small to read) so `items` — each
 // { el, xOnly } — fit the drawing's unobstructed area, or failing that `stepLabel` alone. Shared by the
-// use case map's step player and the Architecture view's story player.
+// use case map's step player.
 function revealOnScreen(items, stepLabel) {
   if (!mainPz || !items.length) return;
   // Below the readability floor the reveal ZOOMS as well as pans: a fit-to-width sequence diagram
@@ -4864,7 +4854,6 @@ function rescaleLayerLines() {
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
 // One line of the picture, as the overlay draws it: its step number, or none on a line into a database.
-// No number: a line's number is a followed story's own step, which archFollow draws.
 function archOverlayItem(e) {
   return { src: e.srcBox, dst: e.dstBox, label: '' };
 }
@@ -4881,7 +4870,7 @@ function archShowLines(test) {
   archRedrawLines();
 }
 function archRedrawLines() {
-  if (!mainScene || archPlay) return;   // a followed story draws its own lines (archFollow)
+  if (!mainScene) return;
   const kept = archKeptTest, peek = archPreviewTest;
   if (!archCrowded()) {
     eachEdge(mainScene.root, (p, label, m) => {
@@ -4911,7 +4900,7 @@ let archPreviewSwitch = 0, archPointerOn = null;
 function archPreview(key, from, test, inCard) {
   clearTimeout(archPreviewTimer); archPreviewTimer = 0;
   clearTimeout(archPreviewSwitch); archPreviewSwitch = 0;
-  if (archPlay || archPreviewKey === key) return;
+  if (archPreviewKey === key) return;
   if (!inCard && mainScene && mainScene.selection.length) return;
   archPreviewWatch();
   const apply = () => {
@@ -5035,35 +5024,11 @@ function archOverlay(items) {
     hit.addEventListener('click', (ev) => anchorArrowAt(line, ev.clientX, ev.clientY));
     hit.addEventListener('click', find);
     if (desc) {
-      mainScene.selectors[desc.key] = () => selAdd(mainScene, desc);   // the story player and the address
+      mainScene.selectors[desc.key] = () => selAdd(mainScene, desc);   // the address
       if (selHas(mainScene, desc.key)) archOverlayMark(line, true);
       previewOnHover(mainScene, [hit], desc.show, line);
     }
-    if (it.label) {
-      const tx = archNumBadge(g, (x1 + x2) / 2, ym, it.label);
-      tx.dataset.src = it.src; tx.dataset.dst = it.dst;
-      tx.addEventListener('click', find);
-      if (desc) previewOnHover(mainScene, [tx], desc.show, line);
-    }
   }
-}
-// A STEP NUMBER on a line: its text on a small tag, centred on (x, y) in `g`'s own units. One drawing
-// for the lines a crowded picture draws on top of itself and for a followed story's drawn lines.
-function archNumBadge(g, x, y, text) {
-  const tx = document.createElementNS(SVGNS, 'text');
-  tx.setAttribute('x', String(x)); tx.setAttribute('y', String(y));
-  tx.setAttribute('class', 'arch-ov-num');
-  tx.textContent = text;
-  g.appendChild(tx);
-  // A ROUND BADGE, as a use case map's step numbers are: a circle, or a pill round a longer number.
-  const bb = tx.getBBox();
-  const h = bb.height + 4, w = Math.max(h, bb.width + 8);
-  const bg = document.createElementNS(SVGNS, 'rect');
-  bg.setAttribute('x', String(bb.x + bb.width / 2 - w / 2)); bg.setAttribute('y', String(bb.y + bb.height / 2 - h / 2));
-  bg.setAttribute('width', String(w)); bg.setAttribute('height', String(h));
-  bg.setAttribute('rx', String(h / 2)); bg.setAttribute('class', 'arch-ov-numbg');
-  g.insertBefore(bg, tx);
-  return tx;
 }
 // A LINE DRAWN ON TOP OF A CROWDED PICTURE is picked like a drawn one, under the same key. The overlay
 // is drawn again whenever what it shows changes, so the glow finds the line as it stands, and a picked
@@ -5083,12 +5048,11 @@ function archOverlayDesc(src, dst) {
   const t = archTextOf(s);
   const e = archLineOf(t, src, dst);
   if (!e || !mainScene) return null;
-  const story = archStoryOf(s, t);
   const mark = (on) => {
     const el = archOverlayLineEl(src, dst);
     if (el) archOverlayMark(el, on);
   };
-  return { key: 'arch:' + src + '>' + dst, focus: null, show: () => showArchLine(e, story),
+  return { key: 'arch:' + src + '>' + dst, focus: null, show: () => showArchLine(e),
            glow: () => { mark(true); return () => mark(false); } };
 }
 // A LINE UP THE LAYERS of the layered Architecture picture is written from the box it goes TO, with a
@@ -5392,9 +5356,6 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // happy path's alone. Unset = every use case's. (Its ONE feature rides on
                       // `cap`, the field the Features page already names a feature by.)
                       'scope',
-                      // `story` is the ONE story the Architecture view follows: its lines lit and
-                      // numbered in its own order. Unset = every story, numbered together.
-                      'story',
                       // `open` is the BOXES the Architecture view lists in full, every part named, after
                       // the reader clicked their "+N more". Comma-separated box ids (`CYG2S2`): one
                       // subsystem has a box in each layer it has parts in, and only the clicked one opens.
@@ -5416,7 +5377,6 @@ function stateKey(s) {
     + (s.cap ? ':' + s.cap : '')   // one FEATURE's use cases ('-' = the ones assigned to none), or
                                    // the Architecture view narrowed to one feature
     + (s.act ? ':' + s.act : '')   // …or one ACTOR's, the overview's other axis
-    + (s.story ? '@' + s.story : '')  // …following one story: a different screen of one drawing
     + (s.open ? '+' + s.open : '')    // …with boxes opened to list every part: a different drawing
     + (s.scope ? '~' + s.scope : '')  // the Architecture view on the happy path's stories: a
                                       // different drawing, so it has to key apart or the switch
@@ -7687,18 +7647,7 @@ function archFeatureHtml() {
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     // NO HAPPY-PATH SWITCH ON THE ALL PICTURE: the whole product is every story, and its happy path
     // alone is a feature's question. A feature's picture keeps it.
-    + (now ? `<span class="archwho-sep" aria-hidden="true"></span>${sw}` : '') + `${archControlsHtml(s)}</div>`
-    + archKeyHtml(!!s.story);
-}
-// WHAT THE READER NARROWS THE PICTURE TO, after the happy-path switch on the features' row, which it
-// shares rather than taking a row of the drawing's height: one story to follow.
-function archControlsHtml(s) {
-  const t = archTextOf({ ...s, kind: 'arch' });
-  const stories = (t && t.stories) || [];
-  // NOT ON THE ALL PICTURE: its 67 stories are one long list to scroll, and a story is reached there
-  // from a line's card ("Follow this story"). A feature's picture lists its own few.
-  const all = !archFeature({ ...s, kind: 'arch' });
-  return stories.length && !all ? archFollowSelectHtml(stories, s.story || '') : '';
+    + (now ? `<span class="archwho-sep" aria-hidden="true"></span>${sw}` : '') + '</div>';
 }
 function archThroughHtml() {
   return archFilterLabel ? `${archFilterLabel} <button type="button" class="archthrough-x" data-archthrough-clear`
@@ -7711,41 +7660,16 @@ function syncArchThrough() {
   tag.hidden = !archFilterLabel;
   tag.innerHTML = archThroughHtml();
 }
-// FOLLOW A STORY: every story of the picture, grouped by its feature in the Features page's order. The
-// first entry says what the list is for while nothing is followed, and lets go of the story once one is.
-function archFollowSelectHtml(stories, now) {
-  const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
-  const order = (ARCH_FEATURES || []).map((f) => f.id);
-  const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
-  const feats = [...new Set(stories.map((x) => featureOf(x.uc)))].sort((a, b) => at(a) - at(b));
-  const opt = (x) => `<option value="${esc(x.uc)}"${x.uc === now ? ' selected' : ''}>${esc(x.name)}</option>`;
-  // THE LIST SAYS WHAT IT IS FOR in its own first entry, with no label beside it: a label and a wide
-  // list pushed the features' row onto a second line at 1280px, and took 33px from the drawing.
-  return '<label class="archfollow">'
-    + `<select data-archfollow aria-label="Follow a story"><option value="">`
-    + `${now ? 'Show every story' : `Follow a story (${stories.length})\u2026`}</option>`
-    + feats.map((f) => `<optgroup label="${esc(f ? featureName(f) : 'In no feature')}">`
-      + stories.filter((x) => featureOf(x.uc) === f).map(opt).join('') + '</optgroup>').join('')
-    + '</select></label>';
-}
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
 // pasted address and a switch flip both land on a drawing that exists.
-// WHAT THE VIEW KNOWS OF A PICTURE is `ARCH_TEXT[key]`, `{lines, stories, cells, layerLines}`
-// (gen_viewer._arch_text and _arch_stories): each line with its two ends and the use cases that take it,
-// which its card tells, and each story on its own, which the view follows: its lines lit and numbered
-// 1, 2, 3 in its own order, from what starts it to what the person comes away with. The shared numbers
-// cannot give that order wherever stories take the same lines in different orders, which is half the
-// lines of some pictures (see _story_order_numbers on loops).
+// WHAT THE VIEW KNOWS OF A PICTURE is `ARCH_TEXT[key]`, `{lines, cells, layerLines}` (gen_viewer
+// `_arch_text`): each line with its two ends and the use cases that take it, which its card tells.
 function archTextOf(s) { return s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || null) : null; }
-function archStoryOf(s, t) {
-  return s && s.story && t ? (t.stories || []).find((x) => x.uc === s.story) || null : null;
-}
 let archBoxFilter = '';
 let archFilterLabel = '';   // what the header's tag says while a box's lines alone are shown
-// A NEW SCREEN starts with every line shown, and with the story player for the story it follows.
-function syncArchView(s) {
-  syncArchPlayer(s);
+// A NEW SCREEN starts with every line shown.
+function syncArchView(_s) {
   clearTimeout(archPreviewTimer); clearTimeout(archPreviewSwitch);
   archPreviewTimer = 0; archPreviewSwitch = 0;
   archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
@@ -7753,93 +7677,6 @@ function syncArchView(s) {
   archFilterLabel = '';
   syncArchThrough();
 }
-// THE STORY PLAYER (#archplayer): while one story is followed, a strip at the foot of the drawing walks
-// its lines in its own order. Each step picks that line, exactly as a click on it does, so the card says
-// the story's own sentence for it, and the camera brings the line and its two boxes into view
-// (revealOnScreen, the use case map's own move). `cur` is the step last reached; the walk is ACTIVE while
-// that step's line is the one picked, and a click on one of the story's lines moves it there.
-let archPlay = null;   // { story, cur } while a story is followed, else null
-function syncArchPlayer(s) {
-  const story = archStoryOf(s, archTextOf(s));
-  archPlay = story && story.lines.length ? { story, cur: -1 } : null;
-  archplayer.hidden = !archPlay;
-  if (!archPlay) { archplayer.innerHTML = ''; return; }
-  const end = (cls, word, text) => text
-    ? `<span class="archplay-end"><span class="${cls}" aria-hidden="true"></span>${word}: ${esc(text)}</span>` : '';
-  archplayer.innerHTML = `<div class="archplay-story"><div class="archplay-name">${esc(story.name)}</div>`
-    + `<div class="archplay-ends">${end('ucm-key-start', 'Starts when', story.trigger)}`
-    + `${end('ucm-key-end', 'Ends with', story.outcome)}</div></div>`
-    + '<div class="archplay-ctl"><button type="button" data-archstep="-1" aria-label="Previous step">\u25c0</button>'
-    + '<span class="archplay-count"></span>'
-    + '<button type="button" data-archstep="1" aria-label="Next step">\u25b6</button></div>'
-    + '<button type="button" class="archplay-x" data-archstory="" aria-label="Show every story"'
-    + ' title="Show every story">\u00d7</button>';
-  archPlayCounter();
-}
-function archPlayKey(i) {
-  const [a, b] = archPlay.story.lines[i];
-  return 'arch:' + a + '>' + b;
-}
-function archPlayActive() {
-  return !!(archPlay && archPlay.cur >= 0 && mainScene && selHas(mainScene, archPlayKey(archPlay.cur)));
-}
-function archPlayCounter() {
-  if (!archPlay) return;
-  const n = archPlay.story.lines.length, on = archPlayActive();
-  const count = archplayer.querySelector('.archplay-count');
-  if (count) count.textContent = on ? `Step ${archPlay.cur + 1} of ${n}` : `${n} steps`;
-  const prev = archplayer.querySelector('[data-archstep="-1"]');
-  if (prev) prev.disabled = !on;
-}
-// A PICK MADE ANY OTHER WAY — a click on one of the story's lines, the address — moves the walk there.
-function archPlaySync() {
-  if (!archPlay || !mainScene) return;
-  const key = mainScene.selectedKey || '';
-  if (!archPlayActive() && key.startsWith('arch:')) {
-    const i = archPlay.story.lines.findIndex(([a, b]) => key === 'arch:' + a + '>' + b);
-    if (i >= 0) archPlay.cur = i;
-  }
-  archPlayCounter();
-}
-function archStepGoto(i) {
-  if (!archPlay || !mainScene) return;
-  const n = archPlay.story.lines.length;
-  archPlay.cur = Math.max(0, Math.min(n - 1, i));
-  const sel = mainScene.selectors[archPlayKey(archPlay.cur)];
-  selClear(mainScene);
-  if (sel) sel(); else resetScene(mainScene);
-  const [a, b] = archPlay.story.lines[archPlay.cur];
-  const line = archLineEls(a, b);
-  const items = [...line, mainScene.nodeEls[a], mainScene.nodeEls[b]].filter(Boolean)
-    .map((el) => ({ el, xOnly: false }));
-  revealOnScreen(items, line[1] || null);
-  archPlayCounter();
-}
-// Not active: Previous does nothing and Next picks up where the walk was, or starts at step 1.
-function archStepBy(d) {
-  if (!archPlay) return;
-  const n = archPlay.story.lines.length;
-  if (!archPlayActive()) { if (d > 0) archStepGoto(archPlay.cur >= 0 ? archPlay.cur : 0); return; }
-  archStepGoto((archPlay.cur + d + n) % n);
-}
-// A line on the drawing and its number: a drawn line and its label, or one drawn on top of a crowded
-// picture and its number.
-function archLineEls(a, b) {
-  const ov = archOverlayLineEl(a, b);
-  if (ov) {
-    const num = [...ov.parentNode.querySelectorAll('.arch-ov-num')]
-      .find((x) => x.dataset.src === a && x.dataset.dst === b) || null;
-    return [ov, num].filter(Boolean);
-  }
-  let hit = [];
-  if (mainScene) eachEdge(mainScene.root, (p, label, m) => { if (m[1] === a && m[2] === b) hit = [p, label]; });
-  return hit.filter(Boolean);
-}
-archplayer.addEventListener('click', (e) => {
-  if (archStoryClick(e)) return;
-  const step = e.target.closest && e.target.closest('[data-archstep]');
-  if (step) { e.stopPropagation(); archStepBy(+step.getAttribute('data-archstep')); }
-});
 function archList(xs) {
   return xs.length <= 1 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
 }
@@ -7915,22 +7752,10 @@ function archBoxName(t, id) {
     .map((i) => 'flowstep:' + uc + ':' + i);
   go(sels.length ? { kind: 'usecase', uc, sels } : { kind: 'usecase', uc });
 }));
-// FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The story player's ×.
-function archStoryClick(e) {
-  const pick = e.target.closest && e.target.closest('[data-archstory]');
-  if (!pick) return false;
-  e.stopPropagation();
-  const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
-  return true;
-}
-// A LINE'S CARD: its two ends, its step, and the use cases that take it, each opening to its own step
-// sentence and following its story from there. While one story is followed, the card says that story's
-// own sentence for the line first, under the story's own step number.
-function showArchLine(e, story) {
-  const own = story ? story.lines.findIndex(([a, b]) => a === e.srcBox && b === e.dstBox) : -1;
-  const said = own >= 0 ? e.sentences.find((x) => x.ucs.includes(story.uc)) : null;
-  const badge = e.store ? 'keeps records' : own >= 0 ? 'step ' + (own + 1) : '';
+// A LINE'S CARD: its two ends, and the use cases that take it, each with its own step sentence and
+// opening its own map.
+function showArchLine(e) {
+  const badge = e.store ? 'keeps records' : '';
   // A feature's picture lists the use cases themselves; the whole product's lists them by feature.
   const flat = !!archFeature((hi >= 0 && history[hi]) || {});
   // The boxes a grey line passes through. Not the code's verb ("calls ×2"): the line itself says it.
@@ -7938,8 +7763,6 @@ function showArchLine(e, story) {
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
   panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
     + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
-    + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
-      + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
     + `<div class="archcard-lbl">${flat ? 'Use cases using this line' : 'Features using this line'}</div>`
     + `<div class="archcard-ucs">${archUseCasesHtml(e, flat)}</div>`;
   cvElement = null;
@@ -7951,12 +7774,12 @@ function archLineOf(t, src, dst) {
 }
 // A LINE IS PICKED LIKE A BOX: its card stays, and a hover on another line shows that one's card beside
 // it. Every drawn box line takes its card here; a crowded picture's lines are drawn by archOverlay.
-function archLineResolver(t, story) {
+function archLineResolver(t) {
   return (m) => {
     const e = archLineOf(t, m[1], m[2]);
     if (!e) return null;
     return { e: { src: m[1], dst: m[2] }, selKey: 'arch:' + m[1] + '>' + m[2],
-             showFn: () => showArchLine(e, story), opts: { hover: true } };
+             showFn: () => showArchLine(e), opts: { hover: true } };
   };
 }
 // THE ARCHITECTURE VIEW'S BOXES open the way a flow picture's do (bindFlowMap): a plain click on the
@@ -7969,7 +7792,6 @@ function archLineResolver(t, story) {
 function bindArch() {
   const s = (hi >= 0 && history[hi]) || {};
   const t = archTextOf(s);
-  const story = archStoryOf(s, t);
   const cells = (t && t.cells) || {};
   const standsFor = (id) => (cells[id] ? cells[id].sub : id);
   mainScene.focusPairs = ((t && t.lines) || []).map((e) => [e.srcBox, e.dstBox]);
@@ -7978,7 +7800,7 @@ function bindArch() {
   mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box: it lights its lines, and the header's tag names them.
-  const pickBox = (id) => { if (!story) archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id)); };
+  const pickBox = (id) => archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id));
   bindNodes(mainScene, (id, el, ev) => {
     const elem = standsFor(id);
     const locate = locateActionFor(elem);
@@ -8011,7 +7833,7 @@ function bindArch() {
       const node = b.closest('g.node');
       if (!node) return;
       const open = [...archOpenOf(s), idOf(node)];
-      const next = archState(s.scope, s.cap || '', s.story || '', [...new Set(open)].join(','));
+      const next = archState(s.scope, s.cap || '', [...new Set(open)].join(','));
       if (mainPz) {
         next.vp = { zoom: mainPz.getZoom(), real: mainPz.getSizes().realZoom, pan: mainPz.getPan() };
         const r = node.getBoundingClientRect();
@@ -8023,9 +7845,8 @@ function bindArch() {
   // A crowded picture draws only its lines between layers, which stand for many lines each, and are
   // drawing only: no card and no lines of their own. A card summing up to 15 lines and 63 use cases
   // added confusion and little a box's own lines did not already say.
-  if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t, story));
+  if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t));
   markLayerLines(mainScene.root, t);
-  if (story) archFollow(story);
 }
 // A PERSON'S BOX is drawn under an alias of its own (a person is a role, not a map element), so
 // bindNodes passes it by. It takes the same gestures as every other box here: resting on it shows the
@@ -8058,81 +7879,6 @@ function bindActorBox(scene, el, id, a, afterPick) {
   bindAliasBox(scene, el, id, { show: () => showActorCard(a), opensOn: nameClick,
                                 open: () => go({ kind: 'actor', act: a.name }), afterPick });
 }
-// FOLLOWING ONE STORY on the drawing: its lines stay lit and carry its own numbers, 1, 2, 3 in its
-// order, everything else steps back, and its start and end are marked (markStartEnd).
-// The numbers are the story's own, drawn on its lines in place of their labels: no other number is on
-// the picture, since the shared order of every story read true for few of them (gen_viewer).
-function archFollow(story) {
-  if (!mainScene) return;
-  const own = new Map(story.lines.map(([a, b], i) => [a + '>' + b, i + 1]));
-  mainScene.root.classList.add('arch-following');
-  const host = diagram.querySelector('.svg-pan-zoom_viewport') || diagram.querySelector('svg > g');
-  diagram.querySelectorAll('.arch-story-nums').forEach((x) => x.remove());
-  const nums = host ? document.createElementNS(SVGNS, 'g') : null;
-  if (nums) { nums.setAttribute('class', 'arch-story-nums'); host.appendChild(nums); }
-  eachEdge(mainScene.root, (p, label, m) => {
-    const n = own.get(m[1] + '>' + m[2]);
-    const on = n !== undefined;
-    for (const el of [p, ...(p._segs || []), label].filter(Boolean)) el.classList.toggle('arch-story-on', on);
-    const mid = on && nums ? arrowMidpoint(p) : null;
-    const at = mid && clientToLocal(nums, mid.x, mid.y);
-    if (at) archNumBadge(nums, at.x, at.y, String(n)).dataset.n = String(n);
-  });
-  const boxes = new Set(story.lines.flat());
-  mainScene.root.querySelectorAll('g.node').forEach((el) => el.classList.toggle('arch-story-on', boxes.has(idOf(el))));
-  // A crowded picture has none of the story's lines in its drawing: they are drawn on top of it.
-  if (archCrowded()) archOverlay(story.lines.map(([a, b], i) => ({ src: a, dst: b, label: String(i + 1) })));
-  markStartEnd(mainScene, story.start, story.end, story.trigger, story.outcome);
-}
-// An arrow's label text, replaced in place: the innermost element holding its text, so the label keeps
-// its box and its styling.
-function setEdgeLabelText(label, text) {
-  const host = label.querySelector('span.edgeLabel p, span.edgeLabel, p, span, text') || label;
-  host.textContent = text;
-}
-// START AND END, marked the way Use Case Maps mark a path: a filled circle where a story starts and a
-// bar where it ends, each on the box, its sentence in the tip. The one drawing of the two marks, shared
-// by the Architecture view (following one story) and every use case map.
-function markStartEnd(scene, startId, endId, trigger, outcome) {
-  if (!scene) return;
-  scene.root.querySelectorAll('.ucm-mark').forEach((x) => x.remove());
-  const NS = 'http://www.w3.org/2000/svg';
-  const nodeEl = (id) => [...scene.root.querySelectorAll('g.node')].find((el) => idOf(el) === id);
-  const put = (id, tipText, make) => {
-    const el = id && nodeEl(id);
-    if (!el) return;
-    const bb = el.getBBox();
-    const g = document.createElementNS(NS, 'g');
-    g.setAttribute('class', 'ucm-mark');
-    make(g, bb);
-    if (tipText) {
-      const tt = document.createElementNS(NS, 'title');
-      tt.textContent = tipText;
-      g.appendChild(tt);
-    }
-    el.appendChild(g);
-  };
-  put(startId, trigger ? 'Starts when: ' + trigger : 'Starts here', (g, bb) => {
-    const c = document.createElementNS(NS, 'circle');
-    c.setAttribute('cx', String(bb.x - 9));
-    c.setAttribute('cy', String(bb.y + bb.height / 2));
-    c.setAttribute('r', '6');
-    c.setAttribute('class', 'ucm-start');
-    // Inline, because the drawing's own node rules (scoped to its id) would repaint a plain class.
-    c.setAttribute('style', 'fill:#0f172a;stroke:#fff;stroke-width:1.5');
-    g.appendChild(c);
-  });
-  put(endId, outcome ? 'Ends with: ' + outcome : 'Ends here', (g, bb) => {
-    const r = document.createElementNS(NS, 'rect');
-    r.setAttribute('x', String(bb.x + bb.width + 4));
-    r.setAttribute('y', String(bb.y + bb.height / 2 - 10));
-    r.setAttribute('width', '4');
-    r.setAttribute('height', '20');
-    r.setAttribute('class', 'ucm-end');
-    r.setAttribute('style', 'fill:#0f172a;stroke:none');
-    g.appendChild(r);
-  });
-}
 function archScope(s) { return s && s.scope === 'happy' && s.cap !== 'all' ? 'happy' : 'all'; }   // All has no happy path
 // WHICH FEATURE A STATE DRAWS. `all` is the whole product; a feature id is that feature, when this
 // scope draws it; and nothing named opens on the FIRST feature this scope draws, in the Features
@@ -8146,12 +7892,11 @@ function archFeature(s) {
   return first ? first.id : '';
 }
 function archKey(s) { return archScope(s) + '|' + archFeature(s); }
-function archState(scope, cap, story, open) {
+function archState(scope, cap, open) {
   const s = { kind: 'arch' };
   if (scope === 'happy' && cap !== 'all') s.scope = 'happy';   // the All picture has no happy-path switch
   if (cap === 'all') s.cap = 'all';
   else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
-  if (story) s.story = story;
   if (open) s.open = open;
   return s;
 }
@@ -8189,15 +7934,6 @@ function holdBoxAt(at) {
 }
 function archOpenOf(s) {
   return new Set(s && s.kind === 'arch' && s.open ? String(s.open).split(',').filter(Boolean) : []);
-}
-// THE KEY TO THE PICTURE: every line is drawn the same (gen_viewer `_arch_lines_mermaid`) and a crowded
-// picture's lines between layers explain themselves, so the key holds only a followed story's marks,
-// its numbers and its two ends, and only while one is followed. Nothing to say, no key.
-function archKeyHtml(following) {
-  if (!following) return '';
-  return '<div class="archkey"><span><b class="archkey-num">3</b> the story\'s third step</span>'
-    + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
-    + ' where the story starts and ends</span></div>';
 }
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
@@ -8729,7 +8465,7 @@ function cardKeepSets(el) {
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The story player's strip at the foot of the drawing is a control too.
-  const fixed = [zoomctl, archplayer, document.getElementById('archthrough')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
+  const fixed = [zoomctl, document.getElementById('archthrough')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
        [...g([...own, ...ends]), ...fixed],
@@ -15020,8 +14756,6 @@ async function renderView(sArg, transient, seq) {
   tintClusters(diagram);  // recolour expanded group frames (subsystem/subdomain clusters) to their family
   emphasizeZoomedFrame(diagram, s);  // thicker border + bigger title on the group you drilled into
   if (s.kind === 'deployment' || s.kind === 'deploymentUnit') styleDeploymentLanes(diagram);  // bold lane titles + gap
-  // A followed story dims every other line (archFollow); a new drawing starts with nothing followed.
-  diagram.classList.remove('arch-following');
   mainScene = makeScene(diagram, () => applyDefaultPanel(s));
   iconOverlay = ensureIconOverlay(diagram);  // front layer for the diff badges — must exist before any is added
   bindFor(s);
@@ -16563,11 +16297,6 @@ document.addEventListener('keydown', (e) => {
   if (flowPlay && !typing && !e.metaKey && !e.altKey && !e.ctrlKey) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); flowStepBy(-1); return; }
     if (e.key === 'ArrowRight') { e.preventDefault(); flowStepBy(1); return; }
-  }
-  // …and the story followed on the Architecture view, the same way.
-  if (archPlay && !typing && !e.metaKey && !e.altKey && !e.ctrlKey) {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); archStepBy(-1); return; }
-    if (e.key === 'ArrowRight') { e.preventDefault(); archStepBy(1); return; }
   }
   if (e.key === 'Escape' && mainScene) resetScene(mainScene);
 });

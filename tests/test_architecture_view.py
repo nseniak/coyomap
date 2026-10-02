@@ -186,17 +186,6 @@ def test_arrows_two_stories_take_in_opposite_orders_share_one_number():
     assert numbers[x] == numbers[y] and numbers[z] == numbers[x] + 1
 
 
-def test_each_story_carries_its_trigger_outcome_and_its_own_lines():
-    graph = make_graph()
-    model = gv._arch_model(graph, "", "all")
-    assert model is not None
-    first = gv._arch_stories(graph, model)[0]
-    assert (first["uc"], first["trigger"], first["outcome"]) == (
-        "UC1", "The admin types a thing.", "The thing is saved.")
-    assert first["lines"][0] == [gv._person_id("Admin"), "I1"]
-    assert (first["start"], first["end"]) == (gv._person_id("Admin"), "I1")
-
-
 # --- what a component's kind changes ------------------------------------------------------
 
 def make_kinded_map(**kinds: str) -> dict[str, Any]:
@@ -677,9 +666,10 @@ def test_the_picture_over_subsystems_has_no_groups_of_parts():
 def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
     graph = make_graph(make_layered_map())
     _drawings, texts = gv.gen_arch_views(graph)
-    story = next(x for x in texts["all|"]["stories"] if x["uc"] == "UC1")
-    assert story["lines"][:2] == [[gv._person_id("Admin"), "I1"], ["I1", gv._arch_cell_id(0, "S1")]]
+    pairs = {(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"]}
+    assert {(gv._person_id("Admin"), "I1"), ("I1", gv._arch_cell_id(0, "S1"))} <= pairs
     assert all(e["n"] >= 1 for e in texts["all|"]["lines"] if not e["store"])
+    assert "stories" not in texts["all|"], "no story is followed on the picture"
 
 
 # --- the use case map marks the same things ---------------------------------------------

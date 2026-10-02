@@ -2169,26 +2169,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
     return out
 
 
-def _arch_stories(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
-    """The stories one Architecture picture merges, each on its own: its name, what starts it and what
-    the person comes away with (the use case's trigger and outcome), the lines it takes in its own
-    order, and the boxes it starts and ends at. The view uses them to follow ONE story: its lines lit
-    and numbered 1, 2, 3 in its own order, where the shared numbers cannot give one (see
-    `_story_order_numbers` on loops)."""
-    nodes = graph["nodes"]
-    titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
-    out: list[dict[str, Any]] = []
-    for uc, seq in model["stories"].items():
-        fields = cast("dict[str, Any]", nodes.get(uc, {}).get("fields") or {})
-        out.append({
-            "uc": uc, "name": titles.get(uc, uc),
-            "trigger": str(fields.get("Trigger") or ""), "outcome": str(fields.get("Outcome") or ""),
-            "lines": [[_arch_box_id(model, a), _arch_box_id(model, b)] for a, b in seq],
-            "start": _arch_box_id(model, seq[0][0]), "end": _arch_box_id(model, model["ends"][uc]),
-        })
-    return out
-
-
 def arch_layered(graph: GraphDict) -> bool:
     """Is the Architecture picture drawn in LAYERS? Yes once the map says what kind of thing its parts
     are: a part's kind is what places it in a layer. A map built before kinds existed keeps the
@@ -2205,9 +2185,8 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
     feature over the happy path alone. Pre-rendered side by side, the way every other per-element
     drawing already is, from ONE model per key so the cards can never describe another drawing.
 
-    What it tells is `{lines, stories, cells}`: each line's card (`_arch_text`), each story on
-    its own (`_arch_stories`), and each group of parts with the subsystem it stands for and the parts
-    it holds, which the view opens and marks through. A layered picture with more than `crowded`
+    What it tells is `{lines, cells}`: each line's card (`_arch_text`), and each group of parts with
+    the subsystem it stands for and the parts it holds, which the view opens and marks through. A layered picture with more than `crowded`
     lines also carries its lines between layers (`layerLines`), which it draws instead of its
     boxes' own.
 
@@ -2226,7 +2205,7 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
             layer_lines = _arch_layer_lines(graph, model) if whole else []
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered, whole)
             texts[f"{scope}|{feature}"] = {
-                "lines": _arch_text(graph, model), "stories": _arch_stories(graph, model),
+                "lines": _arch_text(graph, model),
                 "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()},
                 **({"layerLines": [{"src": _arch_frame_title(graph, model, ll["src"]),
                                     "dst": _arch_frame_title(graph, model, ll["dst"]),
