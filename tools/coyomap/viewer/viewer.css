@@ -3462,6 +3462,9 @@ body.insp-on { cursor: crosshair; }
    a pick is a decision, not a hover. */
 #diagram.pointer-held .ibox:hover:not(.ibox-picked) { border-color: var(--ibox-rest); }
 #diagram.pointer-held .ibox-name:hover, #diagram.pointer-held .cyname:hover { text-decoration: none; }
+/* Off the words of a wrapped name, beside its shorter line: no underline, as a click there picks the box. */
+#diagram .ibox-name.name-off:hover, #diagram .cyname.name-off:hover,
+#diagram .cluster-label.cyname.name-off:hover p { text-decoration: none; }
 #diagram.pointer-held .pickbox:hover:not(.ibox-picked) { box-shadow: none; }
 .ibox.ibox-picked, .ibox.ibox-picked:hover {
   border-top-color: #4f46e5; border-right-color: #4f46e5; border-bottom-color: #4f46e5;

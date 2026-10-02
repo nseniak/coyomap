@@ -4625,6 +4625,13 @@ def test_a_two_line_name_opens_only_from_its_words() -> None:
             return { blank: [last.right + (b.right - last.right) / 2, (last.top + last.bottom) / 2],
                      words: [(rs[0].left + rs[0].right) / 2, (rs[0].top + rs[0].bottom) / 2] }; } return null; }""")
         assert spot, "no two-line name with space beside its second line"
+        # …and the underline says the same: none on the blank, one on the words
+        under = "() => { const n = document.querySelector('#diagram .ibox-name:hover'); return n ? getComputedStyle(n).textDecorationLine : ''; }"
+        page.mouse.move(spot["blank"][0] - 1, spot["blank"][1])
+        page.mouse.move(*spot["blank"])
+        assert page.evaluate(under) == "none"
+        page.mouse.move(*spot["words"])
+        assert page.evaluate(under) == "underline"
         before = page.evaluate("() => location.hash")
         page.mouse.click(*spot["blank"])
         page.wait_for_timeout(600)
@@ -5252,5 +5259,31 @@ def test_picking_a_feature_on_the_architecture_view_moves_no_button() -> None:
         _arch_ready(page)
         after = page.evaluate(where)
         assert after[:len(before)] == before, (before, after)
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_line_drawn_on_a_crowded_picture_passes_behind_the_boxes_it_crosses() -> None:
+    """A line drawn on top of a crowded picture is cut out where it crosses a box other than its two
+    ends: it passes behind the box, and the box, not the line, answers the pointer there."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    over = """() => { let n = 0; const boxes = [...document.querySelectorAll('#diagram g.node')];
+      for (const l of document.querySelectorAll('.arch-ov-line')) { const L = l.getTotalLength(), m = l.getScreenCTM();
+        for (const b of boxes) { const c = [...b.classList].find((x) => x.startsWith('cy-')); if (!c) continue;
+          if (c.slice(3) === l.dataset.src || c.slice(3) === l.dataset.dst) continue;
+          const r = (b.querySelector('.ibox') || b).getBoundingClientRect();
+          for (let k = 1; k < 60; k++) { const q = l.getPointAtLength(L * k / 60), x = m.a * q.x + m.e, y = m.d * q.y + m.f;
+            if (x > r.left + 4 && x < r.right - 4 && y > r.top + 4 && y < r.bottom - 4) {
+              const e = document.elementFromPoint(x, y);
+              if (e && (e.classList.contains('arch-ov-hit') || e.classList.contains('arch-ov-line'))) n++;
+              break; } } } }
+      return n; }"""
+    with _served_map(make_parts_in_every_layer) as url, _page(url) as page:
+        for box in sorted(set(ends), key=ends.count, reverse=True)[:6]:
+            page.goto(url + f"#v=arch&cap=all&sel=node%3A{box}")
+            page.reload()
+            _settle(page)
+            page.wait_for_selector(".arch-ov-line", state="attached")
+            assert page.evaluate(over) == 0, box
         assert not page.js_errors, page.js_errors
 

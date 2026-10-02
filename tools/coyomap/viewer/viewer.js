@@ -4983,12 +4983,35 @@ function archOverlay(items) {
     const a = clientToLocal(g, r.left, r.top), b = clientToLocal(g, r.right, r.bottom);
     return a && b ? { x1: a.x, y1: a.y, x2: b.x, y2: b.y, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 } : null;
   };
+  // A LINE PASSES BEHIND THE BOXES IT CROSSES. Drawn on top of the picture, a long line between
+  // layers ran over the boxes between its two ends and across their names. Each line is cut out where
+  // it crosses any other box, by a clip path with a hole per box, which also leaves the box, not the
+  // line, to answer a click there. Its own two boxes are left out, so its ends and its head show.
+  const boxes = [...diagram.querySelectorAll('g.node')].map((el) => [idOf(el), rectOf(idOf(el))])
+    .filter(([id, r]) => id && r);
+  const defs = g.querySelector('defs');
+  let clipN = 0;
+  const clipAround = (src, dst) => {
+    const holes = boxes.filter(([id]) => id !== src && id !== dst)
+      .map(([, r]) => `M${r.x1 + 2},${r.y1 + 2}H${r.x2 - 2}V${r.y2 - 2}H${r.x1 + 2}Z`).join('');
+    const id = 'arch-ov-clip-' + (clipN++);
+    const cp = document.createElementNS(SVGNS, 'clipPath');
+    cp.id = id;
+    cp.setAttribute('clipPathUnits', 'userSpaceOnUse');
+    const path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', 'M-100000,-100000H100000V100000H-100000Z' + holes);
+    path.setAttribute('clip-rule', 'evenodd');
+    cp.appendChild(path);
+    defs.appendChild(cp);
+    return `url(#${id})`;
+  };
   for (const it of items) {
     const s = rectOf(it.src), d = rectOf(it.dst);
     if (!s || !d) continue;
     const [x1, y1, c1, c2, x2, y2] = archOverlayCurve(s, d);
-    // The number sits on the curve's own middle (t = 1/2 of the Bezier), wherever the curve bends to.
-    const ym = (y1 + 3 * c1 + 3 * c2 + y2) / 8;
+    const one = document.createElementNS(SVGNS, 'g');
+    one.setAttribute('clip-path', clipAround(it.src, it.dst));
+    g.appendChild(one);
     const line = document.createElementNS(SVGNS, 'path');
     // …and the curve ends a head's length short, in a straight stretch: the head sits on a line that
     // already runs its way, whatever the bend before it.
@@ -4999,7 +5022,7 @@ function archOverlay(items) {
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
     hit.setAttribute('class', 'arch-ov-hit'); hit.removeAttribute('marker-end');
-    g.appendChild(line); g.appendChild(hit);
+    one.appendChild(line); one.appendChild(hit);
     const desc = archOverlayDesc(it.src, it.dst);
     // …and the click stops here: on the empty space behind it, it would let go of the box or the
     // layer line these lines were drawn for, and take them away again.
@@ -6427,12 +6450,24 @@ function nameClick(ev) {
   const name = t && t.closest && t.closest('.ibox-name, .cyname');
   if (!name) return false;
   if (!ev.detail || !Number.isFinite(ev.clientX)) return true;
+  return pointOnNameText(name, ev.clientX, ev.clientY);
+}
+// Is (x, y) on a line of the name's own text? A pixel or two round the glyphs counts, so a click on a
+// letter's edge still does.
+function pointOnNameText(name, x, y) {
   const range = document.createRange();
   range.selectNodeContents(name);
-  const slack = 2;   // a pixel or two round the glyphs, so a click on a letter's edge still counts
-  return [...range.getClientRects()].some((r) => ev.clientX >= r.left - slack && ev.clientX <= r.right + slack
-                                               && ev.clientY >= r.top - slack && ev.clientY <= r.bottom + slack);
+  const slack = 2;
+  return [...range.getClientRects()].some((r) => x >= r.left - slack && x <= r.right + slack
+                                               && y >= r.top - slack && y <= r.bottom + slack);
 }
+// …AND THE UNDERLINE SAYS THE SAME. It came on anywhere over the name's button, so the blank beside a
+// wrapped name's shorter line looked like a link and was not one (a click there picks the box). The
+// name wears `name-off` while the pointer is over its button but off its words.
+diagram.addEventListener('mousemove', (ev) => {
+  const name = ev.target && ev.target.closest && ev.target.closest('.ibox-name, .cyname');
+  if (name) name.classList.toggle('name-off', !pointOnNameText(name, ev.clientX, ev.clientY));
+}, { passive: true });
 function bindFlowMap(uc) {
   const scene = mainScene;
   const steps = FLOWS_NARR[uc] || [];
