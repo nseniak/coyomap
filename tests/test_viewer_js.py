@@ -2464,7 +2464,8 @@ def test_the_zoom_control_is_absent_on_a_page_with_no_diagram() -> None:
     keep = js[js.index("function cardKeepSets(el) {"): js.index("\n}", js.index("function cardKeepSets(el) {"))]
     assert "[zoomctl, archplayer].filter((c) => c && !c.hidden)" in keep, \
         "no shape at all on a page that has no control (nor for the story player when it is hidden)"
-    assert keep.count("...fixed") == 4, "in every set: a control is never the concession to make"
+    # 4 sets, plus the Architecture picture's 2 that come before them (its drawn lines and far boxes)
+    assert keep.count("...fixed") == 6, "in every set: a control is never the concession to make"
     # Its ceiling keeps it inside the box #diagwrap clips; the placement, not the ceiling, is what
     # keeps it off the control.
     pane = css[css.index("#panel, #peekcard {"): css.index("}", css.index("#panel, #peekcard {"))]

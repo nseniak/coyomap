@@ -7802,6 +7802,7 @@ function archUseCasesHtml(e) {
 // lines that pass `test` (archShowLines). `key` names what is picked, so a second click on it shows
 // every line again; an empty key does that too.
 function archFilterLines(key, test, headHtml) {
+  const before = archBoxFilter;
   archBoxFilter = key || '';
   const on = archBoxFilter ? test : null;
   archFilterLabel = on ? headHtml : '';
@@ -7812,6 +7813,9 @@ function archFilterLines(key, test, headHtml) {
   if (mainScene) mainScene.root.querySelectorAll('.arch-layerline')
     .forEach((el) => el.classList.toggle('arch-layer-open', el.dataset.layer === open));
   archShowLines(on);
+  // LINES KEPT FROM INSIDE A CARD ("Draw all", a row) can land under it: the card is placed again, and
+  // stays where it is unless they do (placeCardNear keeps a place that clears everything).
+  if (archBoxFilter !== before && !PANEL_HOST.hidden && /^layer(box)?:/.test(archBoxFilter + before)) placeCard();
 }
 // ONE BOX'S STEPS: the lines with this box at either end. An empty id shows every line again.
 function archFilterBox(id, name) {
@@ -8723,10 +8727,62 @@ function cardKeepSets(el) {
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The story player's strip at the foot of the drawing is a control too.
   const fixed = [zoomctl, archplayer].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
-  if (!isArrow) return [[...g(own), ...fixed]];
-  return [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
-          [...g([...own, ...ends]), ...fixed],
-          [...g(ends), ...fixed]];
+  const base = !isArrow ? [[...g(own), ...fixed]]
+    : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
+       [...g([...own, ...ends]), ...fixed],
+       [...g(ends), ...fixed]];
+  // ON THE ARCHITECTURE PICTURE, the lines drawn for what the card is about, and the boxes at their far
+  // ends, come first: the card covered them, and they are what the reader looks at next. Given up in
+  // that order when nothing clears them, before the sets above.
+  const lines = archCardShapes(el);
+  if (!lines) return base;
+  const near = [...own, ...(isArrow ? [rectOf(arrow), ...ends] : [])];
+  const sets = [[...g([...near, ...lines.far, ...lines.along]), ...fixed],
+                [...g([...near, ...lines.far]), ...fixed],
+                ...base];
+  // …and where no place clears every line, the second set takes the place covering the FEWEST: giving
+  // the lines up all at once let the card lie on a third of them.
+  sets.fewest = { at: 1, of: g(lines.along) };
+  return sets;
+}
+// The lines drawn for `el` on the Architecture picture, as shapes to keep clear of: `along`, a small
+// square every ARCH_CARD_STEP screen pixels of each line (one rectangle round a curve would cover the
+// screen), and `far`, the boxes at their ends. On a crowded picture the drawn lines are the ones on top
+// of it; elsewhere every line is drawn, so they are the ones lit for `el` or touching its box.
+const ARCH_CARD_STEP = 18, ARCH_CARD_DOT = 8, ARCH_CARD_DOTS = 4000;
+function archCardShapes(el) {
+  if (!el || !mainScene || !archCurrentText()) return null;
+  const own = el.closest && el.closest('g.node');
+  const ownId = own ? idOf(own) : '';
+  const picked = [];   // [path, src, dst]
+  if (archCrowded()) {
+    diagram.querySelectorAll('.arch-overlay path.arch-ov-line')
+      .forEach((p) => picked.push([p, p.dataset.src, p.dataset.dst]));
+  } else {
+    eachEdge(mainScene.root, (p, _label, m) => {
+      if (p.classList.contains('arch-preview-on') || (ownId && (m[1] === ownId || m[2] === ownId))) picked.push([p, m[1], m[2]]);
+    });
+  }
+  if (!picked.length) return null;
+  const wrap = document.getElementById('diagwrap').getBoundingClientRect();
+  const along = [], farIds = new Set();
+  for (const [p, a, b] of picked) {
+    for (const id of [a, b]) if (id !== ownId) farIds.add(id);
+    let L = 0, m = null;
+    try { L = p.getTotalLength(); m = p.getScreenCTM(); } catch (_) { continue; }
+    if (!L || !m) continue;
+    const step = ARCH_CARD_STEP / (Math.hypot(m.a, m.b) || 1);
+    for (let d = 0; d <= L && along.length < ARCH_CARD_DOTS; d += step) {
+      const q = p.getPointAtLength(d);
+      const x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f;
+      if (x < wrap.left || x > wrap.right || y < wrap.top || y > wrap.bottom) continue;
+      const h = ARCH_CARD_DOT / 2;
+      along.push({ left: x - h, top: y - h, right: x + h, bottom: y + h, width: ARCH_CARD_DOT, height: ARCH_CARD_DOT });
+    }
+  }
+  const far = [...farIds].map((id) => mainScene.nodeEls[id]).filter(Boolean)
+    .map((n) => rectOf(n.querySelector('.ibox') || n));
+  return { far, along };
 }
 // THE LINE THAT WILL ACTUALLY BE DRAWN, not a stand-in for it: `syncCallout` runs it from the card's
 // border to the arrow's middle, or to the border of the box you picked. Measuring to a box's CENTRE
@@ -8767,7 +8823,8 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   // A BOX's line ends on its border, an arrow's on the arrow itself — `e` is null for an arrow so the
   // length is measured to the middle the line really meets.
   const e = mid ? null : own;
-  const sets = cardKeepSets(el).map((set) => [...set, ...also]);
+  const raw = cardKeepSets(el);
+  const sets = raw.map((set) => [...set, ...also]);
   // The reader's own hand is a shape to keep clear of, the same as the thing itself — but the first
   // sets only. By the last one there is barely room for the card at all.
   const hand = main && handAt
@@ -8793,12 +8850,12 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
       && box.right <= w.right - CARD_EDGE && box.bottom <= w.bottom - CARD_EDGE;
     // Against the shapes THEMSELVES, not the margin a fresh placement keeps round them: the card it took
     // over stood just outside that margin, and the bar it gained can bring it a few pixels into it.
-    if (inside && !sets[0].some((r) => rectsOverlap(box, grow(r, -CARD_CLEAR)))) { put(box.left, box.top); return; }
+    if (inside && !sets[0].some((r) => rectsOverlap(box, grow(r, -CARD_CLEAR)))) { card.dataset.placed = 'kept'; put(box.left, box.top); return; }
   }
   if (main && lastCardPlace) {
     const box = cardRectAt(w.left + lastCardPlace.left, w.top + lastCardPlace.top, W, H);
     if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE) {
-      put(box.left, box.top); return;
+      card.dataset.placed = 'kept'; put(box.left, box.top); return;
     }
   }
   // …then rings, growing outwards, each one tried in the eight directions in their own order. The first
@@ -8807,18 +8864,34 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   const far = Math.max(w.width, w.height) + CARD_RING;
   for (let s = 0; s < sets.length; s++) {
     const keep = (hand && s < 2) ? [...sets[s], hand] : sets[s];
+    if (raw.fewest && raw.fewest.at === s) {
+      let best = null;
+      for (let d = CARD_MIN_LINE; d <= far; d += CARD_RING) {
+        for (const [ux, uy] of CARD_DIRS) {
+          const box = cardRectAt(a.x + d * ux - (ux < 0 ? W : ux > 0 ? 0 : W / 2),
+                                 a.y + d * uy - (uy < 0 ? H : uy > 0 ? 0 : H / 2), W, H);
+          if (!cardBoxOk(box, w, keep, a, e)) continue;
+          const n = raw.fewest.of.reduce((k, r) => k + (rectsOverlap(box, r) ? 1 : 0), 0);
+          if (!best || n < best.n) best = { box, n };
+        }
+      }
+      if (best) { card.dataset.placed = String(s); put(best.box.left, best.box.top); return; }
+      continue;
+    }
     for (let d = CARD_MIN_LINE; d <= far; d += CARD_RING) {
       for (const [ux, uy] of CARD_DIRS) {
         const left = a.x + d * ux - (ux < 0 ? W : ux > 0 ? 0 : W / 2);
         const top = a.y + d * uy - (uy < 0 ? H : uy > 0 ? 0 : H / 2);
         const box = cardRectAt(left, top, W, H);
-        if (cardBoxOk(box, w, keep, a, e)) { put(left, top); return; }
+        // Which set it cleared, on the card itself: 0 is everything, the last before 'clamp' the least.
+        if (cardBoxOk(box, w, keep, a, e)) { card.dataset.placed = String(s); put(left, top); return; }
       }
     }
   }
   // NOWHERE CLEARS EVERYTHING — a card as big as the drawing, or a box in every corner. It goes up and
   // to the right anyway and is pushed back inside the edges: a card covering something still beats a
   // card off screen, and the line still says which thing it is about.
+  card.dataset.placed = 'clamp';
   const left = Math.min(Math.max(a.x + CARD_MIN_LINE, w.left + CARD_EDGE), w.right - CARD_EDGE - W);
   const top = Math.min(Math.max(a.y - CARD_MIN_LINE - H, w.top + CARD_EDGE), w.bottom - CARD_EDGE - H);
   put(left, top);
