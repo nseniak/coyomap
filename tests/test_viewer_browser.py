@@ -4295,7 +4295,7 @@ LINE_CARD = """(card) => { const c = document.querySelector(card);
     return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
              title: (c.querySelector('.pane-title h2') || {}).textContent || '',
              badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
-             ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.godrill),
+             ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.ucopen),
              story: (c.querySelector('.archcard-story .archuc-sent') || {}).textContent || '' }; }"""
 
 
@@ -4330,9 +4330,14 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         _arch_ready(page)
         assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
         # a use case's name opens its own map
-        uc = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-name');
-            btn.click(); return btn.dataset.godrill; }""")
+        uc, ns = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-name');
+            btn.click(); return [btn.dataset.ucopen, btn.dataset.ucsteps]; }""")
         page.wait_for_function(f"() => location.hash.includes('v=usecase') && location.hash.includes('uc={uc}')")
+        # …with this line's steps of it selected there
+        assert ns.split(",") == [str(n) for n in e["steps"][uc]], (ns, e["steps"])
+        page.wait_for_timeout(600)
+        picked = page.evaluate("() => decodeURIComponent(location.hash).split('&').filter((x) => x.startsWith('sel=flowstep:')).length")
+        assert picked == len(e["steps"][uc]), (picked, e["steps"][uc])
         # …and with its story followed on its feature's picture, the line's card says the story's sentence
         graph = model_to_graph(load_model(_FIXTURE_MAP.read_text()))
         cap = str(graph["nodes"][uc]["parent"])
@@ -4493,7 +4498,7 @@ def test_a_line_names_its_use_cases_by_feature() -> None:
             return { src, dst,
               feats: [...l.querySelectorAll('.archuc-feat > summary .archuc-count')].map((c) => +c.textContent),
               ucs: l.querySelectorAll('.archuc').length,
-              follows: l.querySelectorAll('.archuc .archuc-name[data-godrill]').length,
+              follows: l.querySelectorAll('.archuc .archuc-name[data-ucopen]').length,
               sents: l.querySelectorAll('.archuc .archuc-sent').length }; })""")
         by = {(r["src"], r["dst"]): r for r in seen}
         assert len(by) == len(text["lines"]), "every line of the picture has a card"

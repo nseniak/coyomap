@@ -300,7 +300,7 @@ def make_two_server_pipe_map() -> dict[str, Any]:
 
 
 def make_step(src: str, dst: str, key: str = "", phrase: str = "do it") -> gv._ArchStep:
-    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase, store="")
+    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase, store="", n=0)
 
 
 def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
@@ -603,10 +603,27 @@ def test_a_group_lists_first_the_parts_most_stories_pass_through():
     graph = make_graph(make_grouped_map())
     flow = gv._ArchFlow(walks=[("UC1", [("C4", "C5")]), ("UC2", [("C3", "C5")]), ("UC3", [("C3", "C5")])],
                         phrases={uc: ["x"] for uc in ("UC1", "UC2", "UC3")},
-                        keys={uc: [[]] for uc in ("UC1", "UC2", "UC3")},
+                        nums={uc: [1] for uc in ("UC1", "UC2", "UC3")},
                         people=[], doors=[], stores=[], ends={})
     lifted = gv._arch_lift(graph, flow, layered=True)
     assert lifted["cells"][gv._arch_cell_id(2, "S2")]["parts"] == ["C3", "C4"]
+
+
+def test_a_line_names_the_use_cases_own_steps_it_draws():
+    """Each line says, for each use case taking it, which of that use case's own steps it draws: the
+    step that starts it, and for a line through boxes not drawn, the steps it passes. A use case map
+    selects them."""
+    graph = make_graph()
+    model = gv._arch_model(graph, "", "all", budget=1)
+    assert model is not None
+    text = {(e["srcBox"], e["dstBox"]): e for e in gv._arch_text(graph, model)}
+    flows = {f["uc"]: f for f in graph["flows"]}
+    for (a, b), e in text.items():
+        for uc, ns in e["steps"].items():
+            own = {int(st["n"]) for st in flows[uc]["steps"]}
+            assert ns and set(ns) <= own, (a, b, uc, ns)
+    folded = text[("I1", "S2")]   # passes the Screens box, which has no room
+    assert any(len(ns) > 1 for ns in folded["steps"].values()), folded["steps"]
 
 
 def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():

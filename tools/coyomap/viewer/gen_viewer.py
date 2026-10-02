@@ -1131,6 +1131,8 @@ class _ArchStep(TypedDict):
     to_person: bool     # the result handed back to a person
     phrase: str         # the step's own sentence
     store: str          # the database it reaches through a record, else ""
+    n: int              # the use case's own step it comes from (a shared sub-use case's step: the step
+                        # that runs it), which its use case map selects
 
 
 def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -> list[_ArchStep]:
@@ -1165,7 +1167,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
 
     out: list[_ArchStep] = []
 
-    def emit(st: dict[str, Any], s: str, d: str, phrase: str) -> None:
+    def emit(st: dict[str, Any], s: str, d: str, phrase: str, n: int) -> None:
         from_person = is_role_endpoint(bool(st.get("src_is_id"))) and s == str(st.get("src"))
         to_person = is_role_endpoint(bool(st.get("dst_is_id"))) and d == str(st.get("dst"))
         # A record is reached, it never acts: a step FROM one is its data coming back, an answer,
@@ -1177,12 +1179,13 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
             d = store = store_of(d)
         if s and d and s != d:
             out.append(_ArchStep(src=s, dst=d, from_person=from_person, to_person=to_person,
-                                 phrase=phrase, store=store))
+                                 phrase=phrase, store=store, n=n))
 
     left: tuple[str, set[str]] | None = None   # the box of the run a walk just left, and its components
     for st in cast("list[dict[str, Any]]", flow.get("steps") or []):
         if not st.get("ok"):
             continue
+        n = int(st.get("n") or 0)
         s = str(st["src"])
         if left is not None:
             if s in left[1]:
@@ -1194,13 +1197,13 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
         if sf is not None and inner and layered:
             sid = str(sf["id"])
             for x in inner:
-                emit(x, str(x["src"]), str(x["dst"]), str(x.get("phrase") or "").strip())
+                emit(x, str(x["src"]), str(x["dst"]), str(x.get("phrase") or "").strip(), n)
             continue
         if sf is None or not inner:
-            emit(st, s, str(st["dst"]), str(st.get("phrase") or "").strip())
+            emit(st, s, str(st["dst"]), str(st.get("phrase") or "").strip(), n)
             continue
         sid = str(sf["id"])
-        emit(st, s, sid, str(st.get("phrase") or "").strip() or str(sf.get("name") or sid))
+        emit(st, s, sid, str(st.get("phrase") or "").strip() or str(sf.get("name") or sid), n)
         members: set[str] = set()
         for x in inner:
             a, b = str(x["src"]), str(x["dst"])
@@ -1210,7 +1213,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
             if kind(b) == "component":
                 members.add(b)
                 b = sid
-            emit(x, a, b, str(x.get("phrase") or "").strip())
+            emit(x, a, b, str(x.get("phrase") or "").strip(), n)
         left = (sid, members)
     return out
 
@@ -1328,7 +1331,7 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
             called.setdefault(src, set()).add(dst)
             st = _ArchStep(src=came["src"], dst=dst, from_person=came["from_person"],
                            to_person=st["to_person"], phrase=came["phrase"] if first else st["phrase"],
-                           store=st["store"])
+                           store=st["store"], n=came["n"] if first else st["n"])
             src = st["src"]
         if through(dst) and not st["to_person"]:
             if src in called.get(dst, set()):   # the answer of a box this pipe called
@@ -1338,7 +1341,7 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
         if src == dst:   # an answer that came back through a pipe to the box that called it
             continue
         out.append(_ArchStep(src=src, dst=dst, from_person=st["from_person"],
-                             to_person=st["to_person"], phrase=st["phrase"], store=st["store"]))
+                             to_person=st["to_person"], phrase=st["phrase"], store=st["store"], n=st["n"]))
     return out, needed
 
 
@@ -1346,6 +1349,7 @@ class _ArchFlow(TypedDict):
     walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
     phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
                                                     # order, beside `walks` (what the flow text prints)
+    nums: dict[str, list[int]]                      # use case -> each kept step's own step number, beside it
     people: list[str]                               # the people the walks name, first met first
     doors: list[str]                                # the interfaces a person steps straight into
     stores: list[str]                               # the databases reached through records
@@ -1374,12 +1378,14 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                     doors.setdefault(st["dst"], None)
     out: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
+    nums: dict[str, list[int]] = {}
     stores: dict[str, None] = {}
     ends: dict[str, str] = {}
     for uc, sts in stepped:
         callers: dict[str, set[str]] = {}
         steps: list[tuple[str, str]] = []
         said: list[str] = []
+        ns: list[int] = []
         for st in sts:
             s, d = st["src"], st["dst"]
             if st["to_person"]:
@@ -1391,9 +1397,11 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                 stores.setdefault(st["store"], None)
             steps.append((s, d))
             said.append(st["phrase"])
+            ns.append(st["n"])
         out.append((uc, steps))
         phrases[uc] = said
-    return _ArchFlow(walks=out, phrases=phrases, people=list(people), doors=list(doors),
+        nums[uc] = ns
+    return _ArchFlow(walks=out, phrases=phrases, nums=nums, people=list(people), doors=list(doors),
                      stores=list(stores), ends=ends)
 
 
@@ -1547,21 +1555,25 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
         box_of = {c: (c if alone(c) or sid == c else sid) for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
+    nums: dict[str, list[int]] = {}
     for uc, steps in flow["walks"]:
         callers: dict[str, set[str]] = {}
         lifted: list[tuple[str, str]] = []
         said: list[str] = []
-        for (s, d), text in zip(steps, flow["phrases"][uc]):
+        ns: list[int] = []
+        for (s, d), text, n in zip(steps, flow["phrases"][uc], flow["nums"][uc]):
             a, b = box_of.get(s, s), box_of.get(d, d)
             if a == b or b in callers.get(a, set()):
                 continue
             callers.setdefault(b, set()).add(a)
             lifted.append((a, b))
             said.append(text)
+            ns.append(n)
         walks.append((uc, lifted))
         phrases[uc] = said
+        nums[uc] = ns
     ends = {uc: box_of.get(x, x) for uc, x in flow["ends"].items()}
-    return _ArchLifted(walks=walks, phrases=phrases, people=flow["people"], doors=flow["doors"],
+    return _ArchLifted(walks=walks, phrases=phrases, nums=nums, people=flow["people"], doors=flow["doors"],
                        stores=flow["stores"], ends=ends, box_of=box_of, cells=cells)
 
 
@@ -1648,6 +1660,7 @@ class _ArchLine(TypedDict):
     via: list[str]  # …and which ones: every box a story passes through between the two, first met first
     verb: str       # the link list's word for a one-step line ("calls ×2"), else ""
     number: int     # its step in the macro flow (_story_order_numbers)
+    steps: dict[str, list[int]]   # use case -> its own steps this line draws (its use case map selects them)
     sentences: list[tuple[str, str]]   # (use case, its own sentence for the step that starts this
                                        # line), one per story taking it, first met first
     store: bool      # a line into a database: where a box keeps what it saves, not a step of the flow
@@ -1729,30 +1742,31 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     via_of: dict[tuple[str, str], dict[str, None]] = {}   # (a, b) -> the boxes folded into it
     direct: set[tuple[str, str]] = set()                  # …unless some story takes it as one step
     said: dict[tuple[str, str], dict[str, str]] = {}      # (a, b) -> story -> the sentence of its step
+    steps_of: dict[tuple[str, str], dict[str, list[int]]] = {}   # (a, b) -> story -> its own steps on it
     stories: dict[str, list[tuple[str, str]]] = {}
     for uc, steps in flow["walks"]:
         seq: list[tuple[str, str]] = []
         for i, (s, d) in enumerate(steps):
             if s not in kept:
                 continue
-            found: list[tuple[str, list[str]]] = []   # (end, boxes passed)
+            found: list[tuple[str, list[str], list[int]]] = []   # (end, boxes passed, the steps taken)
             if d in kept:
-                found.append((d, []))
+                found.append((d, [], [i]))
             else:
-                todo: list[tuple[str, int, list[str]]] = [(d, i, [d])]
+                todo: list[tuple[str, int, list[str], list[int]]] = [(d, i, [d], [i])]
                 seen = {d}
                 while todo:
-                    head, at, path = todo.pop()
+                    head, at, path, js = todo.pop()
                     for j in range(at + 1, len(steps)):
                         hs, hd = steps[j]
                         if hs != head:
                             continue
                         if hd in kept:
-                            found.append((hd, path))
+                            found.append((hd, path, [*js, j]))
                         elif hd not in seen:
                             seen.add(hd)
-                            todo.append((hd, j, [*path, hd]))
-            for b, path in found:
+                            todo.append((hd, j, [*path, hd], [*js, j]))
+            for b, path, js in found:
                 if b == s:
                     continue
                 taken.setdefault((s, b), set()).add(uc)
@@ -1762,6 +1776,10 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
                 # THE LINE'S SENTENCE is the one of the step that starts it: for a one-step line the
                 # step itself, for a folded line the step leaving its first box. First step wins.
                 said.setdefault((s, b), {}).setdefault(uc, flow["phrases"][uc][i])
+                mine = steps_of.setdefault((s, b), {}).setdefault(uc, [])
+                for j in js:
+                    if flow["nums"][uc][j] not in mine:
+                        mine.append(flow["nums"][uc][j])
                 if (s, b) not in seq:
                     seq.append((s, b))
         if seq:
@@ -1810,6 +1828,7 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
                                always=(a, b) not in kept_lines and walks_of == leaving[a],
                                hidden=len(via), via=via, verb=verb, number=numbers.get((a, b), 0),
                                sentences=list(said.get((a, b), {}).items()),
+                               steps=steps_of.get((a, b), {}),
                                store=(a, b) in kept_lines, up=False))
     # Reading order: the flow's lines by number, then the lines into a database, each in first-met order.
     lines.sort(key=lambda ln: (ln["store"], ln["number"], first[(ln["src"], ln["dst"])]))
@@ -2141,6 +2160,7 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
             "hidden": ln["hidden"],
             "store": ln["store"],
             "verb": ln["verb"],
+            "steps": ln["steps"],
             **({"up": True} if ln["up"] else {}),
             "via": [name(x) for x in ln["via"]],
             "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}

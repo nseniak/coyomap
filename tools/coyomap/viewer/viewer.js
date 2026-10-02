@@ -7845,8 +7845,10 @@ function archUseCasesHtml(e) {
   // THE NAME OPENS THE USE CASE'S OWN MAP, where it is walked step by step: one door per row, the name
   // a reader is already looking at. It followed the story on the feature's Architecture picture for a
   // while, which only redrew the picture the reader was already reading.
-  const row = (uc) => `<div class="archuc"><button type="button" class="archuc-name" data-godrill="${esc(uc)}"`
-    + ' title="Open this use case\'s map">'
+  // …WITH THIS LINE'S STEPS SELECTED on it (`e.steps`: the use case's own steps the line draws), so
+  // the map opens on the part of the story the reader came from.
+  const row = (uc) => `<div class="archuc"><button type="button" class="archuc-name" data-ucopen="${esc(uc)}"`
+    + ` data-ucsteps="${esc(((e.steps || {})[uc] || []).join(','))}" title="Open this use case's map">`
     + `${itemMarkHtml('usecase')}<span>${esc(elName(uc))}</span></button>`
     + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('') + '</div>';
   // The Features page's order, which is the order of the view's own feature buttons.
@@ -7881,6 +7883,20 @@ function archBoxName(t, id) {
   }
   return id;
 }
+// A USE CASE'S NAME ON A LINE'S CARD opens its map with the line's steps selected: each of its own step
+// numbers is the selection key of that step on the map (`flowstep:<uc>:<index>`, the index into its
+// steps). In either card.
+[PANEL_HOST, PEEK_CARD].forEach((card) => card && card.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-ucopen]');
+  if (!b) return;
+  e.stopPropagation();
+  const uc = b.getAttribute('data-ucopen');
+  const steps = FLOWS_NARR[uc] || [];
+  const sels = (b.getAttribute('data-ucsteps') || '').split(',').filter(Boolean)
+    .map((n) => steps.findIndex((st) => String(st.n) === n)).filter((i) => i >= 0)
+    .map((i) => 'flowstep:' + uc + ':' + i);
+  go(sels.length ? { kind: 'usecase', uc, sels } : { kind: 'usecase', uc });
+}));
 // FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The story player's ×.
 function archStoryClick(e) {
   const pick = e.target.closest && e.target.closest('[data-archstory]');
@@ -7906,7 +7922,6 @@ function showArchLine(e, story) {
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
     + '<div class="archcard-lbl">Features using this line</div>'
     + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
-  bindGoDrill(panel);   // a use case's name opens its map
   cvElement = null;
   setTreeSelection(null);
   highlightTreePath(null);

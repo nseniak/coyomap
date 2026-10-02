@@ -990,7 +990,7 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
   color: #64748b; margin: 10px 0 4px; }
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
 .archcard-story .archuc-sent { margin: 0; }
-.archcard-ucs { max-height: 50vh; overflow: auto; }
+
 /* …and on a picture that draws every line, resting on a box lights its own. */
 #diagram path.flowchart-link.arch-preview-on { stroke: #4f46e5 !important; stroke-width: 2.4px !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
