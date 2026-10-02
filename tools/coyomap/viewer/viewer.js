@@ -267,7 +267,9 @@ diaghead.addEventListener('click', (e) => {
   if (!(e.target.closest && e.target.closest('[data-archthrough-clear]'))) return;
   const was = archBoxFilter;
   archFilterBox('');
-  if (mainScene && was) selRemove(mainScene, was.startsWith('layer:') ? 'archlayer:' + was.slice(6) : 'node:' + was);
+  if (mainScene && was && !/^layer(box)?:/.test(was)) selRemove(mainScene, 'node:' + was);
+  [PANEL_HOST, PEEK_CARD].forEach((card) => card && card.querySelectorAll('[data-archdrawall]')
+    .forEach((b) => archSyncLayerCard(card, +b.dataset.archdrawall)));
 });
 diaghead.addEventListener('change', (e) => {
   const pick = e.target.closest && e.target.closest('[data-archfollow]');
@@ -503,7 +505,7 @@ const GLOSS_SKIP = 'a, button, summary, code, pre, kbd, svg, h1, h2, h3, h4, .pa
   + '.ibox-name, .tb-trig, '
   + '.feat-ep-plain, .glossary-wrap, .gloss-plain, .ecard-pill, .ecard-type, .dv-tag, '
   + '.dv-kindpill, .dv-coll, .ibox-name, .ibox-pill, .ibox-count, .item-pill, '
-  + '.story-pill, .story-colhead, '
+  + '.story-pill, .story-colhead, .archcard-from, '
   + '.story-elabel, .journey-zkind, .journey-gutter';
 // A page about one element is not decorated with a link to itself: the page's subject is the
 // breadcrumb's last item (the trail names the page — one source of truth), folded the same way the
@@ -4829,11 +4831,64 @@ function archOverlayItem(e) {
 }
 // Draw the box lines of a crowded picture that pass `test`, each with its step number, or none again
 // when it is null.
+// WHAT THE PICTURE DRAWS OF ITS LINES besides the drawing: the lines KEPT (a picked box's, a row of a
+// line between layers clicked, "Draw all"), and the lines PREVIEWED while the pointer rests on something
+// (a box, a line between layers, a row of its card). Resting shows, clicking keeps: the rule a card
+// already follows. A crowded picture draws them on top of itself; any other picture has them all
+// drawn already, and lights the previewed ones.
+let archKeptTest = null;
 function archShowLines(test) {
-  if (!archCrowded()) return;
+  archKeptTest = test;
+  archRedrawLines();
+}
+function archRedrawLines() {
+  if (!mainScene || archPlay) return;   // a followed story draws its own lines (archFollow)
+  const kept = archKeptTest, peek = archPreviewTest;
+  if (!archCrowded()) {
+    eachEdge(mainScene.root, (p, label, m) => {
+      const on = !!peek && peek(m[1], m[2]);
+      for (const el of [p, ...(p._segs || []), ...(p.__cyHits || []), label].filter(Boolean))
+        el.classList.toggle('arch-preview-on', on);
+    });
+    return;
+  }
+  const test = kept || peek ? (a, b) => (!!kept && kept(a, b)) || (!!peek && peek(a, b)) : null;
   mainScene.root.classList.toggle('arch-picking', !!test);
   const t = archCurrentText();
   archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox)).map(archOverlayItem) : []);
+}
+// A PREVIEW lasts while the pointer is on what asked for it, on the lines it drew, or in a card: the
+// reader moves from a box to its lines to read them, and the lines must not go on the way.
+let archPreviewTest = null, archPreviewKey = '', archPreviewFrom = null, archPreviewTimer = 0;
+const ARCH_PREVIEW_LEAVE_MS = 200;
+function archPreview(key, from, test) {
+  clearTimeout(archPreviewTimer); archPreviewTimer = 0;
+  if (archPlay || archPreviewKey === key) return;
+  archPreviewWatch();
+  archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
+  archRedrawLines();
+}
+function archPreviewEnd() {
+  clearTimeout(archPreviewTimer); archPreviewTimer = 0;
+  if (!archPreviewKey) return;
+  archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null;
+  archRedrawLines();
+}
+function archPreviewHeld(el) {
+  if (!el || !el.closest) return false;
+  return (archPreviewFrom && archPreviewFrom.isConnected && archPreviewFrom.contains(el))
+    || !!el.closest('.arch-overlay, .arch-preview-on, #panel, #peekcard');
+}
+// Listened for from the first preview on, not at load: this part of the file also runs outside a page.
+let archPreviewWatching = false;
+function archPreviewWatch() {
+  if (archPreviewWatching) return;
+  archPreviewWatching = true;
+  document.addEventListener('pointermove', (ev) => {
+    if (!archPreviewKey) return;
+    if (archPreviewHeld(ev.target)) { clearTimeout(archPreviewTimer); archPreviewTimer = 0; return; }
+    if (!archPreviewTimer) archPreviewTimer = setTimeout(archPreviewEnd, ARCH_PREVIEW_LEAVE_MS);
+  }, { passive: true });
 }
 // ONE BOX LINE'S CURVE, from box `s` to box `d` (each { x1, y1, x2, y2, cx, cy }), as
 // [x1, y1, the two control heights, x2, y2]: it leaves and arrives straight up or down, at the boxes'
@@ -7616,6 +7671,8 @@ let archFilterLabel = '';   // what the header's tag says while a box's lines al
 // A NEW SCREEN starts with every line shown, and with the story player for the story it follows.
 function syncArchView(s) {
   syncArchPlayer(s);
+  clearTimeout(archPreviewTimer);
+  archPreviewTimer = 0; archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
   archBoxFilter = '';
   archFilterLabel = '';
   syncArchThrough();
@@ -7807,10 +7864,10 @@ function showArchLine(e, story) {
   setTreeSelection(null);
   highlightTreePath(null);
 }
-// A LINE BETWEEN LAYERS is picked like any line, and its card lists the lines it stands for, each
-// opening to the use cases that take it. Picking it also draws those lines (archFilterLayerLine), from a
-// click as from the address. The drawing holds nothing else on a crowded picture, so the k-th line
-// drawn is the k-th line between layers (markLayerLines).
+// A LINE BETWEEN LAYERS is picked like any line, and its card says what it stands for. Resting on it
+// previews its lines; the card draws them on demand (a row, or "Draw all"). A click draws nothing by
+// itself: drawn on a click, the lines came as a surprise. The drawing holds nothing else on a crowded
+// picture, so the k-th line drawn is the k-th line between layers (markLayerLines).
 function bindArchLayerLines(t, story) {
   const paths = [...mainScene.root.querySelectorAll('.edgePaths path.flowchart-link')];
   const layers = (t && t.layerLines) || [];
@@ -7820,27 +7877,96 @@ function bindArchLayerLines(t, story) {
     return { e: { src: m[1], dst: m[2] }, selKey: 'archlayer:' + k,
              showFn: () => showArchLayerLine(layers[k], t, story), opts: { hover: true } };
   });
-  layers.forEach((_ll, k) => {
-    const base = mainScene.selectors['archlayer:' + k];
-    if (base) mainScene.selectors['archlayer:' + k] = () => {
-      base();
-      if (!story && archBoxFilter !== 'layer:' + k) archFilterLayerLine(k, t);
-    };
+  paths.forEach((p, k) => {
+    if (!layers[k]) return;
+    const test = archLayerTest(layers[k]);
+    for (const el of p.__cyHits || []) el.addEventListener('mouseenter', () => archPreview('layer:' + k, el, test));
   });
 }
+function archLayerTest(ll, from) {
+  const pairs = new Set(ll.lines.filter(([a]) => !from || a === from).map(([a, b]) => a + '>' + b));
+  return (a, b) => pairs.has(a + '>' + b);
+}
+// THE CARD OF A LINE BETWEEN LAYERS, as a summary: how many lines, from how many boxes to how many,
+// for how many use cases; then one row per box the lines leave from, naming where they go; then the
+// use cases by feature. On mcpolis's whole product a line between layers stands for up to 15 lines and
+// 63 use cases, and one row per line, each with its own use cases, was a pile with nothing on top.
+// No step numbers: across every story of the product, the 8 lines of one row all said "step 2".
 function showArchLayerLine(ll, t, story) {
-  const rows = ll.lines.map(([a, b]) => archLineOf(t, a, b)).filter(Boolean);
+  const k = ((t && t.layerLines) || []).indexOf(ll);
+  const lines = ll.lines.map(([a, b]) => archLineOf(t, a, b)).filter(Boolean);
+  const n = (k2, word) => k2 === 1 ? `1 ${word}` : `${k2} ${word}${/x$/.test(word) ? 'es' : 's'}`;
+  // A group's name carries its layer, "(UI and scripts)", which the card's title already says.
+  const bare = (name, layer) => name.endsWith(` (${layer})`) ? name.slice(0, -layer.length - 3) : name;
+  const from = new Map();
+  for (const e of lines) {
+    if (!from.has(e.srcBox)) from.set(e.srcBox, { name: bare(e.src, ll.src), to: [] });
+    from.get(e.srcBox).to.push(bare(e.dst, ll.dst));
+  }
+  const merged = { sentences: lines.flatMap((e) => e.sentences) };
+  const ucs = new Set(merged.sentences.flatMap((x) => x.ucs));
+  const feats = new Set([...ucs].map((uc) => String((GRAPH.nodes[uc] || {}).parent || '')));
+  const dsts = new Set(lines.map((e) => e.dstBox));
+  const kept = archBoxFilter;
   panel.innerHTML = `<div class="pane-title"><h2>${esc(ll.src)} \u2192 ${esc(ll.dst)}</h2>`
     + '<span class="badge edge">between layers</span></div>'
-    + `<p class="archcard-via">Stands for ${rows.length === 1 ? '1 line' : rows.length + ' lines'} from a box`
-    + ` in ${esc(ll.src)} to a box in ${esc(ll.dst)}.</p>`
-    + '<div class="archcard-ucs">' + rows.map((e) => `<details class="archcard-line"><summary>`
-      + `${esc(e.src)} \u2192 ${esc(e.dst)}`
-      + (e.store ? '' : ` <span class="archuc-count">step ${Number(e.n)}</span>`) + '</summary>'
-      + archUseCasesHtml(e) + '</details>').join('') + '</div>';
+    + `<p class="archcard-via">${n(lines.length, 'line')} from ${n(from.size, 'box')} in ${esc(ll.src)}`
+    + ` to ${dsts.size} in ${esc(ll.dst)}, taken by ${n(ucs.size, 'use case')} in ${n(feats.size, 'feature')}.</p>`
+    + '<div class="archcard-lbl">From each box</div><div class="archcard-from-list">'
+    + [...from].map(([box, r]) => `<div class="archcard-from${kept === `layerbox:${k}:${box}` ? ' on' : ''}"`
+      + ` data-archrow="${esc(box)}" data-archlayer="${k}" tabindex="0">`
+      + `<b>${esc(r.name)}</b> <span class="archcard-to">\u2192 ${r.to.map(esc).join(' \u00b7 ')}</span></div>`).join('')
+    + '</div>'
+    + `<button type="button" class="archcard-drawall" data-archdrawall="${k}">`
+    + `${kept === 'layer:' + k ? 'Hide the lines' : (lines.length === 1 ? 'Draw the line' : `Draw all ${lines.length} lines`)}</button>`
+    + '<div class="archcard-lbl">Use cases</div>'
+    + `<div class="archcard-ucs">${archUseCasesHtml(merged)}</div>`;
   cvElement = null;
   setTreeSelection(null);
   highlightTreePath(null);
+}
+// The card's rows and its button, in either card: resting on a row previews that box's lines, a click
+// keeps them, and "Draw all" keeps every line. A second click lets go.
+function archLayerRowAt(e) {
+  const row = e.target.closest && e.target.closest('[data-archrow]');
+  const t = archCurrentText();
+  const ll = row && ((t && t.layerLines) || [])[+row.dataset.archlayer];
+  return ll ? { row, ll, k: +row.dataset.archlayer, box: row.dataset.archrow } : null;
+}
+[PANEL_HOST, PEEK_CARD].forEach((card) => {
+  if (!card) return;
+  card.addEventListener('mouseover', (e) => {
+    const r = archLayerRowAt(e);
+    if (r) archPreview(`row:${r.k}:${r.box}`, r.row, archLayerTest(r.ll, r.box));
+  });
+  card.addEventListener('click', (e) => {
+    const all = e.target.closest && e.target.closest('[data-archdrawall]');
+    const t = archCurrentText();
+    if (all) {
+      e.stopPropagation();
+      const k = +all.dataset.archdrawall;
+      if (archBoxFilter === 'layer:' + k) archFilterBox(''); else archFilterLayerLine(k, t);
+      archSyncLayerCard(card, k);
+      return;
+    }
+    const r = archLayerRowAt(e);
+    if (!r) return;
+    e.stopPropagation();
+    const key = `layerbox:${r.k}:${r.box}`;
+    if (archBoxFilter === key) archFilterBox('');
+    else archFilterLines(key, archLayerTest(r.ll, r.box),
+      `From <b>${esc(archBoxName(t, r.box))}</b> to <b>${esc(r.ll.dst)}</b>`);
+    archSyncLayerCard(card, r.k);
+  });
+});
+// The card says what is kept, in place: which row is on, and what the button will do.
+function archSyncLayerCard(card, k) {
+  card.querySelectorAll(`[data-archrow][data-archlayer="${k}"]`).forEach((row) =>
+    row.classList.toggle('on', archBoxFilter === `layerbox:${k}:${row.dataset.archrow}`));
+  const btn = card.querySelector(`[data-archdrawall="${k}"]`);
+  const t = archCurrentText(), ll = ((t && t.layerLines) || [])[k];
+  if (btn && ll) btn.textContent = archBoxFilter === 'layer:' + k ? 'Hide the lines'
+    : (ll.lines.length === 1 ? 'Draw the line' : `Draw all ${ll.lines.length} lines`);
 }
 function archLineOf(t, src, dst) {
   return ((t && t.lines) || []).find((x) => x.srcBox === src && x.dstBox === dst) || null;
@@ -7887,6 +8013,12 @@ function bindArch() {
     mainScene.selectors['node:' + id] = () => { selAdd(mainScene, nodeDesc(mainScene, el, id)); pickBox(id); };
   }
   bindArchPeople(t, pickBox);
+  // RESTING ON A BOX previews its lines, as resting on a line between layers does: drawn on a crowded
+  // picture, lit on any other. A click keeps them (pickBox).
+  for (const id in mainScene.nodeEls) {
+    const el = mainScene.nodeEls[id];
+    el.addEventListener('mouseenter', () => archPreview('box:' + id, el, (a, b) => a === id || b === id));
+  }
   // "+N MORE" OPENS THE BOX: the picture is drawn again with that subsystem's every part named. It is a
   // new screen, so Back closes it again and a link keeps it open.
   // …AND THE CAMERA STAYS: the reader opened one box where they were looking, so the new drawing opens
@@ -7911,7 +8043,6 @@ function bindArch() {
   if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t, story));
   else bindArchLayerLines(t, story);
   markLayerLines(mainScene.root, t);
-  bindArchLayerToggle(t, story);
   if (story) archFollow(story);
 }
 // A PERSON'S BOX is drawn under an alias of its own (a person is a role, not a map element), so
@@ -7944,23 +8075,6 @@ function bindAliasBox(scene, el, id, opts) {
 function bindActorBox(scene, el, id, a, afterPick) {
   bindAliasBox(scene, el, id, { show: () => showActorCard(a), opensOn: nameClick,
                                 open: () => go({ kind: 'actor', act: a.name }), afterPick });
-}
-// A LAYER LINE draws the box lines it stands for; a second click on it lets go of them and of it.
-function bindArchLayerToggle(t, story) {
-  if (!mainScene) return;
-  eachEdge(mainScene.root, (p, label) => {
-    const layer = p.classList.contains('arch-layerline') ? p.dataset.layer : '';
-    if (!layer) return;
-    const toggle = (ev) => {
-      ev.stopPropagation();   // the empty space behind it lets go of what is picked (resetScene)
-      if (story) return;
-      if (archBoxFilter === 'layer:' + layer) {
-        archFilterBox('');
-        selRemove(mainScene, 'archlayer:' + layer);
-      } else archFilterLayerLine(+layer, t);
-    };
-    for (const el of [p, ...(p.__cyHits || []), label].filter(Boolean)) el.addEventListener('click', toggle);
-  });
 }
 // FOLLOWING ONE STORY on the drawing: its lines stay lit and carry its own numbers, 1, 2, 3 in its
 // order, everything else steps back, and its start and end are marked (markStartEnd).
@@ -8096,7 +8210,7 @@ function archKeyHtml(t) {
   // takes the place of the two box line styles.
   const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, ARCH_LAYER_LINE_COLOR, ARCH_LAYER_LINE_PX)}`
       + ' from one layer to another, when more than a third of the first layer\'s boxes lead there.'
-      + ' Click it, or a box, to see the lines themselves</span>' : '';
+      + ' Rest the pointer on it, or on a box, to see the lines themselves; a click keeps a box\'s</span>' : '';
   return '<div class="archkey">'
     + (crowded || `<span>${line(false, '#475569')} every story through that box goes this way</span>`
       + `<span>${line(true, '#475569')} only some do</span>`)

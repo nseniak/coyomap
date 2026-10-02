@@ -989,6 +989,19 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archcard-line > summary:hover { color: #4f46e5; }
 .archcard-line > .archuc-list, .archcard-line > .archuc-feat { margin-left: 14px; }
 .archcard-line[open] { padding-bottom: 6px; }
+/* A line between layers' card: one row per box its lines leave from. Resting on a row previews its
+   lines; a clicked row keeps them, and says so. */
+.archcard-from-list { display: flex; flex-direction: column; gap: 2px; }
+.archcard-from { font-size: 13px; line-height: 18px; color: #1f2937; padding: 3px 6px; margin: 0 -6px;
+  border-radius: 6px; cursor: pointer; }
+.archcard-from:hover { background: #f1f5f9; }
+.archcard-from.on { background: #eef2ff; box-shadow: inset 2px 0 0 #4f46e5; }
+.archcard-to { color: #475569; }
+.archcard-drawall { margin-top: 8px; font: inherit; font-size: 12px; color: #4f46e5; background: #fff;
+  border: 1px solid #c7d2fe; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.archcard-drawall:hover { background: #eef2ff; }
+/* …and on a picture that draws every line, resting on a box lights its own. */
+#diagram path.flowchart-link.arch-preview-on { stroke: #4f46e5 !important; stroke-width: 2.4px !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
    column heads and the "The product" tag are drawn inside that air, and the wrap is what clips. */
 .item-sec-frame .ifd-wrap, .item-sec-frame .hfade-wrap > .ifd-wrap { padding: 16px 0; }
