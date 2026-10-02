@@ -219,17 +219,13 @@ def test_an_update_row_says_what_its_skeptics_decided_or_that_none_read_it() -> 
         assert not page.js_errors, page.js_errors
 
 
-def test_the_overview_says_how_much_of_the_map_has_a_verdict() -> None:
-    """The map's warrant on the one screen meant to be read, and nothing when the map has no record:
-    a map nobody challenged must not read "0 of 0"."""
-    with _served_update() as url, _page(url + "#v=overview") as page:
-        _ready(page)
-        assert page.evaluate("() => document.querySelectorAll('[data-warrant]').length") == 0
+def test_the_overview_says_nothing_of_how_the_map_was_checked() -> None:
+    """The Overview is about the product. How many of the map's statements a skeptic has read is about
+    the map's making, and is not said there, whatever the map records."""
     with _served_update(challenged=True) as url, _page(url + "#v=overview") as page:
         _ready(page)
-        line = _text(page, "[data-warrant]")
-        assert line.startswith("40 of 40 statements have a verdict from a fresh-context skeptic, 1 refuted"), line
-        assert "1 update wave since the build of 2026-09-01; the last re-argued 9 and carried 31" in line, line
+        assert page.evaluate("() => document.querySelectorAll('[data-warrant]').length") == 0
+        assert "skeptic" not in _text(page, "#diagram"), "no line about the map's checking"
         assert not page.js_errors, page.js_errors
 
 

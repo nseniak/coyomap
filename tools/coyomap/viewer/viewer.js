@@ -10428,35 +10428,15 @@ function productLeadHtml(secs) {
     `<div class="view-lead"><div class="view-lead-body">`
     + proseBlocksHtml(overview, (p) => mdRefs(p, GRAPH.nodes)) + '</div></div>');
 }
-// THE WARRANT, in one line: how much of what this map says a fresh-context skeptic has read against
-// the code, and how that came to be — the build's pass, then each update's wave. Until this line
-// existed the record travelled inside the map and appeared on NO screen, so a reader could not tell
-// a map argued with by eighteen skeptics from one nobody had checked; after an update the numbers
-// are re-measured over the map as it now is, and the waves say what was carried and what was re-read.
-function warrantLineHtml() {
-  const w = GRAPH.warrant;
-  if (!w) return '';
-  const waves = w.waves || [];
-  const parts = [`${w.live_challenged} of ${countLabel(w.live_total, 'statement')} have a verdict from a fresh-context skeptic`
-                 + (w.refuted ? `, ${w.refuted} refuted` : '')];
-  const updates = waves.filter((x) => x.kind === 'update');
-  const build = waves.find((x) => x.kind === 'build');
-  if (updates.length) {
-    const last = updates[updates.length - 1];
-    parts.push(`${countLabel(updates.length, 'update wave')} since the build`
-               + (build && build.date ? ` of ${build.date}` : '')
-               + `; the last re-argued ${last.challenged} and carried ${last.carried}`);
-  }
-  return `<p class="warrant-line" data-warrant>${parts.map(esc).join(' · ')}</p>`;
-}
 function renderOverviewTab() {
   // The description alone. A digest of the map's people, features and interfaces as pills sat under
   // it for one day (2026-09-11) and was taken out the next: the tab is the one screen meant to be READ,
   // and the Features board already draws every one of those names with its sentence, one tab over.
-  // The warrant line is the one exception: it is about the description's own trustworthiness.
+  // NOR HOW MUCH OF THE MAP A SKEPTIC HAS READ ("2028 of 2052 statements have a verdict…"): a line
+  // about the map's making, on the screen about the product. Each update's row in the Update log
+  // still says what its skeptics decided.
   diagram.innerHTML = '<div class="usecases-wrap overview-wrap">'
-    + (productLeadHtml([]) || '<p class="empty">This map records no product description.</p>')
-    + warrantLineHtml() + '</div>';
+    + (productLeadHtml([]) || '<p class="empty">This map records no product description.</p>') + '</div>';
   bindProductLead();
 }
 
