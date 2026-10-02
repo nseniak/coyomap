@@ -4359,14 +4359,14 @@ def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_on
             const cards = ['#panel', '#peekcard'].map((s) => document.querySelector(s))
               .filter((c) => !c.hidden).map((c) => c.getBoundingClientRect());
             const free = (x, y) => !cards.some((r) => x > r.left && x < r.right && y > r.top && y < r.bottom);
-            const labels = [...document.querySelectorAll('#diagram .edgeLabels > g.edgeLabel')];
-            const paths = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
-            for (let i = 0; i < paths.length; i++) {
-              const l = labels[i];
-              if (paths[i].classList.contains('is-selected') || !l || !l.textContent.trim()) continue;
-              const r = l.getBoundingClientRect(), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
-              const el = document.elementFromPoint(x, y);
-              if (free(x, y) && el && l.contains(el)) return { x, y };
+            for (const p of document.querySelectorAll('#diagram .edgePaths path.flowchart-link')) {
+              if (p.classList.contains('is-selected') || !p.__cyHits) continue;
+              const L = p.getTotalLength(), m = p.getScreenCTM();
+              for (const f of [0.5, 0.35, 0.65]) {
+                const q = p.getPointAtLength(L * f), x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f;
+                const el = document.elementFromPoint(x, y);
+                if (free(x, y) && el && p.__cyHits.includes(el)) return { x, y };
+              }
             }
             return null; }""")
         assert at, "no other line to rest on"

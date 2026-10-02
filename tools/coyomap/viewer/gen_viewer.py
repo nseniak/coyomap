@@ -1099,7 +1099,6 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a store or a check standing alone
 ARCH_OUTSIDE_MAX = 6
 ARCH_STORES_MAX = 4     # the databases behind the records the stories reach
-ARCH_STORE_LINE = "#0f766e"   # the colour of a line into a database, on the picture and in its key
 #: THE LAYERED PICTURE'S FRAMES: a pale fill and a quiet border, so a frame reads as a band behind
 #: its parts and never as a box of its own.
 ARCH_FRAME_FILL = "#f8fafc"
@@ -2064,32 +2063,20 @@ def _arch_layer_lines(graph: GraphDict, model: _ArchModel) -> list[_ArchLayerLin
 def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
                         layered: bool = False, last: list[str] | None = None,
                         layer_lines: list[_ArchLayerLine] | None = None) -> str:
-    """The lines of an Architecture picture, after its boxes (`_arch_mermaid`). In the layered
-    picture every line is solid: "only some stories go this way" was drawn on 100 of 115 lines of
-    the picture over subsystems, so it told a reader nothing, and the trials drew none."""
+    """The lines of an Architecture picture, after its boxes (`_arch_mermaid`). EVERY LINE IS DRAWN
+    THE SAME, with no word on it. Dashed for "only some stories go this way" was drawn on 59 of 151
+    lines of coyomap's own picture and on none of mcpolis's layered ones, while the key explained it on
+    both; a teal dash said a line ran into a database, which the box it ends at says; and a word on a
+    line ("calls ×2", "via 2", "keeps") said what its card says. The card tells a line: its use cases,
+    and the boxes a line passes through without drawing them."""
 
     def box_id(x: str) -> str:
         return _arch_box_id(model, x)
 
-    folded: list[str] = []
-    keeping: list[str] = []
     # A CROWDED PICTURE (`layer_lines`) draws none of its boxes' own lines: see `_arch_mermaid`.
     box_lines = model["lines"] if layer_lines is None else []
-    for n_line, ln in enumerate(box_lines):
-        # NO WORD IS PUT ON A STEP THAT HAS NO VERB. The step's own phrase is a sentence, too long
-        # for a line, and the link list has none for this pair; a filler verb was tried and took
-        # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries no label.
-        # NOR A NUMBER: the macro flow's shared number (`number`) read in order for 17 of the 67
-        # stories of mcpolis's whole product, and 56 of its 120 lines carried the same one. The view
-        # numbers a story's own lines, 1, 2, 3, while that story is followed.
-        words = f"via {ln['hidden']}" if ln["hidden"] else ln["verb"]
-        if ln["store"]:   # where a box keeps what it saves: its own style (see _arch_model)
-            words = words or "keeps"
-            keeping.append(str(n_line))
-        label = f"|{_edge_label(words)}|" if words else ""
-        if ln["hidden"]:
-            folded.append(str(n_line))
-        head = "-.->" if ln["store"] or (not ln["always"] and not layered) else "-->"
+    for ln in box_lines:
+        head = "-->"
         a, b = box_id(ln["src"]), box_id(ln["dst"])
         if ln["up"]:
             # A LINE UP THE LAYERS is written from the upper box, with a head at both ends, and the
@@ -2097,8 +2084,8 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
             # it runs, it made a loop with the ties that stack the frames, and the layout broke the
             # loop by dropping ties: on mcpolis's whole-product picture 6 lines of 107 ran up, and the
             # frames stood side by side. The drawing tool has no way to put one head at the start.
-            head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
-        lines.append(f"  {a} {head}{label} {b}")
+            head, a, b = "<-->", b, a
+        lines.append(f"  {a} {head} {b}")
     # THE LINES BETWEEN LAYERS, thick, and with no number (see `_arch_mermaid`).
     thick: list[str] = []
     for k, ll in enumerate(layer_lines or []):
@@ -2110,10 +2097,6 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         thick.append(str(len(box_lines) + k))
     if thick:
         lines.append(f"  linkStyle {','.join(thick)} stroke:#64748b,stroke-width:2.6px,color:#64748b")
-    if folded:
-        lines.append(f"  linkStyle {','.join(folded)} stroke:#94a3b8,color:#64748b")
-    if keeping:
-        lines.append(f"  linkStyle {','.join(keeping)} stroke:{ARCH_STORE_LINE},color:{ARCH_STORE_LINE}")
     lines += last or []
     lines.append(ITEM_SLOT_CLASSDEF)
     return "\n".join(lines)

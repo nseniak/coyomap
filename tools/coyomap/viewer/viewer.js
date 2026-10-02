@@ -4860,7 +4860,7 @@ function archCrowded() { return !!(mainScene && mainScene.root.classList.contain
 // One line of the picture, as the overlay draws it: its step number, or none on a line into a database.
 // No number: a line's number is a followed story's own step, which archFollow draws.
 function archOverlayItem(e) {
-  return { src: e.srcBox, dst: e.dstBox, label: '', store: !!e.store };
+  return { src: e.srcBox, dst: e.dstBox, label: '' };
 }
 // Draw the box lines of a crowded picture that pass `test`, each with its step number, or none again
 // when it is null.
@@ -4997,7 +4997,7 @@ function archOverlay(items) {
     // already runs its way, whatever the bend before it.
     const yb = y2 - Math.sign(y2 - c2) * ARCH_OV_HEAD_RUN;
     line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${yb} L${x2},${y2}`);
-    line.setAttribute('class', 'arch-ov-line' + (it.store ? ' arch-ov-store' : ''));
+    line.setAttribute('class', 'arch-ov-line');
     line.setAttribute('marker-end', 'url(#arch-ov-head)');
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
@@ -8147,36 +8147,27 @@ function archOpenOf(s) {
   return new Set(s && s.kind === 'arch' && s.open ? String(s.open).split(',').filter(Boolean) : []);
 }
 // THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
-// than they decode a word for one. Solid = every story through that box goes this way, so two solid
-// lines out of one box read "and"; dashed = only some do, so read "or".
-// The story's marks, its numbers and its two ends, are on the picture only while a story is followed,
-// and so are they in the key.
+// than they decode a word for one. Every box line is drawn the same (gen_viewer `_arch_lines_mermaid`),
+// so the key has only the marks that differ: a crowded picture's lines between layers, and, only while a
+// story is followed, its numbers and its two ends. Nothing to say, no key.
 function archKeyHtml(t, following) {
-  const line = (dash, stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
-    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
-  // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers, so that one
-  // takes the place of the two box line styles.
-  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(false, ARCH_LAYER_LINE_COLOR, ARCH_LAYER_LINE_PX)}`
+  const line = (stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
+    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width}"/></svg>`;
+  // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers.
+  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(ARCH_LAYER_LINE_COLOR, ARCH_LAYER_LINE_PX)}`
       + ' from one layer to another, when more than a third of the first layer\'s boxes lead there.'
       + ' Rest the pointer on a box to see its own lines; a click keeps them</span>' : '';
-  return '<div class="archkey">'
-    + (crowded || `<span>${line(false, '#475569')} every story through that box goes this way</span>`
-      + `<span>${line(true, '#475569')} only some do</span>`)
-    + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
-    + `<span>${line(true, ARCH_STORE_LINE)} where a box keeps its records</span>`
+  const marks = crowded
     + (following ? '<span><b class="archkey-num">3</b> the story\'s third step</span>'
       + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
-      + ' where the story starts and ends</span>' : '')
-    + '</div>';
+      + ' where the story starts and ends</span>' : '');
+  return marks ? `<div class="archkey">${marks}</div>` : '';
 }
-// The store line's colour the picture's key names, kept equal to gen_viewer's ARCH_STORE_LINE: the
-// key must show the marks the picture actually carries.
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
 const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'instructions',
   'store', 'pipe', 'wiring'];
 const COMPONENT_KIND_WORD = { api: 'API', screen: 'UI' };
-const ARCH_STORE_LINE = '#0f766e';
 // THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
 // the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.
 // ABOVE the head, not inside it: the head is "what this is" and stays the same object on every page;

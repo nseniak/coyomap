@@ -644,12 +644,6 @@ def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_ru
     assert up == [(checker, saver)]
 
 
-def test_no_line_carries_the_shared_step_number():
-    """A line says its verb, or how many boxes it passes through, and no number: the shared number read
-    in order for few stories, and the view numbers a story's own lines while it is followed."""
-    drawing = gv.gen_arch_views(make_graph())[0]["all|"]
-    labels = re.findall(r'\|"([^"]*)"\|', drawing)
-    assert labels and not any(re.match(r"\d", x) for x in labels), labels
 
 
 def test_the_picture_over_subsystems_draws_no_line_flipped():
@@ -697,7 +691,15 @@ def test_the_viewer_key_shows_the_marks_the_generator_draws():
     mark: no picture ties a rule to a step (2026-10-01)."""
     js = _VIEWER_JS.read_text()
     assert "RULE_MARK" not in js and not hasattr(gv, "RULE_MARK")
-    assert f"const ARCH_STORE_LINE = '{gv.ARCH_STORE_LINE}';" in js
+    # Every box line is drawn the same, so the key names no line style of its own.
+    assert "ARCH_STORE_LINE" not in js and not hasattr(gv, "ARCH_STORE_LINE")
+
+
+def test_every_line_is_drawn_the_same_with_no_word_on_it():
+    """No dashed line, no colour of its own, no label: the card tells a line."""
+    drawing = gv.gen_arch_views(make_graph())[0]["all|"]
+    assert "-.->" not in drawing and "|" not in "".join(ln for ln in drawing.splitlines() if "-->" in ln)
+    assert "linkStyle" not in drawing
 
 
 if __name__ == "__main__":
