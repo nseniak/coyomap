@@ -978,6 +978,7 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archuc-feat > summary:hover { color: #4f46e5; }
 .archuc-feat summary svg, .archuc-name svg { width: 15px; height: 15px; flex: none; }
 .archuc-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 14px; }
+.archuc-list.archuc-flat { margin-left: 0; }
 .archuc-name { display: flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 600;
   line-height: 18px; color: #1f2937; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
 .archuc-name:hover span { color: #4f46e5; text-decoration: underline; }

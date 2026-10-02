@@ -7849,7 +7849,9 @@ function archList(xs) {
 // line carries a median of 2 use cases and up to 35, from up to 9 features. Each use case says, under
 // its name, what it does along this line (its own step sentences, nothing to open), and follows its
 // story on its feature's own picture.
-function archUseCasesHtml(e) {
+// `flat`: on a feature's picture every use case is that feature's, so its name heading the list said
+// the picture's own name again: the use cases are listed with no feature over them.
+function archUseCasesHtml(e, flat) {
   const said = new Map();   // use case -> the sentences it says on this line, in the line's order
   for (const x of e.sentences) for (const uc of x.ucs) {
     if (!said.has(uc)) said.set(uc, []);
@@ -7870,6 +7872,7 @@ function archUseCasesHtml(e) {
   const order = (ARCH_FEATURES || []).map((f) => f.id);
   const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
   const feats = [...new Set(ucs.map(featureOf))].sort((a, b) => at(a) - at(b));
+  if (flat) return `<div class="archuc-list archuc-flat">${ucs.map(row).join('')}</div>`;
   return feats.map((f) => {
     const mine = ucs.filter((uc) => featureOf(uc) === f);
     return `<details class="archuc-feat"><summary>${itemMarkHtml('capability')}`
@@ -7928,6 +7931,8 @@ function showArchLine(e, story) {
   const own = story ? story.lines.findIndex(([a, b]) => a === e.srcBox && b === e.dstBox) : -1;
   const said = own >= 0 ? e.sentences.find((x) => x.ucs.includes(story.uc)) : null;
   const badge = e.store ? 'keeps records' : own >= 0 ? 'step ' + (own + 1) : '';
+  // A feature's picture lists the use cases themselves; the whole product's lists them by feature.
+  const flat = !!archFeature((hi >= 0 && history[hi]) || {});
   // The boxes a grey line passes through. Not the code's verb ("calls ×2"): the line itself says it.
   const via = (e.via || []).length
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
@@ -7935,8 +7940,8 @@ function showArchLine(e, story) {
     + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
     + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
-    + '<div class="archcard-lbl">Features using this line</div>'
-    + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
+    + `<div class="archcard-lbl">${flat ? 'Use cases using this line' : 'Features using this line'}</div>`
+    + `<div class="archcard-ucs">${archUseCasesHtml(e, flat)}</div>`;
   cvElement = null;
   setTreeSelection(null);
   highlightTreePath(null);

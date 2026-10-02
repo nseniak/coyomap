@@ -4374,6 +4374,21 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         assert not page.js_errors, page.js_errors
 
 
+def test_on_a_features_picture_a_lines_card_lists_its_use_cases_with_no_feature_over_them() -> None:
+    """On a feature's picture every use case is that feature's, so the card lists them directly; the
+    whole product's lists them by feature."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        page.evaluate("""() => document.querySelector('#diagram .cy-edgehit')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.wait_for_function("() => location.hash.includes('sel=arch')")
+        seen = page.evaluate("""() => ({ feats: document.querySelectorAll('#panel .archuc-feat').length,
+            ucs: document.querySelectorAll('#panel .archuc').length,
+            head: document.querySelector('#panel .archcard-lbl').textContent })""")
+        assert seen["feats"] == 0 and seen["ucs"] > 0 and seen["head"] == "Use cases using this line", seen
+        assert not page.js_errors, page.js_errors
+
+
 def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_one() -> None:
     """A picked line keeps its card. Resting on another line shows that one's card in the second card,
     beside it, and the picked card stays."""
