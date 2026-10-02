@@ -4295,7 +4295,7 @@ LINE_CARD = """(card) => { const c = document.querySelector(card);
     return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
              title: (c.querySelector('.pane-title h2') || {}).textContent || '',
              badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
-             ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.archstory),
+             ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.godrill),
              story: (c.querySelector('.archcard-story .archuc-sent') || {}).textContent || '' }; }"""
 
 
@@ -4307,8 +4307,8 @@ def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
 
 def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use_cases() -> None:
     """A click on a line picks it, as a click on a box does: the address keeps it, and its card names its
-    two ends and the use cases that take it, by feature, and not the code's verb. "Follow this use case"
-    opens the use case's feature picture with its story followed; there, the same line's card says the
+    two ends and the use cases that take it, by feature, and not the code's verb. A use case's name opens
+    its own map. With its story followed on its feature's picture, the same line's card says the
     story's own sentence first, under the story's own step number."""
     text = make_whole_product_text(lambda m: None)
     assert not text.get("layerLines"), "the fixture's whole product must not be crowded"
@@ -4329,11 +4329,17 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         page.reload()
         _arch_ready(page)
         assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
-        uc, cap = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-name');
-            const out = [btn.dataset.archstory, btn.dataset.archcap]; btn.click(); return out; }""")
-        page.wait_for_function(f"() => location.hash.includes('story={uc}') && location.hash.includes('cap={cap}')")
+        # a use case's name opens its own map
+        uc = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-name');
+            btn.click(); return btn.dataset.godrill; }""")
+        page.wait_for_function(f"() => location.hash.includes('v=usecase') && location.hash.includes('uc={uc}')")
+        # …and with its story followed on its feature's picture, the line's card says the story's sentence
+        graph = model_to_graph(load_model(_FIXTURE_MAP.read_text()))
+        cap = str(graph["nodes"][uc]["parent"])
+        page.goto(url + f"#v=arch&cap={cap}&story={uc}")
+        page.reload()
         _arch_ready(page)
-        text = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[1]["all|" + cap]
+        text = gen_arch_views(graph)[1]["all|" + cap]
         e = next(x for x in text["lines"] if (x["src"], x["dst"]) == (e["src"], e["dst"]))
         story = next(x for x in text["stories"] if x["uc"] == uc)
         k = story["lines"].index([e["srcBox"], e["dstBox"]])
@@ -4487,7 +4493,7 @@ def test_a_line_names_its_use_cases_by_feature() -> None:
             return { src, dst,
               feats: [...l.querySelectorAll('.archuc-feat > summary .archuc-count')].map((c) => +c.textContent),
               ucs: l.querySelectorAll('.archuc').length,
-              follows: l.querySelectorAll('.archuc .archuc-name[data-archstory]').length,
+              follows: l.querySelectorAll('.archuc .archuc-name[data-godrill]').length,
               sents: l.querySelectorAll('.archuc .archuc-sent').length }; })""")
         by = {(r["src"], r["dst"]): r for r in seen}
         assert len(by) == len(text["lines"]), "every line of the picture has a card"

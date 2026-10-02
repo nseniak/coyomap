@@ -4897,13 +4897,26 @@ const ARCH_PREVIEW_LEAVE_MS = 200;
 // WITH SOMETHING PICKED, resting on a box or a line between layers shows its card beside the pick and
 // draws nothing: the picked thing's lines are what the reader is reading. A row of the picked thing's
 // own card still previews (`inCard`).
+// ONE PREVIEW REPLACES ANOTHER only once the pointer has stayed on the new box a moment: on its way
+// from a box to one of that box's lines, the pointer crosses other boxes, and each one swapped the
+// lines out from under it. A row of a card answers at once: the reader is choosing between rows.
+const ARCH_PREVIEW_SWITCH_MS = 160;
+let archPreviewSwitch = 0, archPointerOn = null;
 function archPreview(key, from, test, inCard) {
   clearTimeout(archPreviewTimer); archPreviewTimer = 0;
+  clearTimeout(archPreviewSwitch); archPreviewSwitch = 0;
   if (archPlay || archPreviewKey === key) return;
   if (!inCard && mainScene && mainScene.selection.length) return;
   archPreviewWatch();
-  archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
-  archRedrawLines();
+  const apply = () => {
+    archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
+    archRedrawLines();
+  };
+  if (!archPreviewKey || inCard) { apply(); return; }
+  archPreviewSwitch = setTimeout(() => {
+    archPreviewSwitch = 0;
+    if (archPointerOn && from.contains(archPointerOn)) apply();
+  }, ARCH_PREVIEW_SWITCH_MS);
 }
 function archPreviewEnd() {
   clearTimeout(archPreviewTimer); archPreviewTimer = 0;
@@ -4922,6 +4935,7 @@ function archPreviewWatch() {
   if (archPreviewWatching) return;
   archPreviewWatching = true;
   document.addEventListener('pointermove', (ev) => {
+    archPointerOn = ev.target;
     if (!archPreviewKey) return;
     if (archPreviewHeld(ev.target)) { clearTimeout(archPreviewTimer); archPreviewTimer = 0; return; }
     if (!archPreviewTimer) archPreviewTimer = setTimeout(archPreviewEnd, ARCH_PREVIEW_LEAVE_MS);
@@ -7659,7 +7673,7 @@ function archFeatureHtml() {
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}${archControlsHtml(s)}</div>`
-    + archKeyHtml(archTextOf({ ...s, kind: 'arch' }), !!s.story);
+    + archKeyHtml(!!s.story);
 }
 // WHAT THE READER NARROWS THE PICTURE TO, after the happy-path switch on the features' row, which it
 // shares rather than taking a row of the drawing's height: one story to follow.
@@ -7717,8 +7731,9 @@ let archFilterLabel = '';   // what the header's tag says while a box's lines al
 // A NEW SCREEN starts with every line shown, and with the story player for the story it follows.
 function syncArchView(s) {
   syncArchPlayer(s);
-  clearTimeout(archPreviewTimer);
-  archPreviewTimer = 0; archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
+  clearTimeout(archPreviewTimer); clearTimeout(archPreviewSwitch);
+  archPreviewTimer = 0; archPreviewSwitch = 0;
+  archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
   archBoxFilter = '';
   archFilterLabel = '';
   syncArchThrough();
@@ -7827,10 +7842,11 @@ function archUseCasesHtml(e) {
   }
   const ucs = [...said.keys()];
   const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
-  // THE NAME FOLLOWS THE USE CASE: one door per row, the name a reader is already looking at, rather
-  // than a "Follow this use case" link repeated under every one.
-  const row = (uc) => `<div class="archuc"><button type="button" class="archuc-name" data-archstory="${esc(uc)}"`
-    + ` data-archcap="${esc(featureOf(uc))}" title="Follow this use case on its feature's picture">`
+  // THE NAME OPENS THE USE CASE'S OWN MAP, where it is walked step by step: one door per row, the name
+  // a reader is already looking at. It followed the story on the feature's Architecture picture for a
+  // while, which only redrew the picture the reader was already reading.
+  const row = (uc) => `<div class="archuc"><button type="button" class="archuc-name" data-godrill="${esc(uc)}"`
+    + ' title="Open this use case\'s map">'
     + `${itemMarkHtml('usecase')}<span>${esc(elName(uc))}</span></button>`
     + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('') + '</div>';
   // The Features page's order, which is the order of the view's own feature buttons.
@@ -7865,23 +7881,15 @@ function archBoxName(t, id) {
   }
   return id;
 }
-// FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The button is on a
-// line's card, the main one or the second one, and on the story player, so one listener serves each.
-// FOLLOWING A USE CASE FROM A LINE'S CARD opens its FEATURE's picture (`data-archcap`), where its story
-// is one of a few rather than one of the whole product's 67; the boxes opened on this picture belong to
-// this picture and stay behind. A use case in no feature is followed where it is.
+// FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The story player's ×.
 function archStoryClick(e) {
   const pick = e.target.closest && e.target.closest('[data-archstory]');
   if (!pick) return false;
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  const cap = pick.getAttribute('data-archcap');
-  const moves = !!cap && cap !== archFeature(cur);
-  go(archState(cur.scope, moves ? cap : (cur.cap || ''), pick.getAttribute('data-archstory') || '',
-               moves ? '' : (cur.open || '')));
+  go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
   return true;
 }
-[PANEL_HOST, PEEK_CARD].forEach((card) => card && card.addEventListener('click', archStoryClick));
 // A LINE'S CARD: its two ends, its step, and the use cases that take it, each opening to its own step
 // sentence and following its story from there. While one story is followed, the card says that story's
 // own sentence for the line first, under the story's own step number.
@@ -7898,6 +7906,7 @@ function showArchLine(e, story) {
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
     + '<div class="archcard-lbl">Features using this line</div>'
     + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
+  bindGoDrill(panel);   // a use case's name opens its map
   cvElement = null;
   setTreeSelection(null);
   highlightTreePath(null);
@@ -8146,22 +8155,14 @@ function holdBoxAt(at) {
 function archOpenOf(s) {
   return new Set(s && s.kind === 'arch' && s.open ? String(s.open).split(',').filter(Boolean) : []);
 }
-// THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
-// than they decode a word for one. Every box line is drawn the same (gen_viewer `_arch_lines_mermaid`),
-// so the key has only the marks that differ: a crowded picture's lines between layers, and, only while a
-// story is followed, its numbers and its two ends. Nothing to say, no key.
-function archKeyHtml(t, following) {
-  const line = (stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
-    + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width}"/></svg>`;
-  // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers.
-  const crowded = archIsCrowded(t) && (t.layerLines || []).length ? `<span>${line(ARCH_LAYER_LINE_COLOR, ARCH_LAYER_LINE_PX)}`
-      + ' from one layer to another, when more than a third of the first layer\'s boxes lead there.'
-      + ' Rest the pointer on a box to see its own lines; a click keeps them</span>' : '';
-  const marks = crowded
-    + (following ? '<span><b class="archkey-num">3</b> the story\'s third step</span>'
-      + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
-      + ' where the story starts and ends</span>' : '');
-  return marks ? `<div class="archkey">${marks}</div>` : '';
+// THE KEY TO THE PICTURE: every line is drawn the same (gen_viewer `_arch_lines_mermaid`) and a crowded
+// picture's lines between layers explain themselves, so the key holds only a followed story's marks,
+// its numbers and its two ends, and only while one is followed. Nothing to say, no key.
+function archKeyHtml(following) {
+  if (!following) return '';
+  return '<div class="archkey"><span><b class="archkey-num">3</b> the story\'s third step</span>'
+    + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
+    + ' where the story starts and ends</span></div>';
 }
 // A component's kinds, in the order a subsystem box lists them (grammar.COMPONENT_KINDS), and how
 // each is written on a box (grammar.COMPONENT_KIND_WORDS).
