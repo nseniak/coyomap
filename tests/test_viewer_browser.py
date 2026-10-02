@@ -4825,6 +4825,33 @@ def test_picking_what_the_second_card_shows_keeps_the_card_where_it_was() -> Non
         assert not page.js_errors, page.js_errors
 
 
+def test_a_lines_card_points_where_the_pointer_met_the_line() -> None:
+    """A line's card points where the pointer met the line, not at its middle: a line on a crowded
+    picture runs most of the screen's width."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    box = max(set(ends), key=ends.count)
+    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&sel=node%3A{box}") as page:
+        _settle(page)
+        page.wait_for_selector(".arch-ov-hit", state="attached")
+        at = page.evaluate("""() => { const d = document.getElementById('diagram').getBoundingClientRect();
+            const ls = [...document.querySelectorAll('.arch-ov-line')].sort((a, b) => b.getTotalLength() - a.getTotalLength());
+            for (const l of ls) { const L = l.getTotalLength(), m = l.getScreenCTM();
+              for (const f of [0.2, 0.25, 0.8, 0.75]) { const q = l.getPointAtLength(L * f), x = m.a * q.x + m.e, y = m.d * q.y + m.f;
+                const e = document.elementFromPoint(x, y);
+                if (x > d.left && x < d.right && y > d.top && y < d.bottom && e && e.classList.contains('arch-ov-hit')) return { x, y }; } }
+            return null; }""")
+        assert at, "no long line on screen"
+        page.mouse.move(at["x"] - 2, at["y"] - 2)
+        page.mouse.move(at["x"], at["y"], steps=3)
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(800)
+        dot = page.evaluate("""() => { const c = document.querySelector('#callout .co-dot'), w = document.getElementById('diagwrap').getBoundingClientRect();
+            return c ? { x: +c.getAttribute('cx') + w.left, y: +c.getAttribute('cy') + w.top } : null; }""")
+        assert dot and abs(dot["x"] - at["x"]) < 12 and abs(dot["y"] - at["y"]) < 12, (dot, at)
+        assert not page.js_errors, page.js_errors
+
+
 def test_picking_a_line_whose_card_is_the_second_one_keeps_the_card_where_it_was() -> None:
     """The same for a line drawn on a crowded picture: with its box picked, resting on one of its lines
     shows the line's card beside the box's, and picking the line keeps that card where it was read. A

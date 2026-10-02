@@ -1433,14 +1433,18 @@ def test_the_line_points_at_an_arrows_own_middle_not_its_boxs() -> None:
     A self-loop is three separate paths, so the lengths are walked as ONE — the middle of the whole
     shape, not of whichever piece comes first."""
     js = (VIEWER_DIR / "viewer.js").read_text()
-    fn = js[js.index("function arrowMidpoint(el) {"): js.index("\n}", js.index("function arrowMidpoint(el) {"))]
+    fn = js[js.index("function pointAlong(el, frac) {"): js.index("\n}", js.index("function pointAlong(el, frac) {"))]
+    assert "function arrowMidpoint(el) { return pointAlong(el, 0.5); }" in js
     assert "getTotalLength" in fn and "getPointAtLength" in fn
     assert "(el && el._segs) || [el]" in fn, "a self-arrow is three paths walked as one length"
     assert "getScreenCTM()" in fn, "the path's own numbers are in the diagram's units, which pan and zoom"
     assert "if (!total) return null;" in fn, "a box has no length — the caller falls back to its border"
     draw = js[js.index("function syncCallout() {"): js.index("\n}", js.index("function calloutLineHtml("))]
-    assert "const mid = arrowMidpoint(el);" in draw
-    assert "b = mid || borderPoint(e, pc)" in draw, "an arrow points at its middle, a box at its border"
+    # …where the pointer met it when it did, else its middle (arrowAnchor)
+    assert "const mid = arrowAnchor(el);" in draw
+    assert "b = mid || borderPoint(e, pc)" in draw, "an arrow points at the arrow itself, a box at its border"
+    anchor = js[js.index("function arrowAnchor(el) {"): js.index("\n}", js.index("function arrowAnchor(el) {"))]
+    assert "pointAlong(el, el.__cyAt)" in anchor and "pointAlong(el, 0.5)" in anchor
 
 
 def test_a_step_number_sits_at_the_middle_of_its_arrow() -> None:

@@ -4719,6 +4719,12 @@ function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actio
     h.style.pointerEvents = 'stroke'; h.style.cursor = 'pointer';
     h.classList.add('cy-edgehit');   // findable: an arrow's real hit area is these clones, not the path
     if (onDrill) h.classList.add('drill');  // ⌘-held cursor affordance
+    // Where the pointer met the arrow is where its card's line will land (arrowAnchor): set before the
+    // click's own handler and before the hover's card, which comes a moment later.
+    // A hover moves it only while the arrow is not picked: the picked card's line stays where it was.
+    const at = (ev) => anchorArrowAt(p, ev.clientX, ev.clientY);
+    h.addEventListener('mouseenter', (ev) => { if (!p.classList.contains('is-selected')) at(ev); });
+    h.addEventListener('click', at);
     h.addEventListener('click', onClick);
     h.addEventListener('mouseenter', on);
     h.addEventListener('mouseleave', off);
@@ -5024,6 +5030,9 @@ function archOverlay(items) {
       ev.stopPropagation();
       if (desc) pickSel(mainScene, desc, ev);
     };
+    // Where the pointer met the line is where its card's line lands (arrowAnchor), as on a drawn arrow.
+    hit.addEventListener('mouseenter', (ev) => { if (!line.classList.contains('is-selected')) anchorArrowAt(line, ev.clientX, ev.clientY); });
+    hit.addEventListener('click', (ev) => anchorArrowAt(line, ev.clientX, ev.clientY));
     hit.addEventListener('click', find);
     if (desc) {
       mainScene.selectors[desc.key] = () => selAdd(mainScene, desc);   // the story player and the address
@@ -8324,13 +8333,16 @@ function syncPageHero(s, chain, tv) {
 //
 // Screen coordinates, via each segment's own CTM: the path's own numbers are in the diagram's units,
 // which pan and zoom slide around under the card.
-function arrowMidpoint(el) {
+function arrowMidpoint(el) { return pointAlong(el, 0.5); }
+// The point `frac` of the way along an arrow (0 its start, 1 its end), in screen coordinates; null for
+// anything that is not a drawn path.
+function pointAlong(el, frac) {
   const segs = (el && el._segs) || [el];
   const len = (sg) => { try { return sg && sg.getTotalLength ? sg.getTotalLength() : 0; } catch (_) { return 0; } };
   const lens = segs.map(len);
   const total = lens.reduce((a, b) => a + b, 0);
   if (!total) return null;   // not a drawn path (a box) — the caller falls back to the border point
-  let want = total / 2;
+  let want = total * Math.min(1, Math.max(0, frac));
   for (let i = 0; i < segs.length; i++) {
     if (want > lens[i] && i < segs.length - 1) { want -= lens[i]; continue; }
     let pt, m;
@@ -8339,6 +8351,35 @@ function arrowMidpoint(el) {
     return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
   }
   return null;
+}
+// WHERE A CARD'S LINE MEETS AN ARROW: where the pointer met it, when it did (`__cyAt`, set on a hover
+// or a click), else its middle, else, when the middle is off the drawing, the middle of the part that
+// is on it. A line on the Architecture picture runs 760px at the median on the whole product's, and
+// the middle of 7 of a feature's 27 was off screen: the card pointed far from where the reader looked,
+// or nowhere. Kept as a share of the arrow's length, so it stays on the arrow through a pan or a zoom.
+const ARROW_SAMPLES = 80;
+function arrowAnchor(el) {
+  if (el && Number.isFinite(el.__cyAt)) { const at = pointAlong(el, el.__cyAt); if (at) return at; }
+  const mid = pointAlong(el, 0.5);
+  const wrap = document.getElementById('diagwrap');
+  if (!mid || !wrap) return mid;
+  const w = wrap.getBoundingClientRect();
+  const inside = (q) => q.x >= w.left && q.x <= w.right && q.y >= w.top && q.y <= w.bottom;
+  if (inside(mid)) return mid;
+  const seen = [];
+  for (let k = 0; k <= ARROW_SAMPLES; k++) { const q = pointAlong(el, k / ARROW_SAMPLES); if (q && inside(q)) seen.push(k / ARROW_SAMPLES); }
+  return seen.length ? pointAlong(el, seen[Math.floor(seen.length / 2)]) : mid;
+}
+// The share of the arrow's length nearest the screen point (x, y), kept on the arrow (`__cyAt`).
+function anchorArrowAt(el, x, y) {
+  if (!el || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  let best = -1, bestD = Infinity;
+  for (let k = 0; k <= ARROW_SAMPLES; k++) {
+    const q = pointAlong(el, k / ARROW_SAMPLES);
+    const d = q ? Math.hypot(q.x - x, q.y - y) : Infinity;
+    if (d < bestD) { bestD = d; best = k / ARROW_SAMPLES; }
+  }
+  if (best >= 0) el.__cyAt = best;
 }
 // Where a line from `r` towards `to` crosses r's border. Used at the CARD end always, and at the element
 // end for a box, so the line stops at the edge instead of running under the shape to its centre.
@@ -8773,7 +8814,7 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   // WHERE THE LINE LANDS: an arrow's own middle, or the box's centre. The card is not placed yet, so a
   // box's real border point is not known — its centre is the same answer for every candidate, which is
   // what makes "as close as possible" a comparison between them rather than a moving target.
-  const mid = arrowMidpoint(el);
+  const mid = arrowAnchor(el);
   const own = rectOf(el);
   const a = mid || { x: (own.left + own.right) / 2, y: (own.top + own.bottom) / 2 };
   // A BOX's line ends on its border, an arrow's on the arrow itself — `e` is null for an arrow so the
@@ -8895,8 +8936,8 @@ function calloutLineHtml(p, el, w) {
   // edge would run off the layer. The card's title still names it.
   if (e.right <= w.left || e.left >= w.right || e.bottom <= w.top || e.top >= w.bottom) return '';
   const pc = { x: (p.left + p.right) / 2, y: (p.top + p.bottom) / 2 };
-  // An arrow points at its own middle; a box points at the border you meet coming from the card.
-  const mid = arrowMidpoint(el);
+  // An arrow points where the pointer met it (arrowAnchor); a box at the border you meet from the card.
+  const mid = arrowAnchor(el);
   const ec = mid || { x: (e.left + e.right) / 2, y: (e.top + e.bottom) / 2 };
   const a = borderPoint(p, ec), b = mid || borderPoint(e, pc);
   const ox = w.left, oy = w.top;   // the layer's own origin, so both ends are in its coordinates
