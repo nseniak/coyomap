@@ -971,19 +971,20 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
    use cases; each use case with its mark, its step sentences under it, and the follow button. */
 .archuc-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937;
   display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-.archuc-feat > summary::before { content: '\25B8'; color: #94a3b8; font-size: 10px; width: 8px; }
-.archuc-feat[open] > summary::before { content: '\25BE'; }
+.archuc-feat > summary::before { content: ''; flex: none; width: 5px; height: 5px; margin: 0 3px 0 1px;
+  border-right: 1.5px solid #64748b; border-bottom: 1.5px solid #64748b; transform: rotate(-45deg); }
+.archuc-feat[open] > summary::before { transform: rotate(45deg); margin-top: -3px; }
 .archuc-feat > summary::-webkit-details-marker { display: none; }
 .archuc-feat > summary { list-style: none; }
 .archuc-feat > summary:hover { color: #4f46e5; }
 .archuc-feat summary svg, .archuc-name svg { width: 15px; height: 15px; flex: none; }
 .archuc-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 14px; }
-.archuc-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
-  line-height: 18px; color: #1f2937; }
+.archuc-name { display: flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 600;
+  line-height: 18px; color: #1f2937; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.archuc-name:hover span { color: #4f46e5; text-decoration: underline; }
 .archuc-sent { margin: 2px 0 0 21px; font-size: 13px; line-height: 18px; color: #374151; }
 .archuc-count { font-size: 11px; font-weight: 600; color: #64748b; background: #f1f5f9; border-radius: 8px;
   padding: 0 6px; }
-.archuc .archuc-follow { margin-left: 21px; }
 /* A LINE'S CARD on the Architecture picture (showArchLine). */
 .archcard-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   color: #64748b; margin: 10px 0 4px; }
@@ -3552,10 +3553,6 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 #diagram .ibox-picked:focus-visible, #diagram .ibox-picked:focus-visible .ibox-name:focus-visible,
 #pagehero .ibox-picked:focus-visible, .ibox-picked:focus-visible { outline: none; }
 
-/* ── A line's card on the Architecture view: following a use case's story from it ── */
-.archuc-follow { font: inherit; font-size: 11px; color: #64748b; white-space: nowrap; background: none;
-                  border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
-.archuc-follow:hover { color: #4f46e5; }
 /* THE TWO MARKS OF A STORY'S ENDS, in the key and in the story player: a filled circle where it starts, a bar
    where it ends, as Use Case Maps draw a path. The same shapes markStartEnd draws on a picture. */
 .ucm-key-start, .ucm-key-end { display: inline-block; flex: none; background: #0f172a; }

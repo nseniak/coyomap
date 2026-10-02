@@ -7823,11 +7823,12 @@ function archUseCasesHtml(e) {
   }
   const ucs = [...said.keys()];
   const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
-  const row = (uc) => `<div class="archuc"><div class="archuc-name">${itemMarkHtml('usecase')}`
-    + `<span>${esc(elName(uc))}</span></div>`
-    + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('')
-    + `<button type="button" class="archuc-follow" data-archstory="${esc(uc)}" data-archcap="${esc(featureOf(uc))}">`
-    + 'Follow this use case</button></div>';
+  // THE NAME FOLLOWS THE USE CASE: one door per row, the name a reader is already looking at, rather
+  // than a "Follow this use case" link repeated under every one.
+  const row = (uc) => `<div class="archuc"><button type="button" class="archuc-name" data-archstory="${esc(uc)}"`
+    + ` data-archcap="${esc(featureOf(uc))}" title="Follow this use case on its feature's picture">`
+    + `${itemMarkHtml('usecase')}<span>${esc(elName(uc))}</span></button>`
+    + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('') + '</div>';
   // The Features page's order, which is the order of the view's own feature buttons.
   const order = (ARCH_FEATURES || []).map((f) => f.id);
   const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
@@ -7891,7 +7892,7 @@ function showArchLine(e, story) {
     + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
     + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
-    + '<div class="archcard-lbl">Use cases on this line, by feature</div>'
+    + '<div class="archcard-lbl">Features using this line</div>'
     + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
   cvElement = null;
   setTreeSelection(null);

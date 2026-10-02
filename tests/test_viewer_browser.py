@@ -4295,7 +4295,7 @@ LINE_CARD = """(card) => { const c = document.querySelector(card);
     return { hash: decodeURIComponent(location.hash), shown: !c.hidden,
              title: (c.querySelector('.pane-title h2') || {}).textContent || '',
              badge: (c.querySelector('.pane-title .badge') || {}).textContent || '',
-             ucs: [...c.querySelectorAll('.archuc .archuc-follow')].map((x) => x.dataset.archstory),
+             ucs: [...c.querySelectorAll('.archuc .archuc-name')].map((x) => x.dataset.archstory),
              story: (c.querySelector('.archcard-story .archuc-sent') || {}).textContent || '' }; }"""
 
 
@@ -4329,7 +4329,7 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         page.reload()
         _arch_ready(page)
         assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
-        uc, cap = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-follow');
+        uc, cap = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-name');
             const out = [btn.dataset.archstory, btn.dataset.archcap]; btn.click(); return out; }""")
         page.wait_for_function(f"() => location.hash.includes('story={uc}') && location.hash.includes('cap={cap}')")
         _arch_ready(page)
@@ -4487,7 +4487,7 @@ def test_a_line_names_its_use_cases_by_feature() -> None:
             return { src, dst,
               feats: [...l.querySelectorAll('.archuc-feat > summary .archuc-count')].map((c) => +c.textContent),
               ucs: l.querySelectorAll('.archuc').length,
-              follows: l.querySelectorAll('.archuc .archuc-follow[data-archstory]').length,
+              follows: l.querySelectorAll('.archuc .archuc-name[data-archstory]').length,
               sents: l.querySelectorAll('.archuc .archuc-sent').length }; })""")
         by = {(r["src"], r["dst"]): r for r in seen}
         assert len(by) == len(text["lines"]), "every line of the picture has a card"
