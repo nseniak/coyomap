@@ -4149,7 +4149,7 @@ const VIEW_Q = {
   overview: 'What is this product, and who is it for?',
   hp: 'Which features does one successful run touch, and in what order?',
   usecases: 'What can this product do, feature by feature?',
-  arch: 'Who reaches this product, what do they come through, and what runs behind it?',
+  arch: 'What are this product\'s layers, which components does each hold, and how are they connected?',
   container: 'How is the code organised, and what depends on what?',
   domain: 'What things does this system know about, and how do they relate?',
   context: 'What does it rely on from the outside world?',
