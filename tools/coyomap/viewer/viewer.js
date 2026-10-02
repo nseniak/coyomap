@@ -5055,11 +5055,13 @@ function archNumBadge(g, x, y, text) {
   tx.setAttribute('class', 'arch-ov-num');
   tx.textContent = text;
   g.appendChild(tx);
+  // A ROUND BADGE, as a use case map's step numbers are: a circle, or a pill round a longer number.
   const bb = tx.getBBox();
+  const h = bb.height + 4, w = Math.max(h, bb.width + 8);
   const bg = document.createElementNS(SVGNS, 'rect');
-  bg.setAttribute('x', String(bb.x - 3)); bg.setAttribute('y', String(bb.y - 1));
-  bg.setAttribute('width', String(bb.width + 6)); bg.setAttribute('height', String(bb.height + 2));
-  bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg');
+  bg.setAttribute('x', String(bb.x + bb.width / 2 - w / 2)); bg.setAttribute('y', String(bb.y + bb.height / 2 - h / 2));
+  bg.setAttribute('width', String(w)); bg.setAttribute('height', String(h));
+  bg.setAttribute('rx', String(h / 2)); bg.setAttribute('class', 'arch-ov-numbg');
   g.insertBefore(bg, tx);
   return tx;
 }
@@ -5226,7 +5228,9 @@ function edgeFocus(scene, e) {
 // same card pointed at two different places depending on which pixels the click hit.
 // One function for both doors to a step — the number and the arrow — so the two cannot drift apart.
 function glowEdgeAt(p, label, anchor) {
-  const off = glowEdge(p, label);
+  // A PICKED NUMBER SAYS SO ITSELF (a filled badge): the label's glow round it blurred the badges
+  // beside it, the steps this arrow carries that are not the one picked.
+  const off = glowEdge(p, anchor ? null : label);
   if (anchor) { anchor.classList.add('flow-step-picked'); setStepAnchor(anchor); }
   return () => {
     if (anchor) {

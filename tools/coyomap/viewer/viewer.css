@@ -1476,9 +1476,25 @@ body.panel-dragging { user-select: none; }
 /* ONLY A NUMBER THAT IS A DOOR LIGHTS UP. A map number carries `data-fstep` and opens its step; the
    Happy Path writes the same class on a step's rank, which opens nothing, and it went grey under the
    pointer for no reason. */
-#diagram .flow-step-num[data-fstep] { border-radius: 4px; }
-#diagram .flow-step-num[data-fstep]:hover { background: #eef2ff; box-shadow: 0 0 0 2px #eef2ff; color: #3730a3; }
-#diagram .flow-step-picked { background: #e0e7ff; box-shadow: 0 0 0 2px #e0e7ff; color: #3730a3; }
+/* A STEP NUMBER IS A ROUND BADGE ON ITS ARROW, one per step: no grey block taller than its digits, no
+   arrow running through it, no "1, 4" sharing one block. The engine sized the label's box from the old
+   text, so the badges are let out of it, centred on the arrow (the row is centred, so it spills on both
+   sides alike), rather than widening the box. The badge of a followed story on the Architecture picture
+   is drawn the same (archNumBadge). */
+#diagram g.edgeLabel:has(p[data-fsteps]) foreignObject { overflow: visible; }
+/* …and centred in it up and down: the box is the label's line height (24px), and the row sat at its top,
+   3px above the arrow. */
+#diagram g.edgeLabel:has(p[data-fsteps]) foreignObject > div { display: flex !important; width: 100%;
+  height: 100%; align-items: center; justify-content: center; }
+#diagram g.edgeLabel:has(p[data-fsteps]) :is(.labelBkg, span.edgeLabel, p, div) { background: transparent !important; }
+#diagram p[data-fsteps] { display: flex; justify-content: center; align-items: center; gap: 3px; margin: 0; }
+#diagram p[data-fsteps] .flow-step-sep { display: none; }
+#diagram .flow-step-num[data-fstep] { display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px;
+  background: #fff; border: 1px solid #a5b4fc; color: #3730a3; font-size: 10px; font-weight: 700; line-height: 1; }
+#diagram .flow-step-num[data-fstep]:hover { background: #eef2ff; border-color: #4f46e5; }
+#diagram .flow-step-num.flow-step-picked, #diagram .flow-step-num.flow-step-picked:hover {
+  background: #4f46e5; border-color: #4f46e5; color: #fff; }
 /* A bundled map arrow repeats the ordinary sequence-step pane once per step. A firm divider keeps the
    full records distinct without wrapping each one in another card. */
 #panel .flow-step-separator { border-top: 2px solid #d1d5db; margin: 18px 0; }
@@ -3576,9 +3592,9 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-head-picked { fill: #2563eb; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
-.arch-ov-num { font: 600 11px system-ui, sans-serif; fill: #312e81; text-anchor: middle;
+.arch-ov-num { font: 700 10px system-ui, sans-serif; fill: #3730a3; text-anchor: middle;
                dominant-baseline: middle; cursor: pointer; }
-.arch-ov-numbg { fill: #eef2ff; stroke: #c7d2fe; }
+.arch-ov-numbg { fill: #fff; stroke: #a5b4fc; }
 /* A followed story's own numbers, drawn on its lines in place of their labels (archFollow): the label
    goes, and the number lets a click through to the line under it. */
 .arch-following g.edgeLabel.arch-story-on { visibility: hidden; }

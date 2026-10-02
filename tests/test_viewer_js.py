@@ -1588,7 +1588,7 @@ def test_clicking_an_arrow_points_the_line_at_its_number_not_its_middle() -> Non
     bind time, because the numbers are built after the arrows are bound."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     glow_at = js[js.index("function glowEdgeAt(p, label, anchor) {"): js.index("\n}", js.index("function glowEdgeAt(p, label, anchor) {"))]
-    assert "const off = glowEdge(p, label);" in glow_at
+    assert "const off = glowEdge(p, anchor ? null : label);" in glow_at
     assert "anchor.classList.add('flow-step-picked'); setStepAnchor(anchor);" in glow_at
     assert "if (stepAnchorEl === anchor) setStepAnchor(null);" in glow_at, "the line goes when the selection goes"
     desc = js[js.index("function edgeDesc(scene, p, label, e, selKey, showFn, anchor) {"): js.index("\n}", js.index("function edgeDesc(scene, p, label, e, selKey, showFn, anchor) {"))]
