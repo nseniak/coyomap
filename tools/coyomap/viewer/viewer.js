@@ -1874,7 +1874,15 @@ let cardTookPeekLevel = '0';
 // The first line of the card's contents: a box's name, or the title of a card that has no box (a
 // line's). Measured on the name alone, a line's card measured nothing, and moved down by its bar.
 const CARD_FIRST_LINE = '.ibox-name, .pane-title';
-const PEEK_TOP_ROOM = 20;   // the main card's bar, which the second card leaves room for above it (measured 18)
+// The main card's bar, which the second card leaves room for above it: measured on the bar when the main
+// card is up (its height and margins), 20 otherwise (the bar measured 18 at the default text size).
+function peekTopRoom() {
+  const bar = !PANEL_HOST.hidden && document.getElementById('panelbar');
+  if (!bar) return 20;
+  const cs = getComputedStyle(bar);
+  const h = bar.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+  return Number.isFinite(h) && h > 0 ? Math.ceil(h) + 2 : 20;
+}
 function contentsLift() {
   const off = (card) => {
     const n = card && !card.hidden && card.querySelector(CARD_FIRST_LINE);
@@ -3054,6 +3062,9 @@ function showNode(id, cardOpts) {
   panel.innerHTML = paneCardHtml(id, cardOpts);
   bindElementCards(panel);
   bindNodeDetailHandlers(panel);
+  // THE SECOND CARD leaves the file tree and the code to what is picked: a hover beside a pick moved
+  // the tree to the hovered box.
+  if (panel === PEEK_CARD) return;
   // Source buttons in the pane need binding too. `bindNodeDetailHandlers` wires the navigation
   // links (use case / process / data chips) but not `.srclink`, and this is the ONE panel builder
   // that never made the second call — so the Environments row rendered its manifest anchors as
@@ -7741,6 +7752,9 @@ function archUseCasesHtml(e, flat) {
     if (!said.has(uc)) said.set(uc, []);
     if (!said.get(uc).includes(x.text)) said.get(uc).push(x.text);
   }
+  // …and every use case whose steps the line draws, with a sentence or without: a step with no words
+  // left its use case off the card.
+  for (const uc of Object.keys(e.steps || {})) if (!said.has(uc)) said.set(uc, []);
   const ucs = [...said.keys()];
   const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
   // THE NAME OPENS THE USE CASE'S OWN MAP, where it is walked step by step: one door per row, the name
@@ -7801,7 +7815,10 @@ function archBoxName(t, id) {
 function showArchLine(e) {
   const badge = e.store ? 'keeps records' : '';
   // A feature's picture lists the use cases themselves; the whole product's lists them by feature.
-  const flat = !!archFeature((hi >= 0 && history[hi]) || {});
+  // One feature heading one list is a fold with nothing beside it: listed directly too.
+  const feats = new Set([...e.sentences.flatMap((x) => x.ucs), ...Object.keys(e.steps || {})]
+    .map((uc) => String((GRAPH.nodes[uc] || {}).parent || '')));
+  const flat = !!archFeature((hi >= 0 && history[hi]) || {}) || feats.size <= 1;
   // The boxes a grey line passes through. Not the code's verb ("calls ×2"): the line itself says it.
   const via = (e.via || []).length
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
@@ -7809,6 +7826,8 @@ function showArchLine(e) {
     + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
     + `<div class="archcard-lbl">${flat ? 'Use cases using this line' : 'Features using this line'}</div>`
     + `<div class="archcard-ucs">${archUseCasesHtml(e, flat)}</div>`;
+  // The second card leaves the file tree and the code to what is picked.
+  if (panel === PEEK_CARD) return;
   cvElement = null;
   setTreeSelection(null);
   highlightTreePath(null);
@@ -7868,9 +7887,16 @@ function bindArch() {
   bindArchPeople(t, pickBox);
   // RESTING ON A BOX previews its lines, as resting on a line between layers does: drawn on a crowded
   // picture, lit on any other. A click keeps them (pickBox).
+  // NOT BEFORE THE POINTER MOVES (holdPointer): a picture drawn again under a resting pointer ("+N more")
+  // is not a hover, and drew a box's lines nobody asked for.
   for (const id in mainScene.nodeEls) {
     const el = mainScene.nodeEls[id];
-    el.addEventListener('mouseenter', () => archPreview('box:' + id, el, (a, b) => a === id || b === id));
+    const enter = () => {
+      if (!pointerFresh) { whenPointerMoves(enter); return; }
+      archPreview('box:' + id, el, (a, b) => a === id || b === id);
+    };
+    el.addEventListener('mouseenter', enter);
+    el.addEventListener('mouseleave', () => forgetPointerMove(enter));
   }
   // "+N MORE" OPENS THE BOX: the picture is drawn again with that subsystem's every part named. It is a
   // new screen, so Back closes it again and a link keeps it open.
@@ -8379,7 +8405,35 @@ function showPeekCard(t, fill) {
   // It keeps clear of the box's card as well as of the tag: two cards on top of each other are one.
   const main = PANEL_HOST.hidden ? [] : [grow(rectOf(PANEL_HOST), CARD_CLEAR)];
   placeCardNear(t, PEEK_CARD, main);
+  // NOWHERE TO GO: the last resort pushes the second card inside the drawing whatever it covers, and it
+  // came down on the main card, over its ×. It goes beside the main card instead, on whichever side has
+  // room; with room on no side, the main card is what was asked for, and the second goes.
+  if (PEEK_CARD.dataset.placed === 'clamp' && main.length && rectsOverlap(rectOf(PEEK_CARD), rectOf(PANEL_HOST))) {
+    if (!placePeekBesideMain()) { hidePeekCard(); return; }
+  }
   syncCallout();
+}
+function placePeekBesideMain() {
+  const wrap = document.getElementById('diagwrap');
+  if (!wrap) return false;
+  const w = wrap.getBoundingClientRect(), m = rectOf(PANEL_HOST), p = PEEK_CARD.getBoundingClientRect();
+  const W = p.width, H = p.height, gap = CARD_CLEAR * 2;
+  const fit = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  const top = fit(m.top, w.top + CARD_EDGE, w.bottom - CARD_EDGE - H);
+  const left = fit(m.left, w.left + CARD_EDGE, w.right - CARD_EDGE - W);
+  for (const [x, y] of [[m.right + gap, top], [m.left - gap - W, top], [left, m.bottom + gap], [left, m.top - gap - H]]) {
+    const box = cardRectAt(x, y, W, H);
+    const inside = box.left >= w.left + CARD_EDGE && box.top >= w.top + CARD_EDGE
+      && box.right <= w.right - CARD_EDGE && box.bottom <= w.bottom - CARD_EDGE;
+    if (inside && !rectsOverlap(box, m)) {
+      PEEK_CARD.style.right = 'auto';
+      PEEK_CARD.style.left = Math.round(x - w.left) + 'px';
+      PEEK_CARD.style.top = Math.round(y - w.top) + 'px';
+      PEEK_CARD.dataset.placed = 'beside';
+      return true;
+    }
+  }
+  return false;
 }
 function hidePeekCard() {
   if (!PEEK_CARD || PEEK_CARD.hidden) return;
@@ -8618,7 +8672,7 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   // card in its place with the contents where they were, so the main card stands higher by its bar
   // (contentsLift). Against the drawing's top edge it could not, and the contents dropped by the
   // difference. `wb` is the room a card may use; `w` stays the frame its position is written in.
-  const wb = main ? w : { left: w.left, right: w.right, bottom: w.bottom, top: w.top + PEEK_TOP_ROOM };
+  const wb = main ? w : { left: w.left, right: w.right, bottom: w.bottom, top: w.top + peekTopRoom() };
   const p = card.getBoundingClientRect();
   const W = p.width, H = p.height;
   if (!W || !H) return;

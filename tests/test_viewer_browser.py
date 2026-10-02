@@ -4411,7 +4411,9 @@ def test_a_line_names_its_use_cases_by_feature() -> None:
             r = by[(e["srcBox"], e["dstBox"])]
             assert r["ucs"] == len(ucs(e)) == r["follows"], (e["srcBox"], e["dstBox"], r)
             assert r["sents"] >= r["ucs"], r   # every use case opens to the sentence it says here
-            assert r["feats"] and sum(r["feats"]) == r["ucs"], r
+            # by feature when several use it; one feature's use cases are listed with no fold over them
+            assert (sum(r["feats"]) == r["ucs"] and len(r["feats"]) > 1) or (not r["feats"] and r["ucs"]), r
+        assert any(r["feats"] for r in seen), "a line from several features is grouped by feature"
         assert not page.js_errors, page.js_errors
 
 
