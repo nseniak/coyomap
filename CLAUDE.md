@@ -278,6 +278,14 @@ design principles these come from)
   boxes it passes without drawing them, and the use cases using it, grouped by feature
   on the whole product and listed directly on a feature's picture. A use case's name
   opens its use case map with the line's steps selected.
+- **crowded picture** — an Architecture picture in layers with more than 40 lines. It
+  draws one line per pair of layers instead of each box's own lines, and draws a box's
+  lines on top only while the pointer rests on that box or the box is picked. On mcpolis
+  the whole product's picture is one.
+- **preview** (on the Architecture picture) — resting the pointer on a box shows its
+  lines: drawn on top on a crowded picture, lit on any other. They stay while the pointer
+  is on the box, on those lines or in a card, and go when it leaves; a click keeps them.
+  Nothing is previewed while something is picked.
 
 **How coyomap is delivered**
 
