@@ -7685,7 +7685,9 @@ function archFeatureHtml() {
     + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
-    + `<span class="archwho-sep" aria-hidden="true"></span>${sw}${archControlsHtml(s)}</div>`
+    // NO HAPPY-PATH SWITCH ON THE ALL PICTURE: the whole product is every story, and its happy path
+    // alone is a feature's question. A feature's picture keeps it.
+    + (now ? `<span class="archwho-sep" aria-hidden="true"></span>${sw}` : '') + `${archControlsHtml(s)}</div>`
     + archKeyHtml(!!s.story);
 }
 // WHAT THE READER NARROWS THE PICTURE TO, after the happy-path switch on the features' row, which it
@@ -8126,7 +8128,7 @@ function markStartEnd(scene, startId, endId, trigger, outcome) {
     g.appendChild(r);
   });
 }
-function archScope(s) { return s && s.scope === 'happy' ? 'happy' : 'all'; }
+function archScope(s) { return s && s.scope === 'happy' && s.cap !== 'all' ? 'happy' : 'all'; }   // All has no happy path
 // WHICH FEATURE A STATE DRAWS. `all` is the whole product; a feature id is that feature, when this
 // scope draws it; and nothing named opens on the FIRST feature this scope draws, in the Features
 // page's order. The whole product is one click away, but it is the picture with the most lines
@@ -8141,7 +8143,7 @@ function archFeature(s) {
 function archKey(s) { return archScope(s) + '|' + archFeature(s); }
 function archState(scope, cap, story, open) {
   const s = { kind: 'arch' };
-  if (scope === 'happy') s.scope = 'happy';
+  if (scope === 'happy' && cap !== 'all') s.scope = 'happy';   // the All picture has no happy-path switch
   if (cap === 'all') s.cap = 'all';
   else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
   if (story) s.story = story;

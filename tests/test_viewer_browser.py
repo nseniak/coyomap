@@ -4265,6 +4265,24 @@ def test_the_architecture_view_opens_on_the_first_feature_and_all_is_one_click_a
         assert not page.js_errors, page.js_errors
 
 
+def test_the_happy_path_switch_is_on_a_features_picture_and_not_on_all() -> None:
+    """The whole product is every story; its happy path alone is a feature's question. The All picture
+    has no switch, and an address asking for it there draws the whole product."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        assert page.evaluate("() => !!document.querySelector('.archhp')"), "a feature's picture keeps it"
+        page.goto(url + "#v=arch&cap=all&scope=happy")
+        page.reload()
+        _arch_ready(page)
+        assert page.evaluate("() => !document.querySelector('.archhp')")
+        whole = page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length")
+        page.goto(url + "#v=arch&cap=all")
+        page.reload()
+        _arch_ready(page)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length") == whole
+        assert not page.js_errors, page.js_errors
+
+
 def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_ends() -> None:
     """Picking a story lights its lines, numbers them 1, 2, 3 in its own order, and draws a start
     circle and an end bar. It is a screen of its own: the story is in the address."""
