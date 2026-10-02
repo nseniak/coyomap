@@ -1131,8 +1131,9 @@ class _ArchStep(TypedDict):
     to_person: bool     # the result handed back to a person
     phrase: str         # the step's own sentence
     store: str          # the database it reaches through a record, else ""
-    n: int              # the use case's own step it comes from (a shared sub-use case's step: the step
-                        # that runs it), which its use case map selects
+    ns: list[int]       # the use case's own steps it comes from (a shared sub-use case's step: the step
+                        # that runs it; a pipe drawn through: the step in and the step out), which its
+                        # use case map selects
 
 
 def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -> list[_ArchStep]:
@@ -1179,7 +1180,7 @@ def _arch_steps(graph: GraphDict, flow: dict[str, Any], layered: bool = False) -
             d = store = store_of(d)
         if s and d and s != d:
             out.append(_ArchStep(src=s, dst=d, from_person=from_person, to_person=to_person,
-                                 phrase=phrase, store=store, n=n))
+                                 phrase=phrase, store=store, ns=[n]))
 
     left: tuple[str, set[str]] | None = None   # the box of the run a walk just left, and its components
     for st in cast("list[dict[str, Any]]", flow.get("steps") or []):
@@ -1329,9 +1330,11 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
             first = id(came) not in used
             used.add(id(came))
             called.setdefault(src, set()).add(dst)
+            # THE LINE A -> B IS BOTH STEPS, A -> pipe and pipe -> B, so it carries both their numbers: with
+            # the first only, 106 of mcpolis's 122 steps out of a pipe were selected from no line's card.
             st = _ArchStep(src=came["src"], dst=dst, from_person=came["from_person"],
                            to_person=st["to_person"], phrase=came["phrase"] if first else st["phrase"],
-                           store=st["store"], n=came["n"] if first else st["n"])
+                           store=st["store"], ns=list(dict.fromkeys([*came["ns"], *st["ns"]])))
             src = st["src"]
         if through(dst) and not st["to_person"]:
             if src in called.get(dst, set()):   # the answer of a box this pipe called
@@ -1341,7 +1344,7 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
         if src == dst:   # an answer that came back through a pipe to the box that called it
             continue
         out.append(_ArchStep(src=src, dst=dst, from_person=st["from_person"],
-                             to_person=st["to_person"], phrase=st["phrase"], store=st["store"], n=st["n"]))
+                             to_person=st["to_person"], phrase=st["phrase"], store=st["store"], ns=st["ns"]))
     return out, needed
 
 
@@ -1349,7 +1352,7 @@ class _ArchFlow(TypedDict):
     walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
     phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
                                                     # order, beside `walks` (what the flow text prints)
-    nums: dict[str, list[int]]                      # use case -> each kept step's own step number, beside it
+    nums: dict[str, list[list[int]]]                # use case -> each kept step's own step numbers, beside it
     people: list[str]                               # the people the walks name, first met first
     doors: list[str]                                # the interfaces a person steps straight into
     stores: list[str]                               # the databases reached through records
@@ -1378,14 +1381,14 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                     doors.setdefault(st["dst"], None)
     out: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
-    nums: dict[str, list[int]] = {}
+    nums: dict[str, list[list[int]]] = {}
     stores: dict[str, None] = {}
     ends: dict[str, str] = {}
     for uc, sts in stepped:
         callers: dict[str, set[str]] = {}
         steps: list[tuple[str, str]] = []
         said: list[str] = []
-        ns: list[int] = []
+        ns: list[list[int]] = []
         for st in sts:
             s, d = st["src"], st["dst"]
             if st["to_person"]:
@@ -1397,7 +1400,7 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _Ar
                 stores.setdefault(st["store"], None)
             steps.append((s, d))
             said.append(st["phrase"])
-            ns.append(st["n"])
+            ns.append(st["ns"])
         out.append((uc, steps))
         phrases[uc] = said
         nums[uc] = ns
@@ -1555,13 +1558,13 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
         box_of = {c: (c if alone(c) or sid == c else sid) for sid, members in used.items() for c in members}
     walks: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
-    nums: dict[str, list[int]] = {}
+    nums: dict[str, list[list[int]]] = {}
     for uc, steps in flow["walks"]:
         callers: dict[str, set[str]] = {}
         lifted: list[tuple[str, str]] = []
         said: list[str] = []
-        ns: list[int] = []
-        for (s, d), text, n in zip(steps, flow["phrases"][uc], flow["nums"][uc]):
+        ns: list[list[int]] = []
+        for (s, d), text, n in zip(steps, flow["phrases"][uc], flow["nums"][uc], strict=True):
             a, b = box_of.get(s, s), box_of.get(d, d)
             if a == b or b in callers.get(a, set()):
                 continue
@@ -1776,8 +1779,9 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
                 said.setdefault((s, b), {}).setdefault(uc, flow["phrases"][uc][i])
                 mine = steps_of.setdefault((s, b), {}).setdefault(uc, [])
                 for j in js:
-                    if flow["nums"][uc][j] not in mine:
-                        mine.append(flow["nums"][uc][j])
+                    for n in flow["nums"][uc][j]:
+                        if n not in mine:
+                            mine.append(n)
                 if (s, b) not in seq:
                     seq.append((s, b))
         if seq:

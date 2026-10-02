@@ -203,6 +203,8 @@ def test_a_pipe_is_drawn_through():
     assert ("S1", "S2") in ln
     assert "S3" not in model["inside"] and not any("S3" in pair or "C2" in pair for pair in ln)
     assert ln[("S1", "S2")]["sentences"] == [("UC1", "send the thing")]
+    # the line is both steps, into the pipe and out of it, and carries both numbers for the use case map
+    assert ln[("S1", "S2")]["steps"] == {"UC1": [3, 4]}, ln[("S1", "S2")]["steps"]
 
 
 def make_map_with_a_deploy() -> dict[str, Any]:
@@ -280,7 +282,7 @@ def make_two_server_pipe_map() -> dict[str, Any]:
 
 
 def make_step(src: str, dst: str, key: str = "", phrase: str = "do it") -> gv._ArchStep:
-    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase, store="", n=0)
+    return gv._ArchStep(src=src, dst=dst, from_person=False, to_person=False, phrase=phrase, store="", ns=[])
 
 
 def test_a_pipe_calling_two_servers_draws_each_call_from_the_caller():
