@@ -6069,10 +6069,10 @@ def test_an_interfaces_card_names_no_people_on_the_architecture_picture_alone() 
     picture sets it, so every other card keeps them."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     arch = js[js.index("function bindArch() {"): js.index("\n}", js.index("function bindArch() {"))]
-    assert "mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id };" in arch
+    assert "joined.has(c.name + '>' + id)" in arch, "only the people this picture joins to the interface"
     assert js.count(".cardOpts = ") == 1, "only the Architecture picture leaves anything out"
     assert "show: () => showNodeDetailSynced(sceneElementOf(scene, id), scene.cardOpts)" in js, "the picked card"
     assert "show: o.hover ? boxCard(elem, scene.cardOpts) : null" in js, "the hovered card"
     card = js[js.index("function elementCardHtml(id, opts) {"): js.index("\n}", js.index("function elementCardHtml(id, opts) {"))]
-    assert "chips: (spec0.chips || []).filter((c) => !o.dropChips(c))" in card
+    assert "chips: (spec0.chips || []).filter((c) => !o.dropChips(c, id))" in card
 

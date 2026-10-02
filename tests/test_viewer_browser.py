@@ -5287,3 +5287,193 @@ def test_a_line_drawn_on_a_crowded_picture_passes_behind_the_boxes_it_crosses() 
             assert page.evaluate(over) == 0, box
         assert not page.js_errors, page.js_errors
 
+
+# ── From the independent review of 2026-10-02: each of these failed on 03ee2656 ──────────────────
+
+# Points inside boxes that a click or a rest lands on: inside the box, clear of its name and tags.
+BOX_POINTS = """() => { const d = document.getElementById('diagram').getBoundingClientRect(); const out = [];
+  for (const n of document.querySelectorAll('#diagram g.node')) {
+    const id = [...n.classList].find((c) => c.startsWith('cy-')); if (!id || id.startsWith('cy-CYP')) continue;
+    const b = n.querySelector('.ibox') || n; const r = b.getBoundingClientRect();
+    let hit = null;
+    for (let y = Math.min(r.bottom, d.bottom) - 3; y > Math.max(r.top, d.top) && !hit; y -= 3)
+      for (let x = Math.min(r.right, d.right) - 3; x > Math.max(r.left, d.left) && !hit; x -= 3) {
+        const e = document.elementFromPoint(x, y);
+        if (e && b.contains(e) && !e.closest('button, a, .ibox-name, .item-pill')) hit = { x, y };
+      }
+    if (hit) out.push({ id: id.slice(3), ...hit });
+  }
+  return out; }"""
+# A point on a drawn-on-top line that the line itself answers, clear of both cards.
+LINE_POINT = """() => { const d = document.getElementById('diagram').getBoundingClientRect();
+  const cards = ['#panel', '#peekcard'].map((s) => document.querySelector(s)).filter((c) => !c.hidden).map((c) => c.getBoundingClientRect());
+  const free = (x, y) => !cards.some((r) => x > r.left - 4 && x < r.right + 4 && y > r.top - 4 && y < r.bottom + 4);
+  for (const l of document.querySelectorAll('.arch-ov-line')) { const L = l.getTotalLength(), m = l.getScreenCTM();
+    for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) { const q = l.getPointAtLength(L * f);
+      const x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f; const e = document.elementFromPoint(x, y);
+      if (x > d.left && x < d.right && y > d.top && y < d.bottom && free(x, y) && e && e.classList.contains('arch-ov-hit'))
+        return { x, y, src: l.dataset.src, dst: l.dataset.dst }; } }
+  return null; }"""
+DRAWN = "() => [...document.querySelectorAll('#diagram .arch-overlay .arch-ov-line')].map((l) => [l.dataset.src, l.dataset.dst])"
+PICKED = "() => [...document.querySelectorAll('#diagram .arch-ov-line.arch-ov-picked')].map((l) => [l.dataset.src, l.dataset.dst])"
+
+
+def _rest(page: Any, at: dict[str, Any], ms: int = 700) -> None:
+    page.mouse.move(at["x"] - 2, at["y"], steps=3)
+    page.mouse.move(at["x"], at["y"], steps=3)
+    page.wait_for_timeout(ms)
+
+
+def test_moving_from_one_box_to_the_next_keeps_the_next_boxs_lines() -> None:
+    """Resting on box A draws A's lines; moving to box B and resting there draws B's lines, and they
+    stay while the pointer rests on B (on the branch they show for ~30 ms, then go)."""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        boxes = page.evaluate(BOX_POINTS)
+        a, b = boxes[0], boxes[1]
+        page.mouse.move(2, 2)
+        _rest(page, a)
+        assert page.evaluate(DRAWN), "resting on the first box draws its lines"
+        _rest(page, b, 900)
+        drawn = page.evaluate(DRAWN)
+        assert drawn and all(b["id"] in pair for pair in drawn), (b["id"], drawn)
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_line_picked_from_a_preview_stays_drawn_when_the_pointer_leaves() -> None:
+    """Rest on a box, click one of its lines: the line is picked. Moving the pointer away must not take
+    the picked line off the picture while its card stays open."""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        page.mouse.move(2, 2)
+        for b in page.evaluate(BOX_POINTS):
+            _rest(page, b)
+            if page.evaluate(DRAWN):
+                break
+        at = page.evaluate(LINE_POINT)
+        assert at, "no line of the rested box on screen"
+        page.mouse.move(at["x"], at["y"], steps=8)
+        page.wait_for_timeout(300)
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(600)
+        assert "sel=arch" in page.evaluate("() => decodeURIComponent(location.hash)")
+        page.mouse.move(2, 300, steps=6)
+        page.wait_for_timeout(900)
+        assert page.evaluate(PICKED) == [[at["src"], at["dst"]]], "the picked line left the picture"
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_picked_line_of_a_crowded_picture_survives_a_reload() -> None:
+    """The address names the picked line; a reload, a shared link or Back must bring back its card and
+    draw it lit (on the branch the pick is dropped from the address)."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    e = text["lines"][0]
+    with _served_map(make_parts_in_every_layer) as url, _page(url) as page:
+        page.goto(url + f"#v=arch&cap=all&sel=arch%3A{e['srcBox']}%3E{e['dstBox']}")
+        page.reload()
+        _arch_ready(page)
+        _settle(page)
+        seen = page.evaluate("""() => ({ hash: decodeURIComponent(location.hash),
+            title: (document.querySelector('#panel .pane-title h2') || {}).textContent || '' })""")
+        assert f"sel=arch:{e['srcBox']}>{e['dstBox']}" in seen["hash"], seen
+        assert seen["title"] == f"{e['src']} → {e['dst']}", seen
+        assert page.evaluate(PICKED) == [[e["srcBox"], e["dstBox"]]]
+        assert not page.js_errors, page.js_errors
+
+
+def test_picking_a_box_again_after_one_of_its_lines_draws_its_lines() -> None:
+    """Box picked, then one of its lines, then the box again: the box is picked, so its lines are drawn
+    (on the branch they are toggled off)."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    box = max(set(ends), key=ends.count)
+    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&sel=node%3A{box}") as page:
+        _settle(page)
+        page.wait_for_selector(".arch-ov-hit", state="attached")
+        n = len(page.evaluate(DRAWN))
+        at = page.evaluate(LINE_POINT)
+        assert at, "no line of the picked box on screen"
+        page.mouse.move(at["x"], at["y"], steps=4)
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(600)
+        spot = next((b for b in page.evaluate(BOX_POINTS) if b["id"] == box), None)
+        assert spot, "the box's body is not on screen"
+        page.mouse.move(spot["x"], spot["y"], steps=6)
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(700)
+        assert f"sel=node:{box}" in page.evaluate("() => decodeURIComponent(location.hash)")
+        assert len(page.evaluate(DRAWN)) == n, "the box is picked but its lines are not drawn"
+        assert not page.js_errors, page.js_errors
+
+
+def make_repeated_step(m: dict[str, Any]) -> None:
+    """The first use case takes its second step's arrow again, as its last step."""
+    steps = m["flows"][0]["steps"]
+    again = dict(steps[1])
+    again["n"] = max(int(s["n"]) for s in steps) + 1
+    steps.append(again)
+
+
+def test_letting_go_of_two_steps_on_one_arrow_puts_the_arrow_back() -> None:
+    """A line's card opens a use case with every step the line draws selected, and two of them can sit
+    on one arrow of the use case map. Letting go must leave no arrow blue, thick or with a blue head."""
+    with _served_map(make_repeated_step) as url, _page(url) as page:
+        pick = page.evaluate("""async () => { const b = await fetch('api/view').then((r) => r.json());
+            for (const [uc, steps] of Object.entries(b.flowsNarr)) {
+              const seen = {};
+              for (let i = 0; i < steps.length; i++) { const s = steps[i];
+                const k = (s.srcId || s.src) + '>' + (s.sf || s.dstId || s.dst);
+                if (k in seen) return { uc, i: seen[k], j: i }; seen[k] = i; } }
+            return null; }""")
+        assert pick, "the fixture has no use case with two steps on one arrow"
+        uc, i, j = pick["uc"], pick["i"], pick["j"]
+        page.goto(url + f"#v=usecase&uc={uc}&sel=flowstep%3A{uc}%3A{i}&sel=flowstep%3A{uc}%3A{j}")
+        page.reload()
+        page.wait_for_selector("#crumb h1", state="attached")
+        _settle(page)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .flow-step-picked').length") == 2
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        left = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')]
+            .filter((p) => p.style.getPropertyValue('stroke') || /cypicked/.test((p.getAttribute('marker-end') || '') + (p.getAttribute('marker-start') || '')))
+            .map((p) => p.id)""")
+        assert not left, left
+        assert not page.js_errors, page.js_errors
+
+
+def make_two_people_at_one_page(m: dict[str, Any]) -> None:
+    """The picture tests' small map (interfaces and people), with a Visitor who uses the same web page
+    in a use case of a second feature."""
+    from test_architecture_view import make_arch_map
+    doc = make_arch_map()
+    doc["roles"].append({"id": "R3", "name": "Visitor", "kind": "human", "audience": "user", "wants": "z",
+                         "drives": "UC3"})
+    doc["capabilities"].append({"id": "CAP2", "name": "Looking around", "purpose": "looks",
+                                "happy_path": "excluded", "story": {"place": "after", "feature": "CAP1"}})
+    doc["use_cases"].append({"id": "UC3", "name": "Look at a thing", "actors": ["R3"], "capability": "CAP2",
+                             "trigger": "The visitor looks.", "outcome": "The visitor has seen it."})
+    doc["flows"].append({"uc": "UC3", "title": "Look at a thing", "steps": [
+        {"n": 1, "src": "R3", "dst": "I1", "phrase": "open the page"},
+        {"n": 2, "src": "I1", "dst": "C1", "phrase": "show the thing", "where": "src/page.ts:3"},
+        {"n": 3, "src": "I1", "dst": "R3", "phrase": "present the thing"}]})
+    m.clear()
+    m.update(doc)
+
+
+def test_an_interfaces_card_drops_only_the_people_this_picture_joins_to_it() -> None:
+    """An interface's card on the Architecture picture drops a person only when the picture draws a line
+    from that person to the interface. On one feature's picture the other feature's Visitor keeps their
+    tag; on the whole product both are joined and both go; a use case map keeps every one."""
+    people = """() => { const c = document.querySelector('#panel .ecard'); return c ? [...c.querySelectorAll('.item-pill')]
+        .filter((p) => ['human', 'service', 'ai-agent'].includes(p.dataset.kind)).map((p) => p.textContent.trim()).sort() : null; }"""
+    with _served_map(make_two_people_at_one_page) as url, _page(url) as page:
+        for address, want in (("#v=arch&cap=CAP1&sel=node%3AI1", ["Visitor"]),
+                              ("#v=arch&cap=all&sel=node%3AI1", []),
+                              ("#v=usecase&uc=UC1&sel=node%3AI1", ["Admin", "Visitor"])):
+            page.goto(url + address)
+            page.reload()
+            _settle(page)
+            page.wait_for_selector("#panel .ecard", state="attached")
+            assert page.evaluate(people) == want, (address, page.evaluate(people))
+        assert not page.js_errors, page.js_errors
+

@@ -1502,7 +1502,7 @@ function elementCardHtml(id, opts) {
   // `dropChips` takes away the tags the PICTURE the card floats over already draws and joins to this
   // box ("a box does not repeat its picture"): never added, only ever dropped, and by one picture.
   const spec0 = itemSpecOf(id);
-  const spec = spec0 && o.dropChips ? { ...spec0, chips: (spec0.chips || []).filter((c) => !o.dropChips(c)) } : spec0;
+  const spec = spec0 && o.dropChips ? { ...spec0, chips: (spec0.chips || []).filter((c) => !o.dropChips(c, id)) } : spec0;
   // THE WORD THE BOX SAYS. `c.type` is the element's own label, which for an interface is the word
   // `interface` — while every picture that draws one says which KIND of door it is. The card said
   // `interface` where the map beside it said `website`, about the same thing, one click apart.
@@ -1905,7 +1905,10 @@ function selApply(scene) {
     cardTookPeekPlace = true;
     cardTookPeekLevel = peek.level;
   }
-  scene._selClear = () => undos.forEach((f) => f && f());
+  // UNDONE LAST FIRST. Two picks can glow one element (two steps on one arrow of a use case map), and
+  // each glow saved what it found as the original: undone first to last, the second put back the
+  // first's blue, and the arrow stayed lit after Escape.
+  scene._selClear = () => undos.slice().reverse().forEach((f) => f && f());
   if (scene.selection.length) scene.focusUnion(scene, scene.selection); else clearFocus(scene);
   renderSelPanel(scene);
   // Selecting is not a navigation — it makes no history point — but it IS part of where you are, so the
@@ -1916,6 +1919,7 @@ function selApply(scene) {
   // the guard is here so it cannot start when one does.
   if (scene === mainScene && !renderingTransient) refreshUrl();
   flowSuspendIfDeselected(scene);
+  if (scene === mainScene) { archSelBefore = archSelNow; archSelNow = scene.selection.length === 1 ? scene.selection[0].key : ''; }
   flowMapRefreshStepLabels();
   // Deselecting the last element (⌘-click it off) returns to the empty state: clear the file-browser
   // highlight + default the code slot to browse, the same cleanup empty-canvas click / Escape do.
@@ -4868,7 +4872,11 @@ function archRedrawLines() {
     });
     return;
   }
-  const test = kept || peek ? (a, b) => (!!kept && kept(a, b)) || (!!peek && peek(a, b)) : null;
+  // …AND THE PICKED LINE, whatever drew it: a line picked from a preview is neither kept nor previewed
+  // once the pointer leaves, and went while its card stayed open.
+  const picked = (a, b) => selHas(mainScene, 'arch:' + a + '>' + b);
+  const any = kept || peek || mainScene.selection.some((d) => String(d.key).startsWith('arch:'));
+  const test = any ? (a, b) => (!!kept && kept(a, b)) || (!!peek && peek(a, b)) || picked(a, b) : null;
   mainScene.root.classList.toggle('arch-picking', !!test);
   const t = archCurrentText();
   archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox)).map(archOverlayItem) : []);
@@ -4892,6 +4900,9 @@ function archPreview(key, from, test, inCard) {
   if (!inCard && mainScene && mainScene.selection.length) return;
   archPreviewWatch();
   const apply = () => {
+    // The leave timer the old preview started while the pointer crossed into this box goes too: it
+    // fired just after, and took the new box's lines away under a resting pointer.
+    clearTimeout(archPreviewTimer); archPreviewTimer = 0;
     archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
     archRedrawLines();
   };
@@ -7694,6 +7705,9 @@ archhp.addEventListener('click', (e) => {
 // `_arch_text`): each line with its two ends and the use cases that take it, which its card tells.
 function archTextOf(s) { return s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || null) : null; }
 let archBoxFilter = '';
+// The pick before the last one and the last one, when each was one thing (selApply): a second click on
+// a box lets go of its lines only when that box alone was what was picked before it.
+let archSelBefore = '', archSelNow = '';
 // A NEW SCREEN starts with every line shown, and with the happy-path switch its picture offers.
 function syncArchView(s) {
   syncArchHappySwitch(s);
@@ -7817,12 +7831,18 @@ function bindArch() {
   const cells = (t && t.cells) || {};
   const standsFor = (id) => (cells[id] ? cells[id].sub : id);
   mainScene.focusPairs = ((t && t.lines) || []).map((e) => [e.srcBox, e.dstBox]);
-  // AN INTERFACE'S CARD NAMES NO PEOPLE HERE: the people are the picture's top layer, each joined by its
-  // own line to the interfaces it uses, so the card's tags said it a second time. Other pictures keep them.
-  mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id };
+  // AN INTERFACE'S CARD DROPS THE PEOPLE THIS PICTURE JOINS TO IT, by a line from the person's box to
+  // the interface's: "a box does not repeat its picture" allows dropping only what the same picture
+  // draws AND joins to the box. A person the picture does not draw, or draws without a line to this
+  // interface, keeps their tag; a crowded picture draws no person's line at rest, so it drops none.
+  const joined = new Set(archIsCrowded(t) ? [] : ((t && t.lines) || [])
+    .filter((e) => e.srcBox.startsWith('CYP')).map((e) => e.src + '>' + e.dstBox));
+  mainScene.cardOpts = { dropChips: (c, id) => !!c.id && actorNodeId(c.name) === c.id && joined.has(c.name + '>' + id) };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box: it lights its lines, and the header's tag names them.
-  const pickBox = (id) => archFilterBox(archBoxFilter === id ? '' : id);
+  // A CLICK ON THE BOX PICKED ALONE lets go of its lines; after one of its lines was picked, it draws
+  // them again (the box was not what was picked any more).
+  const pickBox = (id) => archFilterBox(archBoxFilter === id && archSelBefore === 'node:' + id ? '' : id);
   bindNodes(mainScene, (id, el, ev) => {
     const elem = standsFor(id);
     const locate = locateActionFor(elem);
@@ -7868,6 +7888,14 @@ function bindArch() {
   // drawing only: no card and no lines of their own. A card summing up to 15 lines and 63 use cases
   // added confusion and little a box's own lines did not already say.
   if (!archIsCrowded(t)) bindEdges(mainScene, archLineResolver(t));
+  // A CROWDED PICTURE'S LINE PICKED BY THE ADDRESS — a reload, a shared link, Back — is drawn and picked
+  // though nothing drew it yet: every line of the picture has a selector, which picks and draws it.
+  else for (const e of (t.lines || [])) {
+    mainScene.selectors['arch:' + e.srcBox + '>' + e.dstBox] = () => {
+      const d = archOverlayDesc(e.srcBox, e.dstBox);
+      if (d) { selAdd(mainScene, d); archRedrawLines(); }
+    };
+  }
   markLayerLines(mainScene.root, t);
 }
 // A PERSON'S BOX is drawn under an alias of its own (a person is a role, not a map element), so
