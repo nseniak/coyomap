@@ -5248,3 +5248,18 @@ def test_no_story_is_followed_on_the_architecture_picture() -> None:
         assert seen == {"list": False, "strip": False, "hash": seen["hash"], "dim": 0}, seen
         assert not page.js_errors, page.js_errors
 
+
+def test_picking_a_feature_on_the_architecture_view_moves_no_button() -> None:
+    """The button in force is marked without changing its width, so picking one leaves every button
+    where it was."""
+    where = "() => [...document.querySelectorAll('.archwho, .archhp')].map((b) => Math.round(b.getBoundingClientRect().left))"
+    with _served() as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        before = page.evaluate(where)
+        page.evaluate("() => document.querySelectorAll('.archwho')[1].click()")
+        page.wait_for_function("() => !location.hash.includes('cap=all')")
+        _arch_ready(page)
+        after = page.evaluate(where)
+        assert after[:len(before)] == before, (before, after)
+        assert not page.js_errors, page.js_errors
+
