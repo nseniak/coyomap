@@ -3575,6 +3575,7 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }
 .arch-ov-line.arch-ov-picked { stroke: #2563eb; stroke-width: 3.2px; }   /* picked: glowEdge's blue */
 .arch-ov-head { fill: #4f46e5; }
+.arch-ov-head-picked { fill: #2563eb; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
 .arch-ov-num { font: 600 11px system-ui, sans-serif; fill: #312e81; text-anchor: middle;
                dominant-baseline: middle; cursor: pointer; }

@@ -4849,6 +4849,8 @@ function archShowLines(test) {
 // wore a head pointing down. Every control point is at least ARCH_OV_LEAD away, so the line visibly
 // comes in from above (or below) before the head.
 const ARCH_OV_LEAD = 40;
+const ARCH_OV_HEAD = 11;       // the head's length and width, in the drawing's units
+const ARCH_OV_HEAD_RUN = 16;   // the straight end the head sits on, longer than the head
 function archOverlayCurve(s, d) {
   const x1 = s.cx, x2 = d.cx;
   if (s.y1 < d.y2 && d.y1 < s.y2) {   // the two boxes share a row
@@ -4874,8 +4876,15 @@ function archOverlay(items) {
   if (!host || !items.length) return;
   const g = document.createElementNS(SVGNS, 'g');
   g.setAttribute('class', 'arch-overlay');
-  g.innerHTML = '<defs><marker id="arch-ov-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"'
-    + ' markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arch-ov-head"/></marker></defs>';
+  // THE HEAD KEEPS ONE SIZE, in the drawing's own units: sized by the line's width, it grew by three
+  // quarters when the line was picked and thickened, and covered more of the curve than the curve's
+  // own straight end (ARCH_OV_HEAD_RUN), so it pointed one way and the line ran another.
+  g.innerHTML = `<defs><marker id="arch-ov-head" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
+    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
+    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head"/></marker>'
+    + `<marker id="arch-ov-head-picked" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
+    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
+    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head-picked"/></marker></defs>';
   host.appendChild(g);
   const rectOf = (id) => {
     const el = [...diagram.querySelectorAll('g.node')].find((x) => idOf(x) === id);
@@ -4892,7 +4901,10 @@ function archOverlay(items) {
     // The number sits on the curve's own middle (t = 1/2 of the Bezier), wherever the curve bends to.
     const ym = (y1 + 3 * c1 + 3 * c2 + y2) / 8;
     const line = document.createElementNS(SVGNS, 'path');
-    line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${y2}`);
+    // …and the curve ends a head's length short, in a straight stretch: the head sits on a line that
+    // already runs its way, whatever the bend before it.
+    const yb = y2 - Math.sign(y2 - c2) * ARCH_OV_HEAD_RUN;
+    line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${yb} L${x2},${y2}`);
     line.setAttribute('class', 'arch-ov-line' + (it.store ? ' arch-ov-store' : ''));
     line.setAttribute('marker-end', 'url(#arch-ov-head)');
     line.dataset.src = it.src; line.dataset.dst = it.dst;
@@ -4909,7 +4921,7 @@ function archOverlay(items) {
     hit.addEventListener('click', find);
     if (desc) {
       mainScene.selectors[desc.key] = () => selAdd(mainScene, desc);   // the story player and the address
-      if (selHas(mainScene, desc.key)) line.classList.add('is-selected', 'arch-ov-picked');
+      if (selHas(mainScene, desc.key)) archOverlayMark(line, true);
       previewOnHover(mainScene, [hit], desc.show, line);
     }
     if (it.label) {
@@ -4937,6 +4949,12 @@ function archOverlayLineEl(src, dst) {
   return [...diagram.querySelectorAll('.arch-overlay path.arch-ov-line')]
     .find((x) => x.dataset.src === src && x.dataset.dst === dst) || null;
 }
+// A picked line is lit, its head with it.
+function archOverlayMark(line, on) {
+  line.classList.toggle('is-selected', on);
+  line.classList.toggle('arch-ov-picked', on);
+  line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)' : 'url(#arch-ov-head)');
+}
 function archOverlayDesc(src, dst) {
   const s = (hi >= 0 && history[hi]) || {};
   const t = archTextOf(s);
@@ -4945,7 +4963,7 @@ function archOverlayDesc(src, dst) {
   const story = archStoryOf(s, t);
   const mark = (on) => {
     const el = archOverlayLineEl(src, dst);
-    if (el) { el.classList.toggle('is-selected', on); el.classList.toggle('arch-ov-picked', on); }
+    if (el) archOverlayMark(el, on);
   };
   return { key: 'arch:' + src + '>' + dst, focus: null, show: () => showArchLine(e, story),
            glow: () => { mark(true); return () => mark(false); } };
