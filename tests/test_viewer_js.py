@@ -6040,7 +6040,7 @@ def test_every_picture_shows_a_box_card_on_hover() -> None:
             # a call that opens its callback ends at the line its callback closes on
             call = line if not line.endswith("{") else js[i:js.index("\n", js.index("\n  }", i) + 1)]
             assert "hover: true" in call, call[:120]
-    card = js[js.index("function boxCard(id) {"):js.index("\n}", js.index("function boxCard(id) {"))]
+    card = js[js.index("function boxCard(id, cardOpts) {"):js.index("\n}", js.index("function boxCard(id, cardOpts) {"))]
     assert "showLibsFold()" in card and "showBucketFold(id)" in card and "showDeploymentGroup(id)" in card
 
 
