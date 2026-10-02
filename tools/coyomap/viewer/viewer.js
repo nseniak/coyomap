@@ -1518,7 +1518,10 @@ function elementCardHtml(id, opts) {
   //     click would ring the card the reader's finger is still on.
   // A control that looks live and does nothing teaches a reader to distrust the ones that work, and
   // it costs a keyboard stop per card.
-  const spec = itemSpecOf(id);
+  // `dropChips` takes away the tags the PICTURE the card floats over already draws and joins to this
+  // box ("a box does not repeat its picture"): never added, only ever dropped, and by one picture.
+  const spec0 = itemSpecOf(id);
+  const spec = spec0 && o.dropChips ? { ...spec0, chips: (spec0.chips || []).filter((c) => !o.dropChips(c)) } : spec0;
   // THE WORD THE BOX SAYS. `c.type` is the element's own label, which for an interface is the word
   // `interface` — while every picture that draws one says which KIND of door it is. The card said
   // `interface` where the map beside it said `website`, about the same thing, one click apart.
@@ -3057,12 +3060,13 @@ function bindNodeDetailHandlers(root) {
   bindImpactSection(root);
   applyPendingEpSelect();  // a search hit / System link asked to select one of this component's entry points
 }
-function showNode(id) {
+// `cardOpts`: what the picture the card floats over leaves out of it (the scene's `cardOpts`).
+function showNode(id, cardOpts) {
   if (!GRAPH.nodes[id]) return;
   // The pane shows the element's CARD — the same card a list shows, so a reader meets one design and
   // one pair of actions wherever an element appears. Everything deeper is on the card's own page, which
   // the card itself opens. `.pane-card` only marks the context; the card inside it is unchanged.
-  panel.innerHTML = paneCardHtml(id);
+  panel.innerHTML = paneCardHtml(id, cardOpts);
   bindElementCards(panel);
   bindNodeDetailHandlers(panel);
   // Source buttons in the pane need binding too. `bindNodeDetailHandlers` wires the navigation
@@ -3078,9 +3082,9 @@ function showNode(id) {
 // file also anchors OTHER elements (a node_path_index collision — filetree.py), they aren't crammed into
 // the panel: the code viewer tags each one on its own source line instead (anchorsByPath / paintCodeTags),
 // so "selecting a box" reads as "here's this one element", and its file-mates are discoverable in the code.
-function showNodeDetailSynced(id) {
+function showNodeDetailSynced(id, cardOpts) {
   if (isDeploymentGroup(id)) { showDeploymentGroup(id); return; }
-  showNode(id);          // fills the panel with `id` alone and mirrors into the tree + code viewer (syncTreeToNode)
+  showNode(id, cardOpts);          // fills the panel with `id` alone and mirrors into the tree + code viewer (syncTreeToNode)
   updateFolderPeek(id);  // auto-opens browsing for a folder element (see updateFolderPeek)
 }
 
@@ -4381,7 +4385,7 @@ function nodeFocus(scene, id) {
 // into the file browser / code viewer when it's the primary card).
 function nodeDesc(scene, el, id) {
   return { key: 'node:' + id, glow: () => glowNode(el),
-           focus: nodeFocus(scene, id), show: () => showNodeDetailSynced(sceneElementOf(scene, id)) };
+           focus: nodeFocus(scene, id), show: () => showNodeDetailSynced(sceneElementOf(scene, id), scene.cardOpts) };
 }
 // The map element a drawn box stands for (see `bindNodes`): the box's own id, unless the scene says
 // otherwise.
@@ -4600,11 +4604,11 @@ function bindBox(scene, el, id, opts) {
 }
 // THE CARD A BOX SHOWS, on a hover as on a click: a folded box's roster (the Libraries box, a
 // bucket of dependencies), a product area's members, and every other element's own card.
-function boxCard(id) {
+function boxCard(id, cardOpts) {
   if (id === LIBS_ID) return () => showLibsFold();
   if (isDeploymentGroup(id)) return () => showDeploymentGroup(id);
   if (GRAPH.nodes[id] && GRAPH.nodes[id].kind === 'bucketfold') return () => showBucketFold(id);
-  return () => showNode(id);
+  return () => showNode(id, cardOpts);
 }
 // Every box that stands for a map element. `opts.hover`: resting on a box shows its card.
 // `opts.standsFor(id)`: the map element a drawn box stands for, when that is not the box's own id. Only
@@ -4626,7 +4630,7 @@ function bindNodes(scene, onActivate, opts) {
     markOpenSrc(el, elem);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
     bindBox(scene, el, id, {
       tip: () => actionTipNode(elem),
-      show: o.hover ? boxCard(elem) : null,
+      show: o.hover ? boxCard(elem, scene.cardOpts) : null,
       onClick: (e) => {
         if (openSrcClick(elem, e)) return;  // ⌥-click a leaf with a source ref opens it instead of selecting
         onActivate(id, el, e);
@@ -7925,6 +7929,9 @@ function bindArch() {
   const cells = (t && t.cells) || {};
   const standsFor = (id) => (cells[id] ? cells[id].sub : id);
   mainScene.focusPairs = ((t && t.lines) || []).map((e) => [e.srcBox, e.dstBox]);
+  // AN INTERFACE'S CARD NAMES NO PEOPLE HERE: the people are the picture's top layer, each joined by its
+  // own line to the interfaces it uses, so the card's tags said it a second time. Other pictures keep them.
+  mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box: it lights its lines, and the header's tag names them.
   const pickBox = (id) => { if (!story) archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id)); };
