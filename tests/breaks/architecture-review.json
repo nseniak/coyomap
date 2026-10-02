@@ -1,0 +1,192 @@
+[
+ {
+  "name": "gloss-in-summary",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "'a, button, summary, code,",
+    "new": "'a, button, code,"
+   }
+  ]
+ },
+ {
+  "name": "hit-copy-marker-start",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "h.removeAttribute('marker-end'); h.removeAttribute('marker-start');",
+    "new": "h.removeAttribute('marker-end');"
+   }
+  ]
+ },
+ {
+  "name": "subflow-own-n",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "emit(x, str(x[\"src\"]), str(x[\"dst\"]), str(x.get(\"phrase\") or \"\").strip(), n)",
+    "new": "emit(x, str(x[\"src\"]), str(x[\"dst\"]), str(x.get(\"phrase\") or \"\").strip(), int(x.get(\"n\") or 0))"
+   }
+  ]
+ },
+ {
+  "name": "preview-while-picked",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  if (mainScene && mainScene.selection.length) return;\n  archPreviewWatch();",
+    "new": "  archPreviewWatch();"
+   }
+  ]
+ },
+ {
+  "name": "picked-head-not-blue",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "if (blue) { heads.push({ seg, attr, was }); seg.setAttribute(attr, blue); }",
+    "new": "if (false) { heads.push({ seg, attr, was }); seg.setAttribute(attr, blue); }"
+   }
+  ]
+ },
+ {
+  "name": "overlay-head-not-swapped",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)' : 'url(#arch-ov-head)');",
+    "new": "line.setAttribute('marker-end', 'url(#arch-ov-head)');"
+   }
+  ]
+ },
+ {
+  "name": "badge-clipped",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.css",
+    "old": "#diagram g.edgeLabel:has(p[data-fsteps]) foreignObject { overflow: visible; }",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "no-fewest",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "sets.fewest = { at: 1, of: g(lines.along) };",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "no-top-room",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  const bar = !PANEL_HOST.hidden && document.getElementById('panelbar');\n  if (!bar) return 20;",
+    "new": "  return 0;\n  const bar = null;"
+   }
+  ]
+ },
+ {
+  "name": "clamp-over-main",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "if (!placePeekBesideMain(under)) { hidePeekCard(); return; }",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "clamp-over-pointer",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "if ((main.length && rectsOverlap(at, rectOf(PANEL_HOST))) || rectsOverlap(at, under)) {",
+    "new": "if (main.length && rectsOverlap(at, rectOf(PANEL_HOST))) {"
+   }
+  ]
+ },
+ {
+  "name": "redraw-previews",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "      if (!pointerFresh) { whenPointerMoves(enter); return; }\n",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "wordless-use-case-dropped",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  for (const uc of Object.keys(e.steps || {})) if (!said.has(uc)) said.set(uc, []);\n",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "one-feature-folded",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "|| feats.size <= 1;",
+    "new": ";"
+   }
+  ]
+ },
+ {
+  "name": "second-card-moves-tree",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  // THE SECOND CARD leaves the file tree and the code to what is picked: a hover beside a pick moved\n  // the tree to the hovered box.\n  if (panel === PEEK_CARD) return;\n",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "drops-every-actor",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": " && joined.has(c.name + '>' + id) };",
+    "new": " };"
+   }
+  ]
+ },
+ {
+  "name": "card-ignores-drop",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  panel.innerHTML = paneCardHtml(id, cardOpts);",
+    "new": "  panel.innerHTML = paneCardHtml(id);"
+   }
+  ]
+ },
+ {
+  "name": "zoom-from-getZoom",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  const home = usableScale(homeReal) ? homeReal : homeRealZoom(), real = mainPz.getSizes().realZoom;",
+    "new": "  const home = NaN, real = NaN;"
+   }
+  ]
+ },
+ {
+  "name": "switch-on-any-feature",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f];",
+    "new": "  const show = !!f;"
+   }
+  ]
+ }
+]
