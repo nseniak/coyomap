@@ -4378,11 +4378,18 @@ def test_hovering_a_line_while_one_is_picked_shows_its_card_beside_the_picked_on
 
 
 def test_follow_a_story_in_the_header_lists_every_story_by_feature_and_follows_the_one_picked() -> None:
-    """The header's "Follow a story" list holds every story of the picture, grouped by feature in the
-    Features page's order. Picking one follows it, as its own screen; its first entry then lets go."""
-    text = make_whole_product_text(lambda m: None)
+    """A feature's picture has a "Follow a story" list in its header, holding every story of the
+    picture, grouped by feature in the Features page's order. Picking one follows it, as its own screen;
+    its first entry then lets go. The All picture has no such list."""
+    texts = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[1]
     with _served() as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
+        assert page.evaluate("() => !document.querySelector('[data-archfollow]')"), "no list on the All picture"
+        page.goto(url + "#v=arch")
+        page.reload()
+        _arch_ready(page)
+        cap = page.evaluate("() => document.querySelector('.archwho.on').dataset.archcap")
+        text = texts["all|" + cap]
         seen = page.evaluate("""() => ({
             groups: [...document.querySelectorAll('[data-archfollow] optgroup')].map((g) => g.label),
             features: [...document.querySelectorAll('.archwho')].map((b) => b.textContent).slice(1),
@@ -4987,6 +4994,33 @@ def test_a_line_between_layers_shows_a_summary_card_and_draws_its_lines_on_deman
         page.reload()
         _settle(page)
         assert page.evaluate(read)["rows"] == starts
+        assert not page.js_errors, page.js_errors
+
+
+def test_with_a_box_picked_resting_on_another_shows_its_card_and_draws_none_of_its_lines() -> None:
+    """With a box picked, its lines are what the reader is reading: resting on another box shows that
+    box's card beside the picked one's, and draws none of its lines."""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        boxes = page.evaluate("""() => { const d = document.getElementById('diagram').getBoundingClientRect(); const out = [];
+            for (const n of document.querySelectorAll('#diagram g.node')) {
+              const b = n.querySelector('.ibox-map'); if (!b) continue; const r = b.getBoundingClientRect();
+              if (r.right - 3 < d.left || r.right - 3 > d.right) continue;
+              for (let y = Math.min(r.bottom, d.bottom) - 3; y > Math.max(r.top, d.top); y -= 3) { const e = document.elementFromPoint(r.right - 3, y);
+                if (e && b.contains(e) && !e.closest('button, a, .ibox-name, .item-pill')) { out.push({ x: r.right - 3, y }); break; } }
+              if (out.length === 2) break; }
+            return out; }""")
+        assert len(boxes) == 2, boxes
+        page.mouse.click(boxes[0]["x"], boxes[0]["y"])
+        page.wait_for_timeout(500)
+        count = "() => document.querySelectorAll('#diagram .arch-ov-line').length"
+        picked = page.evaluate(count)
+        assert picked > 0
+        page.mouse.move(boxes[1]["x"] - 1, boxes[1]["y"])
+        page.mouse.move(boxes[1]["x"], boxes[1]["y"])
+        page.wait_for_timeout(500)
+        assert page.evaluate(count) == picked, "the hovered box drew its lines"
+        assert page.evaluate("() => !document.getElementById('peekcard').hidden"), "its card shows beside the pick"
         assert not page.js_errors, page.js_errors
 
 

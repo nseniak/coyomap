@@ -4861,9 +4861,13 @@ function archRedrawLines() {
 // reader moves from a box to its lines to read them, and the lines must not go on the way.
 let archPreviewTest = null, archPreviewKey = '', archPreviewFrom = null, archPreviewTimer = 0;
 const ARCH_PREVIEW_LEAVE_MS = 200;
-function archPreview(key, from, test) {
+// WITH SOMETHING PICKED, resting on a box or a line between layers shows its card beside the pick and
+// draws nothing: the picked thing's lines are what the reader is reading. A row of the picked thing's
+// own card still previews (`inCard`).
+function archPreview(key, from, test, inCard) {
   clearTimeout(archPreviewTimer); archPreviewTimer = 0;
   if (archPlay || archPreviewKey === key) return;
+  if (!inCard && mainScene && mainScene.selection.length) return;
   archPreviewWatch();
   archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
   archRedrawLines();
@@ -7624,7 +7628,10 @@ function archFeatureHtml() {
 function archControlsHtml(s) {
   const t = archTextOf({ ...s, kind: 'arch' });
   const stories = (t && t.stories) || [];
-  return (stories.length ? archFollowSelectHtml(stories, s.story || '') : '')
+  // NOT ON THE ALL PICTURE: its 67 stories are one long list to scroll, and a story is reached there
+  // from a line's card ("Follow this story"). A feature's picture lists its own few.
+  const all = !archFeature({ ...s, kind: 'arch' });
+  return (stories.length && !all ? archFollowSelectHtml(stories, s.story || '') : '')
     + `<span class="archthrough"${archFilterLabel ? '' : ' hidden'}>${archThroughHtml()}</span>`;
 }
 function archThroughHtml() {
@@ -7646,9 +7653,11 @@ function archFollowSelectHtml(stories, now) {
   const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
   const feats = [...new Set(stories.map((x) => featureOf(x.uc)))].sort((a, b) => at(a) - at(b));
   const opt = (x) => `<option value="${esc(x.uc)}"${x.uc === now ? ' selected' : ''}>${esc(x.name)}</option>`;
-  return '<label class="archfollow"><span class="archfollow-lbl">Follow a story</span>'
+  // THE LIST SAYS WHAT IT IS FOR in its own first entry, with no label beside it: a label and a wide
+  // list pushed the features' row onto a second line at 1280px, and took 33px from the drawing.
+  return '<label class="archfollow">'
     + `<select data-archfollow aria-label="Follow a story"><option value="">`
-    + `${now ? 'Show every story' : `Pick one of ${stories.length}…`}</option>`
+    + `${now ? 'Show every story' : `Follow a story (${stories.length})\u2026`}</option>`
     + feats.map((f) => `<optgroup label="${esc(f ? featureName(f) : 'In no feature')}">`
       + stories.filter((x) => featureOf(x.uc) === f).map(opt).join('') + '</optgroup>').join('')
     + '</select></label>';
@@ -7941,7 +7950,7 @@ function archLayerRowAt(e) {
   if (!card) return;
   card.addEventListener('mouseover', (e) => {
     const r = archLayerRowAt(e);
-    if (r) archPreview(`row:${r.k}:${r.box}`, r.row, archLayerTest(r.ll, r.box));
+    if (r) archPreview(`row:${r.k}:${r.box}`, r.row, archLayerTest(r.ll, r.box), true);
   });
   card.addEventListener('click', (e) => {
     const all = e.target.closest && e.target.closest('[data-archdrawall]');
