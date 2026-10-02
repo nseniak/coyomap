@@ -206,6 +206,9 @@ design principles these come from)
   cards across then down, to be chosen between. **grouped card list** — a card
   list cut into sections by a heading, where the cut is not a level (People and
   Software on Actors).
+- **second card** — with something picked, the card of what the pointer rests on,
+  shown beside the picked thing's card (the **main card**). A click makes it the
+  main card, in the same place.
 - **page hero** — the block at the top of a page about one element: its pills,
   the sentence saying what it is, one line of context. It does NOT carry the
   name; the breadcrumb does.
