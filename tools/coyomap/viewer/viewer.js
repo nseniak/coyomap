@@ -4825,8 +4825,9 @@ function rescaleLayerLines() {
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
 // One line of the picture, as the overlay draws it: its step number, or none on a line into a database.
+// No number: a line's number is a followed story's own step, which archFollow draws.
 function archOverlayItem(e) {
-  return { src: e.srcBox, dst: e.dstBox, label: e.store ? '' : String(e.n), store: !!e.store };
+  return { src: e.srcBox, dst: e.dstBox, label: '', store: !!e.store };
 }
 // Draw the box lines of a crowded picture that pass `test`, each with its step number, or none again
 // when it is null.
@@ -4983,22 +4984,28 @@ function archOverlay(items) {
       previewOnHover(mainScene, [hit], desc.show, line);
     }
     if (it.label) {
-      const tx = document.createElementNS(SVGNS, 'text');
-      tx.setAttribute('x', String((x1 + x2) / 2)); tx.setAttribute('y', String(ym));
-      tx.setAttribute('class', 'arch-ov-num');
+      const tx = archNumBadge(g, (x1 + x2) / 2, ym, it.label);
       tx.dataset.src = it.src; tx.dataset.dst = it.dst;
-      tx.textContent = it.label;
-      g.appendChild(tx);
-      const bb = tx.getBBox();
-      const bg = document.createElementNS(SVGNS, 'rect');
-      bg.setAttribute('x', String(bb.x - 3)); bg.setAttribute('y', String(bb.y - 1));
-      bg.setAttribute('width', String(bb.width + 6)); bg.setAttribute('height', String(bb.height + 2));
-      bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg');
-      g.insertBefore(bg, tx);
       tx.addEventListener('click', find);
       if (desc) previewOnHover(mainScene, [tx], desc.show, line);
     }
   }
+}
+// A STEP NUMBER on a line: its text on a small tag, centred on (x, y) in `g`'s own units. One drawing
+// for the lines a crowded picture draws on top of itself and for a followed story's drawn lines.
+function archNumBadge(g, x, y, text) {
+  const tx = document.createElementNS(SVGNS, 'text');
+  tx.setAttribute('x', String(x)); tx.setAttribute('y', String(y));
+  tx.setAttribute('class', 'arch-ov-num');
+  tx.textContent = text;
+  g.appendChild(tx);
+  const bb = tx.getBBox();
+  const bg = document.createElementNS(SVGNS, 'rect');
+  bg.setAttribute('x', String(bb.x - 3)); bg.setAttribute('y', String(bb.y - 1));
+  bg.setAttribute('width', String(bb.width + 6)); bg.setAttribute('height', String(bb.height + 2));
+  bg.setAttribute('rx', '3'); bg.setAttribute('class', 'arch-ov-numbg');
+  g.insertBefore(bg, tx);
+  return tx;
 }
 // A LINE DRAWN ON TOP OF A CROWDED PICTURE is picked like a drawn one, under the same key. The overlay
 // is drawn again whenever what it shows changes, so the glow finds the line as it stands, and a picked
@@ -7619,7 +7626,7 @@ function archFeatureHtml() {
   return `<div class="archwho-row">${one('all', 'All')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     + `<span class="archwho-sep" aria-hidden="true"></span>${sw}${archControlsHtml(s)}</div>`
-    + archKeyHtml(archTextOf({ ...s, kind: 'arch' }));
+    + archKeyHtml(archTextOf({ ...s, kind: 'arch' }), !!s.story);
 }
 // WHAT THE READER NARROWS THE PICTURE TO, after the happy-path switch on the features' row, which it
 // shares rather than taking a row of the drawing's height: one story to follow.
@@ -7842,13 +7849,13 @@ function archStoryClick(e) {
 function showArchLine(e, story) {
   const own = story ? story.lines.findIndex(([a, b]) => a === e.srcBox && b === e.dstBox) : -1;
   const said = own >= 0 ? e.sentences.find((x) => x.ucs.includes(story.uc)) : null;
-  const badge = e.store ? 'keeps records' : 'step ' + (own >= 0 ? own + 1 : Number(e.n));
+  const badge = e.store ? 'keeps records' : own >= 0 ? 'step ' + (own + 1) : '';
   // What the code does along it (the link list's verb, "calls ×2"), and the boxes a grey line passes.
   const via = (e.via || []).length
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>`
     : e.verb ? `<p class="archcard-via">${esc(capFirst(e.verb))}</p>` : '';
   panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
-    + `<span class="badge edge">${esc(badge)}</span></div>` + via
+    + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
     + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
     + '<div class="archcard-lbl">Use cases that take this line</div>'
@@ -7968,15 +7975,23 @@ function bindActorBox(scene, el, id, a, afterPick) {
 }
 // FOLLOWING ONE STORY on the drawing: its lines stay lit and carry its own numbers, 1, 2, 3 in its
 // order, everything else steps back, and its start and end are marked (markStartEnd).
+// The numbers are the story's own, drawn on its lines in place of their labels: no other number is on
+// the picture, since the shared order of every story read true for few of them (gen_viewer).
 function archFollow(story) {
   if (!mainScene) return;
   const own = new Map(story.lines.map(([a, b], i) => [a + '>' + b, i + 1]));
   mainScene.root.classList.add('arch-following');
+  const host = diagram.querySelector('.svg-pan-zoom_viewport') || diagram.querySelector('svg > g');
+  diagram.querySelectorAll('.arch-story-nums').forEach((x) => x.remove());
+  const nums = host ? document.createElementNS(SVGNS, 'g') : null;
+  if (nums) { nums.setAttribute('class', 'arch-story-nums'); host.appendChild(nums); }
   eachEdge(mainScene.root, (p, label, m) => {
     const n = own.get(m[1] + '>' + m[2]);
     const on = n !== undefined;
     for (const el of [p, ...(p._segs || []), label].filter(Boolean)) el.classList.toggle('arch-story-on', on);
-    if (on && label) setEdgeLabelText(label, String(n));
+    const mid = on && nums ? arrowMidpoint(p) : null;
+    const at = mid && clientToLocal(nums, mid.x, mid.y);
+    if (at) archNumBadge(nums, at.x, at.y, String(n)).dataset.n = String(n);
   });
   const boxes = new Set(story.lines.flat());
   mainScene.root.querySelectorAll('g.node').forEach((el) => el.classList.toggle('arch-story-on', boxes.has(idOf(el))));
@@ -8093,7 +8108,9 @@ function archOpenOf(s) {
 // THE KEY TO THE PICTURE, each mark drawn as itself rather than named: a reader matches a stroke faster
 // than they decode a word for one. Solid = every story through that box goes this way, so two solid
 // lines out of one box read "and"; dashed = only some do, so read "or".
-function archKeyHtml(t) {
+// The story's marks, its numbers and its two ends, are on the picture only while a story is followed,
+// and so are they in the key.
+function archKeyHtml(t, following) {
   const line = (dash, stroke, width) => '<svg class="archkey-line" width="26" height="8" aria-hidden="true">'
     + `<line x1="1" y1="4" x2="25" y2="4" stroke="${stroke}" stroke-width="${width || 1.6}"${dash ? ' stroke-dasharray="4 3"' : ''}/></svg>`;
   // A CROWDED PICTURE draws no box line of its own at rest, only its lines between layers, so that one
@@ -8106,10 +8123,10 @@ function archKeyHtml(t) {
       + `<span>${line(true, '#475569')} only some do</span>`)
     + `<span>${line(false, '#94a3b8')} via 2: passes through 2 boxes not shown</span>`
     + `<span>${line(true, ARCH_STORE_LINE)} where a box keeps its records</span>`
-    + '<span><b class="archkey-num">3</b> the step: follow 1, 2, 3 and any story reads in order.'
-    + ' One number on several lines: the stories take them in different orders, so follow one story</span>'
-    + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
-    + ' where the story you follow starts and ends</span></div>';
+    + (following ? '<span><b class="archkey-num">3</b> the story\'s third step</span>'
+      + '<span><span class="ucm-key-start" aria-hidden="true"></span><span class="ucm-key-end" aria-hidden="true"></span>'
+      + ' where the story starts and ends</span>' : '')
+    + '</div>';
 }
 // The store line's colour the picture's key names, kept equal to gen_viewer's ARCH_STORE_LINE: the
 // key must show the marks the picture actually carries.

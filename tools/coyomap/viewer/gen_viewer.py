@@ -2078,13 +2078,15 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     for n_line, ln in enumerate(box_lines):
         # NO WORD IS PUT ON A STEP THAT HAS NO VERB. The step's own phrase is a sentence, too long
         # for a line, and the link list has none for this pair; a filler verb was tried and took
-        # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries its number.
+        # over the picture ("uses" on 17 of mcpolis's 34 labels). Such a line carries no label.
+        # NOR A NUMBER: the macro flow's shared number (`number`) read in order for 17 of the 67
+        # stories of mcpolis's whole product, and 56 of its 120 lines carried the same one. The view
+        # numbers a story's own lines, 1, 2, 3, while that story is followed.
         words = f"via {ln['hidden']}" if ln["hidden"] else ln["verb"]
-        if ln["store"]:   # where a box keeps what it saves: no number, its own style (see _arch_model)
-            label = _edge_label(words or "keeps")
+        if ln["store"]:   # where a box keeps what it saves: its own style (see _arch_model)
+            words = words or "keeps"
             keeping.append(str(n_line))
-        else:
-            label = _edge_label(f"{ln['number']} · {words}" if words else str(ln["number"]))
+        label = f"|{_edge_label(words)}|" if words else ""
         if ln["hidden"]:
             folded.append(str(n_line))
         head = "-.->" if ln["store"] or (not ln["always"] and not layered) else "-->"
@@ -2096,7 +2098,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
             # loop by dropping ties: on mcpolis's whole-product picture 6 lines of 107 ran up, and the
             # frames stood side by side. The drawing tool has no way to put one head at the start.
             head, a, b = ("<-.->" if head == "-.->" else "<-->"), b, a
-        lines.append(f"  {a} {head}|{label}| {b}")
+        lines.append(f"  {a} {head}{label} {b}")
     # THE LINES BETWEEN LAYERS, thick, and with no number (see `_arch_mermaid`).
     thick: list[str] = []
     for k, ll in enumerate(layer_lines or []):

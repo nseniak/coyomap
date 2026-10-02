@@ -639,9 +639,17 @@ def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_ru
     assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [(checker, saver)]
     drawings, texts = gv.gen_arch_views(graph)
     drawing = drawings["all|"]
-    assert f'  {saver} <-->|"5"| {checker}' in drawing and f"{checker} -->" not in drawing
+    assert f'  {saver} <--> {checker}' in drawing and f"{checker} -->" not in drawing
     up = [(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"] if e.get("up")]
     assert up == [(checker, saver)]
+
+
+def test_no_line_carries_the_shared_step_number():
+    """A line says its verb, or how many boxes it passes through, and no number: the shared number read
+    in order for few stories, and the view numbers a story's own lines while it is followed."""
+    drawing = gv.gen_arch_views(make_graph())[0]["all|"]
+    labels = re.findall(r'\|"([^"]*)"\|', drawing)
+    assert labels and not any(re.match(r"\d", x) for x in labels), labels
 
 
 def test_the_picture_over_subsystems_draws_no_line_flipped():

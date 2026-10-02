@@ -4275,7 +4275,7 @@ def test_following_a_story_numbers_its_own_lines_and_marks_where_it_starts_and_e
         page.wait_for_function("() => location.hash.includes('story=')")
         _arch_ready(page)
         seen = page.evaluate("""() => {
-          const lit = [...document.querySelectorAll('#diagram g.edgeLabel.arch-story-on')].map((l) => l.textContent.trim());
+          const lit = [...document.querySelectorAll('#diagram .arch-story-nums .arch-ov-num')].map((l) => l.textContent.trim());
           return { lit, marks: [...document.querySelectorAll('#diagram .ucm-mark')].map((m) => m.firstElementChild.getAttribute('class')),
                    steps: document.querySelector('.archplay-count').textContent,
                    start: document.querySelector('#archplayer .archplay-ends').textContent };
@@ -4321,7 +4321,7 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         e = _arch_line(text, seen["hash"])
         named = {uc for x in e["sentences"] for uc in x["ucs"]}
         assert seen["shown"] and seen["title"] == f"{e['src']} \u2192 {e['dst']}", seen
-        assert seen["badge"] == ("keeps records" if e["store"] else f"step {e['n']}"), seen
+        assert seen["badge"] == ("keeps records" if e["store"] else ""), "no shared step number: " + str(seen)
         assert set(seen["ucs"]) == named, (seen, named)
         # a reload keeps the pick, as it keeps a box's
         page.reload()
