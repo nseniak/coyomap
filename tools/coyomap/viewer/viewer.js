@@ -4718,6 +4718,10 @@ function attachEdgeHandlers(p, label, onClick, hoverOn, hoverOff, onDrill, actio
     label.style.cursor = 'pointer';
     label.style.setProperty('pointer-events', 'all', 'important');
     if (onDrill) label.classList.add('drill');
+    // The label answers for the arrow, so it sets where the card's line meets it, as the line does: a
+    // click on the label kept the point of an earlier hover, 88px from the label clicked.
+    label.addEventListener('mouseenter', (ev) => { if (!p.classList.contains('is-selected')) anchorArrowAt(p, ev.clientX, ev.clientY); });
+    label.addEventListener('click', (ev) => anchorArrowAt(p, ev.clientX, ev.clientY));
     label.addEventListener('click', onClick);
     label.addEventListener('mouseenter', on);
     label.addEventListener('mouseleave', off);

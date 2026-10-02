@@ -5521,3 +5521,34 @@ def test_the_happy_path_switch_is_only_on_a_feature_with_a_happy_path_picture() 
         assert "scope=happy" not in page.evaluate("() => location.hash")
         assert not page.js_errors, page.js_errors
 
+
+def test_a_click_on_an_arrows_label_points_the_card_at_the_label() -> None:
+    """The label answers for its arrow: a click on it points the card's line at it, not at a point an
+    earlier hover left on the arrow."""
+    with _served() as url, _page(url + "#v=container") as page:
+        _settle(page)
+        spots = page.evaluate("""() => { const d = document.getElementById('diagram').getBoundingClientRect();
+            const labels = [...document.querySelectorAll('#diagram .edgeLabels > g.edgeLabel')];
+            const paths = [...document.querySelectorAll('#diagram .edgePaths path.flowchart-link')];
+            for (let i = 0; i < paths.length; i++) { const p = paths[i], l = labels[i];
+              if (!l || !l.textContent.trim() || !p.__cyHits) continue;
+              const r = l.getBoundingClientRect(), lx = (r.left + r.right) / 2, ly = (r.top + r.bottom) / 2;
+              const L = p.getTotalLength(), m = p.getScreenCTM(), q = p.getPointAtLength(L * 0.15);
+              const hx = m.a * q.x + m.c * q.y + m.e, hy = m.b * q.x + m.d * q.y + m.f;
+              const inside = (x, y) => x > d.left && x < d.right && y > d.top && y < d.bottom;
+              const he = document.elementFromPoint(hx, hy), le = document.elementFromPoint(lx, ly);
+              if (Math.hypot(hx - lx, hy - ly) > 60 && inside(hx, hy) && inside(lx, ly)
+                  && he && p.__cyHits.includes(he) && le && l.contains(le)) return { hx, hy, lx, ly }; }
+            return null; }""")
+        assert spots, "no labelled arrow with room between its label and its start"
+        page.mouse.move(spots["hx"] - 2, spots["hy"])
+        page.mouse.move(spots["hx"], spots["hy"])
+        page.wait_for_timeout(300)
+        page.mouse.move(2, 2, steps=4)
+        page.mouse.click(spots["lx"], spots["ly"])
+        page.wait_for_timeout(800)
+        dot = page.evaluate("""() => { const c = document.querySelector('#callout .co-dot'), w = document.getElementById('diagwrap').getBoundingClientRect();
+            return c ? { x: +c.getAttribute('cx') + w.left, y: +c.getAttribute('cy') + w.top } : null; }""")
+        assert dot and abs(dot["x"] - spots["lx"]) < 15 and abs(dot["y"] - spots["ly"]) < 15, (dot, spots)
+        assert not page.js_errors, page.js_errors
+
