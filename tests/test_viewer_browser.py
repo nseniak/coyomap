@@ -4868,9 +4868,9 @@ VISIBLE_LINES = """() => {
 
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
     """A picture with more lines than a reader can follow draws one line per pair of layers that most of
-    its layer takes, with no number, and none of its boxes' own. A click on a layer line draws the box
-    lines it stands for on top of the picture and names them in the header's tag; a click on a box draws
-    its own lines; a second click shows the picture at rest again."""
+    its layer takes, with no number, and none of its boxes' own. A click on a layer line shows its card
+    and draws nothing; the card's "Draw all" draws the box lines it stands for on top of the picture and
+    names them in the header's tag, and a second press hides them. A click on a box draws its own lines."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
     rest = 0
@@ -4894,13 +4894,15 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         assert on_top, "the layer lines are not the last thing their drawing paints"
         k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
         under = len(text["layerLines"][k]["lines"])
-        click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]')
-            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
-        page.evaluate(click)
+        page.evaluate(f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
+            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
+        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": rest}, "a click draws nothing"
+        draw_all = "() => document.querySelector('#panel [data-archdrawall]').click()"
+        page.evaluate(draw_all)
         # the layer line stood for these lines: drawn beside them, it would say the same thing twice
         assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]) - 1, "box": under}
         assert page.evaluate("() => document.querySelector('.archthrough').textContent").startswith("From ")
-        page.evaluate(click)
+        page.evaluate(draw_all)
         assert page.evaluate(VISIBLE_LINES)["box"] == rest
         # THE BOX WITH THE MOST LINES, clicked on its body: the picture is wider than the window, so a
         # point on screen cannot be counted on, and a click on the box's body is what a reader makes.
@@ -4925,8 +4927,9 @@ def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> Non
     text = make_whole_product_text(make_parts_in_every_layer)
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        page.evaluate("""() => document.querySelector('#diagram path.arch-layerline')
+        page.evaluate("""() => document.querySelector('#diagram path.arch-layerline').__cyHits[0]
             .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.evaluate("() => document.querySelector('#panel [data-archdrawall]').click()")
         page.evaluate("""() => document.querySelector('#diagram .arch-ov-hit')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
         page.wait_for_function("() => location.hash.includes('sel=arch')")
@@ -4941,34 +4944,96 @@ def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> Non
         assert not page.js_errors, page.js_errors
 
 
-def test_a_line_between_layers_is_picked_and_its_card_lists_the_lines_it_stands_for() -> None:
-    """A line between layers is picked like any line: it draws the lines it stands for, and its card
-    lists them, each opening to the use cases that take it. The address keeps it, and a second click
-    lets go of it."""
+def test_a_line_between_layers_shows_a_summary_card_and_draws_its_lines_on_demand() -> None:
+    """A click on a line between layers picks it and shows its card, and draws nothing. The card says how
+    many lines it stands for, and has one row per box they leave from: resting on a row draws that box's
+    lines while the pointer stays, a click on it keeps them. The use cases are listed by feature. The
+    address keeps the pick."""
     text = make_whole_product_text(make_parts_in_every_layer)
     k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
     ll = text["layerLines"][k]
-    click = f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
-        .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))"""
+    starts = list(dict.fromkeys(a for a, _b in ll["lines"]))
+    first = starts[0]
+    own = sum(1 for a, _b in ll["lines"] if a == first)
     read = """() => ({ hash: decodeURIComponent(location.hash), shown: !document.getElementById('panel').hidden,
-        rows: document.querySelectorAll('#panel .archcard-line').length,
-        ucs: document.querySelectorAll('#panel .archcard-line .archuc-follow').length,
-        drawn: document.querySelectorAll('#diagram .arch-ov-line').length })"""
+        summary: (document.querySelector('#panel .archcard-via') || {}).textContent || '',
+        rows: [...document.querySelectorAll('#panel [data-archrow]')].map((r) => r.dataset.archrow),
+        ucs: document.querySelectorAll('#panel .archuc-follow').length,
+        drawn: document.querySelectorAll('#diagram .arch-ov-line').length,
+        tag: document.querySelector('.archthrough').hidden ? '' : document.querySelector('.archthrough').textContent })"""
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        page.evaluate(click)
+        page.evaluate(f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
+            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
         page.wait_for_function("() => location.hash.includes('sel=archlayer')")
         seen = page.evaluate(read)
-        assert seen["hash"].endswith(f"sel=archlayer:{k}") and seen["shown"], seen
-        assert seen["rows"] == seen["drawn"] == len(ll["lines"]) and seen["ucs"], seen
+        assert seen["hash"].endswith(f"sel=archlayer:{k}") and seen["shown"] and seen["drawn"] == 0, seen
+        assert seen["summary"].startswith(f"{len(ll['lines'])} lines from {len(starts)} boxes"), seen
+        assert seen["rows"] == starts and seen["ucs"], seen
+        # resting on a row draws its box's lines, and only while the pointer stays
+        row = page.locator(f'#panel [data-archrow="{first}"]')
+        row.hover()
+        page.wait_for_timeout(200)
+        assert page.evaluate(read)["drawn"] == own
+        page.mouse.move(2, 2)
+        page.wait_for_timeout(500)
+        assert page.evaluate(read)["drawn"] == 0
+        # a click keeps them, and the header names them
+        row.click()
+        page.mouse.move(2, 2)
+        page.wait_for_timeout(500)
+        seen = page.evaluate(read)
+        assert seen["drawn"] == own and seen["tag"].startswith("From "), seen
         page.reload()
         _settle(page)
-        page.wait_for_selector(".arch-ov-line", state="attached")
-        assert page.evaluate(read)["rows"] == len(ll["lines"])
-        page.evaluate(click)
+        assert page.evaluate(read)["rows"] == starts
+        assert not page.js_errors, page.js_errors
+
+
+def test_resting_on_a_box_of_a_picture_that_draws_every_line_lights_its_own() -> None:
+    """On a picture that draws every line, resting on a box lights the lines it takes part in, and only
+    those, until the pointer leaves."""
+    with _served() as url, _page(url + "#v=arch") as page:
+        _arch_ready(page)
+        spot = page.evaluate(ARCH_BOX_BODY)
+        page.mouse.move(spot["x"] - 1, spot["y"])
+        page.mouse.move(spot["x"], spot["y"])
         page.wait_for_timeout(300)
-        seen = page.evaluate(read)
-        assert "sel=" not in seen["hash"] and seen["drawn"] == 0, seen
+        lit = page.evaluate("""() => [...document.querySelectorAll('#diagram path.flowchart-link.arch-preview-on')].length""")
+        total = page.evaluate("() => document.querySelectorAll('#diagram path.flowchart-link').length")
+        assert 0 < lit < total, (lit, total)
+        page.mouse.move(2, 2)
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .arch-preview-on').length") == 0
+        assert not page.js_errors, page.js_errors
+
+
+def test_resting_on_a_box_of_a_crowded_picture_draws_its_lines_while_the_pointer_is_on_it_or_them() -> None:
+    """Resting on a box draws its lines, as resting on a line between layers does. They stay while the
+    pointer moves from the box onto one of them, and go when it leaves both."""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        spot = page.evaluate(ARCH_BOX_BODY)
+        assert spot
+        page.mouse.move(spot["x"] - 1, spot["y"])
+        page.mouse.move(spot["x"], spot["y"])
+        page.wait_for_timeout(300)
+        n = page.evaluate("() => document.querySelectorAll('#diagram .arch-ov-line').length")
+        assert n > 0
+        at = page.evaluate("""() => { const d = document.getElementById('diagram').getBoundingClientRect();
+            for (const l of document.querySelectorAll('.arch-ov-line')) {
+              const L = l.getTotalLength(), m = l.getScreenCTM();
+              for (const f of [0.3, 0.5, 0.7]) { const q = l.getPointAtLength(L * f);
+                const x = m.a * q.x + m.e, y = m.d * q.y + m.f;
+                if (x > d.left && x < d.right && y > d.top && y < d.bottom) return { x, y }; } }
+            return null; }""")
+        assert at, "no line on screen"
+        page.mouse.move(at["x"], at["y"], steps=10)
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .arch-ov-line').length") == n
+        page.mouse.move(2, 2)
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .arch-ov-line').length") == 0
         assert not page.js_errors, page.js_errors
 
 
