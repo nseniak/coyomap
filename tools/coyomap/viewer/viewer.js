@@ -7644,7 +7644,7 @@ function archFeatureHtml() {
   const happy = scope === 'happy';
   const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
     + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
-  return `<div class="archwho-row">${one('all', 'All')}`
+  return `<div class="archwho-row">${one('all', 'Whole product')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     // NO HAPPY-PATH SWITCH ON THE ALL PICTURE: the whole product is every story, and its happy path
     // alone is a feature's question. A feature's picture keeps it.
