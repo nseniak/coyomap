@@ -28,7 +28,7 @@ import json
 import sys
 from pathlib import Path
 
-from coyomap.ignorefile import ignore_report
+from coyomap.ignorefile import bad_line_disclosure, ignore_report
 from coyomap.preindex_lib import (
     GRANULARITY_BAND_PCT,
     GRANULARITY_FILE_CAP,
@@ -423,11 +423,13 @@ def report(argv: list[str]) -> int:
         out.append(f"  symbol parse failures: {fails}")
     # The one input that can hide a real gap from the check built to find gaps — so the report
     # NAMES the patterns, never just the count. A reader who disagrees with the map's coverage can
-    # see immediately whether the tree or the ignore file is the reason.
+    # see immediately whether the tree or the ignore file is the reason. The unusable lines are
+    # named too, in validate's words, and open the block on their own when no line was usable.
     ignored_n = cov.get("files_skipped_ignored") or 0
     ignore_pats = list(cov.get("ignore_patterns") or [])
     ignore_unused = list(cov.get("ignore_patterns_unused") or [])
-    if ignore_pats:
+    ignore_unusable = list(cov.get("ignore_lines_unusable") or [])
+    if ignore_pats or ignore_unusable:
         out += ["", f"IGNORED BY .coyomap/.ignore — {_fmt_int(ignored_n)} file(s), "
                     f"{len(ignore_pats)} pattern(s). These are OUT of the weight tree, out of E, "
                     f"and out of the coverage check."]
@@ -436,6 +438,7 @@ def report(argv: list[str]) -> int:
             out += [f"    ^ {len(ignore_unused)} pattern(s) decided NOTHING: "
                     f"{', '.join(ignore_unused)} — a typo, a moved tree, or already covered by a "
                     f"built-in exclusion."]
+        out += [f"    ^ {line}" for line in bad_line_disclosure(ignore_unusable)]
     out += ["", "Reconcile every item — this is advisory INPUT, never rows for the map (GR2);",
             "weight sets attention, your judgement sets altitude (GR5)."]
     print("\n".join(out))
@@ -556,8 +559,9 @@ def main(argv: list[str] | None = None) -> int:
 
     walk = iter_source_files(root)
     # Per-pattern, shared with validate's advisory and the viewer's tree so one ignore file cannot
-    # be described three different ways. None when no ignore file is in effect.
-    ignore_rep = ignore_report(walk.ignore, walk.ignore_hits) if walk.ignore else None
+    # be described three different ways. Built on every run, since an absent file gives an empty
+    # report: gating on the patterns hid the file whose EVERY line is unusable, which has none.
+    ignore_rep = ignore_report(walk.ignore, walk.ignore_hits)
     churn, git_ok = git_churn(root, since)
     weight, lang_counts = build_weight(walk.files, root, churn, max_depth)
     symbols, sym_meta = build_symbols(walk.files, root)
@@ -574,8 +578,11 @@ def main(argv: list[str] | None = None) -> int:
         # PATTERN, not just the total: a pattern that removed nothing is a typo or a moved tree, and
         # the total is exactly where that disappears.
         "files_skipped_ignored": walk.skipped_ignored,
-        "ignore_patterns": list(ignore_rep.per_rule) if ignore_rep else [],
-        "ignore_patterns_unused": list(ignore_rep.unused) if ignore_rep else [],
+        "ignore_patterns": list(ignore_rep.per_rule),
+        "ignore_patterns_unused": list(ignore_rep.unused),
+        # Lines that parsed to nothing, as written. Each excludes nothing although its author meant
+        # it to, and the per-pattern list cannot show that: those lines never became patterns.
+        "ignore_lines_unusable": list(ignore_rep.bad_lines),
         "languages_seen": dict(sorted(lang_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
         "languages_with_symbols": sym_meta["languages_with_symbols"],
         "languages_seen_without_extractor": sym_meta["languages_seen_without_extractor"],
@@ -611,7 +618,8 @@ def main(argv: list[str] | None = None) -> int:
            f"{len(walk.ignore.rules)} pattern(s) — this narrows the tree the coverage check "
            f"re-measures too\n" if walk.ignore else "")
         + (f"  .coyomap/.ignore: {len(ignore_rep.unused)} pattern(s) decided NOTHING — "
-           f"{', '.join(ignore_rep.unused)}\n" if ignore_rep and ignore_rep.unused else "")
+           f"{', '.join(ignore_rep.unused)}\n" if ignore_rep.unused else "")
+        + "".join(f"  {line}\n" for line in bad_line_disclosure(ignore_rep.bad_lines))
         + f"  {coverage['files_counted']} files, {weight['loc']} LOC; "
         f"git={'yes' if git_ok else 'NO'}, tree-sitter={'yes' if ts_ok else 'NO'}\n"
         f"  heaviest top-level: " + ", ".join(f"{c['path']}({c['loc']})" for c in top) + "\n"

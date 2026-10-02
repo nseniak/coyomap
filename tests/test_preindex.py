@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from coyomap import preindex, preindex_lib, validate_analysis  # tool #4: compression-coverage check
+from coyomap.ignorefile import bad_line_disclosure
 from coyomap.validate_analysis import _REF_INLINE, _REF_LINK, strip_anchor
 
 
@@ -351,8 +352,8 @@ def make_report_artifact(root: Path, marker: str, expected: int) -> Path:
     return out
 
 
-def run_report(args: list[str], cwd: Path | None = None) -> tuple[int, str]:
-    """Run `preindex --report` and return (exit code, everything it printed to stdout+stderr).
+def run_preindex(args: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    """Run `coyomap preindex` and return (exit code, everything it printed to stdout+stderr).
     Stdlib only and no pytest fixture (house style), so the redirect and the chdir are explicit
     and local; the chdir is always undone, since a leaked CWD would corrupt every later test."""
     buf = io.StringIO()
@@ -361,10 +362,15 @@ def run_report(args: list[str], cwd: Path | None = None) -> tuple[int, str]:
         if cwd is not None:
             os.chdir(cwd)
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            code = preindex.main(["--report", *args])
+            code = preindex.main(args)
     finally:
         os.chdir(here)
     return code, buf.getvalue()
+
+
+def run_report(args: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    """`run_preindex` for `--report`, which reads an existing pre-index and writes nothing."""
+    return run_preindex(["--report", *args], cwd)
 
 
 def test_report_root_reads_the_named_repos_preindex_not_the_cwds() -> None:
@@ -429,6 +435,49 @@ def test_report_missing_preindex_names_the_path_it_looked_for() -> None:
         code, out = run_report(["--root", str(tmp / "empty-repo")])
     assert code == 2, out
     assert str(tmp / "empty-repo" / ".coyomap" / "preindex.json") in out, out
+
+
+# --- the ignore file's unusable lines: the summary, the artifact, --report ---------
+def make_ignore_repo(ignore: str) -> Path:
+    """A git repo holding `src/a.py` and `junk/b.py`, whose `.coyomap/.ignore` holds `ignore`."""
+    return make_temp_repo({"src/a.py": "def a():\n    return 1\n",
+                           "junk/b.py": "def b():\n    return 2\n",
+                           ".coyomap/.ignore": ignore})
+
+
+def test_unusable_ignore_lines_are_named_by_the_summary_the_artifact_and_the_report() -> None:
+    """A line that parses to nothing excludes nothing, although its author meant it to. The
+    build's summary, the saved pre-index and `--report` (the read a build is told to use) each
+    name it, in the sentence `validate` and `scope` print, beside the pattern that did work."""
+    root = make_ignore_repo("junk/\ninternal/  # private runbooks\n/\n")
+    artifact = root / ".coyomap" / "preindex.json"
+    said = bad_line_disclosure(("internal/  # private runbooks", "/"))[0]
+    code, summary = run_preindex(["--root", str(root), "--out", str(artifact)])
+    assert code == 0, summary
+    assert said in summary
+    cov = json.loads(artifact.read_text())["coverage"]
+    assert cov["ignore_patterns"] == ["junk/ (removed 1 file(s))"]
+    assert cov["ignore_lines_unusable"] == ["internal/  # private runbooks", "/"]
+    code, report = run_report(["--in", str(artifact)])
+    assert code == 0, report
+    assert "junk/ (removed 1 file(s))" in report and said in report
+
+
+def test_an_ignore_file_of_only_unusable_lines_is_still_named() -> None:
+    """The worst case: no line is usable, so there is no pattern at all. Every place that first
+    asked "any patterns?" said nothing about a file its author believes works."""
+    root = make_ignore_repo("junk/  # the fixture\n")
+    artifact = root / ".coyomap" / "preindex.json"
+    said = bad_line_disclosure(("junk/  # the fixture",))[0]
+    code, summary = run_preindex(["--root", str(root), "--out", str(artifact)])
+    assert code == 0, summary
+    assert said in summary
+    cov = json.loads(artifact.read_text())["coverage"]
+    assert cov["ignore_patterns"] == [] and cov["files_skipped_ignored"] == 0
+    assert cov["ignore_lines_unusable"] == ["junk/  # the fixture"]
+    code, report = run_report(["--in", str(artifact)])
+    assert code == 0, report
+    assert "IGNORED BY .coyomap/.ignore — 0 file(s), 0 pattern(s)" in report and said in report
 
 
 if __name__ == "__main__":

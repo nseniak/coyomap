@@ -13,6 +13,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from coyomap import validate_analysis
 from coyomap.scope import read_pin, scope_report
 from test_source_walk_git import make_git_repo, run_git, write
 
@@ -26,6 +27,13 @@ def make_dirty_repo(tmp: Path) -> Path:
     """A repo whose committed file has an uncommitted edit."""
     root = make_git_repo(tmp)
     (root / "src" / "tracked.py").write_text("def tracked():\n    return 2\n")
+    return root
+
+
+def make_ignore_repo(tmp: Path, ignore: str) -> Path:
+    """A repo (one committed file, `src/tracked.py`) whose `.coyomap/.ignore` holds `ignore`."""
+    root = make_git_repo(tmp)
+    write(root, ".coyomap/.ignore", ignore)
     return root
 
 
@@ -57,12 +65,42 @@ def test_the_ignore_file_is_reported_per_pattern():
     """A bare total would let an over-broad pattern pass as a number. The pattern that removed
     nothing is named too — the author believes it is describing the tree and it is not."""
     with tempfile.TemporaryDirectory() as td:
-        root = make_git_repo(Path(td))
-        write(root, ".coyomap/.ignore", "src/\nnowhere/\n")
-        text = report(root)
+        text = report(make_ignore_repo(Path(td), "src/\nnowhere/\n"))
         assert "src/ (removed 1 file(s))" in text
         assert "nowhere/ (removed 0 file(s))" in text
         assert "removed nothing: nowhere/" in text
+
+
+def test_unusable_ignore_lines_are_named_beside_the_patterns():
+    """A line that parses to nothing excludes nothing, so the author believes a tree is out of the
+    map that is in it. The briefing is where a build learns that BEFORE it starts, so it names each
+    such line, quoted exactly, beside the patterns that did work."""
+    with tempfile.TemporaryDirectory() as td:
+        text = report(make_ignore_repo(Path(td), "src/\ninternal/  # private runbooks\n/\n"))
+        assert "src/ (removed 1 file(s))" in text
+        assert "2 unusable line(s), DROPPED" in text
+        assert "'internal/  # private runbooks', '/'" in text
+
+
+def test_an_ignore_file_of_only_unusable_lines_still_gets_its_block():
+    """The worst case: every line is unusable, so there is no pattern to list. Gating the block on
+    the patterns made this file invisible, which is the exact file the warning exists for."""
+    with tempfile.TemporaryDirectory() as td:
+        text = report(make_ignore_repo(Path(td), "src/  # the fixture\n"))
+        assert "0 file(s) removed by .coyomap/.ignore:" in text
+        assert "1 unusable line(s), DROPPED" in text and "'src/  # the fixture'" in text
+        assert "1 file(s) will be analyzed" in text     # the line removed nothing, as it says
+
+
+def test_scope_and_validate_say_the_same_thing_about_unusable_lines():
+    """One ignore file, one story: the briefing before the build and validate during it carry the
+    same sentence, word for word, so a reader never has to reconcile two descriptions."""
+    with tempfile.TemporaryDirectory() as td:
+        for i, ignore in enumerate(("src/  # the fixture\n", "src/\n/\n")):
+            root = make_ignore_repo(Path(td) / f"case{i}", ignore)
+            said = [s for s in validate_analysis.ignore_disclosure(root) if "unusable" in s]
+            assert len(said) == 1, said
+            assert said[0] in report(root)
 
 
 def test_a_folder_without_git_says_gitignore_does_not_apply():

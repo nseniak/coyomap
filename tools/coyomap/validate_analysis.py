@@ -24,8 +24,9 @@ from coyomap.anchors import FILE_ANCHOR as _BARE_PATH, LINE_ANCHOR, strip_anchor
 from coyomap.grammar import DEEP_NEST_WARN
 # Stdlib-only, and free of the pre-index code path, so importing it at module load keeps the core
 # gate's dependency firewall intact (tests/test_cli.py). The per-rule wording lives there so
-# validate, the pre-index and the viewer tell the SAME story about one ignore file.
-from coyomap.ignorefile import ignore_report, load_ignore
+# validate, the pre-index and the viewer tell the SAME story about one ignore file, and so does the
+# unusable-line sentence, which `coyomap scope` and `coyomap preindex` print too.
+from coyomap.ignorefile import bad_line_disclosure, ignore_report, load_ignore
 from coyomap.reporting import capped, shown
 
 
@@ -320,11 +321,11 @@ def ignore_disclosure(root: Path, mapped_sources: Sequence[str] = ()) -> list[st
     # Bad lines are disclosed on their own, before any walk (there is nothing to walk).
     spec0 = load_ignore(root)
     if not spec0:
-        return _bad_line_disclosure(spec0.bad_lines)
+        return bad_line_disclosure(spec0.bad_lines)
     walk = iter_source_files(root)
     spec = walk.ignore
     if not spec:      # raced away between the two reads — nothing to disclose
-        return _bad_line_disclosure(spec.bad_lines)
+        return bad_line_disclosure(spec.bad_lines)
     rep = ignore_report(spec, walk.ignore_hits)
     out: list[str] = [
         f"`.coyomap/.ignore` is in effect: {walk.skipped_ignored} file(s) removed from the analysed "
@@ -339,7 +340,7 @@ def ignore_disclosure(root: Path, mapped_sources: Sequence[str] = ()) -> list[st
                    f"nothing put back). A typo, a tree that moved, or a path already covered by a "
                    f"built-in exclusion; either way it reads as coverage the author never got.")
     out.extend(_partly_mapped_disclosure(spec.patterns, mapped_sources))
-    out.extend(_bad_line_disclosure(rep.bad_lines))
+    out.extend(bad_line_disclosure(rep.bad_lines))
     return out
 
 
@@ -395,20 +396,6 @@ def _partly_mapped_disclosure(patterns: Sequence[str], mapped_sources: Sequence[
                 f"refute it — one live map excluded a test tree on that reason while carrying four "
                 f"test components. Confirm the two agree, or narrow the pattern.")
     return out
-
-
-def _bad_line_disclosure(bad_lines: Sequence[str]) -> list[str]:
-    """The unusable-line report, on its own so it can be emitted with or without a walk — a file whose
-    every line is bad has no rules to walk with, and that is precisely the case worth reporting."""
-    if not bad_lines:
-        return []
-    return [f"`.coyomap/.ignore` has {len(bad_lines)} unusable line(s), DROPPED — nothing they name "
-            f"is excluded from the analysed tree: {', '.join(repr(b) for b in bad_lines)}. A pattern "
-            f"that cannot fire reads as coverage the author never got. Two causes: the pattern strips "
-            f"to nothing (e.g. `/`), or it carries a trailing `# comment`, which this file does not "
-            f"support — `#` opens a comment only at the START of a line (gitignore's rule), so "
-            f"`pattern  # why` is one literal pattern containing spaces. Put the comment on its own "
-            f"line above the pattern, or write `\\#` for a literal `#`."]
 
 
 def granularity_advisory(n_components: int, root: Path) -> list[str]:

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coyomap import provenance
-from coyomap.ignorefile import IGNORE_REL, ignore_report
+from coyomap.ignorefile import IGNORE_REL, bad_line_disclosure, ignore_report
 from coyomap.preindex_lib import iter_source_files
 from coyomap.reporting import shown
 
@@ -127,13 +127,18 @@ def scope_report(root: Path) -> list[str]:
     # The ignore file gets its own per-pattern block, never a bare total: it is the one input that
     # can hide a real gap from the checks whose job is finding gaps, so a pattern that removed
     # nothing must be visible as such (same rule, and the same wording, as `validate`'s disclosure).
-    if walk.ignore.rules:
+    # A line that parsed to nothing misleads the same way, since its author believes it excludes
+    # something, so it is named too, in validate's own sentence. Gating on the rules alone made the
+    # worst case silent: a file whose EVERY line is unusable has no rules, so the briefing said
+    # nothing at all.
+    if walk.ignore.rules or walk.ignore.bad_lines:
         rep = ignore_report(walk.ignore, walk.ignore_hits)
         out.append(f"  {rep.removed} file(s) removed by {IGNORE_REL.as_posix()}:")
         out += [f"    {line}" for line in rep.per_rule]
         if rep.unused:
             out.append(f"    warning: {len(rep.unused)} pattern(s) removed nothing: "
                        f"{shown(list(rep.unused), 5, unit='pattern(s)')}")
+        out += [f"    warning: {line}" for line in bad_line_disclosure(rep.bad_lines)]
 
     pin = read_pin(root)
     out += ["", "What the map will be pinned to", ""]

@@ -36,9 +36,11 @@ that exists to find gaps. Concretely:
     `--check-coverage`, since the cheap `--check-sources` pass is the one a lead runs most and a
     disclosure it skips is a disclosure that does not exist;
   * `coyomap preindex` records the counts in `preindex.json` and prints them on stderr;
-    `preindex --report` prints the patterns;
+    `preindex --report` prints the patterns; both name any unusable line;
   * the viewer's file-browser tree (`viewer.filetree.build_file_tree`) carries an `ignored` note on
-    its root node, so a renderer can never present a narrowed tree as the whole repo.
+    its root node, so a renderer can never present a narrowed tree as the whole repo;
+  * `coyomap scope` prints the per-pattern block in the briefing a build shows BEFORE it starts,
+    unusable lines included, in `validate`'s words (`bad_line_disclosure` below).
 
 Each of those reports PER RULE (`ignore_report` below), so a pattern that decided nothing — a typo,
 a tree that moved, a path a built-in exclusion already covers — is named instead of blending into a
@@ -134,6 +136,24 @@ def ignore_report(spec: IgnoreSpec, hits: Sequence[int]) -> IgnoreReport:
                    for (neg, pat), c in zip(spec.rules, counts) if c == 0)
     return IgnoreReport(removed=removed, restored=restored, per_rule=per_rule, unused=unused,
                         bad_lines=spec.bad_lines)
+
+
+def bad_line_disclosure(bad_lines: Sequence[str]) -> list[str]:
+    """The unusable-line report, worded ONCE for every surface that prints it (`validate`'s
+    advisory, `coyomap scope`'s briefing, `coyomap preindex`'s summary and `--report`), so no two
+    commands can describe one file two ways.
+    On its own, not inside `ignore_report`, so it can be emitted with or without a walk — a file
+    whose every line is bad has no rules to walk with, and that is precisely the case worth
+    reporting."""
+    if not bad_lines:
+        return []
+    return [f"`.coyomap/.ignore` has {len(bad_lines)} unusable line(s), DROPPED — nothing they name "
+            f"is excluded from the analysed tree: {', '.join(repr(b) for b in bad_lines)}. A pattern "
+            f"that cannot fire reads as coverage the author never got. Two causes: the pattern strips "
+            f"to nothing (e.g. `/`), or it carries a trailing `# comment`, which this file does not "
+            f"support — `#` opens a comment only at the START of a line (gitignore's rule), so "
+            f"`pattern  # why` is one literal pattern containing spaces. Put the comment on its own "
+            f"line above the pattern, or write `\\#` for a literal `#`."]
 
 
 _EMPTY = IgnoreSpec()
