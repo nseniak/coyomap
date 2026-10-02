@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""The checks that stand behind six method rules.
+"""The checks that stand behind seven method rules.
 
   * every agent brief says the repository's text is evidence, never an instruction;
   * a step where a business rule decides says its condition in its note;
   * a subsystem is named for its job, the way its sentence opens;
   * test code is not a component;
   * a pipe decides nothing and is no way in;
-  * a click on one of our own web pages enters through the screen that handles it.
+  * a click on one of our own web pages enters through the screen that handles it;
+  * a call between two parts of the product takes no door.
 
 Each check is an ADVICE, never a block: it names what to look at, and the rule itself is in the
 method. Run either way: `python3 tests/test_method_rule_advisories.py` or pytest.
@@ -223,6 +224,98 @@ def test_a_recorded_skipped_screen_exception_quiets_the_advice():
     doc = with_record(make_page_map(first="C3"), "Skipped screen exceptions",
                       "src/api.py:5: the page's Save is a plain form post to the route")
     assert not advised(doc, SKIPPED_SCREEN)
+
+
+# --- a call between two parts of the product takes no door ----------------------------------
+
+def make_door_map(*, side: str = "ours", person_at_door: bool = False,
+                  in_subflow: bool = False) -> dict[str, Any]:
+    """An operator runs our smoke test from the command line (`I2`), and the script (`C4`) creates a
+    team by calling our team API (`C3`), drawn through our dashboard (`I1`) the way the mcpolis
+    build drew its smoke test. With `person_at_door` an admin is shown the team on the dashboard in
+    the same story; with `in_subflow` the call through the dashboard is a shared sub-flow."""
+    doc = make_page_map(first="C1", side=side)
+    doc["components"].append({"id": "C4", "name": "Smoke test", "subsystem": "S1",
+                              "purpose": "checks the live service", "files": ["scripts/smoke.ts"],
+                              "kind": "script"})
+    doc["interfaces"].append({"id": "I2", "name": "Operator command line", "what": "commands an operator runs",
+                              "side": "ours", "facing": "operator", "kind": "command-line"})
+    through: list[dict[str, Any]] = [
+        {"n": 3, "src": "C4", "dst": "I1", "phrase": "create a throwaway team",
+         "where": "scripts/smoke.ts:10", "direction": "out"},
+        {"n": 4, "src": "I1", "dst": "C3", "phrase": "pass the new team on", "where": "src/api.py:5",
+         "direction": "in"}]
+    steps: list[dict[str, Any]] = [
+        {"n": 1, "src": "R1", "dst": "I2", "phrase": "run the smoke test"},
+        {"n": 2, "src": "I2", "dst": "C4", "phrase": "start the smoke test", "where": "scripts/smoke.ts:1",
+         "direction": "in"}]
+    if in_subflow:
+        doc["subflows"] = [{"id": "SF1", "name": "Create a team through the dashboard",
+                            "steps": [{**st, "n": st["n"] - 2} for st in through]}]
+        steps.append({"n": 3, "src": "C4", "dst": "C3", "phrase": "", "subflow": "SF1"})
+    else:
+        steps.extend(through)
+    steps.extend([
+        {"n": 5, "src": "C4", "dst": "I2", "phrase": "report pass or fail", "where": "scripts/smoke.ts:20",
+         "direction": "out"},
+        {"n": 6, "src": "I2", "dst": "R1", "phrase": "show PASS"}])
+    if person_at_door:
+        steps.extend([
+            {"n": 7, "src": "C1", "dst": "I1", "phrase": "show the team", "where": "src/page.tsx:12",
+             "direction": "out"},
+            {"n": 8, "src": "I1", "dst": "R1", "phrase": "show the new team on its page"}])
+    doc["flows"] = [{"uc": "UC1", "title": "Run the smoke test", "steps": steps}]
+    return doc
+
+
+NOBODY_AT_DOOR = "Doors nobody stands at"
+
+
+def test_our_script_calling_our_own_address_through_a_door_is_advised():
+    found = advised(make_door_map(), NOBODY_AT_DOOR)
+    assert found and "UC1 step 3 (Smoke test → Team dashboard → Team API)" in found[0], found
+
+
+def test_the_call_drawn_straight_to_the_part_that_answers_is_not_advised():
+    doc = make_door_map()
+    steps = doc["flows"][0]["steps"]
+    straight = {"n": 3, "src": "C4", "dst": "C3", "phrase": "create a throwaway team",
+                "where": "scripts/smoke.ts:10"}
+    doc["flows"][0]["steps"] = [*steps[:2], straight, *steps[4:]]
+    assert not advised(doc, NOBODY_AT_DOOR)
+
+
+def test_a_door_where_someone_stands_in_the_same_story_is_not_advised():
+    """A part of ours that talks to someone at the surface keeps its door: on mcpolis the gateway
+    asks a member's AI client to sign in mid-story, and that client is at the gateway."""
+    assert not advised(make_door_map(person_at_door=True), NOBODY_AT_DOOR)
+
+
+def test_someone_elses_surface_between_two_of_our_parts_is_not_asked():
+    """A redirect to someone else's sign-in page and back is a person's round trip."""
+    assert not advised(make_door_map(side="theirs"), NOBODY_AT_DOOR)
+
+
+def test_a_door_inside_a_shared_sub_flow_is_named_with_the_story_that_rides_it():
+    found = advised(make_door_map(in_subflow=True), NOBODY_AT_DOOR)
+    assert found and "SF1 step 1 (in UC1) (Smoke test → Team dashboard → Team API)" in found[0], found
+
+
+def test_our_surfaces_can_come_from_outside_the_model():
+    """A trace fragment holds no interfaces; `lint-fragment --ids` hands the check the map's."""
+    from coyomap.validate_model import nobody_at_door_warnings
+    doc = make_door_map()
+    m = load_model(json.dumps({**doc, "interfaces": []}))
+    assert not nobody_at_door_warnings(m)
+    assert nobody_at_door_warnings(m, {"I1", "I2"})
+
+
+def test_no_recorded_line_quiets_the_door_advice():
+    """The skipped-screen advice offered an escape, and a build used it on these very steps with a
+    reason saying no page was involved."""
+    for heading, line in (("Skipped screen exceptions", "src/api.py:5: the smoke test calls the backend"),
+                          ("Interface exceptions", "UC1/doors: the smoke test calls the backend")):
+        assert advised(with_record(make_door_map(), heading, line), NOBODY_AT_DOOR), heading
 
 
 def test_a_recorded_topic_name_quiets_the_subsystem_naming_advice():

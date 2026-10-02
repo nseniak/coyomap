@@ -7236,6 +7236,56 @@ def skipped_screen_warnings(m: ProjectModel) -> list[str]:
             "plain link or a redirect that runs none of our page's code"]
 
 
+_PART_ID = re.compile(r"^C\d+$")
+
+
+def nobody_at_door_warnings(m: ProjectModel, ours: set[str] | None = None) -> list[str]:
+    """A CALL BETWEEN TWO PARTS OF THE PRODUCT TAKES NO DOOR (method.md, Doors). A door stands where
+    someone outside the product crosses: a person, or a program somebody else runs. A step from a
+    part of ours into one of OUR surfaces, which the surface hands straight on to another part of
+    ours, in a story where no actor ever stands at that surface, draws a crossing that does not
+    happen. Measured on mcpolis: the live smoke test, a script an operator runs, reached the
+    dashboard's backend addresses through the Dashboard door 5 times and the gateway through the
+    Gateway door once, while the dashboard's own pages reached the same addresses straight in 10
+    steps. The 5 dashboard doors drew 2 lines on the Architecture picture that no code takes.
+
+    A part of ours that talks to someone who IS at the surface keeps its door, so a story with an
+    actor step at that surface anywhere is not asked: 11 steps on mcpolis answer a member's AI
+    client at the gateway that way. Only `ours` surfaces are asked, because someone else's sign-in
+    page between two of our parts is a person's round trip, and a sub-flow, which holds no actor,
+    is read inside each story that rides it. NO RECORDED LINE SILENCES IT: across the three live
+    maps it names 6 steps, all in that one story, and those steps' skipped-screen warnings were
+    the ones a build silenced with a reason that said no page was involved.
+
+    `ours` names our surfaces when the model holds none, as a trace fragment linted against the
+    map with `--ids` does."""
+    doors = ours if ours is not None else {i.id for i in m.interfaces if i.side == "ours"}
+    if not doors:
+        return []
+    names = {c.id: c.name for c in m.components} | {i.id: i.name for i in m.interfaces}
+    found: list[str] = []
+    seen: set[tuple[str, int]] = set()
+    for f in m.flows:
+        walk = expanded_steps_with_container(m, f)
+        attended = {door for _, st in walk for door, other in ((st.src, st.dst), (st.dst, st.src))
+                    if door in doors and not grammar.is_step_id(other)}
+        for (container, st), (_, nxt) in zip(walk, walk[1:]):
+            door = st.dst
+            if (door not in doors or door in attended or nxt.src != door
+                    or not _PART_ID.match(st.src) or not _PART_ID.match(nxt.dst)
+                    or (container, st.n) in seen):
+                continue
+            seen.add((container, st.n))
+            where = f"{container} step {st.n}" + ("" if container == f.uc else f" (in {f.uc})")
+            found.append(f"{where} ({names.get(st.src, st.src)} → {names.get(door, door)} → "
+                         f"{names.get(nxt.dst, nxt.dst)})")
+    if not found:
+        return []
+    return [f"Doors nobody stands at: {_shown(found, 8, unit='step(s)')} — a call between two parts of "
+            "the product takes no door, even when it reaches one of our own addresses, so draw one "
+            "step from the part that calls to the part that answers, anchored at the caller's own line"]
+
+
 def test_code_component_warnings(m: ProjectModel) -> list[str]:
     """TEST CODE IS NOT A COMPONENT (method.md, T1): one whose every file is test code and that no
     story reaches. A script in a test folder that a story runs is a component like any other."""
@@ -7465,6 +7515,7 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
     warnings.extend(minted_kind_warnings(m))
     warnings.extend(deciding_pipe_warnings(m))
     warnings.extend(skipped_screen_warnings(m))
+    warnings.extend(nobody_at_door_warnings(m))
 
     # Diagram balance (advisory, never blocking): per-diagram fan-out vs the 5±2 target —
     # sparse roots, over-dense screens, single-child wrapper levels. Model-only, so always on.

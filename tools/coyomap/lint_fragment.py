@@ -51,6 +51,7 @@ from coyomap.validate_model import (
     domain_card_shape_problems,
     reciprocal_relation_problems,
     duplicate_security_warnings,
+    nobody_at_door_warnings,
     roleless_cd_verb_warnings,
     subflow_refcount_warnings,
     walk_jumps,
@@ -82,6 +83,25 @@ def arrivals_from(sources: list[Path]) -> dict[str, set[tuple[str, int | None]]]
     for iid, ws in ways.items():
         locs = [parse_anchor(sources_of.get(w, "")) for w in ws]
         out[iid] = {(loc.path, loc.lo) for loc in locs if loc is not None}
+    return out
+
+
+def our_doors_from(sources: list[Path]) -> set[str]:
+    """The ids of OUR surfaces in the JSON files `--ids` names. A trace fragment holds no interfaces,
+    so without them the check for a door nobody stands at cannot tell our door from someone else's
+    sign-in page, and stays silent."""
+    out: set[str] = set()
+    for src in sources:
+        if src.suffix != ".json":
+            continue
+        try:
+            doc = json.loads(src.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        out.update(str(i["id"]) for i in doc.get("interfaces") or []
+                   if isinstance(i, dict) and i.get("id") and i.get("side") == "ours")
     return out
 
 
@@ -538,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root: Path | None = None
     known_ids: set[str] | None = None
     sibling_arrivals: dict[str, set[tuple[str, int | None]]] = {}
+    sibling_doors: set[str] = set()
     expect: int | None = None
     finalize = False
     frags: list[Path] = []
@@ -569,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
                          for t in re.findall(r"\b[A-Z]+\d+\b", src.read_text(encoding="utf-8"))
                          if ID_SHAPE.match(t)}
             sibling_arrivals = arrivals_from(sources)
+            sibling_doors = our_doors_from(sources)
         elif a == "--expect":
             i += 1
             if i >= len(argv) or not argv[i].lstrip("+").isdigit():
@@ -661,7 +683,12 @@ def main(argv: list[str] | None = None) -> int:
             arrivals = {**sibling_arrivals, **door_arrival_sources(m)}
             drift = check_operative_lines_model(m, [repo_root.resolve()], arrivals,
                                                 unknown_doors_pass=True)
-        for w in lint_fragment_warnings(m) + budget + drift:
+        # A DOOR NOBODY STANDS AT is seen here, by the agent that drew it, and not only at the lead's
+        # `validate`: the lead is who silenced the smoke test's doors on the build that found them.
+        # Our surfaces come from the fragment or from `--ids`, the map a trace brief names.
+        doors = nobody_at_door_warnings(
+            m, {i.id for i in m.interfaces if i.side == "ours"} | sibling_doors)
+        for w in lint_fragment_warnings(m) + doors + budget + drift:
             say(f"{p.name}: warning: {w}", kind="warning")
         n_drift += len(drift)
     n_prob, n_warn = tally["problem"], tally["warning"]

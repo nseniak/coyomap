@@ -1432,3 +1432,15 @@ def test_a_closer_row_misfiled_among_the_skeptics_is_no_dispute() -> None:
             {"claim": "C1 calls C2", "verdict": "uphold", "grounded": False, "evidence": "a.py:1",
              "skeptic": "c1", "id": "security-1#1"}]}), encoding="utf-8")
         assert [c.id for c in contract.disputed_claims(d)] == []
+
+
+def test_the_doors_rule_says_a_call_between_two_parts_of_the_product_takes_no_door():
+    """Retro of the 2026-09-30 mcpolis build: the live smoke test reached the dashboard's backend
+    addresses through the Dashboard door 5 times. The rule reaches the brief that draws doors, once
+    when the doors half rides a trace brief, and says which two shapes keep their door."""
+    head = "**A call between two parts of the product is NOT a crossing"
+    rule = contract.render("doors")
+    assert rule.count(head) == 1
+    assert "a member's AI client asked to sign in" in rule and "a file we write, a mail we send" in rule
+    assert contract._compose(["trace", "doors"]).count(head) == 1
+    assert "A step FROM a door counts" in contract.render("trace")

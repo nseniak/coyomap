@@ -124,8 +124,8 @@ lead; nothing above this line goes into an agent prompt.
 >     2. **An invented pipeline** — `A → B → C` when A calls B and then calls C itself. Chain two
 >        steps only when B's own code makes the second call.
 >     3. **A skipped middle** — `A → C` when A calls B and B calls C. Every box the call passes
->        through is a step of its own. A door counts: `Shop page → Orders API` skips the cart screen
->        whose Pay button sends the order.
+>        through is a step of its own. A step FROM a door counts: `Shop page → Orders API` skips
+>        the cart screen whose Pay button sends the order.
 >     4. **A neighbour's call** — a step given to a component because it sits in the same folder or
 >        subsystem as the one that makes the call. `where` must be in the `src` component's own files.
 >   For example, `orders.py:40` calls `billing.charge()`, whose line 12 calls `stripe.charge()`: the

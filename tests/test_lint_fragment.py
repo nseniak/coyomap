@@ -1,6 +1,8 @@
 """Tests for `coyomap lint-fragment` — the per-fragment self-check (B1)."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import tempfile
@@ -879,3 +881,35 @@ def test_a_header_fragment_with_a_one_block_goal_gets_the_goal_shape_warning() -
     assert len(lines) == 1 and "one paragraph of 2 sentences" in lines[0]
     ok = make_fragment({"title": "Demo", "goal": "One block.\n\nA second one."})
     assert not [w for w in lint_fragment.lint_fragment_warnings(ok) if "goal" in w]
+
+
+def make_door_fragment_files(tmp: Path) -> tuple[Path, Path]:
+    """A trace fragment that draws our script calling our API through our dashboard, and the map it
+    is linted against, the only file that says the dashboard is ours."""
+    frag = make_fragment_file(tmp, "t1.json", {"flows": [{"uc": "UC1", "title": "Run the smoke test", "steps": [
+        {"n": 1, "src": "C4", "dst": "I1", "phrase": "create a team", "where": "scripts/smoke.ts:10",
+         "direction": "out"},
+        {"n": 2, "src": "I1", "dst": "C3", "phrase": "pass the team on", "where": "src/api.py:5",
+         "direction": "in"}]}]})
+    legend = make_fragment_file(tmp, "map.json", {
+        "use_cases": [{"id": "UC1", "name": "Run the smoke test"}],
+        "components": [{"id": "C3", "name": "Team API"}, {"id": "C4", "name": "Smoke test"}],
+        "interfaces": [{"id": "I1", "name": "Team dashboard", "side": "ours", "kind": "screen"}]})
+    return frag, legend
+
+
+def lint_output(args: list[str]) -> str:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        lint_fragment.main(args)
+    return out.getvalue() + err.getvalue()
+
+
+def test_the_agent_sees_a_door_nobody_stands_at_once_the_map_says_the_door_is_ours():
+    """The lead silenced these doors at `validate` on the build that found them; the agent that drew
+    them is the one who should hear it. Without the map, the dashboard could be someone else's
+    sign-in page, so the fragment alone says nothing."""
+    with tempfile.TemporaryDirectory() as td:
+        frag, legend = make_door_fragment_files(Path(td))
+        assert "Doors nobody stands at: UC1 step 1 (C4 → I1 → C3)" in lint_output([str(frag), "--ids", str(legend)])
+        assert "Doors nobody stands at" not in lint_output([str(frag)])
