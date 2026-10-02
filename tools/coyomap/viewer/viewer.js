@@ -4137,7 +4137,7 @@ const groupLast = {};
 const VIEW_LABEL = {};   // view id -> its tab label, filled from the buttons at boot (one source)
 const VIEW_Q = {
   overview: 'What is this product, and who is it for?',
-  hp: 'Which features does one successful run touch, and in what order?',
+  hp: 'What does a simple run through the product\'s main features look like?',
   usecases: 'What can this product do, feature by feature?',
   arch: 'What are this product\'s layers, which components does each hold, and how are they connected?',
   container: 'How is the code organised, and what depends on what?',
@@ -7643,7 +7643,7 @@ function archFeatureHtml() {
   };
   const happy = scope === 'happy';
   const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
-    + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Happy path</button>`;
+    + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Restrict to the Happy Path</button>`;
   return `<div class="archwho-row">${one('all', 'Whole product')}`
     + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
     // NO HAPPY-PATH SWITCH ON THE ALL PICTURE: the whole product is every story, and its happy path
