@@ -2462,7 +2462,8 @@ def test_the_zoom_control_is_absent_on_a_page_with_no_diagram() -> None:
     # never a CSS offset — the stylesheet's `top` is overwritten by `put()` a moment later, which is
     # exactly how the first attempt at this failed.
     keep = js[js.index("function cardKeepSets(el) {"): js.index("\n}", js.index("function cardKeepSets(el) {"))]
-    assert "zoomctl && !zoomctl.hidden" in keep, "no shape at all on a page that has no control"
+    assert "[zoomctl, archplayer].filter((c) => c && !c.hidden)" in keep, \
+        "no shape at all on a page that has no control (nor for the story player when it is hidden)"
     assert keep.count("...fixed") == 4, "in every set: a control is never the concession to make"
     # Its ceiling keeps it inside the box #diagwrap clips; the placement, not the ceiling, is what
     # keeps it off the control.
