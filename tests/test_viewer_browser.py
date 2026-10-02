@@ -4815,6 +4815,39 @@ def test_picking_what_the_second_card_shows_keeps_the_card_where_it_was() -> Non
         assert not page.js_errors, page.js_errors
 
 
+def test_picking_a_line_whose_card_is_the_second_one_keeps_the_card_where_it_was() -> None:
+    """The same for a line drawn on a crowded picture: with its box picked, resting on one of its lines
+    shows the line's card beside the box's, and picking the line keeps that card where it was read. A
+    line's card has a title rather than a box's name, and was measured by the name alone, so it moved
+    down by the main card's bar; and a second card that had given up a few lines to fit was held to
+    every line once picked, and jumped across the drawing."""
+    title = """(c) => { const e = document.querySelector(c); if (e.hidden) return null;
+        const b = e.querySelector('.pane-title').getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top)]; }"""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+    box = max(set(ends), key=ends.count)
+    with _served_map(make_parts_in_every_layer) as url, _page(url + f"#v=arch&cap=all&sel=node%3A{box}") as page:
+        _settle(page)
+        page.wait_for_selector(".arch-ov-hit", state="attached")
+        at = page.evaluate("""() => { const d = document.getElementById('diagram').getBoundingClientRect();
+            for (const l of document.querySelectorAll('.arch-ov-line')) { const L = l.getTotalLength(), m = l.getScreenCTM();
+              for (const f of [0.5, 0.4, 0.6, 0.3, 0.7]) { const q = l.getPointAtLength(L * f), x = m.a * q.x + m.e, y = m.d * q.y + m.f;
+                const e = document.elementFromPoint(x, y);
+                if (x > d.left && x < d.right && y > d.top && y < d.bottom && e && e.classList.contains('arch-ov-hit')) return { x, y }; } }
+            return null; }""")
+        assert at, "no line of the picked box on screen"
+        page.mouse.move(at["x"] - 2, at["y"] - 2)
+        page.mouse.move(at["x"], at["y"], steps=3)
+        page.wait_for_timeout(500)
+        before = page.evaluate(title, "#peekcard")
+        assert before, "the hover shows the line's card beside the box's"
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(800)
+        after = page.evaluate(title, "#panel")
+        assert after and abs(after[0] - before[0]) <= 1 and abs(after[1] - before[1]) <= 1, (before, after)
+        assert not page.js_errors, page.js_errors
+
+
 def make_every_part_do_work(m: dict[str, Any]) -> None:
     """Every component doing the work: the Architecture picture is then layered, and each subsystem's
     parts are one box of the work layer."""

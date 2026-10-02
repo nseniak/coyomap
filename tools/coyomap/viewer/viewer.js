@@ -1882,9 +1882,17 @@ function selHas(scene, key) { return scene.selKeys.has(key); }
 // nothing and stays inside. It lasts until the next pick, because the card is placed again after the
 // next paint (scheduleCallout) and on every pan, and each of those must keep the same place.
 let cardTookPeekPlace = false;
+// …and which set of shapes the second card cleared there (placeCardNear's `data-placed`): the main card
+// keeps that place on the same terms. Held to the first set, it left a place the second card had
+// rightly taken while giving up a few lines, and jumped across the drawing.
+let cardTookPeekLevel = '0';
+// The first line of the card's contents: a box's name, or the title of a card that has no box (a
+// line's). Measured on the name alone, a line's card measured nothing, and moved down by its bar.
+const CARD_FIRST_LINE = '.ibox-name, .pane-title';
+const PEEK_TOP_ROOM = 20;   // the main card's bar, which the second card leaves room for above it (measured 18)
 function contentsLift() {
   const off = (card) => {
-    const n = card && !card.hidden && card.querySelector('.ibox-name');
+    const n = card && !card.hidden && card.querySelector(CARD_FIRST_LINE);
     return n ? n.getBoundingClientRect().top - card.getBoundingClientRect().top : null;
   };
   const a = off(PANEL_HOST), b = off(PEEK_CARD);
@@ -1896,7 +1904,8 @@ function selApply(scene) {
   // while it still works). Any other pick answers for itself, and the second card goes.
   const peek = peekCardFor && PEEK_CARD && !PEEK_CARD.hidden
     ? { el: peekCardFor, at: { left: parseFloat(PEEK_CARD.style.left), top: parseFloat(PEEK_CARD.style.top) },
-        lift: contentsLift(), height: PEEK_CARD.getBoundingClientRect().height } : null;
+        lift: contentsLift(), height: PEEK_CARD.getBoundingClientRect().height,
+        level: PEEK_CARD.dataset.placed || '0' } : null;
   hidePeekCard();
   cardTookPeekPlace = false;
   if (scene._selClear) { scene._selClear(); scene._selClear = null; }
@@ -1910,6 +1919,7 @@ function selApply(scene) {
     const room = wrap ? wrap.getBoundingClientRect().height - CARD_EDGE - (peek.height + peek.lift) : Infinity;
     lastCardPlace = { left: peek.at.left, top: Math.max(CARD_EDGE, Math.min(peek.at.top - peek.lift, room)) };
     cardTookPeekPlace = true;
+    cardTookPeekLevel = peek.level;
   }
   scene._selClear = () => undos.forEach((f) => f && f());
   if (scene.selection.length) scene.focusUnion(scene, scene.selection); else clearFocus(scene);
@@ -8733,6 +8743,11 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   const wrap = document.getElementById('diagwrap');
   if (!wrap || !el || card.hidden) return;
   const w = wrap.getBoundingClientRect();
+  // THE SECOND CARD LEAVES ROOM ABOVE IT for the main card's bar: picking what it shows puts the main
+  // card in its place with the contents where they were, so the main card stands higher by its bar
+  // (contentsLift). Against the drawing's top edge it could not, and the contents dropped by the
+  // difference. `wb` is the room a card may use; `w` stays the frame its position is written in.
+  const wb = main ? w : { left: w.left, right: w.right, bottom: w.bottom, top: w.top + PEEK_TOP_ROOM };
   const p = card.getBoundingClientRect();
   const W = p.width, H = p.height;
   if (!W || !H) return;
@@ -8772,11 +8787,13 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
       && box.right <= w.right - CARD_EDGE && box.bottom <= w.bottom - CARD_EDGE;
     // Against the shapes THEMSELVES, not the margin a fresh placement keeps round them: the card it took
     // over stood just outside that margin, and the bar it gained can bring it a few pixels into it.
-    if (inside && !sets[0].some((r) => rectsOverlap(box, grow(r, -CARD_CLEAR)))) { card.dataset.placed = 'kept'; put(box.left, box.top); return; }
+    const lv = Number(cardTookPeekLevel);
+    const shapes = Number.isInteger(lv) ? sets[Math.min(lv, sets.length - 1)] : [];   // 'clamp': it covered what it had to
+    if (inside && !shapes.some((r) => rectsOverlap(box, grow(r, -CARD_CLEAR)))) { card.dataset.placed = 'kept'; put(box.left, box.top); return; }
   }
   if (main && lastCardPlace) {
     const box = cardRectAt(w.left + lastCardPlace.left, w.top + lastCardPlace.top, W, H);
-    if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE) {
+    if (cardBoxOk(box, wb, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE) {
       card.dataset.placed = 'kept'; put(box.left, box.top); return;
     }
   }
@@ -8792,7 +8809,7 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
         for (const [ux, uy] of CARD_DIRS) {
           const box = cardRectAt(a.x + d * ux - (ux < 0 ? W : ux > 0 ? 0 : W / 2),
                                  a.y + d * uy - (uy < 0 ? H : uy > 0 ? 0 : H / 2), W, H);
-          if (!cardBoxOk(box, w, keep, a, e)) continue;
+          if (!cardBoxOk(box, wb, keep, a, e)) continue;
           const n = raw.fewest.of.reduce((k, r) => k + (rectsOverlap(box, r) ? 1 : 0), 0);
           if (!best || n < best.n) best = { box, n };
         }
@@ -8806,7 +8823,7 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
         const top = a.y + d * uy - (uy < 0 ? H : uy > 0 ? 0 : H / 2);
         const box = cardRectAt(left, top, W, H);
         // Which set it cleared, on the card itself: 0 is everything, the last before 'clamp' the least.
-        if (cardBoxOk(box, w, keep, a, e)) { card.dataset.placed = String(s); put(left, top); return; }
+        if (cardBoxOk(box, wb, keep, a, e)) { card.dataset.placed = String(s); put(left, top); return; }
       }
     }
   }
@@ -8815,7 +8832,7 @@ function placeCardNear(el, card = PANEL_HOST, also = []) {
   // card off screen, and the line still says which thing it is about.
   card.dataset.placed = 'clamp';
   const left = Math.min(Math.max(a.x + CARD_MIN_LINE, w.left + CARD_EDGE), w.right - CARD_EDGE - W);
-  const top = Math.min(Math.max(a.y - CARD_MIN_LINE - H, w.top + CARD_EDGE), w.bottom - CARD_EDGE - H);
+  const top = Math.min(Math.max(a.y - CARD_MIN_LINE - H, wb.top + CARD_EDGE), w.bottom - CARD_EDGE - H);
   put(left, top);
 }
 // Draw it, or take it away. Called wherever either end can have moved: the card being placed, dragged or

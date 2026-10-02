@@ -1659,7 +1659,7 @@ def test_the_card_comes_to_what_you_picked_and_stays_put_while_it_can() -> None:
     four then honours for as long as it holds."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     fn = js[js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"): js.index("\n}", js.index("function placeCardNear(el, card = PANEL_HOST, also = []) {"))]
-    assert "if (cardBoxOk(box, w, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE)" in fn, \
+    assert "if (cardBoxOk(box, wb, keep0, a, e) && cardLineLen(box, a, e) <= CARD_MAX_LINE)" in fn, \
         "rule four, and it is tried FIRST — against the strictest set"
     # The floor is on the line that will actually be DRAWN — to a box's border, an arrow's middle.
     ln = js[js.index("function cardLineLen(box, a, e) {"):
