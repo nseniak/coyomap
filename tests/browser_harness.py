@@ -17,10 +17,15 @@ pytest fixtures, so this is a lazy module-level singleton behind a function, clo
 
 Under `-n auto` every xdist worker is its own PROCESS, so each gets its own browser and nothing is
 shared across them. Playwright's sync API is single-threaded by design and this keeps it that way.
+
+WHICH ENGINE: Chromium by default. `COYOMAP_BROWSER=webkit` runs the same tests in Safari's engine,
+on request, for a layout break only Safari shows (`playwright install webkit` first). Firefox is
+accepted too, but it does not start from inside the Claude desktop app.
 """
 from __future__ import annotations
 
 import atexit
+import os
 from typing import Any
 
 import pytest
@@ -29,7 +34,7 @@ _STATE: dict[str, Any] = {}
 
 
 def shared_browser() -> Any:
-    """The process's one Chromium, launched on first use.
+    """The process's one browser (Chromium unless `COYOMAP_BROWSER` names another), launched on first use.
 
     Skips the calling test (rather than erroring) when Playwright or the browser binary is missing —
     the same bargain the rest of the suite makes, so a Python-only environment still gets a clean
@@ -38,11 +43,15 @@ def shared_browser() -> Any:
         return _STATE["browser"]
     api = pytest.importorskip("playwright.sync_api", reason="playwright not installed")
     pw = api.sync_playwright().start()
+    engine = os.environ.get("COYOMAP_BROWSER", "chromium")
+    if engine not in ("chromium", "webkit", "firefox"):
+        pw.stop()
+        raise ValueError(f"COYOMAP_BROWSER must be chromium, webkit or firefox, not {engine!r}")
     try:
-        browser = pw.chromium.launch()
+        browser = getattr(pw, engine).launch()
     except Exception as exc:  # the driver is installed but the browser binary is not
         pw.stop()
-        pytest.skip(f"chromium not available: {exc}")
+        pytest.skip(f"{engine} not available: {exc}")
     _STATE["pw"] = pw
     _STATE["browser"] = browser
     atexit.register(_close)
