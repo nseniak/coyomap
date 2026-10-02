@@ -200,6 +200,10 @@
            (7) but the card lives there. A flex column, so whichever of them a view shows simply stack —
            no coordinate depends on another control's height. -->
       <div id="overlays">
+      <!-- The Architecture view's tag naming whose lines alone are shown ("Through X ×"). Over the drawing,
+           not in the header: in the header a long name wrapped the row and the picture jumped down under
+           the reader's click. Hidden unless a box is picked there (syncArchThrough). -->
+      <div id="archthrough" class="archthrough" hidden></div>
       <!-- Deployment environment filter. Floats over the diagram (in the #overlays column) rather
            than living in the info pane: it filters what the DIAGRAM draws, so it belongs beside it — and
            in the pane it vanished the moment you selected a box, stranding you in a filtered view with

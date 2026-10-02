@@ -937,6 +937,7 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
   border-radius: 6px; background: #fff; color: #1f2937; width: 150px; cursor: pointer; }
 .archfollow select:hover { border-color: #94a3b8; }
 .archthrough { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #312e81;
+  max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
   background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; padding: 3px 4px 3px 10px; }
 .archthrough[hidden] { display: none; }
 .archthrough-x { font: inherit; font-size: 14px; line-height: 1; border: 0; background: none; color: #4f46e5;
@@ -978,7 +979,7 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archuc-count { font-size: 11px; font-weight: 600; color: #64748b; background: #f1f5f9; border-radius: 8px;
                   padding: 0 6px; }
 .archuc-follow { font-size: 11px; color: #64748b; white-space: nowrap; }
-/* A LINE'S CARD on the Architecture picture (showArchLine, showArchLayerLine). */
+/* A LINE'S CARD on the Architecture picture (showArchLine). */
 .archcard-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   color: #64748b; margin: 10px 0 4px; }
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
@@ -988,17 +989,6 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archcard-line > summary:hover { color: #4f46e5; }
 .archcard-line > .archuc-list, .archcard-line > .archuc-feat { margin-left: 14px; }
 .archcard-line[open] { padding-bottom: 6px; }
-/* A line between layers' card: one row per box its lines leave from. Resting on a row previews its
-   lines; a clicked row keeps them, and says so. */
-.archcard-from-list { display: flex; flex-direction: column; gap: 2px; }
-.archcard-from { font-size: 13px; line-height: 18px; color: #1f2937; padding: 3px 6px; margin: 0 -6px;
-  border-radius: 6px; cursor: pointer; }
-.archcard-from:hover { background: #f1f5f9; }
-.archcard-from.on { background: #eef2ff; box-shadow: inset 2px 0 0 #4f46e5; }
-.archcard-to { color: #475569; }
-.archcard-drawall { margin-top: 8px; font: inherit; font-size: 12px; color: #4f46e5; background: #fff;
-  border: 1px solid #c7d2fe; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
-.archcard-drawall:hover { background: #eef2ff; }
 /* …and on a picture that draws every line, resting on a box lights its own. */
 #diagram path.flowchart-link.arch-preview-on { stroke: #4f46e5 !important; stroke-width: 2.4px !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
@@ -3578,10 +3568,7 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
    story is followed. */
 .arch-layers.arch-picking .arch-layerline { opacity: .2; }
 .arch-layers.arch-following .arch-layerline { display: none; }
-.arch-layers path.arch-layerline, .arch-layers .cy-edgehit.arch-layerline { cursor: pointer; }
-/* An open one is not drawn, but keeps its place: its card's line still points where it ran, and a
-   second click on it lets go of it. */
-.arch-layers .arch-layerline.arch-layer-open { opacity: 0 !important; }
+.arch-layers .arch-layerline { pointer-events: none; }   /* drawing only: a click goes to what is behind */
 .arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-store { stroke: #0f766e; stroke-dasharray: 4 3; }

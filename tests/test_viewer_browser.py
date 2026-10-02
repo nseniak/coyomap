@@ -4899,18 +4899,10 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
             const g = p.parentNode, top = g.parentNode, kids = [...top.children];
             return kids.indexOf(g) > kids.indexOf(top.querySelector(':scope > .nodes')); }""")
         assert on_top, "the layer lines are not the last thing their drawing paints"
-        k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
-        under = len(text["layerLines"][k]["lines"])
-        page.evaluate(f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
-            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
-        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]), "box": rest}, "a click draws nothing"
-        draw_all = "() => document.querySelector('#panel [data-archdrawall]').click()"
-        page.evaluate(draw_all)
-        # the layer line stood for these lines: drawn beside them, it would say the same thing twice
-        assert page.evaluate(VISIBLE_LINES) == {"layer": len(text["layerLines"]) - 1, "box": under}
-        assert page.evaluate("() => document.querySelector('.archthrough').textContent").startswith("From ")
-        page.evaluate(draw_all)
-        assert page.evaluate(VISIBLE_LINES)["box"] == rest
+        # A LAYER LINE IS DRAWING ONLY: no card, no lines of its own, and a click goes to what is behind it
+        seen = page.evaluate("""() => { const p = document.querySelector('#diagram path.arch-layerline');
+            return { hits: (p.__cyHits || []).length, events: getComputedStyle(p).pointerEvents }; }""")
+        assert seen == {"hits": 0, "events": "none"}, seen
         # THE BOX WITH THE MOST LINES, clicked on its body: the picture is wider than the window, so a
         # point on screen cannot be counted on, and a click on the box's body is what a reader makes.
         people = {e["srcBox"] for e in text["lines"] if e["srcBox"].startswith("CYP")}
@@ -4929,14 +4921,16 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
 
 
 def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> None:
-    """The box lines a crowded picture draws on top of itself are picked like any line: a click lights
-    the line, names it in the address and shows its card."""
+    """The box lines a crowded picture draws on top of itself, a picked box's here, are picked like any
+    line: a click lights the line, names it in the address and shows its card."""
     text = make_whole_product_text(make_parts_in_every_layer)
     with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
-        page.evaluate("""() => document.querySelector('#diagram path.arch-layerline').__cyHits[0]
-            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
-        page.evaluate("() => document.querySelector('#panel [data-archdrawall]').click()")
+        ends = [x for e in text["lines"] for x in (e["srcBox"], e["dstBox"]) if not x.startswith("CYP")]
+        box = max(set(ends), key=ends.count)
+        page.evaluate(f"""() => document.querySelector('#diagram g.cy-{box} .ibox')
+            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
+        page.wait_for_timeout(300)
         page.evaluate("""() => document.querySelector('#diagram .arch-ov-hit')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
         page.wait_for_function("() => location.hash.includes('sel=arch')")
@@ -4948,52 +4942,6 @@ def test_a_line_drawn_on_a_crowded_picture_is_picked_and_shows_its_card() -> Non
         assert lit == [[e["srcBox"], e["dstBox"]]], lit
         # the overlay's other lines are still drawn: picking one line does not take its neighbours away
         assert page.evaluate(VISIBLE_LINES)["box"] > 1
-        assert not page.js_errors, page.js_errors
-
-
-def test_a_line_between_layers_shows_a_summary_card_and_draws_its_lines_on_demand() -> None:
-    """A click on a line between layers picks it and shows its card, and draws nothing. The card says how
-    many lines it stands for, and has one row per box they leave from: resting on a row draws that box's
-    lines while the pointer stays, a click on it keeps them. The use cases are listed by feature. The
-    address keeps the pick."""
-    text = make_whole_product_text(make_parts_in_every_layer)
-    k = max(range(len(text["layerLines"])), key=lambda i: len(text["layerLines"][i]["lines"]))
-    ll = text["layerLines"][k]
-    starts = list(dict.fromkeys(a for a, _b in ll["lines"]))
-    first = starts[0]
-    own = sum(1 for a, _b in ll["lines"] if a == first)
-    read = """() => ({ hash: decodeURIComponent(location.hash), shown: !document.getElementById('panel').hidden,
-        summary: (document.querySelector('#panel .archcard-via') || {}).textContent || '',
-        rows: [...document.querySelectorAll('#panel [data-archrow]')].map((r) => r.dataset.archrow),
-        ucs: document.querySelectorAll('#panel .archuc-follow').length,
-        drawn: document.querySelectorAll('#diagram .arch-ov-line').length,
-        tag: document.querySelector('.archthrough').hidden ? '' : document.querySelector('.archthrough').textContent })"""
-    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
-        _arch_ready(page)
-        page.evaluate(f"""() => document.querySelector('#diagram path.arch-layerline[data-layer="{k}"]').__cyHits[0]
-            .dispatchEvent(new MouseEvent('click', {{ bubbles: true }}))""")
-        page.wait_for_function("() => location.hash.includes('sel=archlayer')")
-        seen = page.evaluate(read)
-        assert seen["hash"].endswith(f"sel=archlayer:{k}") and seen["shown"] and seen["drawn"] == 0, seen
-        assert seen["summary"].startswith(f"{len(ll['lines'])} lines from {len(starts)} boxes"), seen
-        assert seen["rows"] == starts and seen["ucs"], seen
-        # resting on a row draws its box's lines, and only while the pointer stays
-        row = page.locator(f'#panel [data-archrow="{first}"]')
-        row.hover()
-        page.wait_for_timeout(200)
-        assert page.evaluate(read)["drawn"] == own
-        page.mouse.move(2, 2)
-        page.wait_for_timeout(500)
-        assert page.evaluate(read)["drawn"] == 0
-        # a click keeps them, and the header names them
-        row.click()
-        page.mouse.move(2, 2)
-        page.wait_for_timeout(500)
-        seen = page.evaluate(read)
-        assert seen["drawn"] == own and seen["tag"].startswith("From "), seen
-        page.reload()
-        _settle(page)
-        assert page.evaluate(read)["rows"] == starts
         assert not page.js_errors, page.js_errors
 
 
