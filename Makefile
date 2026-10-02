@@ -18,7 +18,7 @@ SKILLS_DIRS := $(HOME)/.claude/skills $(HOME)/.agents/skills
 
 .PHONY: install install-eval install-retro install-dev \
         uninstall uninstall-eval uninstall-retro uninstall-dev \
-        deps dev venv clean start dev-start gates land
+        deps dev venv clean start dev-start gates land break-check
 
 # Port for the local map server (the file browser + code viewer backend).
 PORT ?= 8765
@@ -71,6 +71,13 @@ gates:
 # Stdlib only, so it needs no venv of its own; the gates it runs use the main checkout's.
 land:
 	python3 tools/land.py
+
+# Which tests notice a broken behaviour? Each break in BREAKS (a JSON file, see
+# tools/break_check.py) is made in a scratch copy, one at a time, and the viewer's tests run on
+# it: `make break-check BREAKS=breaks.json`. The checkout itself is never touched. Stdlib only,
+# like land; the tests it runs use the main checkout's venv. Exit 1 when some break went unnoticed.
+break-check:
+	python3 tools/break_check.py --breaks $(BREAKS)
 
 # Install the coyomap skill globally for all agents (macOS/Linux). Also builds the venv and
 # installs the CLI (via `deps`) so a one-time `make install` covers everything.
