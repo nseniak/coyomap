@@ -7809,13 +7809,12 @@ archplayer.addEventListener('click', (e) => {
 function archList(xs) {
   return xs.length <= 1 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
 }
-// A LINE SAYS WHICH USE CASES TAKE IT. The use case is what a line is FOR; a step sentence says how,
-// in one story's words, and a line taken by many stories read as a pile of them. On mcpolis's whole
-// product a line carries a median of 2 use cases and up to 35, so a line with more than ARCH_UC_FLAT
-// of them, from more than one feature, lists its FEATURES, each with a count, and opens to its use
-// cases: at most 9 rows on mcpolis's busiest line. Each use case opens to the step sentence it takes
-// here, and follows its story from there.
-const ARCH_UC_FLAT = 3;
+// A LINE SAYS WHICH USE CASES TAKE IT, BY FEATURE. The use case is what a line is FOR, and the
+// feature is what a reader knows the product by: a line lists its features, each with its mark and a
+// count, in the Features page's order, and each opens to its use cases. On mcpolis's whole product a
+// line carries a median of 2 use cases and up to 35, from up to 9 features. Each use case says, under
+// its name, what it does along this line (its own step sentences, nothing to open), and follows its
+// story on its feature's own picture.
 function archUseCasesHtml(e) {
   const said = new Map();   // use case -> the sentences it says on this line, in the line's order
   for (const x of e.sentences) for (const uc of x.ucs) {
@@ -7823,20 +7822,20 @@ function archUseCasesHtml(e) {
     if (!said.get(uc).includes(x.text)) said.get(uc).push(x.text);
   }
   const ucs = [...said.keys()];
-  const row = (uc) => `<details class="archuc"><summary>${esc(elName(uc))}</summary>`
-    + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('')
-    + `<button type="button" class="archuc-follow" data-archstory="${esc(uc)}">Follow this story</button></details>`;
   const featureOf = (uc) => String((GRAPH.nodes[uc] || {}).parent || '');
-  const feats = [...new Set(ucs.map(featureOf))];
-  if (ucs.length <= ARCH_UC_FLAT || feats.length < 2) return `<div class="archuc-list">${ucs.map(row).join('')}</div>`;
+  const row = (uc) => `<div class="archuc"><div class="archuc-name">${itemMarkHtml('usecase')}`
+    + `<span>${esc(elName(uc))}</span></div>`
+    + said.get(uc).map((text) => `<p class="archuc-sent">${esc(capFirst(text))}</p>`).join('')
+    + `<button type="button" class="archuc-follow" data-archstory="${esc(uc)}" data-archcap="${esc(featureOf(uc))}">`
+    + 'Follow this use case</button></div>';
   // The Features page's order, which is the order of the view's own feature buttons.
   const order = (ARCH_FEATURES || []).map((f) => f.id);
   const at = (f) => { const i = order.indexOf(f); return i < 0 ? order.length : i; };
-  feats.sort((a, b) => at(a) - at(b));
+  const feats = [...new Set(ucs.map(featureOf))].sort((a, b) => at(a) - at(b));
   return feats.map((f) => {
     const mine = ucs.filter((uc) => featureOf(uc) === f);
-    return `<details class="archuc-feat"><summary>${esc(f ? featureName(f) : 'In no feature')}`
-      + ` <span class="archuc-count">${mine.length}</span></summary>`
+    return `<details class="archuc-feat"><summary>${itemMarkHtml('capability')}`
+      + `<span>${esc(f ? featureName(f) : 'In no feature')}</span> <span class="archuc-count">${mine.length}</span></summary>`
       + `<div class="archuc-list">${mine.map(row).join('')}</div></details>`;
   }).join('');
 }
@@ -7863,12 +7862,18 @@ function archBoxName(t, id) {
 }
 // FOLLOW A STORY, or ("") show every story again: its own screen, its own address. The button is on a
 // line's card, the main one or the second one, and on the story player, so one listener serves each.
+// FOLLOWING A USE CASE FROM A LINE'S CARD opens its FEATURE's picture (`data-archcap`), where its story
+// is one of a few rather than one of the whole product's 67; the boxes opened on this picture belong to
+// this picture and stay behind. A use case in no feature is followed where it is.
 function archStoryClick(e) {
   const pick = e.target.closest && e.target.closest('[data-archstory]');
   if (!pick) return false;
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(cur.scope, cur.cap || '', pick.getAttribute('data-archstory') || '', cur.open || ''));
+  const cap = pick.getAttribute('data-archcap');
+  const moves = !!cap && cap !== archFeature(cur);
+  go(archState(cur.scope, moves ? cap : (cur.cap || ''), pick.getAttribute('data-archstory') || '',
+               moves ? '' : (cur.open || '')));
   return true;
 }
 [PANEL_HOST, PEEK_CARD].forEach((card) => card && card.addEventListener('click', archStoryClick));
@@ -7879,15 +7884,14 @@ function showArchLine(e, story) {
   const own = story ? story.lines.findIndex(([a, b]) => a === e.srcBox && b === e.dstBox) : -1;
   const said = own >= 0 ? e.sentences.find((x) => x.ucs.includes(story.uc)) : null;
   const badge = e.store ? 'keeps records' : own >= 0 ? 'step ' + (own + 1) : '';
-  // What the code does along it (the link list's verb, "calls ×2"), and the boxes a grey line passes.
+  // The boxes a grey line passes through. Not the code's verb ("calls ×2"): the line itself says it.
   const via = (e.via || []).length
-    ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>`
-    : e.verb ? `<p class="archcard-via">${esc(capFirst(e.verb))}</p>` : '';
+    ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
   panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
     + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
     + (said ? '<div class="archcard-story"><div class="archcard-lbl">In the story you follow</div>'
       + `<p class="archuc-sent">${esc(capFirst(said.text))}</p></div>` : '')
-    + '<div class="archcard-lbl">Use cases that take this line</div>'
+    + '<div class="archcard-lbl">Use cases on this line, by feature</div>'
     + `<div class="archcard-ucs">${archUseCasesHtml(e)}</div>`;
   cvElement = null;
   setTreeSelection(null);

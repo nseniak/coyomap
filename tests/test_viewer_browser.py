@@ -4307,9 +4307,9 @@ def _arch_line(text: dict[str, Any], hash_: str) -> dict[str, Any]:
 
 def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use_cases() -> None:
     """A click on a line picks it, as a click on a box does: the address keeps it, and its card names its
-    two ends, its step and the use cases that take it. A use case opens to its own step sentence and
-    follows its story; with that story followed, the card says the story's own sentence first, under
-    the story's own step number."""
+    two ends and the use cases that take it, by feature, and not the code's verb. "Follow this use case"
+    opens the use case's feature picture with its story followed; there, the same line's card says the
+    story's own sentence first, under the story's own step number."""
     text = make_whole_product_text(lambda m: None)
     assert not text.get("layerLines"), "the fixture's whole product must not be crowded"
     with _served() as url, _page(url + "#v=arch&cap=all") as page:
@@ -4323,16 +4323,18 @@ def test_a_line_on_the_architecture_picture_is_picked_and_its_card_names_its_use
         assert seen["shown"] and seen["title"] == f"{e['src']} \u2192 {e['dst']}", seen
         assert seen["badge"] == ("keeps records" if e["store"] else ""), "no shared step number: " + str(seen)
         assert set(seen["ucs"]) == named, (seen, named)
+        assert not page.evaluate("() => document.querySelector('#panel .archcard-via')") or e["via"], \
+            "the card says no verb"
         # a reload keeps the pick, as it keeps a box's
         page.reload()
         _arch_ready(page)
         assert page.evaluate(LINE_CARD, "#panel")["title"] == seen["title"]
-        uc = page.evaluate("""() => { const row = document.querySelector('#panel .archuc');
-            row.querySelector('summary').click();
-            const btn = row.querySelector('.archuc-follow'); const uc = btn.dataset.archstory;
-            btn.click(); return uc; }""")
-        page.wait_for_function(f"() => location.hash.includes('story={uc}')")
+        uc, cap = page.evaluate("""() => { const btn = document.querySelector('#panel .archuc .archuc-follow');
+            const out = [btn.dataset.archstory, btn.dataset.archcap]; btn.click(); return out; }""")
+        page.wait_for_function(f"() => location.hash.includes('story={uc}') && location.hash.includes('cap={cap}')")
         _arch_ready(page)
+        text = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[1]["all|" + cap]
+        e = next(x for x in text["lines"] if (x["src"], x["dst"]) == (e["src"], e["dst"]))
         story = next(x for x in text["stories"] if x["uc"] == uc)
         k = story["lines"].index([e["srcBox"], e["dstBox"]])
         page.evaluate(f"""() => {{ for (const p of document.querySelectorAll('#diagram .edgePaths path.flowchart-link'))
@@ -4465,11 +4467,10 @@ def test_a_followed_story_is_walked_on_a_crowded_picture_through_the_lines_drawn
     assert two["picked"] == ["%s>%s" % tuple(story["lines"][1])], two
 
 
-def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
-    """A line says which use cases take it: the use case is what a line is for, and a step sentence only
-    says how, in one story's words. Past a few use cases from several features, a line lists its
-    features, each with a count, and each opens to its use cases; a use case opens to its own step
-    sentence and follows its story."""
+def test_a_line_names_its_use_cases_by_feature() -> None:
+    """A line says which use cases take it, by feature: the use case is what a line is for, and the
+    feature is what a reader knows the product by. Each feature has a count and opens to its use cases;
+    each use case shows its own step sentence under its name, and follows its story."""
     text = make_whole_product_text(lambda m: None)
     def ucs(e: dict[str, Any]) -> set[str]:
         return {u for x in e["sentences"] for u in x["ucs"]}
@@ -4494,9 +4495,7 @@ def test_a_line_names_its_use_cases_grouped_by_feature_past_a_few() -> None:
             r = by[(e["srcBox"], e["dstBox"])]
             assert r["ucs"] == len(ucs(e)) == r["follows"], (e["srcBox"], e["dstBox"], r)
             assert r["sents"] >= r["ucs"], r   # every use case opens to the sentence it says here
-            if r["feats"]:
-                assert sum(r["feats"]) == r["ucs"] and len(r["feats"]) > 1 and r["ucs"] > 3, r
-        assert any(r["feats"] for r in seen), "a busy line from several features is grouped by feature"
+            assert r["feats"] and sum(r["feats"]) == r["ucs"], r
         assert not page.js_errors, page.js_errors
 
 

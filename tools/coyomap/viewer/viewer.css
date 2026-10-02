@@ -967,28 +967,29 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
 .archplay-x { flex: 0 0 auto; font: inherit; font-size: 16px; line-height: 1; border: 0; background: none;
   color: #9ca3af; cursor: pointer; padding: 2px 4px; }
 .archplay-x:hover { color: #374151; }
-.archuc-sent { margin: 2px 0 0; font-size: 13px; line-height: 18px; color: #1f2937; }
-/* A LINE'S USE CASES (archUseCasesHtml): each a row that opens to its step sentence and its story;
-   past a few, from several features, grouped under a feature with a count. */
-.archuc-list { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
-.archuc > summary, .archuc-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; }
-.archuc > summary:hover, .archuc-feat > summary:hover { color: #4f46e5; }
-.archuc[open] { padding-bottom: 4px; }
-.archuc .archuc-sent, .archuc .archuc-follow { margin-left: 14px; }
-.archuc-feat > .archuc-list { margin-left: 14px; }
+/* A LINE'S USE CASES (archUseCasesHtml): its features, each with its mark and a count, opening to its
+   use cases; each use case with its mark, its step sentences under it, and the follow button. */
+.archuc-feat > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937;
+  display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.archuc-feat > summary::before { content: '\25B8'; color: #94a3b8; font-size: 10px; width: 8px; }
+.archuc-feat[open] > summary::before { content: '\25BE'; }
+.archuc-feat > summary::-webkit-details-marker { display: none; }
+.archuc-feat > summary { list-style: none; }
+.archuc-feat > summary:hover { color: #4f46e5; }
+.archuc-feat summary svg, .archuc-name svg { width: 15px; height: 15px; flex: none; }
+.archuc-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 14px; }
+.archuc-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+  line-height: 18px; color: #1f2937; }
+.archuc-sent { margin: 2px 0 0 21px; font-size: 13px; line-height: 18px; color: #374151; }
 .archuc-count { font-size: 11px; font-weight: 600; color: #64748b; background: #f1f5f9; border-radius: 8px;
-                  padding: 0 6px; }
-.archuc-follow { font-size: 11px; color: #64748b; white-space: nowrap; }
+  padding: 0 6px; }
+.archuc .archuc-follow { margin-left: 21px; }
 /* A LINE'S CARD on the Architecture picture (showArchLine). */
 .archcard-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   color: #64748b; margin: 10px 0 4px; }
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
 .archcard-story .archuc-sent { margin: 0; }
 .archcard-ucs { max-height: 50vh; overflow: auto; }
-.archcard-line > summary { cursor: pointer; font-size: 13px; line-height: 18px; color: #1f2937; font-weight: 600; }
-.archcard-line > summary:hover { color: #4f46e5; }
-.archcard-line > .archuc-list, .archcard-line > .archuc-feat { margin-left: 14px; }
-.archcard-line[open] { padding-bottom: 6px; }
 /* …and on a picture that draws every line, resting on a box lights its own. */
 #diagram path.flowchart-link.arch-preview-on { stroke: #4f46e5 !important; stroke-width: 2.4px !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
