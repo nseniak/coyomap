@@ -30,6 +30,11 @@ attacks existing fields on every rebuild if the method ever states it.
 12 views in 4 groups, and several that should be drill-down destinations are
 top-level tabs. We will restructure at some point, not now.
 
+**Known gap, recorded 2026-10-02: a keyboard cannot reach an arrow's card.** On every
+picture, an arrow's card opens only with a pointer. On the Architecture view this lost
+something: its old text column held each line's use cases as page text, which a keyboard
+could reach. A keyboard path for every picture's arrows is its own piece of work.
+
 ## Glossary
 
 The words we use when talking about this project. Use these; don't drift back to
