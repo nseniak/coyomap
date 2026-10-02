@@ -4861,16 +4861,13 @@ function rescaleLayerLines() {
 }
 function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); }
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
-// One line of the picture, as the overlay draws it: its step number, or none on a line into a database.
+// One line of the picture, as the overlay draws it.
 function archOverlayItem(e) {
-  return { src: e.srcBox, dst: e.dstBox, label: '' };
+  return { src: e.srcBox, dst: e.dstBox };
 }
-// Draw the box lines of a crowded picture that pass `test`, each with its step number, or none again
-// when it is null.
-// WHAT THE PICTURE DRAWS OF ITS LINES besides the drawing: the lines KEPT (a picked box's, a row of a
-// line between layers clicked, "Draw all"), and the lines PREVIEWED while the pointer rests on something
-// (a box, a line between layers, a row of its card). Resting shows, clicking keeps: the rule a card
-// already follows. A crowded picture draws them on top of itself; any other picture has them all
+// WHAT THE PICTURE DRAWS OF ITS LINES besides the drawing: the lines KEPT (a picked box's), the line
+// PICKED, and the lines PREVIEWED while the pointer rests on a box. Resting shows, clicking keeps: the
+// rule a card already follows. A crowded picture draws them on top of itself; any other picture has them all
 // drawn already, and lights the previewed ones.
 let archKeptTest = null;
 function archShowLines(test) {
@@ -4901,19 +4898,18 @@ function archRedrawLines() {
 // reader moves from a box to its lines to read them, and the lines must not go on the way.
 let archPreviewTest = null, archPreviewKey = '', archPreviewFrom = null, archPreviewTimer = 0;
 const ARCH_PREVIEW_LEAVE_MS = 200;
-// WITH SOMETHING PICKED, resting on a box or a line between layers shows its card beside the pick and
-// draws nothing: the picked thing's lines are what the reader is reading. A row of the picked thing's
-// own card still previews (`inCard`).
+// WITH SOMETHING PICKED, resting on a box shows its card beside the pick and draws nothing: the picked
+// thing's lines are what the reader is reading.
 // ONE PREVIEW REPLACES ANOTHER only once the pointer has stayed on the new box a moment: on its way
 // from a box to one of that box's lines, the pointer crosses other boxes, and each one swapped the
-// lines out from under it. A row of a card answers at once: the reader is choosing between rows.
+// lines out from under it.
 const ARCH_PREVIEW_SWITCH_MS = 160;
 let archPreviewSwitch = 0, archPointerOn = null;
-function archPreview(key, from, test, inCard) {
+function archPreview(key, from, test) {
   clearTimeout(archPreviewTimer); archPreviewTimer = 0;
   clearTimeout(archPreviewSwitch); archPreviewSwitch = 0;
   if (archPreviewKey === key) return;
-  if (!inCard && mainScene && mainScene.selection.length) return;
+  if (mainScene && mainScene.selection.length) return;
   archPreviewWatch();
   const apply = () => {
     // The leave timer the old preview started while the pointer crossed into this box goes too: it
@@ -4922,7 +4918,7 @@ function archPreview(key, from, test, inCard) {
     archPreviewKey = key; archPreviewFrom = from; archPreviewTest = test;
     archRedrawLines();
   };
-  if (!archPreviewKey || inCard) { apply(); return; }
+  if (!archPreviewKey) { apply(); return; }
   archPreviewSwitch = setTimeout(() => {
     archPreviewSwitch = 0;
     if (archPointerOn && from.contains(archPointerOn)) apply();
@@ -7819,7 +7815,7 @@ function showArchLine(e) {
   const feats = new Set([...e.sentences.flatMap((x) => x.ucs), ...Object.keys(e.steps || {})]
     .map((uc) => String((GRAPH.nodes[uc] || {}).parent || '')));
   const flat = !!archFeature((hi >= 0 && history[hi]) || {}) || feats.size <= 1;
-  // The boxes a grey line passes through. Not the code's verb ("calls ×2"): the line itself says it.
+  // The boxes a line passes through without drawing them.
   const via = (e.via || []).length
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
   panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
@@ -7847,8 +7843,8 @@ function archLineResolver(t) {
 }
 // THE ARCHITECTURE VIEW'S BOXES open the way a flow picture's do (bindFlowMap): a plain click on the
 // NAME opens the thing, so a subsystem box opens its components and a lone component its own page;
-// the rest of the box selects it, and the header's tag names its lines (on a crowded picture they are
-// drawn; a second click on the same box lets go of them). The generic binder it used before only selected,
+// the rest of the box selects it and lights its lines (on a crowded picture they are drawn; a second
+// click on the same box picked alone lets go of them). The generic binder it used before only selected,
 // so a subsystem box standing for 5 components offered no way to see them.
 // A GROUP OF PARTS (the layered picture's `cells`) opens and shows the subsystem it stands for, and
 // keeps its own id for the steps: two groups of one subsystem are two different boxes on the picture.
@@ -7866,7 +7862,7 @@ function bindArch() {
     .filter((e) => e.srcBox.startsWith('CYP')).map((e) => e.src + '>' + e.dstBox));
   mainScene.cardOpts = { dropChips: (c, id) => !!c.id && actorNodeId(c.name) === c.id && joined.has(c.name + '>' + id) };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
-  // A plain click picks the box: it lights its lines, and the header's tag names them.
+  // A plain click picks the box and lights its lines.
   // A CLICK ON THE BOX PICKED ALONE lets go of its lines; after one of its lines was picked, it draws
   // them again (the box was not what was picked any more).
   const pickBox = (id) => archFilterBox(archBoxFilter === id && archSelBefore === 'node:' + id ? '' : id);
@@ -8582,7 +8578,7 @@ function cardKeepSets(el) {
   // IN EVERY SET. The later sets exist so a crowded arrow can place its card at all, by giving up one
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
-  // The story player's strip at the foot of the drawing is a control too.
+  // The happy-path switch over the drawing's corner is a control too.
   const fixed = [zoomctl, document.getElementById('archhp')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],

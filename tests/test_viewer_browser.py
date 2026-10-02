@@ -4457,7 +4457,7 @@ def test_a_click_on_a_box_picks_it_and_escape_lets_go_of_it() -> None:
 def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -> None:
     """Four gestures every other picture has, which the Architecture picture lacked: resting on a box
     shows its card and no corner magnifier, a person's box picks like any other box and lights its
-    lines, and a click on empty space lets go of the box, in the header's tag as well as on the drawing."""
+    lines, and a click on empty space lets go of the box."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
         box = page.evaluate(ARCH_BOX_BODY)
@@ -4807,7 +4807,7 @@ def make_one_part_a_screen(m: dict[str, Any]) -> None:
 
 
 def make_whole_product_text(mutate: Any) -> dict[str, Any]:
-    """The text beside the whole-product picture, for the fixture map changed by `mutate`."""
+    """What the view knows of the whole-product picture (its lines and cards), for the fixture map changed by `mutate`."""
     m = json.loads(_FIXTURE_MAP.read_text())
     mutate(m)
     return gen_arch_views(model_to_graph(load_model(json.dumps(m))))[1]["all|"]
@@ -4817,7 +4817,7 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
     """A group of parts is its subsystem's box on the layered picture. It names the parts it holds,
     each a tag that opens that part, with no sentence and no type word: every box inside the product
     is a subsystem on this picture, and its card is one hover away. The box around the name
-    selects it, shows the subsystem's card and names the group in the header's tag; the name
+    selects it and shows the subsystem's card; the name
     opens the subsystem."""
     groups = make_whole_product_text(make_every_part_do_work)["cells"]
     with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=all") as page:
@@ -4878,9 +4878,8 @@ VISIBLE_LINES = """() => {
 
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
     """A picture with more lines than a reader can follow draws one line per pair of layers that most of
-    its layer takes, with no number, and none of its boxes' own. A click on a layer line shows its card
-    and draws nothing; the card's "Draw all" draws the box lines it stands for on top of the picture and
-    names them in the header's tag, and a second press hides them. A click on a box draws its own lines."""
+    its layer takes, with no number, and none of its boxes' own. A layer line is drawing only: it takes
+    no click and has no card. A click on a box draws its own lines on top of the picture."""
     text = make_whole_product_text(make_parts_in_every_layer)
     assert len(text["lines"]) > 40 and text["layerLines"], "the changed map must crowd the picture"
     rest = 0

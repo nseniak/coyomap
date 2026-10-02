@@ -1067,7 +1067,7 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 #   keep the ARCH_BOX_BUDGET boxes the most stories pass through
 #   fold every other box into the lines that pass through it: A -> (not shown) -> B draws A -> B,
 #     and that line's card names what it passed
-#   number every line by the order the stories take it, so each story reads 1, 2, 3 on the picture
+#   order the lines by when the stories take them (the macro flow's number), which no line shows
 #
 # WHY SUBSYSTEMS, AND WHICH ONES. A component's OWN subsystem, the smallest one it sits in, is named
 # for a job on the maps measured: "Serving tools", "Client credentials", "Sign-in machinery". Drawn
@@ -1107,7 +1107,7 @@ ARCH_FRAME_STROKE = "#cbd5e1"
 ARCH_NO_KIND_FRAME = "Parts with no kind"
 #: How many boxes the layered picture draws at most, a group of parts or a part alone: gitdiagram's
 #: own picture of mcpolis drew 23, and a trial of our map drawn its way stayed readable at 24. The
-#: rest are drawn through, as grey lines.
+#: rest are drawn through: a line passes them, and its card names them.
 ARCH_LAYER_BUDGET = 24
 #: A layered picture with more lines than this draws one line per pair of layers instead
 #: (`_arch_layer_lines`). On mcpolis the pictures had 116, 84 and 51 lines, then 30 and fewer; the 3
@@ -1351,7 +1351,7 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
 class _ArchFlow(TypedDict):
     walks: list[tuple[str, list[tuple[str, str]]]]   # each walk as its merged (src, dst) steps
     phrases: dict[str, list[str]]                   # use case -> each kept step's own sentence, in step
-                                                    # order, beside `walks` (what the flow text prints)
+                                                    # order, beside `walks` (what a line's card says)
     nums: dict[str, list[list[int]]]                # use case -> each kept step's own step numbers, beside it
     people: list[str]                               # the people the walks name, first met first
     doors: list[str]                                # the interfaces a person steps straight into
@@ -1584,7 +1584,8 @@ def _story_order_numbers(sequences: list[list[tuple[str, str]]]) -> dict[tuple[s
     """THE MACRO FLOW'S STEP NUMBERS. Each story is the list of arrows it takes, in its own order.
     An arrow's number is 1 + the largest number of any arrow a story takes just before it, so no
     story ever reads backwards on the picture, and arrows at the same point of different stories
-    share a number: same number and dashed reads "one or the other here", solid reads "both".
+    share a number. The number orders the lines and their cards; no line shows it, as it read in order
+    for 17 of mcpolis's 67 stories.
 
     Stories can disagree: one takes arrow X before Y, another Y before X. Those arrows form a loop,
     and a loop has no order to give, so all its arrows share one number. Measured on mcpolis: 0 of
@@ -1689,7 +1690,7 @@ class _ArchModel(TypedDict):
 def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
                 budget: int = ARCH_BOX_BUDGET, layered: bool = False) -> _ArchModel | None:
     """The Architecture picture as data: the chosen stories merged into one flow and simplified by
-    the rule in the block above, with every line's style and step number worked out. `None` when
+    the rule in the block above, with every line's number (its place in the macro flow) worked out. `None` when
     the chosen stories reach no component. `gen_overview_mermaid` draws it; keeping the two apart
     lets the numbering be checked on the flow itself instead of by reading a drawing back."""
     nodes = graph["nodes"]
@@ -2094,17 +2095,17 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
 
 def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
     """WHAT EACH LINE OF AN ARCHITECTURE PICTURE TELLS on its card: one entry per line in reading
-    order (by step number, then first met). Each entry names its two ends and gives, for every story
-    taking the line, that story's own sentence for the step and the story's name.
+    order (by the macro flow's number, then first met). Each entry names its two ends, gives the
+    sentences the use cases taking it say for the step, and each use case's own steps on it (`steps`),
+    which its use case map selects.
 
     Why a card and not words on the lines: a step's sentence is 48 characters at the median, and
     one line can carry many of them (24 on the team admin's line into the Dashboard, one per story).
-    The picture keeps the numbers; the card keeps the sentences.
 
-    Only DISTINCT sentences are kept, each with the stories that say it, so 3 stories saying the
-    same thing are one sentence with 3 names rather than the same words 3 times.
+    Only DISTINCT sentences are kept, each with the use cases that say it, so 3 saying the same thing
+    are one sentence with 3 use cases rather than the same words 3 times.
 
-    Each entry also says what the picture cannot: the boxes a grey line passes through (`via`)."""
+    Each entry also says what the picture cannot: the boxes a line passes through (`via`)."""
     nodes = graph["nodes"]
     subflow_names = {str(sf.get("id")): str(sf.get("name") or sf.get("id"))
                      for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
@@ -4382,7 +4383,7 @@ class ViewBundle(TypedDict):
     mermaidContainer: str
     mermaidArch: str               # the Architecture view, everyone over every walk; "" = no walks
     mermaidArchBy: dict[str, str]  # every drawing its two toggles can ask for, "<scope>|<person>"
-    archText: dict[str, dict[str, Any]]  # …and what the view tells of each, same keys: {lines, stories}
+    archText: dict[str, dict[str, Any]]  # …and what the view tells of each, same keys: {lines, cells}
     archFeatures: list[dict[str, str]]  # the features any walk belongs to, {id, name}, map order
     mermaidBySub: dict[str, str]
     mermaidEdgeCard: dict[str, str]
