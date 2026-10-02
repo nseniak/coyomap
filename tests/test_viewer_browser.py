@@ -4433,9 +4433,9 @@ ARCH_BOX_BODY = """() => {
 }"""
 
 
-def test_a_click_on_a_box_picks_it_and_the_header_tag_lets_go_of_it() -> None:
-    """The box around the name selects it and steps back what does not touch it; a tag in the header
-    says whose lines these are, and its × lets go of the box."""
+def test_a_click_on_a_box_picks_it_and_escape_lets_go_of_it() -> None:
+    """The box around the name selects it and steps back what does not touch it, with no tag naming it
+    a third time; Escape lets go."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
         spot = page.evaluate(ARCH_BOX_BODY)
@@ -4443,15 +4443,12 @@ def test_a_click_on_a_box_picks_it_and_the_header_tag_lets_go_of_it() -> None:
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({
             dim: document.querySelectorAll('#diagram g.node.dim').length,
-            head: document.querySelector('.archthrough').hidden ? '' :
-                  document.querySelector('.archthrough').textContent })""")
-        assert seen["dim"] > 0, seen
-        assert seen["head"] == f"Through {spot['name']} \u00d7", seen
-        page.evaluate("() => document.querySelector('.archthrough [data-archthrough-clear]').click()")
-        page.wait_for_timeout(300)
-        seen = page.evaluate("""() => ({ hash: location.hash, tag: !document.querySelector('.archthrough').hidden,
-            dim: document.querySelectorAll('#diagram g.node.dim').length })""")
-        assert not seen["tag"] and not seen["dim"] and "sel=" not in seen["hash"], seen
+            tag: !!document.getElementById('archthrough') })""")
+        assert seen["dim"] > 0 and not seen["tag"], seen
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        seen = page.evaluate("""() => ({ hash: location.hash, dim: document.querySelectorAll('#diagram g.node.dim').length })""")
+        assert not seen["dim"] and "sel=" not in seen["hash"], seen
         assert not page.js_errors, page.js_errors
 
 
@@ -4478,11 +4475,9 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
         page.mouse.click(person["x"], person["y"])
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({ hash: location.hash,
-            dim: document.querySelectorAll('#diagram g.node.dim').length,
-            head: document.querySelector('.archthrough').textContent })""")
+            dim: document.querySelectorAll('#diagram g.node.dim').length })""")
         assert "sel=node%3ACYP" in seen["hash"], seen
         assert seen["dim"] > 0, seen
-        assert seen["head"].startswith("Through"), seen
         # EMPTY SPACE: a point of the drawing with nothing drawn under it.
         empty = page.evaluate("""() => {
             const svg = document.querySelector('#diagram svg'), r = svg.getBoundingClientRect();
@@ -4494,10 +4489,8 @@ def test_an_architecture_box_and_a_person_take_every_other_pictures_gestures() -
         page.mouse.click(empty["x"], empty["y"])
         page.wait_for_timeout(500)
         seen = page.evaluate("""() => ({ hash: location.hash,
-            selected: document.querySelectorAll('#diagram .is-selected').length,
-            filtered: !document.querySelector('.archthrough').hidden })""")
+            selected: document.querySelectorAll('#diagram .is-selected').length })""")
         assert "sel=" not in seen["hash"] and seen["selected"] == 0, seen
-        assert not seen["filtered"], seen
         assert not page.js_errors, page.js_errors
 
 
@@ -4844,12 +4837,9 @@ def test_a_group_of_parts_names_its_parts_shows_its_subsystem_and_keeps_its_own_
         page.mouse.click(spot["x"], spot["y"])
         page.wait_for_timeout(700)
         seen = page.evaluate("""() => ({ hash: location.hash,
-            card: (document.querySelector('#panel .ecard[data-id]') || { dataset: {} }).dataset.id || '',
-            head: document.querySelector('.archthrough').textContent })""")
+            card: (document.querySelector('#panel .ecard[data-id]') || { dataset: {} }).dataset.id || '' })""")
         assert "node%3A" + spot["id"] in seen["hash"], seen
         assert seen["card"] == group["sub"], seen
-        # every part does work in this map, so the work layer names only "Logic"
-        assert seen["head"].startswith("Through") and "(Logic)" in seen["head"], seen
         # A TAG OPENS ITS PART, not the box around it.
         page.evaluate(f"""() => document.querySelector('#diagram g.cy-{spot["id"]} .item-pill-door').click()""")
         page.wait_for_function(f"() => location.hash.includes('node%3A{named[0]}')")

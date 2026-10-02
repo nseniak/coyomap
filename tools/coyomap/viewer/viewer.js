@@ -258,15 +258,6 @@ diaghead.addEventListener('click', (e) => {
   const cap = e.target.closest && e.target.closest('[data-archcap]');
   if (cap && !cap.disabled) go(archState(cur.scope, cap.getAttribute('data-archcap') || ''));
 });
-// LETTING GO OF A BOX'S LINES lets go of the box too, as a second click on it does: its lines alone
-// were what picking it showed.
-document.getElementById('archthrough').addEventListener('click', (e) => {
-  if (!(e.target.closest && e.target.closest('[data-archthrough-clear]'))) return;
-  e.stopPropagation();
-  const was = archBoxFilter;
-  archFilterBox('');
-  if (mainScene && was) selRemove(mainScene, 'node:' + was);
-});
 const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
 const crumb = document.getElementById('crumb');
@@ -2441,7 +2432,7 @@ function clearFocus(scene) {
 function resetScene(scene) {  // clear selection + focus, restore the scene's default panel
   selClear(scene);          // tear down every selected element's glow + empty the selection set
   clearFocus(scene);
-  if (archBoxFilter) archFilterBox('');   // the Architecture text keeps every step again
+  if (archBoxFilter) archFilterBox('');   // the Architecture picture draws its lines at rest again
   panel = PANEL_HOST;
   PANEL_HOST.innerHTML = '';
   scene.defaultPanel();
@@ -7661,17 +7652,6 @@ archhp.addEventListener('click', (e) => {
   const cur = (hi >= 0 && history[hi]) || {};
   go(archState(archhp.dataset.archhp || '', cur.cap || ''));   // the feature in force stays
 });
-function archThroughHtml() {
-  return archFilterLabel ? `${archFilterLabel} <button type="button" class="archthrough-x" data-archthrough-clear`
-    + ' aria-label="Show every line" title="Show every line">\u00d7</button>' : '';
-}
-// The tag over the drawing's top-left corner, written as the reader picks.
-function syncArchThrough() {
-  const tag = document.getElementById('archthrough');
-  if (!tag) return;
-  tag.hidden = !archFilterLabel;
-  tag.innerHTML = archThroughHtml();
-}
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
 // pasted address and a switch flip both land on a drawing that exists.
@@ -7679,7 +7659,6 @@ function syncArchThrough() {
 // `_arch_text`): each line with its two ends and the use cases that take it, which its card tells.
 function archTextOf(s) { return s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || null) : null; }
 let archBoxFilter = '';
-let archFilterLabel = '';   // what the header's tag says while a box's lines alone are shown
 // A NEW SCREEN starts with every line shown, and with the happy-path switch its picture offers.
 function syncArchView(s) {
   syncArchHappySwitch(s);
@@ -7687,8 +7666,6 @@ function syncArchView(s) {
   archPreviewTimer = 0; archPreviewSwitch = 0;
   archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
   archBoxFilter = '';
-  archFilterLabel = '';
-  syncArchThrough();
 }
 function archList(xs) {
   return xs.length <= 1 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
@@ -7730,19 +7707,16 @@ function archUseCasesHtml(e, flat) {
       + `<div class="archuc-list">${mine.map(row).join('')}</div></details>`;
   }).join('');
 }
-// ONE BOX'S LINES: the header's tag names them, and a crowded picture draws the lines that pass `test`
-// (archShowLines). `key` names what is picked, so a second click on it shows
-// every line again; an empty key does that too.
-function archFilterLines(key, test, headHtml) {
+// ONE BOX'S LINES: a crowded picture draws the lines that pass `test` (archShowLines). `key` names what
+// is picked, so a second click on it shows every line again; an empty key does that too. No tag names
+// them: the box is ringed and its card is open, and a tag saying "Through X ×" said it a third time.
+function archFilterLines(key, test) {
   archBoxFilter = key || '';
-  const on = archBoxFilter ? test : null;
-  archFilterLabel = on ? headHtml : '';
-  syncArchThrough();
-  archShowLines(on);
+  archShowLines(archBoxFilter ? test : null);
 }
-// ONE BOX'S STEPS: the lines with this box at either end. An empty id shows every line again.
-function archFilterBox(id, name) {
-  archFilterLines(id, (a, b) => a === id || b === id, `Through <b>${esc(name || id)}</b>`);
+// ONE BOX'S LINES: the lines with this box at either end. An empty id shows every line again.
+function archFilterBox(id) {
+  archFilterLines(id, (a, b) => a === id || b === id);
 }
 function archBoxName(t, id) {
   for (const e of (t && t.lines) || []) {
@@ -7813,7 +7787,7 @@ function bindArch() {
   mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box: it lights its lines, and the header's tag names them.
-  const pickBox = (id) => archFilterBox(archBoxFilter === id ? '' : id, archBoxName(t, id));
+  const pickBox = (id) => archFilterBox(archBoxFilter === id ? '' : id);
   bindNodes(mainScene, (id, el, ev) => {
     const elem = standsFor(id);
     const locate = locateActionFor(elem);
@@ -8478,7 +8452,7 @@ function cardKeepSets(el) {
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The story player's strip at the foot of the drawing is a control too.
-  const fixed = [zoomctl, document.getElementById('archthrough'), document.getElementById('archhp')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
+  const fixed = [zoomctl, document.getElementById('archhp')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
        [...g([...own, ...ends]), ...fixed],
