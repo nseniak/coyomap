@@ -7249,13 +7249,21 @@ def nobody_at_door_warnings(m: ProjectModel, ours: set[str] | None = None) -> li
     Gateway door once, while the dashboard's own pages reached the same addresses straight in 10
     steps. The 5 dashboard doors drew 2 lines on the Architecture picture that no code takes.
 
-    A part of ours that talks to someone who IS at the surface keeps its door, so a story with an
-    actor step at that surface anywhere is not asked: 11 steps on mcpolis answer a member's AI
-    client at the gateway that way. Only `ours` surfaces are asked, because someone else's sign-in
-    page between two of our parts is a person's round trip, and a sub-flow, which holds no actor,
-    is read inside each story that rides it. NO RECORDED LINE SILENCES IT: across the three live
-    maps it names 6 steps, all in that one story, and those steps' skipped-screen warnings were
-    the ones a build silenced with a reason that said no page was involved.
+    THE TEST IS WHO STANDS AT THE SURFACE IN THE STORY, as the method states it: a story with an
+    actor step at that surface anywhere is not asked, because a part of ours that talks to someone
+    standing there keeps its door. 11 steps on mcpolis answer a member's AI client at the gateway
+    that way. Only `ours` surfaces are asked, because someone else's sign-in page between two of our
+    parts is a person's round trip, and a sub-flow, which holds no actor, is read inside each story
+    that rides it. NO RECORDED LINE SILENCES IT, and its message names both fixes, the second for
+    someone who really stands there and is not drawn. Across the four live maps it names 9 steps:
+    mcpolis's smoke test 6 times, and reminderrepo's deploy, monitor and setup scripts reaching its
+    own health check 3 times. The smoke test's skipped-screen warnings were the ones a build
+    silenced with a reason that said no page was involved.
+
+    Not caught, each by design or for want of a case: a door where the person also stands elsewhere
+    in the story (the step is read as theirs); a hand-on that is not the very next step, or is a
+    sub-flow reference; an answer drawn back out to the surface and stopping there; and our own
+    scheduled role drawn at the surface, which counts as somebody.
 
     `ours` names our surfaces when the model holds none, as a trace fragment linted against the
     map with `--ids` does."""
@@ -7283,7 +7291,9 @@ def nobody_at_door_warnings(m: ProjectModel, ours: set[str] | None = None) -> li
         return []
     return [f"Doors nobody stands at: {_shown(found, 8, unit='step(s)')} — a call between two parts of "
             "the product takes no door, even when it reaches one of our own addresses, so draw one "
-            "step from the part that calls to the part that answers, anchored at the caller's own line"]
+            "step from the part that calls to the part that answers, anchored at the caller's own "
+            "line; if a person or someone else's program really stands at that surface, draw them "
+            "there in this story instead"]
 
 
 def test_code_component_warnings(m: ProjectModel) -> list[str]:

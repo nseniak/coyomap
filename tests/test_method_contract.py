@@ -720,6 +720,13 @@ KNOWN_NO_ESCAPE: dict[str, str] = {
     # saying the product's dashboard has no production host.
     "{} deployment unit(s) host no component and are excused because the":
         "the finding IS the disclosure of a built-in excuse; check the unit's build file instead",
+    # A door nobody stands at is a drawing no code runs, and both of its fixes are drawings: one
+    # step from the caller to the part that answers, or the person who really stands there drawn at
+    # the surface. The build that produced it silenced the skipped-screen warning on the very same
+    # steps with a reason saying no page was involved, so a recorded line here would be the escape
+    # that was already used to hide it.
+    "Doors nobody stands at: {}":
+        "the finding IS the drawing; redraw the step, or draw who stands at the surface",
 }
 
 

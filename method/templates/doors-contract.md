@@ -63,13 +63,17 @@ lead; nothing above this line goes into an agent prompt.
 > the far side of a surface.
 >
 > **A call between two parts of the product is NOT a crossing, even when it reaches one of our own
-> addresses.** When our own script, page or job calls an address of ours and the surface would hand
-> the call straight on to another part of ours, draw ONE step from the part that calls to the part
-> that answers, anchored at the caller's own line, with no surface in between. Where the caller runs
-> changes nothing: a script on an operator's laptop is ours. Two shapes keep their door: a part of
-> ours talking to someone who IS standing at our surface (a member's AI client asked to sign in), and
-> a step that ENDS at the surface for someone outside to read (a file we write, a mail we send).
-> `lint-fragment` given the map warns on a door nobody stands at, and no recorded line silences it.
+> addresses.** When our own script, page or job calls an address of ours, draw ONE step from the part
+> that calls to the part that answers, anchored at the caller's own line, with no surface in between,
+> and its answer the same way. Where the caller runs changes nothing: a script on an operator's laptop
+> is ours. **The test is who stands at the surface in this story.** When a person, or a program
+> somebody else runs, stands there, every step through it keeps its door, including one the surface
+> hands straight on to a part of ours: the gateway asking a member's AI client to sign in, and the
+> answer coming back in. When nobody stands there, that step is the product talking to itself and
+> takes no door. When somebody does stand there but the story does not show them, draw them at the
+> surface; never remove the door to quiet the warning. A step that ends at our surface for someone
+> outside to receive (a file we write, a mail we send) keeps its door. `lint-fragment` given the map
+> with `--ids` warns on a door nobody stands at, and no recorded line silences it.
 >
 > ## Every crossing, not only the two ends
 >
@@ -198,7 +202,7 @@ lead; nothing above this line goes into an agent prompt.
 > - **every flow where no surface fitted**, with the step and what the actor is really standing at.
 >
 > Then run
-> `«COYOMAP_HOME»/.venv/bin/coyomap lint-fragment --repo «REPO» «AGENT_ID».json`
+> `«COYOMAP_HOME»/.venv/bin/coyomap lint-fragment --repo «REPO» --ids «MAP» «AGENT_ID».json`
 > and fix every row it reports until it exits clean, before you hand back.
 >
 > **With `--repo`, the verdict line ends with an anchor-drift count when any of your `where`s point

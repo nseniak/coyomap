@@ -19,7 +19,7 @@ from typing import Any
 
 from coyomap import contract
 from coyomap.model import FORMAT, load_model
-from coyomap.validate_model import validate_model
+from coyomap.validate_model import nobody_at_door_warnings, validate_model
 
 
 # --- builders -------------------------------------------------------------------
@@ -303,11 +303,32 @@ def test_a_door_inside_a_shared_sub_flow_is_named_with_the_story_that_rides_it()
 
 def test_our_surfaces_can_come_from_outside_the_model():
     """A trace fragment holds no interfaces; `lint-fragment --ids` hands the check the map's."""
-    from coyomap.validate_model import nobody_at_door_warnings
     doc = make_door_map()
     m = load_model(json.dumps({**doc, "interfaces": []}))
     assert not nobody_at_door_warnings(m)
     assert nobody_at_door_warnings(m, {"I1", "I2"})
+
+
+def test_a_door_that_hands_on_to_anything_but_a_part_of_ours_is_not_this_shape():
+    """Only part → our surface → part is the product talking to itself. A dependency calling in
+    through our surface is someone outside crossing, and a surface handing on to a record or a
+    dependency is not a call between two of our parts."""
+    for src, dst in (("D1", "C3"), ("C4", "E1"), ("C4", "D1")):
+        doc = make_door_map()
+        doc["deps"] = [{"id": "D1", "name": "Billing service", "kind": "service", "type": "api",
+                        "not_an_interface": "a test double"}]
+        steps = doc["flows"][0]["steps"]
+        steps[2] = {**steps[2], "src": src}
+        steps[3] = {**steps[3], "dst": dst}
+        assert not advised(doc, NOBODY_AT_DOOR), (src, dst)
+
+
+def test_the_advice_names_both_fixes():
+    """Redraw the call, or draw who really stands at the surface: removing a door someone stands
+    at would be wrong, and no recorded line can answer the advice instead."""
+    found = advised(make_door_map(), NOBODY_AT_DOOR)
+    assert found and "draw one step from the part that calls to the part that answers" in found[0]
+    assert "draw them there in this story instead" in found[0]
 
 
 def test_no_recorded_line_quiets_the_door_advice():

@@ -810,24 +810,31 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   reintroduce an endpoints-only rule.** The readability argument for it runs backwards.
   **A CALL BETWEEN TWO PARTS OF THE PRODUCT IS NOT A CROSSING, even when it reaches one of our own
   addresses.** A door stands where someone OUTSIDE the product crosses, and both ends of this call
-  are the product. When our own script, page or job calls an address of ours and the surface would
-  hand the call straight on to another part of ours, draw ONE step from the part that calls to the
-  part that answers, anchored at the caller's own line, with no surface in between. Where the caller
-  runs changes nothing: a script on an operator's laptop and a page in a member's browser are both
-  ours, and who runs the machine is not a criterion. The address still belongs to its surface; in
-  this story nobody stands at it. TWO SHAPES KEEP THEIR DOOR. A part of ours talking to someone who
-  IS standing at our surface keeps it: the gateway asking a member's AI client to sign in, the open
-  sessions told their tool list changed. And a step that ENDS at the surface keeps it, because that
-  is the product reaching out: a file we write for someone outside to open, a mail we send. The test
-  is the step after the surface: one that hands on to a part of ours is the product talking to
-  itself. Measured on mcpolis: the live smoke test, a script an operator runs from the command line,
-  reached the dashboard's backend addresses through the Dashboard door 5 times and the gateway
-  through the Gateway door once, while the dashboard's own pages reached the same addresses straight,
-  in 10 steps. The 5 dashboard doors drew 2 lines on the Architecture picture that no code takes, and
-  the build silenced the 5 skipped-screen warnings they raised with "the smoke test calls the backend
-  directly, with no page", the very fact that rules the door out. `validate` warns on a door nobody
-  stands at, and so does `lint-fragment` given the map; no recorded line silences it, because the
-  fix is the drawing.
+  are the product. When our own script, page or job calls an address of ours, draw ONE step from the
+  part that calls to the part that answers, anchored at the caller's own line, with no surface in
+  between, and draw the answer it gets back the same way. Where the caller runs changes nothing: a
+  script on an operator's laptop and a page in a member's browser are both ours, and who runs the
+  machine is not a criterion. The address still belongs to its surface; in this story nobody stands
+  at it.
+  **THE TEST IS WHO STANDS AT THE SURFACE IN THIS STORY.** When a person, or a program somebody else
+  runs, stands there, every step through that surface keeps its door, including a step the surface
+  hands straight on to a part of ours: the gateway asking a member's AI client to sign in, and the
+  client's answer coming back in, is a crossing each way. When nobody stands there, a step the
+  surface hands on to a part of ours is the product talking to itself, and takes no door. When
+  somebody really does stand there and the story does not show them, draw them at the surface; never
+  remove the door to quiet the warning. The open sessions told their tool list changed are members'
+  clients, for example. A step that ENDS at our surface keeps its door when someone outside receives
+  it there, such as a file we write for someone to open or a mail we send; an answer handed back to
+  our own caller is not that, and goes straight to the caller.
+  Measured on mcpolis: the live smoke test, a script an operator runs from the command line, reached
+  the dashboard's backend addresses through the Dashboard door 5 times and the gateway through the
+  Gateway door once, while the dashboard's own pages reached the same addresses straight, in 10
+  steps. The 5 dashboard doors drew 2 lines on the Architecture picture that no code takes, and the
+  build silenced the 5 skipped-screen warnings they raised with "the smoke test calls the backend
+  directly, with no page", the very fact that rules the door out. reminderrepo held the same shape 3
+  times: its deploy, monitor and setup scripts reached its own health check through its surface.
+  `validate` warns on a door nobody stands at, and so does `lint-fragment` given the map; no recorded
+  line silences it, because both fixes are drawings.
   **WHICH surface — look it up, do not guess.** The arrival surface is the one whose `ways_in` hold
   the use case's `entry_points`; that link is already authored. If those entry points sit on MORE
   than one surface, stop: two doors onto one goal is the split this method already asks for under

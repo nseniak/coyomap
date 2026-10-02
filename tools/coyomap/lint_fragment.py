@@ -72,10 +72,10 @@ def arrivals_from(sources: list[Path]) -> dict[str, set[tuple[str, int | None]]]
             continue
         if not isinstance(doc, dict):
             continue
-        for ep in doc.get("entry_points") or []:
+        for ep in _rows(doc, "entry_points"):
             if isinstance(ep, dict) and ep.get("id") and ep.get("source"):
                 sources_of[str(ep["id"])] = str(ep["source"])
-        for iface in doc.get("interfaces") or []:
+        for iface in _rows(doc, "interfaces"):
             if isinstance(iface, dict) and iface.get("id"):
                 ways.setdefault(str(iface["id"]), []).extend(
                     str(w) for w in iface.get("ways_in") or [])
@@ -86,10 +86,17 @@ def arrivals_from(sources: list[Path]) -> dict[str, set[tuple[str, int | None]]]
     return out
 
 
+def _rows(doc: dict[str, object], key: str) -> list[object]:
+    """`doc[key]` when it is a list, else nothing: a file `--ids` names is any JSON at all, and a
+    non-list where rows belong is not the map's shape, so it holds no rows."""
+    rows = doc.get(key)
+    return rows if isinstance(rows, list) else []
+
+
 def our_doors_from(sources: list[Path]) -> set[str]:
     """The ids of OUR surfaces in the JSON files `--ids` names. A trace fragment holds no interfaces,
     so without them the check for a door nobody stands at cannot tell our door from someone else's
-    sign-in page, and stays silent."""
+    sign-in page, and stays silent; it stays silent too on a markdown legend, which states no side."""
     out: set[str] = set()
     for src in sources:
         if src.suffix != ".json":
@@ -100,7 +107,7 @@ def our_doors_from(sources: list[Path]) -> set[str]:
             continue
         if not isinstance(doc, dict):
             continue
-        out.update(str(i["id"]) for i in doc.get("interfaces") or []
+        out.update(str(i["id"]) for i in _rows(doc, "interfaces")
                    if isinstance(i, dict) and i.get("id") and i.get("side") == "ours")
     return out
 
