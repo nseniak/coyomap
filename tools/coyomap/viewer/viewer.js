@@ -5027,6 +5027,27 @@ function rectOf(el) {
 }
 
 // Stroke an edge's path + glow its label (selection highlight); returns a cleanup fn.
+// A PICKED ARROW'S HEAD takes the arrow's blue. A head is a marker the drawing shares between all its
+// arrows, so the picked one points at a blue copy of it, made once per marker, and back again after.
+const PICKED_EDGE = '#2563eb';
+function pickedMarkerUrl(seg, attr) {
+  const m = (seg.getAttribute(attr) || '').match(/^url\(#(.+)\)$/);
+  const svg = seg.ownerSVGElement;
+  if (!m || !svg) return null;
+  const id = m[1].endsWith('-cypicked') ? m[1] : m[1] + '-cypicked';
+  if (!svg.querySelector('#' + CSS.escape(id))) {
+    const src = svg.querySelector('#' + CSS.escape(m[1]));
+    if (!src) return null;
+    const copy = src.cloneNode(true);
+    copy.id = id;
+    copy.querySelectorAll('path, circle, polygon, line').forEach((x) => {
+      x.style.setProperty('fill', PICKED_EDGE, 'important');
+      x.style.setProperty('stroke', PICKED_EDGE, 'important');
+    });
+    src.parentNode.appendChild(copy);
+  }
+  return `url(#${id})`;
+}
 function glowEdge(p, label) {
   // Preserve any BASE inline stroke/width the arrow already carries, so deselecting restores that rather
   // than Mermaid's default.
@@ -5035,9 +5056,14 @@ function glowEdge(p, label) {
     s0: seg.style.getPropertyValue('stroke'), sp0: seg.style.getPropertyPriority('stroke'),
     w0: seg.style.getPropertyValue('stroke-width'), wp0: seg.style.getPropertyPriority('stroke-width'),
   }));
+  const heads = [];
   for (const { seg } of saved) {
-    seg.style.setProperty('stroke', '#2563eb', 'important');
+    seg.style.setProperty('stroke', PICKED_EDGE, 'important');
     seg.style.setProperty('stroke-width', '3px', 'important');
+    for (const attr of ['marker-end', 'marker-start']) {
+      const was = seg.getAttribute(attr), blue = was && pickedMarkerUrl(seg, attr);
+      if (blue) { heads.push({ seg, attr, was }); seg.setAttribute(attr, blue); }
+    }
   }
   if (label) label.style.filter = HILITE;
   // The same class glowNode puts on a selected box. Nothing styles it here — it exists so ONE query
@@ -5049,6 +5075,7 @@ function glowEdge(p, label) {
       if (k.s0) k.seg.style.setProperty('stroke', k.s0, k.sp0); else k.seg.style.removeProperty('stroke');
       if (k.w0) k.seg.style.setProperty('stroke-width', k.w0, k.wp0); else k.seg.style.removeProperty('stroke-width');
     }
+    for (const h of heads) h.seg.setAttribute(h.attr, h.was);
     if (label) label.style.filter = '';
     p.classList.remove('is-selected');
   };
@@ -9237,8 +9264,25 @@ function curIconInv() {
   const rz = mainPz ? mainPz.getSizes().realZoom : 0;
   return usableScale(rz) ? 1 / rz : 1;
 }
+// 100% IS WHERE THE VIEW OPENS: the scale the view's own fit gives the drawing (fitStage), so a click on
+// the number, which fits, reads 100%. The library's own zoom is relative to ITS fit, the whole drawing
+// in the box, which fitStage then clamps or, on the Architecture view, widens: that view opened at 169%,
+// and a click on the number brought it back to 169%. Worked out from the box and the drawing alone, so
+// it holds on a screen that opened at a remembered camera and was never fitted.
+function homeRealZoom() {
+  const s = mainPz.getSizes(), vb = s.viewBox;
+  if (!vb || !vb.width || !vb.height) return 0;
+  const cur = (hi >= 0 && history[hi]) || {};
+  const fit = cur.kind === 'arch' ? (s.width - 2 * FIT_EDGE_PX) / vb.width : Math.min(s.width / vb.width, s.height / vb.height);
+  return Math.min(FIT_MAX_SCALE, Math.max(FIT_MIN_SCALE, fit));
+}
+function zoomPercent() {
+  if (!mainPz) return 100;
+  const home = homeRealZoom(), real = mainPz.getSizes().realZoom;
+  return usableScale(home) && usableScale(real) ? Math.round(real / home * 100) : Math.round(mainPz.getZoom() * 100);
+}
 function updateZoomLevel() {  // reflect the current pan-zoom scale in the header control + the badges
-  if (zoomlevel) zoomlevel.textContent = mainPz ? Math.round(mainPz.getZoom() * 100) + '%' : '100%';
+  if (zoomlevel) zoomlevel.textContent = zoomPercent() + '%';
   rescaleLayerLines();
   rescaleDiffBadges();
   scheduleCallout(false);   // the element end moved with the drawing — measured once it is painted
