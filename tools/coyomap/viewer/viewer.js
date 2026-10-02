@@ -256,10 +256,7 @@ const diaghead = document.getElementById('diaghead');    // …and a walk's own 
 diaghead.addEventListener('click', (e) => {
   const cur = (hi >= 0 && history[hi]) || {};
   const cap = e.target.closest && e.target.closest('[data-archcap]');
-  if (cap && !cap.disabled) { go(archState(cur.scope, cap.getAttribute('data-archcap') || '')); return; }
-  // The happy-path switch keeps the feature in force; one with no happy-path story drops to All.
-  const sw = e.target.closest && e.target.closest('[data-archhp]');
-  if (sw) go(archState(sw.getAttribute('data-archhp') || '', cur.cap || ''));
+  if (cap && !cap.disabled) go(archState(cur.scope, cap.getAttribute('data-archcap') || ''));
 });
 // LETTING GO OF A BOX'S LINES lets go of the box too, as a second click on it does: its lines alone
 // were what picking it showed.
@@ -7641,15 +7638,29 @@ function archFeatureHtml() {
       + (off ? ' disabled title="No happy-path story in this feature"' : '')
       + `>${val === 'all' ? '' : itemMarkHtml('capability')}${esc(label)}</button>`;
   };
-  const happy = scope === 'happy';
-  const sw = `<button class="archhp${happy ? ' on' : ''}" data-archhp="${happy ? '' : 'happy'}" `
-    + `aria-pressed="${happy}"><span class="archhp-box" aria-hidden="true"></span>Restrict to the Happy Path</button>`;
   return `<div class="archwho-row">${one('all', 'Whole product')}`
-    + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('')
-    // NO HAPPY-PATH SWITCH ON THE ALL PICTURE: the whole product is every story, and its happy path
-    // alone is a feature's question. A feature's picture keeps it.
-    + (now ? `<span class="archwho-sep" aria-hidden="true"></span>${sw}` : '') + '</div>';
+    + ARCH_FEATURES.map((f) => one(f.id, f.name)).join('') + '</div>';
 }
+// THE HAPPY-PATH SWITCH, over the drawing's top-left corner (#archhp, in #overlays) on a feature's
+// picture. At the end of the feature row it was missed: the row wraps to two lines on mcpolis. In the
+// corner it sits by the picture it changes, takes no height from it, and moves no feature button as it
+// comes and goes. NOT ON THE WHOLE PRODUCT'S PICTURE: the whole product is every story, and its happy
+// path alone is a feature's question.
+const archhp = document.getElementById('archhp');
+function syncArchHappySwitch(s) {
+  const show = !!(s && s.kind === 'arch' && archFeature(s));
+  archhp.hidden = !show;
+  if (!show) return;
+  const happy = archScope(s) === 'happy';
+  archhp.classList.toggle('on', happy);
+  archhp.setAttribute('aria-pressed', String(happy));
+  archhp.dataset.archhp = happy ? '' : 'happy';
+}
+archhp.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const cur = (hi >= 0 && history[hi]) || {};
+  go(archState(archhp.dataset.archhp || '', cur.cap || ''));   // the feature in force stays
+});
 function archThroughHtml() {
   return archFilterLabel ? `${archFilterLabel} <button type="button" class="archthrough-x" data-archthrough-clear`
     + ' aria-label="Show every line" title="Show every line">\u00d7</button>' : '';
@@ -7669,8 +7680,9 @@ function syncArchThrough() {
 function archTextOf(s) { return s && s.kind === 'arch' ? (ARCH_TEXT[archKey(s)] || null) : null; }
 let archBoxFilter = '';
 let archFilterLabel = '';   // what the header's tag says while a box's lines alone are shown
-// A NEW SCREEN starts with every line shown.
-function syncArchView(_s) {
+// A NEW SCREEN starts with every line shown, and with the happy-path switch its picture offers.
+function syncArchView(s) {
+  syncArchHappySwitch(s);
   clearTimeout(archPreviewTimer); clearTimeout(archPreviewSwitch);
   archPreviewTimer = 0; archPreviewSwitch = 0;
   archPreviewKey = ''; archPreviewFrom = null; archPreviewTest = null; archKeptTest = null;
@@ -8466,7 +8478,7 @@ function cardKeepSets(el) {
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The story player's strip at the foot of the drawing is a control too.
-  const fixed = [zoomctl, document.getElementById('archthrough')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
+  const fixed = [zoomctl, document.getElementById('archthrough'), document.getElementById('archhp')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
        [...g([...own, ...ends]), ...fixed],
@@ -14609,7 +14621,7 @@ async function renderView(sArg, transient, seq) {
   pickNow = null;       // …and a picked box belongs to its board, on the same rule
   const s = sArg || history[hi];
   syncInfoPane(s, transient);   // every navigation starts with no card (one rule, before any return)
-  syncArchView(s);   // …and the Architecture view's story player and line filter, BEFORE the drawing
+  syncArchView(s);   // …and the Architecture view's happy-path switch and line filter, BEFORE the drawing
   syncCodePane(s);   // …and no source pane either, until the reader asks for a file
   // The step player's card, HERE, before the HTML-tab early returns below: the table views and the
   // degraded "could not render" branch never reach the end of render, so a card shown on a walk would

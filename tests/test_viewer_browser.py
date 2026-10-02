@@ -4266,15 +4266,16 @@ def test_the_architecture_view_opens_on_the_first_feature_and_all_is_one_click_a
 
 
 def test_the_happy_path_switch_is_on_a_features_picture_and_not_on_all() -> None:
-    """The whole product is every story; its happy path alone is a feature's question. The All picture
-    has no switch, and an address asking for it there draws the whole product."""
+    """The whole product is every story; its happy path alone is a feature's question. The switch sits
+    over a feature's picture, and the whole product's has none: an address asking for it there draws
+    the whole product."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
-        assert page.evaluate("() => !!document.querySelector('.archhp')"), "a feature's picture keeps it"
+        assert page.evaluate("() => !document.getElementById('archhp').hidden"), "a feature's picture keeps it"
         page.goto(url + "#v=arch&cap=all&scope=happy")
         page.reload()
         _arch_ready(page)
-        assert page.evaluate("() => !document.querySelector('.archhp')")
+        assert page.evaluate("() => document.getElementById('archhp').hidden")
         whole = page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length")
         page.goto(url + "#v=arch&cap=all")
         page.reload()
@@ -5252,7 +5253,7 @@ def test_no_story_is_followed_on_the_architecture_picture() -> None:
 def test_picking_a_feature_on_the_architecture_view_moves_no_button() -> None:
     """The button in force is marked without changing its width, so picking one leaves every button
     where it was."""
-    where = "() => [...document.querySelectorAll('.archwho, .archhp')].map((b) => Math.round(b.getBoundingClientRect().left))"
+    where = "() => [...document.querySelectorAll('.archwho')].map((b) => Math.round(b.getBoundingClientRect().left))"
     with _served() as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
         before = page.evaluate(where)
