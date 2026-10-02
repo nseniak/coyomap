@@ -812,7 +812,7 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   addresses.** A door stands where someone OUTSIDE the product crosses, and both ends of this call
   are the product. When our own script, page or job calls an address of ours, draw ONE step from the
   part that calls to the part that answers, anchored at the caller's own line, with no surface in
-  between, and draw the answer it gets back the same way. Where the caller runs changes nothing: a
+  between; an answer the story draws goes back the same way. Where the caller runs changes nothing: a
   script on an operator's laptop and a page in a member's browser are both ours, and who runs the
   machine is not a criterion. The address still belongs to its surface; in this story nobody stands
   at it.
@@ -820,8 +820,11 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   runs, stands there, every step through that surface keeps its door, including a step the surface
   hands straight on to a part of ours: the gateway asking a member's AI client to sign in, and the
   client's answer coming back in, is a crossing each way. When nobody stands there, a step the
-  surface hands on to a part of ours is the product talking to itself, and takes no door. When
-  somebody really does stand there and the story does not show them, draw them at the surface; never
+  surface hands on to a part of ours is the product talking to itself, and takes no door. This is
+  about OUR surfaces only: our script reaching someone else's page or service, such as a sign-in
+  picker its headless browser clicks, still names that surface, person or not. When somebody really
+  does stand at our surface and the story never shows them there, draw them once, where they really
+  act or receive; one actor step there is enough, and never invent an action they do not take. Never
   remove the door to quiet the warning. The open sessions told their tool list changed are members'
   clients, for example. A step that ENDS at our surface keeps its door when someone outside receives
   it there, such as a file we write for someone to open or a mail we send; an answer handed back to

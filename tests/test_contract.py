@@ -1441,8 +1441,11 @@ def test_the_doors_rule_says_a_call_between_two_parts_of_the_product_takes_no_do
     head = "**A call between two parts of the product is NOT a crossing"
     rule = contract.render("doors")
     assert rule.count(head) == 1
-    assert "The test is who stands at the surface in this story" in rule
-    assert "the gateway asking a member's AI client to sign in" in rule and "a file we write, a mail we send" in rule
-    assert "lint-fragment --repo «REPO» --ids «MAP»" in rule
+    words = " ".join(rule.split())   # the brief wraps its lines, so a phrase may span two
+    for phrase in ("The test is who stands at the surface in this story",
+                   "the gateway asking a member's AI client to sign in", "a file we write, a mail we send",
+                   "This is about OUR surfaces only", "never invent an action they do not take",
+                   "lint-fragment --repo «REPO» --ids «MAP»"):
+        assert phrase in words, phrase
     assert contract._compose(["trace", "doors"]).count(head) == 1
     assert "A step FROM a door counts" in contract.render("trace")
