@@ -1655,11 +1655,9 @@ class _ArchLine(TypedDict):
     src: str        # a person's name, or an element id
     dst: str
     stories: list[str]   # the use cases that take this line
-    always: bool    # every story leaving `src` takes it: drawn solid, else dashed
     hidden: int     # boxes folded away between the two ends; 0 = one real step
     via: list[str]  # …and which ones: every box a story passes through between the two, first met first
-    verb: str       # the link list's word for a one-step line ("calls ×2"), else ""
-    number: int     # its step in the macro flow (_story_order_numbers)
+    number: int     # its place in the macro flow (_story_order_numbers), which orders the lines
     steps: dict[str, list[int]]   # use case -> its own steps this line draws (its use case map selects them)
     sentences: list[tuple[str, str]]   # (use case, its own sentence for the step that starts this
                                        # line), one per story taking it, first met first
@@ -1787,28 +1785,8 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     # A LINE INTO A DATABASE IS NOT A STEP OF THE FLOW. It says where a box keeps what it saves, and
     # each story saves at its own moment, so numbered with the flow it tied unrelated lines into one
     # loop: measured on mcpolis's All picture, the largest set of lines sharing one number went from
-    # 21 to 58. It is drawn in its own style, with no number, and it takes no part in solid-or-dashed.
+    # 21 to 58. It carries no number.
     kept_lines = {pair for pair in taken if pair[1] in stores}
-    leaving: dict[str, set[str]] = {}
-    for (a, b), walks_of in taken.items():
-        if (a, b) not in kept_lines:
-            leaving.setdefault(a, set()).update(walks_of)
-    # THE WORDS ON A LINE come from the links in the code between the two boxes' components, only the
-    # components these stories use, so a subsystem box's line counts its members' links. A link to a
-    # record counts for the database behind it.
-    links: dict[tuple[str, str], dict[str, int]] = {}
-    for e in graph["edges"]:
-        s, d = str(e["src"]), str(e["dst"])
-        if (kind_of(s) == "component" and s not in flow["box_of"]) or \
-           (kind_of(d) == "component" and d not in flow["box_of"]):
-            continue
-        store = nodes.get(d, {}).get("store") if kind_of(d) == "entity" else None
-        if isinstance(store, dict) and str(store.get("dep") or "") in stores:
-            d = str(store["dep"])
-        a, b = flow["box_of"].get(s, s), flow["box_of"].get(d, d)
-        if a != b and a in kept and b in kept and a not in people and b not in people:
-            per_pair = links.setdefault((a, b), {})
-            per_pair[str(e["verb"])] = per_pair.get(str(e["verb"]), 0) + 1
     numbers = _story_order_numbers([[p for p in seq if p not in kept_lines] for seq in stories.values()])
     first = {pair: i for i, pair in enumerate(taken)}
     lines: list[_ArchLine] = []
@@ -1816,17 +1794,8 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
         # A line is GREY only when every story taking it passes boxes not shown; one story taking it
         # as a single step makes it a real step, drawn as one.
         via = [] if (a, b) in direct else list(via_of[(a, b)])
-        verb = ""
-        if not via and links.get((a, b)):
-            verbs = links[(a, b)]
-            total = sum(verbs.values())
-            top = sorted(verbs.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-            # Several links in the code under one line: name the commonest verb AND how many there
-            # are, so the label never passes itself off as the whole of what crosses.
-            verb = top if total == 1 else f"{top} ×{total}"
         lines.append(_ArchLine(src=a, dst=b, stories=sorted(walks_of),
-                               always=(a, b) not in kept_lines and walks_of == leaving[a],
-                               hidden=len(via), via=via, verb=verb, number=numbers.get((a, b), 0),
+                               hidden=len(via), via=via, number=numbers.get((a, b), 0),
                                sentences=list(said.get((a, b), {}).items()),
                                steps=steps_of.get((a, b), {}),
                                store=(a, b) in kept_lines, up=False))
@@ -1889,10 +1858,8 @@ def gen_overview_mermaid(graph: GraphDict, feature: str = "", scope: str = "all"
     Neither is the big picture with boxes hidden: the rule is re-asked over the chosen stories, so
     the budget keeps the boxes THOSE stories pass through most.
 
-    Every line carries its STEP NUMBER first: "3 · calls", "6 · via 1", or a bare "4". Follow the
-    numbers up and any one story reads in order. A line is SOLID when every story leaving its box
-    takes it and DASHED when only some do, so a shared number with dashed lines reads "one or the
-    other here" and with solid lines "both". A line through boxes folded away is grey: "via 2".
+    Every line is drawn the same, with no word on it (`_arch_lines_mermaid`): its card tells it. A
+    line through boxes folded away names them (`via`).
 
     `""` when the chosen stories draw nothing: a map with no walks hides the view, and a feature
     with no happy-path story gets no happy-path picture."""
@@ -2135,7 +2102,6 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
 
     Each entry also says what the picture cannot: the boxes a grey line passes through (`via`)."""
     nodes = graph["nodes"]
-    titles = {str(f.get("uc")): str(f.get("title") or f.get("uc")) for f in graph["flows"]}
     subflow_names = {str(sf.get("id")): str(sf.get("name") or sf.get("id"))
                      for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
 
@@ -2154,16 +2120,13 @@ def _arch_text(graph: GraphDict, model: _ArchModel) -> list[dict[str, Any]]:
             if text:
                 by_text.setdefault(text, []).append(uc)
         out.append({
-            "n": ln["number"],
             "src": name(ln["src"]), "dst": name(ln["dst"]),
             "srcBox": _arch_box_id(model, ln["src"]), "dstBox": _arch_box_id(model, ln["dst"]),
-            "hidden": ln["hidden"],
             "store": ln["store"],
-            "verb": ln["verb"],
             "steps": ln["steps"],
             **({"up": True} if ln["up"] else {}),
             "via": [name(x) for x in ln["via"]],
-            "sentences": [{"text": t, "stories": [titles.get(uc, uc) for uc in ucs], "ucs": ucs}
+            "sentences": [{"text": t, "ucs": ucs}
                           for t, ucs in by_text.items()],
         })
     return out

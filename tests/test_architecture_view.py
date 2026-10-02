@@ -128,16 +128,7 @@ def test_a_shared_sub_use_case_is_one_box_and_its_inside_is_not_drawn():
 
 def test_a_record_is_drawn_as_its_database_with_no_step_number():
     line = lines_of(make_model())[("S2", "D1")]
-    assert line["store"] and line["number"] == 0 and not line["always"]
-    assert line["verb"] == "persists"   # the code's link to the record counts for its database
-
-
-def test_a_lines_card_names_what_the_code_does_along_it():
-    graph = make_graph()
-    model = gv._arch_model(graph, "", "all")
-    assert model is not None
-    entry = next(e for e in gv._arch_text(graph, model) if (e["srcBox"], e["dstBox"]) == ("S2", "D1"))
-    assert entry["verb"] == "persists"
+    assert line["store"] and line["number"] == 0
 
 
 def test_every_story_reads_forward_and_answers_are_not_drawn():
@@ -668,7 +659,7 @@ def test_the_layered_picture_keeps_the_story_numbers_and_the_text():
     _drawings, texts = gv.gen_arch_views(graph)
     pairs = {(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"]}
     assert {(gv._person_id("Admin"), "I1"), ("I1", gv._arch_cell_id(0, "S1"))} <= pairs
-    assert all(e["n"] >= 1 for e in texts["all|"]["lines"] if not e["store"])
+    assert not any("n" in e or "verb" in e for e in texts["all|"]["lines"]), "the view reads neither"
     assert "stories" not in texts["all|"], "no story is followed on the picture"
 
 
