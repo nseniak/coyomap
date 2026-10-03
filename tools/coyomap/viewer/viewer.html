@@ -286,17 +286,16 @@
         <button id="treediffonly" type="button" hidden title="Show only changed files">Changed only</button>
         <!-- A CHEVRON, not a ×. This does not close a thing in place, the way the card's × does: it
              folds a whole column back to the edge it came from, and the rail is waiting there. A right-pointing chevron says which way it goes, and the pair teaches itself. -->
-        <button id="cvclose" type="button" title="Fold the source back to the edge" aria-label="Fold the source back to the edge">&#8250;</button>
+        <button id="cvclose" type="button" title="Hide source" aria-label="Hide source">Hide source <span aria-hidden="true">&#8250;</span></button>
       </div>
       <!-- The FILE, on a row of its own and at the full width: its name first, then its folder muted
            after it, so the folder is what gives way when the column is narrow. It belongs to the code
            pane, so it is not drawn while the file browser is the pane on screen. -->
       <div class="srchead-row" id="srcfile">
         <span id="cvpath"></span>
+        <!-- Keep the external-open action beside the filename it acts on. -->
+        <button id="cvopen" type="button" hidden title="Open file externally" aria-label="Open file externally">&#8599;</button>
         <span id="srcdir"></span>
-        <!-- Opening the file elsewhere is about the FILE, so it rides the file's own row, at its far end.
-             It sat on the row above, beside the controls that act on the column. -->
-        <button id="cvopen" type="button" hidden title="Open in external editor / on GitHub" aria-label="Open in external editor">&#8599;</button>
       </div>
     </div>
     <div id="srcpanes">
@@ -333,7 +332,7 @@
   <div class="modal-card">
     <h2 id="modalTitle">Settings</h2>
     <p id="modalIntro" class="modal-help"></p>
-    <label class="modal-row">Open in
+    <label class="modal-row">Open files in
       <select id="setEditor"></select>
     </label>
     <label class="modal-row" id="setCustomRow" hidden>Custom URI

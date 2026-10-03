@@ -1901,9 +1901,9 @@ def test_the_source_column_has_one_header_over_both_panes() -> None:
     for ctl in ('id="srcswitch"', 'id="cvclose"'):
         assert html.index(ctl) < html.index('id="srcfile"'), ctl
     assert html.index('id="cvopen"') > html.index('id="srcfile"'), "open-externally rides the file's row"
-    # …and both icons sit at the far end of their own row. That push came from the pin button's
-    # `margin-left: auto` and went with it, so the two bunched up against the switch.
-    for btn in ("#cvclose {", "#cvopen {"):
+    # The fold control stays at the far end; external-open sits beside the filename.
+    assert html.index('id="cvpath"') < html.index('id="cvopen"') < html.index('id="srcdir"')
+    for btn in ("#cvclose {",):
         blk = css[css.index(btn): css.index("}", css.index(btn))]
         assert "margin-left: auto" in blk, btn
     # The file row belongs to the CODE pane, so it is not drawn while the browser is the pane on screen:

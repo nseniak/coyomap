@@ -1677,6 +1677,7 @@ body.altmod .opensrc, body.altmod .opensrc * {
 .modal-sub { color: #9ca3af; font-weight: 400; }
 .modal-row select, .modal-row input { display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 13px;
               padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+#setEditor { margin-top: 8px; }
 .modal-help { font-size: 11px; color: #6b7280; margin: 12px 0 0; }
 .modal-help code { font-family: ui-monospace, monospace; background: #f3f4f6; padding: 0 3px; border-radius: 3px; }
 .modal-err { font-size: 12px; color: #cf222e; margin: 10px 0 0; }
@@ -1755,19 +1756,20 @@ body.tree-browsing #srcfile { display: none; }
               font-size: 10px; color: #9ca3af; }
 /* the ↗ that opens the shown file in the external editor / on GitHub — the SOLE external-open control
    (the old inline source pills are gone). Hidden until a local file is showing. */
-/* On the FILE's row, at its far end: it opens the file, not the column. */
-#cvopen { flex: 0 0 auto; margin-left: auto; cursor: pointer; border: 1px solid #c7d2fe; background: #eef2ff; color: #4338ca;
-          border-radius: 4px; padding: 1px 6px; font-size: 13px; line-height: 1.2; }
+/* Beside the filename, with a fixed click target that stays visible as the folder shrinks. */
+#cvopen { flex: 0 0 auto; cursor: pointer; border: 1px solid #c7d2fe; background: #eef2ff; color: #4338ca;
+          border-radius: 4px; min-width: 22px; min-height: 22px; padding: 1px 4px; font-size: 12px; line-height: 1.2; }
 #cvopen:hover { background: #e0e7ff; }
 #cvopen[hidden] { display: none; }
-/* the × that closes the whole source column — quieter than the ↗ beside it, because it undoes a thing the
-   reader opened rather than reaching outside the app. Shown only on the card pages (syncCodePane). */
-/* Sized up from the × it replaced: a chevron at 15px is a hairline, and this is the control that puts a
-   whole column away. `margin-left: auto` pins it to the far end of its row — that push used to come from
-   the pin button, and went with it, so the two icons bunched up against the switch. */
-#cvclose { flex: 0 0 auto; margin-left: auto; cursor: pointer; border: 0; background: none; color: #9ca3af;
-           border-radius: 4px; padding: 0 7px; font-size: 20px; line-height: 1.1; font-weight: 600; }
-#cvclose:hover { background: #f3f4f6; color: #374151; }
+/* A labeled control for folding away the source column. Match the Source switch's typography while
+   giving the action a visible boundary and keeping it at the far end of the header. */
+#cvclose { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; margin-left: auto;
+           cursor: pointer; border: 1px solid #d1d5db; background: #f3f4f6; color: #374151;
+           border-radius: 6px; min-height: 32px; padding: 0 9px; font: inherit; font-size: 11px;
+           font-weight: 500; letter-spacing: .02em; white-space: nowrap; }
+#cvclose span { font-size: 20px; line-height: 1; }
+#cvclose:hover { background: #e5e7eb; color: #111827; }
+#cvclose:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
 #cvclose[hidden] { display: none; }
 /* the code body is a flex row: the scrolling source on the left, a thin overview ruler pinned on the right */
 #cvbody { flex: 1; min-height: 0; overflow: hidden; background: #fbfbfd; display: flex; }
@@ -3582,4 +3584,3 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-ov-head-picked { fill: #2563eb; }
 .arch-ov-head-up { fill: #d97706; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
-

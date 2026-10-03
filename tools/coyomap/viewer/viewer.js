@@ -16818,6 +16818,8 @@ function openSource(n) {
   doOpenSource(n);
 }
 function doOpenSource(n) {
+  // The placeholder is not an opening method, even after Settings has been saved once.
+  if (openTargetId() === 'native') { pendingSrc = n; openSettings(false); return; }
   // An editor target builds a scheme URI; the GitHub target (or any fallback) opens the blob URL.
   if (openTargetId() !== 'github') {
     const uri = editorUri(n.file, n.line);
