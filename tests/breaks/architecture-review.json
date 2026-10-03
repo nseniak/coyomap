@@ -184,8 +184,8 @@
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.js",
-    "old": "  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f];",
-    "new": "  const show = !!f;"
+    "old": "  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());",
+    "new": "  const show = !!f && (detail || !archHasDetail());"
    }
   ]
  }

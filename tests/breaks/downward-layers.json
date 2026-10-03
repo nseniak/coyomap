@@ -74,8 +74,8 @@
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.js",
-    "old": "line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : ''));",
-    "new": "line.setAttribute('class', 'arch-ov-line');"
+    "old": "line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : '') + (it.faded ? ' arch-ov-faded' : ''));",
+    "new": "line.setAttribute('class', 'arch-ov-line' + (it.faded ? ' arch-ov-faded' : ''));"
    }
   ]
  },
@@ -126,6 +126,16 @@
     "file": "tools/coyomap/viewer/gen_viewer.py",
     "old": "    if not apis:   # nothing to tell",
     "new": "    if False:   # nothing to tell"
+   }
+  ]
+ },
+ {
+  "name": "show-all-lines-off",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "  if (archDetailOn()) archRedrawLines();",
+    "new": "  if (false) archRedrawLines();"
    }
   ]
  }
