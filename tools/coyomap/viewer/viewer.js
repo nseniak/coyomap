@@ -8013,7 +8013,10 @@ function bindArch() {
   }
   markLayerLines(mainScene.root, t);
   markBoxLines(mainScene.root, t);
-  if (archDetailOn()) archRedrawLines();   // "Lines: All" or "Happy path": every box line, on top, from the start
+  // EVERY CROWDED PICTURE REDRAWS ITS LINES ON ARRIVAL, not only one showing every line: the drawing
+  // area outlives the picture, and coming back to "Between layers" kept the last choice's marks, which
+  // hid the lines between layers.
+  if (archIsCrowded(t)) archRedrawLines();
 }
 // A PART DRAWN OUTSIDE ITS KIND'S OWN LAYER says why on its box's card (`moved`, gen_viewer
 // `_arch_place`): the layer is what its calls decided, and a reader who knows its kind would otherwise

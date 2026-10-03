@@ -5953,4 +5953,12 @@ def test_the_lines_choice_offers_layers_every_line_or_the_happy_path_and_keeps_t
         page.wait_for_timeout(800)
         seen = page.evaluate(state)
         assert "detail" not in seen["hash"] and "scope" not in seen["hash"] and seen["on"] == ["layers"], seen
+        assert seen["layer"] > 0 and seen["box"] == 0, f"the lines between layers come back: {seen}"
+        # …and straight from All too, the way a reader found it broken
+        page.click('#archlines [data-lines="all"]')
+        page.wait_for_timeout(800)
+        page.click('#archlines [data-lines="layers"]')
+        page.wait_for_timeout(800)
+        seen = page.evaluate(state)
+        assert seen["layer"] > 0 and seen["box"] == 0, seen
         assert not page.js_errors, page.js_errors
