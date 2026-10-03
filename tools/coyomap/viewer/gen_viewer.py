@@ -2471,8 +2471,6 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
     place = _arch_place(graph) if layered else None
     for scope in ARCH_SCOPES:
         for feature in ["", *(f["id"] for f in arch_features(graph))]:
-            if scope == "happy" and not feature:
-                continue   # the whole product has no happy-path picture: the view offers none
             model = _arch_model(graph, feature, scope, budget, layered, place)
             if model is None:
                 continue

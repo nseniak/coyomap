@@ -4269,22 +4269,21 @@ def test_the_architecture_view_opens_on_the_whole_product_and_a_feature_is_one_c
         assert not page.js_errors, page.js_errors
 
 
-def test_the_happy_path_switch_is_on_a_features_picture_and_not_on_all() -> None:
-    """The whole product is every story; its happy path alone is a feature's question. The switch sits
-    over a feature's picture, and the whole product's has none: an address asking for it there draws
-    the whole product."""
+def test_the_happy_path_switch_is_on_a_features_picture_and_on_all() -> None:
+    """The switch sits over a feature's picture and over the whole product's (asked for on 2026-10-03):
+    the whole product's happy path alone draws fewer lines than all of it."""
     with _served() as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         assert page.evaluate("() => !document.getElementById('archhp').hidden"), "a feature's picture keeps it"
-        page.goto(url + "#v=arch&cap=all&scope=happy")
-        page.reload()
-        _arch_ready(page)
-        assert page.evaluate("() => document.getElementById('archhp').hidden")
-        whole = page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length")
         page.goto(url + "#v=arch&cap=all")
         page.reload()
         _arch_ready(page)
-        assert page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length") == whole
+        assert page.evaluate("() => !document.getElementById('archhp').hidden"), "and so does the whole product's"
+        whole = page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length")
+        page.goto(url + "#v=arch&cap=all&scope=happy")
+        page.reload()
+        _arch_ready(page)
+        assert page.evaluate("() => document.querySelectorAll('#diagram .edgePaths path.flowchart-link').length") < whole
         assert not page.js_errors, page.js_errors
 
 
@@ -5574,10 +5573,10 @@ def test_the_zoom_number_reads_100_where_each_view_opens_and_after_a_click_on_it
 
 def test_the_happy_path_switch_is_only_on_a_feature_with_a_happy_path_picture() -> None:
     """A feature none of whose use cases is on the happy path has no switch, and an address asking for
-    its happy path draws the feature whole. A stale happy path in the whole product's address does not
-    switch the next feature on."""
+    its happy path draws the feature whole. The whole product offers it: its happy path is a picture
+    too."""
     drawings = gen_arch_views(model_to_graph(load_model(_FIXTURE_MAP.read_text())))[0]
-    assert "happy|" not in drawings, "the whole product has no happy-path picture"
+    assert "happy|" in drawings, "the whole product has a happy-path picture"
     bare = next(k.split("|")[1] for k in drawings if k.startswith("all|CAP") and "happy|" + k.split("|")[1] not in drawings)
     seen = """() => ({ hidden: document.getElementById('archhp').hidden,
         on: (document.querySelector('.archwho.on') || { dataset: {} }).dataset.archcap })"""
@@ -5590,9 +5589,8 @@ def test_the_happy_path_switch_is_only_on_a_feature_with_a_happy_path_picture() 
         page.goto(url + "#v=arch&cap=all&scope=happy")
         page.reload()
         _arch_ready(page)
-        page.evaluate("() => document.querySelectorAll('.archwho')[1].click()")
-        page.wait_for_function("() => !location.hash.includes('cap=all')")
-        assert "scope=happy" not in page.evaluate("() => location.hash")
+        assert page.evaluate(seen) == {"hidden": False, "on": "all"}, page.evaluate(seen)
+        assert page.evaluate("() => document.getElementById('archhp').classList.contains('on')")
         assert not page.js_errors, page.js_errors
 
 

@@ -281,8 +281,8 @@ design principles these come from)
   one picture per feature. It opens on the whole product; each feature is one
   button away.
 - **whole product** (on the Architecture view) — the picture over every feature's use
-  cases at once, the first button of the feature row. It has no "Restrict to the Happy
-  Path" switch; a feature's picture does.
+  cases at once, the first button of the feature row. Like a feature's picture, it offers
+  "Happy path only".
 - **macro flow** — what the Architecture picture draws: every story of the picture
   merged into one flow over the product's boxes, so each line is a way some story goes.
   Answers going back and results handed to a person are left out. Every line is drawn

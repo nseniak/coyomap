@@ -7758,7 +7758,7 @@ function syncArchHappySwitch(s) {
   // on another feature's picture.
   const f = isArch ? archFeature(s) : '';
   if (isArch) archdetail.querySelector('.archhp-label').textContent = `Show all lines (${lines('all|' + archFeature({ ...s, scope: '' }))})`;
-  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
+  const show = isArch && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
   if (show) archhp.querySelector('.archhp-label').textContent = `Happy path only (${lines('happy|' + f)})`;
   archhp.hidden = !show;
   if (!show) return;
@@ -8045,15 +8045,15 @@ function bindActorBox(scene, el, id, a, afterPick) {
   bindAliasBox(scene, el, id, { show: () => showActorCard(a), opensOn: nameClick,
                                 open: () => go({ kind: 'actor', act: a.name }), afterPick });
 }
-// THE HAPPY PATH ALONE, only where a picture of it exists: never on the whole product, and never on a
-// feature none of whose use cases is on the happy path. A stale `scope=happy` in an address is read as
-// every use case, rather than drawing a picture nobody can reach from the screen.
+// THE HAPPY PATH ALONE, only where a picture of it exists: the whole product's, and a feature's when some
+// of its use cases are on the happy path. A stale `scope=happy` in an address is read as every use case,
+// rather than drawing a picture nobody can reach from the screen.
 // ON A LAYERED PICTURE, ONLY IN DETAIL: the lines between layers are the picture's shape, and the happy
 // path alone is a question about its stories, which only the boxes' own lines tell.
 function archScope(s) {
-  if (!s || s.scope !== 'happy' || !s.cap || s.cap === 'all') return 'all';
+  if (!s || s.scope !== 'happy') return 'all';
   if (archHasDetail() && !s.detail) return 'all';
-  return MERMAID_ARCH_BY['happy|' + s.cap] ? 'happy' : 'all';
+  return MERMAID_ARCH_BY['happy|' + (s.cap && s.cap !== 'all' ? s.cap : '')] ? 'happy' : 'all';
 }
 // WHICH FEATURE A STATE DRAWS. A feature id is that feature, when this scope draws it; `all`, and
 // nothing named, is the whole product, which is where the view opens. Each feature is one click away.
@@ -8072,7 +8072,7 @@ function archKey(s) { return archScope(s) + '|' + archFeature(s); }
 function archState(scope, cap, open, detail) {
   const s = { kind: 'arch' };
   if (detail) s.detail = 1;
-  if (scope === 'happy' && cap !== 'all') s.scope = 'happy';   // the All picture has no happy-path switch
+  if (scope === 'happy') s.scope = 'happy';
   if (cap === 'all') s.cap = 'all';
   else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
   if (open) s.open = open;
