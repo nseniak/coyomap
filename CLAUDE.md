@@ -295,9 +295,10 @@ design principles these come from)
   of layers instead of each box's own lines, and a box's lines on top only while the
   pointer rests on that box or the box is picked. Since 2026-10-03 (on trial) every
   layered picture opens this way, whatever its size; it was only those over 40 lines.
-- **Display details** — the switch on a layered Architecture picture that draws every
-  box's own line instead, the whole product included. Only while it is on does
-  "Restrict to the Happy Path" appear.
+- **Show all lines (N)** — the switch on a layered Architecture picture that draws every
+  box's own line on top of the same layout, the whole product included; N says how
+  many. Only while it is on does "Happy path only (N)" appear. Neither switch moves the
+  camera.
 - **preview** (on the Architecture picture) — resting the pointer on a box shows its
   lines: drawn on top on a crowded picture, lit on any other. They stay while the pointer
   is on the box, on those lines or in a card, and go when it leaves; a click keeps them.

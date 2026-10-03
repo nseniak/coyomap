@@ -5083,27 +5083,25 @@ def make_one_part_a_screen_called_by_stores(m: dict[str, Any]) -> None:
 
 
 def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_runs() -> None:
-    """A line from a lower layer up to a higher one is written the other way round, so the layers stay
-    stacked. On screen it keeps one head, at the box it goes to, wears a dashed amber of its own, and a
-    click on it picks the line the way it runs, whose card says it goes up the layers."""
+    """With every line shown, a line from a lower layer up to a higher one wears a dashed amber of its
+    own, head included, and a click on it picks the line the way it runs, whose card says it goes up
+    the layers."""
     up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen_called_by_stores)["lines"]
           if e.get("up")]
     assert up, "the changed map must draw a line up the layers"
     with _served_map(make_one_part_a_screen_called_by_stores) as url, _page(url + "#v=arch&cap=all&detail=1") as page:
         _arch_ready(page)
+        page.wait_for_selector(".arch-ov-line", state="attached")
         seen = page.evaluate("""() => {
-            const flipped = [...document.querySelectorAll('#diagram .edgePaths path[data-cy-flip]')];
-            return { n: flipped.length,
-                     heads: flipped.map((p) => [!!p.getAttribute('marker-start'), !!p.getAttribute('marker-end')]),
-                     looks: flipped.map((p) => [getComputedStyle(p).stroke, getComputedStyle(p).strokeDasharray]) };
+            const ups = [...document.querySelectorAll('.arch-overlay .arch-ov-line.arch-ov-up')];
+            return { pairs: ups.map((l) => [l.dataset.src, l.dataset.dst]), heads: ups.map((l) => l.getAttribute('marker-end')),
+                     looks: ups.map((l) => [getComputedStyle(l).stroke, getComputedStyle(l).strokeDasharray]) };
         }""")
-        assert seen["n"] == len(up), (seen, up)
-        assert all(h == [True, False] for h in seen["heads"]), seen
+        assert sorted(map(tuple, seen["pairs"])) == sorted(up), (seen, up)
+        assert all(h == "url(#arch-ov-head-up)" for h in seen["heads"]), seen
         assert all(look == ["rgb(217, 119, 6)", "6px, 4px"] for look in seen["looks"]), seen
-        # an arrow's invisible click area keeps no head of its own, at either end
-        assert page.evaluate("() => document.querySelectorAll('#diagram .cy-edgehit[marker-start], #diagram .cy-edgehit[marker-end]').length") == 0
-        page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]').__cyHits[0]
-            .dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
+        page.evaluate("""() => document.querySelector('.arch-overlay .arch-ov-line.arch-ov-up').parentNode
+            .querySelector('.arch-ov-hit').dispatchEvent(new MouseEvent('click', { bubbles: true }))""")
         on = page.evaluate("""() => { const h = decodeURIComponent(location.hash).split('sel=arch:')[1];
             return h ? h.split('&')[0].split('>') : null; }""")
         assert on is not None and tuple(on) in up, (on, up)
@@ -5929,8 +5927,8 @@ def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_pa
     switching details off takes the happy path back off too."""
     state = """() => ({ hash: decodeURIComponent(location.hash),
         detail: !document.getElementById('archdetail').hidden, happy: !document.getElementById('archhp').hidden,
-        layer: document.querySelectorAll('#diagram path.arch-layerline').length,
-        box: document.querySelectorAll('#diagram .edgePaths path.flowchart-link:not(.arch-layerline)').length })"""
+        layer: [...document.querySelectorAll('#diagram path.arch-layerline')].filter((p) => getComputedStyle(p).display !== 'none').length,
+        box: document.querySelectorAll('#diagram .arch-overlay .arch-ov-line').length })"""
     with _served_map(make_a_scoper) as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         seen = page.evaluate(state)

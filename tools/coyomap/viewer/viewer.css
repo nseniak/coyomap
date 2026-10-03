@@ -3567,6 +3567,8 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
     letter-spacing: .08em; line-height: 24px; white-space: nowrap; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
 .arch-ov-line.arch-ov-up { stroke: #d97706; stroke-dasharray: 6 4; }   /* a line up the layers, as drawn */
+.arch-ov-line.arch-ov-faded { opacity: .2; }   /* "Show all lines": not the box the reader rests on */
+.arch-detail .arch-layerline { display: none; }   /* "Show all lines" draws the box lines instead */
 .arch-ov-line.arch-ov-picked { stroke: #2563eb; stroke-width: 3.2px; }   /* picked: glowEdge's blue */
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-head-picked { fill: #2563eb; }

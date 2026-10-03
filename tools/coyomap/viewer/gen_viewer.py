@@ -1114,8 +1114,10 @@ ARCH_LAYER_BUDGET = 24
 #: A layered picture with more lines than this draws one line per pair of layers instead
 #: (`_arch_layer_lines`). On mcpolis the pictures had 116, 84 and 51 lines, then 30 and fewer; the 3
 #: biggest were the unreadable ones. It was 40, so a picture's look depended on a size the reader could
-#: not see: every layered picture now opens on its lines between layers, and the view's "Display
-#: details" switch draws its boxes' own lines (`gen_arch_views`, the `|d` drawings).
+#: not see: every layered picture now opens on its lines between layers, and the view's "Show all
+#: lines" switch draws every box's own line on top of the same layout (viewer.js `archRedrawLines`).
+#: Laid out by the drawing tool with the box lines inside it, a frame stretched to the room its passing
+#: lines took: on a second build of mcpolis, a UI frame holding one box of 139 px was 1309 px wide.
 ARCH_CROWDED_LINES = 0
 #: A LINE BETWEEN TWO LAYERS SAYS SOMETHING ABOUT A LAYER only when enough of the layer's boxes have a
 #: line to the other one: more than one box in this many, of the layer it leaves. Under that, its lines
@@ -2460,9 +2462,6 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
     boxes' own. A layered picture drawing a part outside its kind's own layer says why (`moved`:
     part -> its sentence, `_ArchPlacement.why`), and its box's card tells it.
 
-    A layered picture also has its DETAILED drawing, keyed `<scope>|<feature id>|d`: every box's own
-    line, and no line between layers. The view's "Display details" switch shows it.
-
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
     drawings: dict[str, str] = {}
@@ -2494,9 +2493,6 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
                                     **({"up": True} if ll["up"] else {})}
                                    for ll in layer_lines if ll["rule"]]}
                    if whole else {})}
-            if layered:
-                drawings[f"{scope}|{feature}|d"] = _arch_mermaid(graph, model, layered, False)
-                texts[f"{scope}|{feature}|d"] = text
     return drawings, texts
 
 

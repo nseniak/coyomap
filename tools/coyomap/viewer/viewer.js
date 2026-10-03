@@ -4896,8 +4896,17 @@ function archRedrawLines() {
   const picked = (a, b) => selHas(mainScene, 'arch:' + a + '>' + b);
   const any = kept || peek || mainScene.selection.some((d) => String(d.key).startsWith('arch:'));
   const test = any ? (a, b) => (!!kept && kept(a, b)) || (!!peek && peek(a, b)) || picked(a, b) : null;
-  mainScene.root.classList.toggle('arch-picking', !!test);
   const t = archCurrentText();
+  // "SHOW ALL LINES" DRAWS EVERY BOX LINE ON TOP OF THE SAME LAYOUT, and no line between layers: what a
+  // box shows, kept or previewed, stays lit and the rest fades. Laid out with its box lines inside it, the
+  // picture stretched its frames to the room their lines took (gen_viewer ARCH_CROWDED_LINES).
+  const detail = archDetailOn();
+  mainScene.root.classList.toggle('arch-detail', detail);
+  mainScene.root.classList.toggle('arch-picking', !!test && !detail);
+  if (detail) {
+    archOverlay(((t && t.lines) || []).map((e) => ({ ...archOverlayItem(e), faded: !!test && !test(e.srcBox, e.dstBox) })));
+    return;
+  }
   archOverlay(test ? ((t && t.lines) || []).filter((e) => test(e.srcBox, e.dstBox)).map(archOverlayItem) : []);
 }
 // A PREVIEW lasts while the pointer is on what asked for it, on the lines it drew, or in a card: the
@@ -5073,7 +5082,7 @@ function archOverlay(items) {
     const yb = y2 - Math.sign(y2 - c2) * ARCH_OV_HEAD_RUN;
     line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${yb} L${x2},${y2}`);
     // A LINE UP THE LAYERS keeps the look it has where it is drawn in the picture (markFlippedLines).
-    line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : ''));
+    line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : '') + (it.faded ? ' arch-ov-faded' : ''));
     line.setAttribute('marker-end', it.up ? 'url(#arch-ov-head-up)' : 'url(#arch-ov-head)');
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
@@ -7748,9 +7757,9 @@ function syncArchHappySwitch(s) {
   // …and only on a feature some of whose use cases are on the happy path: on any other, a click landed
   // on another feature's picture.
   const f = isArch ? archFeature(s) : '';
-  if (isArch) archdetail.querySelector('.archhp-label').textContent = `Show all lines (${lines('all|' + archFeature({ ...s, scope: '' }) + '|d')})`;
+  if (isArch) archdetail.querySelector('.archhp-label').textContent = `Show all lines (${lines('all|' + archFeature({ ...s, scope: '' }))})`;
   const show = !!f && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
-  if (show) archhp.querySelector('.archhp-label').textContent = `Happy path only (${lines('happy|' + f + (archHasDetail() ? '|d' : ''))})`;
+  if (show) archhp.querySelector('.archhp-label').textContent = `Happy path only (${lines('happy|' + f)})`;
   archhp.hidden = !show;
   if (!show) return;
   const happy = archScope(s) === 'happy';
@@ -7992,6 +8001,7 @@ function bindArch() {
   }
   markLayerLines(mainScene.root, t);
   markBoxLines(mainScene.root, t);
+  if (archDetailOn()) archRedrawLines();   // "Show all lines": every box line, on top, from the start
 }
 // A PART DRAWN OUTSIDE ITS KIND'S OWN LAYER says why on its box's card (`moved`, gen_viewer
 // `_arch_place`): the layer is what its calls decided, and a reader who knows its kind would otherwise
@@ -8052,9 +8062,13 @@ function archFeature(s) {
   if (!cap || cap === 'all') return '';
   return MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
 }
-// THE DETAILED DRAWING (gen_viewer `gen_arch_views`, the `|d` keys): only a layered map has one.
-function archHasDetail() { return Object.keys(MERMAID_ARCH_BY || {}).some((k) => k.endsWith('|d')); }
-function archKey(s) { return archScope(s) + '|' + archFeature(s) + (s && s.detail && archHasDetail() ? '|d' : ''); }
+// "SHOW ALL LINES" (`detail`): only a layered map's pictures draw lines between layers to switch from.
+function archHasDetail() { return Object.values(ARCH_TEXT || {}).some((t) => !!(t && t.layerLines)); }
+function archDetailOn() {
+  const s = (hi >= 0 && history[hi]) || {};
+  return s.kind === 'arch' && !!s.detail && archHasDetail();
+}
+function archKey(s) { return archScope(s) + '|' + archFeature(s); }
 function archState(scope, cap, open, detail) {
   const s = { kind: 'arch' };
   if (detail) s.detail = 1;
