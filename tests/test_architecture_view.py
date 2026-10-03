@@ -758,13 +758,44 @@ def make_map_with_an_outside_sign_in_page() -> dict[str, Any]:
         feature="CAP2"))
 
 
-def test_an_outside_page_a_person_goes_to_sits_with_the_doors_on_every_picture():
-    """At the bottom with the outside services, its way back in climbed every layer."""
+def test_an_outside_page_answering_the_story_that_called_it_is_an_answer():
+    """The Checker's call to the sign-in page is drawn; the page sending the person back to the API is
+    its answer, not a call up from the bottom frame through every layer."""
     graph = make_graph(make_map_with_an_outside_sign_in_page())
-    for feature in ("", "CAP2"):
-        model = gv._arch_model(graph, feature, "all", gv.ARCH_LAYER_BUDGET, layered=True)
-        assert model is not None and "I3" in model["doors"], feature
-        assert "I3" not in model["outside"] and not [ln for ln in model["lines"] if ln["up"]], feature
+    checker, api = gv._arch_cell_id(2, "S2"), gv._arch_cell_id(1, "S2")
+    model = gv._arch_model(graph, "CAP2", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None and "I3" in model["outside"]
+    ln = lines_of(model)
+    assert (checker, "I3") in ln and ("I3", api) not in ln
+    assert not [pair for pair, line in ln.items() if line["up"]]
+
+
+def make_map_with_an_unkinded_caller() -> dict[str, Any]:
+    """The layered map with the page's kind unstated: a part with no kind starts below Storage."""
+    doc = make_layered_map()
+    del next(c for c in doc["components"] if c["id"] == "C1")["kind"]
+    return doc
+
+
+def test_a_part_the_call_graph_may_move_never_has_its_calls_up_a_pipe_dropped():
+    """Judged by the layer it starts in, the page with no kind lost its call through the client to
+    the API; the placement then moves it above the API."""
+    graph = make_graph(make_map_with_an_unkinded_caller())
+    model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    assert any(src.endswith("S1") and dst == gv._arch_cell_id(1, "S2") for src, dst in lines_of(model))
+    assert gv._arch_place(graph)["final"]["C1"] <= gv.ARCH_API_LAYER
+
+
+def test_with_no_api_anywhere_no_part_counts_as_browser_code():
+    graph = make_graph(make_map_run_in_two_places(["web"]))
+    doc = make_map_run_in_two_places(["web"])
+    for c in doc["components"]:
+        c["runs_in"] = ["web"]
+        if c.get("kind") == "api":
+            c["kind"] = "logic"
+    assert gv._arch_client_parts(make_graph(doc)) == set()
+    assert gv._arch_client_parts(graph) == {"C1", "C2"}
 
 
 def test_parts_that_call_each_other_share_one_layer():

@@ -1387,11 +1387,13 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False,
     `start`: each part's layer before the call graph is read (`_ArchPlacement.start`). The layered
     picture drops what comes back up a pipe by it (`_draw_through`), so it is given there only.
 
-    AN OUTSIDE PAGE A PERSON GOES TO IS A DOOR on every layered picture (`_arch_person_goes_to`),
-    whether or not the picture's stories draw the person stepping in. A story that sent the person to
-    Google's sign-in page and drew only the page sending them back put the page with the outside
-    services, at the bottom, and its way back in climbed every layer: 5 of mcpolis's 19 pictures
-    drew it so, and the whole product's, whose other stories draw the person, put it with the doors."""
+    AN OUTSIDE SYSTEM ANSWERING A STORY THAT CALLED IT IS AN ANSWER on the layered picture, wherever in
+    the product the answer lands. A story sent the person to Google's sign-in page, and Google sent them
+    back to the sign-in routes, a different part than the one that called: drawn, the way back climbed
+    from the bottom frame through every layer, on 5 of mcpolis's 19 pictures. The call to the outside
+    system is drawn; what it sends back is not. An outside system a person steps into is a door, and a
+    door is not this case. Making such a page a door on every picture was tried and dropped: the
+    product's own calls to it, a token refresh among them, then vanished as results going back out."""
     nodes = graph["nodes"]
     flows = {str(f.get("uc")): f for f in graph["flows"]}
     raw = [(uc, _arch_steps(graph, flows[uc], layered)) for uc in walks if uc in flows]
@@ -1400,10 +1402,6 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False,
         for st in sts:
             if st["from_person"] and str(nodes.get(st["dst"], {}).get("kind")) == "interface":
                 doors.setdefault(st["dst"], None)
-            elif layered:
-                for x in (st["src"], st["dst"]):
-                    if _arch_person_goes_to(graph, x):
-                        doors.setdefault(x, None)
     climbs = _arch_climbs(graph, set(doors), start) if layered and start is not None else None
     stepped = [(uc, _draw_through(graph, sts, climbs)) for uc, sts in raw]
     people: dict[str, None] = {}
@@ -1418,6 +1416,7 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False,
     ends: dict[str, str] = {}
     for uc, sts in stepped:
         callers: dict[str, set[str]] = {}
+        called_out: set[str] = set()   # the outside systems this story has called (see above)
         steps: list[tuple[str, str]] = []
         said: list[str] = []
         ns: list[list[int]] = []
@@ -1427,6 +1426,10 @@ def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False,
                 ends[uc] = s
             if st["to_person"] or (d in doors and not st["from_person"]) or d in callers.get(s, set()):
                 continue
+            if layered and s in called_out:
+                continue
+            if layered and str(nodes.get(d, {}).get("kind")) == "interface" and d not in doors:
+                called_out.add(d)
             callers.setdefault(d, set()).add(s)
             if st["store"]:
                 stores.setdefault(st["store"], None)
@@ -1467,7 +1470,7 @@ def _arch_frame(graph: GraphDict, x: str, client: set[str] | None = None) -> int
     A PART THAT RUNS BEFORE THE APIS ANSWER sits with them (`grammar.runs_before_apis`). Drawn with the
     work, a request filter made a line from a door down past the APIs and back up to them: on mcpolis,
     with a kind on every part, its 2 filters were 6 of the whole product's 11 exception lines. A pipe
-    and the wiring keep their place: lines go through them."""
+    and the wiring start in the first layer when drawn as a box; the call graph may move them on."""
     kind = _component_kind(graph, x)
     # A PIPE OR THE WIRING DRAWN AS A BOX sits in the first layer, with what people run: it is drawn
     # where an interface leads straight into it (`_draw_through`), or where it starts a story.
@@ -1503,36 +1506,45 @@ def _arch_client_parts(graph: GraphDict) -> set[str]:
             screens |= places(c)
         elif _component_kind(graph, c) == "api":
             apis |= places(c)
+    if not apis:   # nothing to tell the browser's side from: a server-rendered or desktop product
+        return set()
     return {c for c in parts if places(c) & (screens - apis) and not places(c) & (apis - screens)}
 
 
-def _arch_person_goes_to(graph: GraphDict, x: str) -> bool:
-    """Is `x` an interface whose kind says a person goes there themselves: someone else's sign-in
-    page, a link we hand them (`grammar.INTERFACE_KINDS_A_PERSON_GOES_TO`)?"""
-    node = graph["nodes"].get(x)
-    if node is None or str(node.get("kind")) != "interface":
-        return False
-    fields = cast("dict[str, Any]", node.get("fields") or {})
-    return grammar.canonical_interface_kind(str(fields.get("Kind") or "")) in grammar.INTERFACE_KINDS_A_PERSON_GOES_TO
-
-
 def _arch_climbs(graph: GraphDict, doors: set[str], start: dict[str, int]) -> Callable[[str, str], bool]:
-    """Does a line from `a` to `b` climb the layers, by the layer each starts in? A person, named by
-    the walk and no node of the map, sits above everything; a door below the people; a part in its
-    starting layer (`start`); and anything else, a database or an outside service, below every part."""
+    """Does a line from `a` to `b` climb the layers between two ends whose layer is settled before any
+    line is read? A person, named by the walk and no node of the map, sits above everything, and the
+    product's own timer in the logic layer; a door below the people; a part whose kind keeps its layer,
+    or code kept in the browser, in its starting layer (`start`); anything else, a database or an
+    outside service, below every part.
+
+    A PART THE CALL GRAPH MAY MOVE SETTLES NOTHING: a check, a piece of logic, a pipe kept as a box, a
+    part with no kind. Its starting layer is a guess the placement corrects (`_arch_place`), and judged
+    by it, a part with no kind, which starts below Storage, had every call it made up a pipe dropped,
+    and kept the events pushed down to it."""
     nodes = graph["nodes"]
     bottom = len(grammar.COMPONENT_KIND_FRAMES) + 1
+    timers = _arch_inside_people(graph)
+    client = _arch_client_parts(graph)
 
-    def level(x: str) -> int:
+    def level(x: str) -> int | None:
+        if x in timers:
+            return ARCH_WORK_LAYER
         if x not in nodes:
             return -2
         if x in doors:
             return -1
         if str(nodes[x].get("kind")) == "component":
-            return start[x] if x in start else _arch_frame(graph, x)
+            if x in client or _component_kind(graph, x) in grammar.COMPONENT_KINDS_KEEPING_THEIR_LAYER:
+                return start[x] if x in start else _arch_frame(graph, x, client)
+            return None
         return bottom
 
-    return lambda a, b: level(a) > level(b)
+    def climbs(a: str, b: str) -> bool:
+        la, lb = level(a), level(b)
+        return la is not None and lb is not None and la > lb
+
+    return climbs
 
 
 class _ArchPlacement(TypedDict):

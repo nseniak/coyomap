@@ -30,12 +30,12 @@
   ]
  },
  {
-  "name": "outside-page-not-a-door",
+  "name": "outside-answer-drawn-as-a-call",
   "edits": [
    {
     "file": "tools/coyomap/viewer/gen_viewer.py",
-    "old": "                    if _arch_person_goes_to(graph, x):",
-    "new": "                    if False:"
+    "old": "            if layered and s in called_out:\n                continue",
+    "new": "            if False:\n                continue"
    }
   ]
  },
@@ -106,6 +106,26 @@
     "file": "tools/coyomap/viewer/viewer.js",
     "old": "'</div>' + up + via",
     "new": "'</div>' + via"
+   }
+  ]
+ },
+ {
+  "name": "movable-parts-judged-by-their-start",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "                return start[x] if x in start else _arch_frame(graph, x, client)\n            return None",
+    "new": "                return start[x] if x in start else _arch_frame(graph, x, client)\n            return start[x] if x in start else _arch_frame(graph, x, client)"
+   }
+  ]
+ },
+ {
+  "name": "browser-code-without-apis",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "    if not apis:   # nothing to tell",
+    "new": "    if False:   # nothing to tell"
    }
   ]
  }
