@@ -5925,7 +5925,7 @@ def test_the_second_card_leaves_the_file_tree_to_what_is_picked() -> None:
 
 def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_path() -> None:
     """A layered picture opens on its lines between layers, whatever its size. "Display details" draws
-    every box's own line, in its own address, and only then offers "Restrict to the Happy Path";
+    every box's own line, in its own address, and only then offers "Happy path only";
     switching details off takes the happy path back off too."""
     state = """() => ({ hash: decodeURIComponent(location.hash),
         detail: !document.getElementById('archdetail').hidden, happy: !document.getElementById('archhp').hidden,
@@ -5935,10 +5935,18 @@ def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_pa
         _arch_ready(page)
         seen = page.evaluate(state)
         assert seen["detail"] and not seen["happy"] and seen["layer"] > 0 and seen["box"] == 0, seen
+        camera = "() => document.querySelector('#diagram .svg-pan-zoom_viewport').getAttribute('transform')"
+        page.click("#zoomin")
+        page.wait_for_timeout(400)
+        before = page.evaluate(camera)
         page.click("#archdetail")
         page.wait_for_timeout(800)
         seen = page.evaluate(state)
         assert "detail=1" in seen["hash"] and seen["happy"] and seen["layer"] == 0 and seen["box"] > 0, seen
+        # each switch says how many lines it draws, and the drawing stays where the reader left it
+        labels = page.evaluate("() => [...document.querySelectorAll('#overlays .archhp-label')].map((l) => l.textContent)")
+        assert labels[0] == f"Show all lines ({seen['box']})" and re.fullmatch(r"Happy path only \(\d+\)", labels[1]), labels
+        assert page.evaluate(camera) == before
         page.click("#archhp")
         page.wait_for_timeout(800)
         assert "scope=happy" in page.evaluate(state)["hash"]

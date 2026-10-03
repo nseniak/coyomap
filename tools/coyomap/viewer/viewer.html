@@ -197,8 +197,8 @@
       <div id="overlays">
       <!-- The Architecture view's happy-path switch, on a feature's picture (syncArchHappySwitch). -->
       <!-- …and its details switch, on a layered map's every picture: every box's own line. -->
-      <button id="archdetail" class="archhp" type="button" aria-pressed="false" hidden><span class="archhp-box" aria-hidden="true"></span>Display details</button>
-      <button id="archhp" class="archhp" type="button" aria-pressed="false" hidden><span class="archhp-box" aria-hidden="true"></span>Restrict to the Happy Path</button>
+      <button id="archdetail" class="archhp" type="button" aria-pressed="false" hidden><span class="archhp-box" aria-hidden="true"></span><span class="archhp-label">Show all lines</span></button>
+      <button id="archhp" class="archhp" type="button" aria-pressed="false" hidden><span class="archhp-box" aria-hidden="true"></span><span class="archhp-label">Happy path only</span></button>
       <!-- Deployment environment filter. Floats over the diagram (in the #overlays column) rather
            than living in the info pane: it filters what the DIAGRAM draws, so it belongs beside it — and
            in the pane it vanished the moment you selected a box, stranding you in a filtered view with

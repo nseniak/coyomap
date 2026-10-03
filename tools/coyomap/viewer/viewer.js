@@ -7743,10 +7743,14 @@ function syncArchHappySwitch(s) {
   const detail = !!(isArch && s.detail);
   archdetail.classList.toggle('on', detail);
   archdetail.setAttribute('aria-pressed', String(detail));
+  // EACH SWITCH SAYS HOW MANY LINES IT DRAWS, so a reader can tell 8 from 126 before asking.
+  const lines = (key) => (((ARCH_TEXT || {})[key] || {}).lines || []).length;
   // …and only on a feature some of whose use cases are on the happy path: on any other, a click landed
   // on another feature's picture.
   const f = isArch ? archFeature(s) : '';
+  if (isArch) archdetail.querySelector('.archhp-label').textContent = `Show all lines (${lines('all|' + archFeature({ ...s, scope: '' }) + '|d')})`;
   const show = !!f && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
+  if (show) archhp.querySelector('.archhp-label').textContent = `Happy path only (${lines('happy|' + f + (archHasDetail() ? '|d' : ''))})`;
   archhp.hidden = !show;
   if (!show) return;
   const happy = archScope(s) === 'happy';
@@ -7757,12 +7761,18 @@ function syncArchHappySwitch(s) {
 archdetail.addEventListener('click', (e) => {
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(cur.detail ? '' : archScope(cur), cur.cap || '', '', !cur.detail));
+  go(archKeepCamera(archState(cur.detail ? '' : archScope(cur), cur.cap || '', '', !cur.detail)));
 });
+// A SWITCH CHANGES THE LINES, NOT WHERE THE READER LOOKS: the new drawing opens at the zoom and the pan the
+// reader left, as "+N more" does.
+function archKeepCamera(next) {
+  if (mainPz) next.vp = { zoom: mainPz.getZoom(), real: mainPz.getSizes().realZoom, pan: mainPz.getPan() };
+  return next;
+}
 archhp.addEventListener('click', (e) => {
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(archhp.dataset.archhp || '', cur.cap || '', '', cur.detail));   // the feature in force stays
+  go(archKeepCamera(archState(archhp.dataset.archhp || '', cur.cap || '', '', cur.detail)));   // the feature in force stays
 });
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
