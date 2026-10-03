@@ -130,6 +130,9 @@ the code's names.
   removal is a stated reason on one screen.
   Why the rule exists: on the Features page the actors are a whole column joined
   by wires, so naming them again on the feature card says it twice.
+  One exception, asked for on 2026-10-03: on the Architecture view an interface's
+  card names no people at all, on every picture, even people that picture does not
+  draw. The people are that view's top row.
 - **item pill** — a small tag naming one particular thing, anywhere on any
   screen: a feature, an actor, a record, a component, a door, a decision area.
   It wears that kind's own mark and colour, and clicking it opens the thing it
