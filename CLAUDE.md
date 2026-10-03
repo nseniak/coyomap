@@ -35,6 +35,16 @@ picture, an arrow's card opens only with a pointer. On the Architecture view thi
 something: its old text column held each line's use cases as page text, which a keyboard
 could reach. A keyboard path for every picture's arrows is its own piece of work.
 
+**Known gap, recorded 2026-10-03: an interface's row is decided per picture.** On the
+Architecture view an interface sits with the doors only on a picture where a person
+steps into it; elsewhere it sits with the outside services, at the bottom, and its line
+into the APIs is drawn as an upward line though the code calls nothing upward. Seen on
+the build `mcpolis/.coyomap/dev-rebuilds/0028`: "Gateway MCP" on "Running the hosted
+service", where only an operator's test script calls it. No picture of mcpolis's
+current map shows it. Making a door a door on every picture is not the fix: the test
+script's call into it would then be hidden as a result going back out. A real fix lets
+one picture draw an interface as both a way in and an outside system.
+
 ## Glossary
 
 The words we use when talking about this project. Use these; don't drift back to
