@@ -265,7 +265,7 @@ design principles these come from)
   drawn at that service.
 - **Architecture** (a view) — the first tab under the hood. It answers "What are this
   product's layers, which components does each hold, and how are they connected?" with
-  one picture per feature. It opens on the first feature; the whole product is one
+  one picture per feature. It opens on the whole product; each feature is one
   button away.
 - **whole product** (on the Architecture view) — the picture over every feature's use
   cases at once, the first button of the feature row. It has no "Restrict to the Happy

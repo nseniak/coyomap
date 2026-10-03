@@ -1099,10 +1099,12 @@ def bridge_card_mermaids(graph: GraphDict) -> dict[str, str]:
 ARCH_BOX_BUDGET = 16   # boxes inside the product: a subsystem, or a store or a check standing alone
 ARCH_OUTSIDE_MAX = 6
 ARCH_STORES_MAX = 4     # the databases behind the records the stories reach
-#: THE LAYERED PICTURE'S FRAMES: a pale fill and a quiet border, so a frame reads as a band behind
-#: its parts and never as a box of its own.
-ARCH_FRAME_FILL = "#f8fafc"
-ARCH_FRAME_STROKE = "#cbd5e1"
+#: THE LAYERED PICTURE'S FRAMES wear the Features page's FEATURES column (viewer.css
+#: `.story-col-spine`): its indigo ground, its border and its title colour. Rounded corners, the shadow
+#: and the title's lettering are in viewer.css (`g.cluster[id*="-CYF"]`).
+ARCH_FRAME_FILL = "#eceffb"
+ARCH_FRAME_STROKE = "#c9d0f0"
+ARCH_FRAME_TITLE = "#3730a3"
 #: The frame of the parts whose kind places them in no layer.
 ARCH_NO_KIND_FRAME = "Parts with no kind"
 #: How many boxes the layered picture draws at most, a group of parts or a part alone: gitdiagram's
@@ -2253,7 +2255,7 @@ def _arch_mermaid(graph: GraphDict, model: _ArchModel, layered: bool = False, by
         drawn = [(fid, members) for fid, _label, members
                  in [*tops, *frames, (_arch_frame_id(outside), "", outer)] if members]
         for fid, _members in drawn:
-            lines.append(f"  style {fid} fill:{ARCH_FRAME_FILL},stroke:{ARCH_FRAME_STROKE},color:#475569")
+            lines.append(f"  style {fid} fill:{ARCH_FRAME_FILL},stroke:{ARCH_FRAME_STROKE},color:{ARCH_FRAME_TITLE}")
         # THE FRAMES STACK TOP TO BOTTOM. The layout places a frame by the lines into it, so without
         # this the work frame landed beside the APIs it is called from. An invisible link is the
         # drawing tool's own way to say "below": a link between the frames themselves was measured
@@ -2372,7 +2374,7 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
         lines.append(f"  {a} {head} {b}")
         thick.append(str(len(box_lines) + k))
     if thick:
-        lines.append(f"  linkStyle {','.join(thick)} stroke:#64748b,stroke-width:2.6px,color:#64748b")
+        lines.append(f"  linkStyle {','.join(thick)} stroke:{ARCH_FRAME_STROKE},stroke-width:2.6px,color:{ARCH_FRAME_STROKE}")
     lines += last or []
     lines.append(ITEM_SLOT_CLASSDEF)
     return "\n".join(lines)

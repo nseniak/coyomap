@@ -64,8 +64,8 @@
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.css",
-    "old": "#diagram path.flowchart-link[data-cy-flip] { stroke: #d97706 !important; stroke-dasharray: 6 4; }",
-    "new": ""
+    "old": "{ stroke: #d97706 !important; stroke-dasharray: 6 4; }",
+    "new": "{ }"
    }
   ]
  },
