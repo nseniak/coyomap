@@ -2466,7 +2466,7 @@ def test_the_zoom_control_is_absent_on_a_page_with_no_diagram() -> None:
     # never a CSS offset — the stylesheet's `top` is overwritten by `put()` a moment later, which is
     # exactly how the first attempt at this failed.
     keep = js[js.index("function cardKeepSets(el) {"): js.index("\n}", js.index("function cardKeepSets(el) {"))]
-    assert "[zoomctl, document.getElementById('archhp')].filter((c) => c && !c.hidden)" in keep, \
+    assert "[zoomctl, document.getElementById('archhp'), document.getElementById('archdetail')].filter((c) => c && !c.hidden)" in keep, \
         "no shape at all on a page that has no control (nor for the happy-path switch when it is hidden)"
     # 4 sets, plus the Architecture picture's 2 that come before them (its drawn lines and far boxes)
     assert keep.count("...fixed") == 6, "in every set: a control is never the concession to make"

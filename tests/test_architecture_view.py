@@ -349,17 +349,16 @@ def frames_of(drawing: str, ids: tuple[str, ...]) -> dict[str, str]:
 def test_the_layered_picture_frames_each_part_by_its_kind():
     graph = make_graph(make_layered_map())
     drawings, _texts = gv.gen_arch_views(graph)
-    drawing = drawings["all|CAP1"]
-    # every layer of parts keeps its fixed name: the Checker alone is in Logic
-    # the last frame holds the database alone, and says so
-    for label in ("UI", "APIs", "Logic", "Storage", "Databases"):
-        assert f'["{label}"]' in drawing, label
-    # on a feature's picture the door is in no frame: it sits between the people and the first
-    # frame, tied above it
+    # every layer keeps its fixed name: the Checker alone is in Logic; the last frame holds the
+    # database alone, and says so. The detailed drawing keeps every layer, the people and doors too.
     page, api, checker, saver = (gv._arch_cell_id(f, s) for f, s in ((0, "S1"), (1, "S2"), (2, "S2"), (3, "S2")))
-    assert frames_of(drawing, ("I1", page, api, checker, saver, "D1")) == {
-        page: "UI", api: "APIs", checker: "Logic", saver: "Storage", "D1": "Databases"}
-    assert f"  I1 ~~~ {page}" in drawing and f"  I2 ~~~ {page}" in drawing
+    for key in ("all|CAP1", "all|CAP1|d"):
+        drawing = drawings[key]
+        for label in ("Actors", "Interfaces", "UI", "APIs", "Logic", "Storage", "Databases"):
+            assert f'["{label}"]' in drawing, (key, label)
+        assert frames_of(drawing, ("I1", page, api, checker, saver, "D1")) == {
+            "I1": "Interfaces", page: "UI", api: "APIs", checker: "Logic", saver: "Storage", "D1": "Databases"}, key
+    assert f"  I1 ~~~ {page}" in drawings["all|CAP1|d"]
 
 
 def make_map_with_a_timer() -> dict[str, Any]:
@@ -530,11 +529,18 @@ def test_a_layer_line_few_boxes_of_its_layer_take_is_not_drawn():
     assert len(links) == len(text["layerLines"])
 
 
-def test_a_picture_that_is_not_crowded_keeps_its_box_lines():
+def test_every_layered_picture_opens_on_its_layer_lines_and_its_detail_draws_its_box_lines():
+    """The look no longer depends on a size the reader cannot see: every layered picture opens on its
+    lines between layers, and its detailed drawing (`|d`, the "Display details" switch) draws every
+    box's own line and no line between layers."""
     drawings, texts = gv.gen_arch_views(make_graph(make_layered_map()))
-    assert len(texts["all|"]["lines"]) <= gv.ARCH_CROWDED_LINES
-    assert all("layerLines" not in t for t in texts.values())
-    assert all("CYFP" not in d for d in drawings.values())
+    base = [k for k in texts if not k.endswith("|d")]
+    assert base and all("layerLines" in texts[k] for k in base)
+    assert all(f"{k}|d" in texts and "layerLines" not in texts[f"{k}|d"] for k in base)
+    assert all(texts[f"{k}|d"]["lines"] == texts[k]["lines"] for k in base)
+    assert all("CYFP --> CYFD" not in drawings[f"{k}|d"] for k in base)
+    # a map without kinds has no layers, and no detailed drawing
+    assert not [k for k in gv.gen_arch_views(make_graph())[1] if k.endswith("|d")]
 
 
 def test_the_layered_picture_draws_parts_and_doors_goes_through_pipes_and_writes_out_sub_flows():
@@ -649,7 +655,7 @@ def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_ru
     checker, saver = gv._arch_cell_id(3, "S2"), gv._arch_cell_id(0, "S2")
     assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [(checker, saver)]
     drawings, texts = gv.gen_arch_views(graph)
-    drawing = drawings["all|"]
+    drawing = drawings["all||d"]
     assert f'  {saver} <--> {checker}' in drawing and f"{checker} -->" not in drawing
     up = [(e["srcBox"], e["dstBox"]) for e in texts["all|"]["lines"] if e.get("up")]
     assert up == [(checker, saver)]

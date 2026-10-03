@@ -257,7 +257,7 @@ diaghead.addEventListener('click', (e) => {
   const cur = (hi >= 0 && history[hi]) || {};
   const cap = e.target.closest && e.target.closest('[data-archcap]');
   // The scope in force, not the address's word for it: a stale one would switch the next feature on.
-  if (cap && !cap.disabled) go(archState(archScope(cur), cap.getAttribute('data-archcap') || ''));
+  if (cap && !cap.disabled) go(archState(archScope(cur), cap.getAttribute('data-archcap') || '', '', cur.detail));
 });
 const PEEK_CARD = document.getElementById('peekcard');   // the second card: a tag inside a box, beside the box's own
 const callout = document.getElementById('callout');      // the line from the card to what it describes
@@ -5424,6 +5424,9 @@ const STATE_FIELDS = ['sid', 'a', 'b', 'hp', 'uc', 'sf', 'sd', 'unit', 'store', 
                       // happy path's alone. Unset = every use case's. (Its ONE feature rides on
                       // `cap`, the field the Features page already names a feature by.)
                       'scope',
+                      // `detail` = 1: the layered Architecture picture draws every box's own line
+                      // (its `|d` drawing) instead of its lines between layers.
+                      'detail',
                       // `open` is the BOXES the Architecture view lists in full, every part named, after
                       // the reader clicked their "+N more". Comma-separated box ids (`CYG2S2`): one
                       // subsystem has a box in each layer it has parts in, and only the clicked one opens.
@@ -5446,6 +5449,7 @@ function stateKey(s) {
                                    // the Architecture view narrowed to one feature
     + (s.act ? ':' + s.act : '')   // …or one ACTOR's, the overview's other axis
     + (s.open ? '+' + s.open : '')    // …with boxes opened to list every part: a different drawing
+    + (s.detail ? '~d' : '')          // …drawn in detail: a different drawing too
     + (s.scope ? '~' + s.scope : '')  // the Architecture view on the happy path's stories: a
                                       // different drawing, so it has to key apart or the switch
                                       // is a no-op on the screen
@@ -7730,11 +7734,19 @@ function archFeatureHtml() {
 // comes and goes. NOT ON THE WHOLE PRODUCT'S PICTURE: the whole product is every story, and its happy
 // path alone is a feature's question.
 const archhp = document.getElementById('archhp');
+// THE DETAILS SWITCH (#archdetail), on a layered map's every picture: off, the picture draws its lines
+// between layers; on, every box's own line. The happy-path switch shows only while it is on.
+const archdetail = document.getElementById('archdetail');
 function syncArchHappySwitch(s) {
+  const isArch = !!s && s.kind === 'arch';
+  archdetail.hidden = !(isArch && archHasDetail());
+  const detail = !!(isArch && s.detail);
+  archdetail.classList.toggle('on', detail);
+  archdetail.setAttribute('aria-pressed', String(detail));
   // …and only on a feature some of whose use cases are on the happy path: on any other, a click landed
   // on another feature's picture.
-  const f = s && s.kind === 'arch' ? archFeature(s) : '';
-  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f];
+  const f = isArch ? archFeature(s) : '';
+  const show = !!f && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
   archhp.hidden = !show;
   if (!show) return;
   const happy = archScope(s) === 'happy';
@@ -7742,10 +7754,15 @@ function syncArchHappySwitch(s) {
   archhp.setAttribute('aria-pressed', String(happy));
   archhp.dataset.archhp = happy ? '' : 'happy';
 }
+archdetail.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const cur = (hi >= 0 && history[hi]) || {};
+  go(archState(cur.detail ? '' : archScope(cur), cur.cap || '', '', !cur.detail));
+});
 archhp.addEventListener('click', (e) => {
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  go(archState(archhp.dataset.archhp || '', cur.cap || ''));   // the feature in force stays
+  go(archState(archhp.dataset.archhp || '', cur.cap || '', '', cur.detail));   // the feature in force stays
 });
 // WHICH DRAWING A STATE MEANS, decided in one place for the lookup, the buttons and the clicks. The
 // scope is `happy` or `all`; the feature is kept only when the map draws it under that scope, so a
@@ -7942,7 +7959,7 @@ function bindArch() {
       const node = b.closest('g.node');
       if (!node) return;
       const open = [...archOpenOf(s), idOf(node)];
-      const next = archState(s.scope, s.cap || '', [...new Set(open)].join(','));
+      const next = archState(s.scope, s.cap || '', [...new Set(open)].join(','), s.detail);
       if (mainPz) {
         next.vp = { zoom: mainPz.getZoom(), real: mainPz.getSizes().realZoom, pan: mainPz.getPan() };
         const r = node.getBoundingClientRect();
@@ -8011,8 +8028,11 @@ function bindActorBox(scene, el, id, a, afterPick) {
 // THE HAPPY PATH ALONE, only where a picture of it exists: never on the whole product, and never on a
 // feature none of whose use cases is on the happy path. A stale `scope=happy` in an address is read as
 // every use case, rather than drawing a picture nobody can reach from the screen.
+// ON A LAYERED PICTURE, ONLY IN DETAIL: the lines between layers are the picture's shape, and the happy
+// path alone is a question about its stories, which only the boxes' own lines tell.
 function archScope(s) {
   if (!s || s.scope !== 'happy' || !s.cap || s.cap === 'all') return 'all';
+  if (archHasDetail() && !s.detail) return 'all';
   return MERMAID_ARCH_BY['happy|' + s.cap] ? 'happy' : 'all';
 }
 // WHICH FEATURE A STATE DRAWS. A feature id is that feature, when this scope draws it; `all`, and
@@ -8022,9 +8042,12 @@ function archFeature(s) {
   if (!cap || cap === 'all') return '';
   return MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
 }
-function archKey(s) { return archScope(s) + '|' + archFeature(s); }
-function archState(scope, cap, open) {
+// THE DETAILED DRAWING (gen_viewer `gen_arch_views`, the `|d` keys): only a layered map has one.
+function archHasDetail() { return Object.keys(MERMAID_ARCH_BY || {}).some((k) => k.endsWith('|d')); }
+function archKey(s) { return archScope(s) + '|' + archFeature(s) + (s && s.detail && archHasDetail() ? '|d' : ''); }
+function archState(scope, cap, open, detail) {
   const s = { kind: 'arch' };
+  if (detail) s.detail = 1;
   if (scope === 'happy' && cap !== 'all') s.scope = 'happy';   // the All picture has no happy-path switch
   if (cap === 'all') s.cap = 'all';
   else if (cap && MERMAID_ARCH_BY[archScope(s) + '|' + cap]) s.cap = cap;
@@ -8630,7 +8653,7 @@ function cardKeepSets(el) {
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The happy-path switch over the drawing's corner is a control too.
-  const fixed = [zoomctl, document.getElementById('archhp')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
+  const fixed = [zoomctl, document.getElementById('archhp'), document.getElementById('archdetail')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
        [...g([...own, ...ends]), ...fixed],

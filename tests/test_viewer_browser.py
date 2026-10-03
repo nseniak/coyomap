@@ -5089,7 +5089,7 @@ def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_ru
     up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen_called_by_stores)["lines"]
           if e.get("up")]
     assert up, "the changed map must draw a line up the layers"
-    with _served_map(make_one_part_a_screen_called_by_stores) as url, _page(url + "#v=arch&cap=all") as page:
+    with _served_map(make_one_part_a_screen_called_by_stores) as url, _page(url + "#v=arch&cap=all&detail=1") as page:
         _arch_ready(page)
         seen = page.evaluate("""() => {
             const flipped = [...document.querySelectorAll('#diagram .edgePaths path[data-cy-flip]')];
@@ -5921,3 +5921,29 @@ def test_the_second_card_leaves_the_file_tree_to_what_is_picked() -> None:
         finally:
             page.close()
 
+
+
+def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_path() -> None:
+    """A layered picture opens on its lines between layers, whatever its size. "Display details" draws
+    every box's own line, in its own address, and only then offers "Restrict to the Happy Path";
+    switching details off takes the happy path back off too."""
+    state = """() => ({ hash: decodeURIComponent(location.hash),
+        detail: !document.getElementById('archdetail').hidden, happy: !document.getElementById('archhp').hidden,
+        layer: document.querySelectorAll('#diagram path.arch-layerline').length,
+        box: document.querySelectorAll('#diagram .edgePaths path.flowchart-link:not(.arch-layerline)').length })"""
+    with _served_map(make_a_scoper) as url, _page(url + "#v=arch&cap=CAP1") as page:
+        _arch_ready(page)
+        seen = page.evaluate(state)
+        assert seen["detail"] and not seen["happy"] and seen["layer"] > 0 and seen["box"] == 0, seen
+        page.click("#archdetail")
+        page.wait_for_timeout(800)
+        seen = page.evaluate(state)
+        assert "detail=1" in seen["hash"] and seen["happy"] and seen["layer"] == 0 and seen["box"] > 0, seen
+        page.click("#archhp")
+        page.wait_for_timeout(800)
+        assert "scope=happy" in page.evaluate(state)["hash"]
+        page.click("#archdetail")
+        page.wait_for_timeout(800)
+        seen = page.evaluate(state)
+        assert "detail" not in seen["hash"] and "scope" not in seen["hash"] and not seen["happy"], seen
+        assert not page.js_errors, page.js_errors
