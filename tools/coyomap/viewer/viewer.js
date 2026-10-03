@@ -8133,30 +8133,55 @@ function archOpenOf(s) {
 const COMPONENT_KIND_ORDER = ['screen', 'command', 'script', 'api', 'logic', 'check', 'instructions',
   'store', 'pipe', 'wiring'];
 const COMPONENT_KIND_WORD = { api: 'API', screen: 'UI' };
-// THE PATH TO THE PAGE, on the page ground just above its head: every ancestor from the view down to
-// the parent, each a link, then a closing ›. The page itself is the head's name line, so it is not here.
-// ABOVE the head, not inside it: the head is "what this is" and stays the same object on every page;
-// the path is "where you are". Inside the head it shared the card with the item, indented to the
-// text, and the figure needed rules to ignore it. GOV.UK and Carbon draw the breadcrumb here too.
-// The first item repeats the lit tab on purpose, as GOV.UK keeps "Home": a path that starts half way
-// reads as a mistake. A landing has no parents and draws no line.
-function pagePathHtml(chain) {
-  const parents = (chain || []).slice(0, -1);
-  if (!parents.length) return '';
-  return '<nav class="page-path" aria-label="Path to this page">'
-    + parents.map((node, i) => `<button type="button" class="page-path-seg" data-path="${i}">${esc(stateTitle(node))}</button>`
-        + '<span class="page-path-sep" aria-hidden="true">\u203a</span>').join('')
-    + '</nav>';
+// Navigation belongs to the shared chrome, independently of the page's content renderer.
+function renderBreadcrumb(chain) {
+  crumb.innerHTML = '';
+  const drilled = chain.length > 1;
+  crumb.parentElement.classList.toggle('hint-empty', !drilled);
+  chain.forEach((node, i) => {
+    const current = i === chain.length - 1;
+    if (current) {
+      const h = document.createElement('h1');
+      h.className = 'crumbseg cur' + (drilled ? '' : ' sr-only');
+      h.textContent = stateTitle(node);
+      h.setAttribute('aria-current', 'page');
+      crumb.appendChild(h);
+    } else {
+      const item = document.createElement('span');
+      item.className = 'crumbitem';
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'crumbseg page-path-seg';
+      link.textContent = stateTitle(node);
+      link.addEventListener('click', () => go(node));
+      const separator = document.createElement('span');
+      separator.className = 'crumbsep';
+      separator.textContent = '›';
+      separator.setAttribute('aria-hidden', 'true');
+      item.append(link, separator);
+      crumb.appendChild(item);
+    }
+  });
 }
-function placePagePath(chain) {
-  document.querySelectorAll('.page-path').forEach((e) => e.remove());
-  const html = pagePathHtml(chain);
-  if (!html) return;
-  const hero = document.querySelector('#diaghead .page-hero, #pagehero .page-hero, #diagram .page-hero');
-  if (!hero) return;
-  hero.insertAdjacentHTML('beforebegin', html);
-  hero.previousElementSibling.querySelectorAll('.page-path-seg').forEach((b) =>
-    b.addEventListener('click', () => go(chain[+b.dataset.path])));
+// Older collection renderers supplied descriptions without names. Keep their content title visible
+// too; the breadcrumb supplies orientation even when this title has scrolled out of view.
+function ensurePageTitle(s, chain) {
+  if (chain.length < 2) return;
+  const root = document.querySelector('#pagehero .page-hero, #diaghead .page-hero, #diagram .page-hero');
+  if (root && root.querySelector('.page-hero-name')) return;
+  const name = stateTitle(s);
+  if (root) {
+    const title = document.createElement('p');
+    title.className = 'page-hero-name';
+    const subject = document.createElement('span');
+    subject.className = 'page-hero-subject';
+    subject.textContent = name;
+    title.appendChild(subject);
+    (root.querySelector('.page-hero-body') || root).prepend(title);
+  } else {
+    pagehero.innerHTML = pageHeroHtml({ name, desc: '', noDesc: false });
+    pagehero.hidden = false;
+  }
 }
 // EVERY HEADER FIGURE READS AS THE SAME SIZE. The figures are drawn on different squares — a sparkle
 // that fills its 20-unit square to the edges, a person 27px wide in a 52px box, a record card with a
@@ -8239,7 +8264,7 @@ function syncPageHero(s, chain, tv) {
   host.innerHTML = html;
   host.hidden = !html;
   if (inHead) { diaghead.innerHTML = inHead; diaghead.hidden = false; }
-  placePagePath(chain);
+
   sizeHeroFigures();
   if (!html) return;
   bindElementCards(host);   // the `In feature …` line is a door, here as on a card
@@ -9340,6 +9365,7 @@ function renderChrome(s) {
   // syncPageHero as the grey strip of the landing's first block. The fixed block's own line is gone: a
   // landing screen and an item page were two different objects, and the sentence is what made them so.
   syncPageHero(s, chain, q ? tv : '');
+  ensurePageTitle(s, chain);
   // No dividing rule any more. It existed because the question sat among the TABS, at their size and
   // weight, where it read as a fifth disabled one. Beside a 16px bold page title it is a 12.5px grey
   // italic sentence, and nothing about it can be mistaken for a control, so a gap is separation enough.
@@ -9363,31 +9389,15 @@ function renderChrome(s) {
       const on = b.dataset.view === tv;
       b.classList.toggle('active', on);
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-      // A tab you are NOT on that would reopen BELOW its top (goTab replays tabLast) says so: the same
-      // › the head shows while you are inside, moved up to the tab once you leave. Without it the tab
-      // promised the view and opened a page. Only a drill counts — a selection or a zoom on the
-      // overview still lands on the overview — which is the test atRoot makes for the lit tab.
+      // Keep remembered destinations in tooltips without adding a mark to the tab label.
       const held = on ? null : heldPage(b.dataset.view);
-      b.classList.toggle('held', !!held);
+
       if (on && !atRoot) b.title = 'Back to ' + (VIEW_LABEL[tv] || tv);
       else if (held) b.title = 'Reopens at ' + stateTitle(held);
       else b.removeAttribute('title');
     });
   }
-  // breadcrumb: the structural nesting from the VIEW down to this page; each ancestor crumb zooms out
-  // to it. The bar is always there, because its first segment is always the view.
-  crumb.innerHTML = '';
-  // NO TRAIL ROW. The path is drawn IN THE PAGE HEAD, above the page's name (pagePathHtml, placed by
-  // syncPageHero): parents only, each a link, the way GOV.UK and Carbon draw a breadcrumb over an H1.
-  // A row of its own repeated the page's name 36px above the head that names it, and repeated the
-  // lit tab as its first item; and a row that showed only the middle of the path came and went
-  // between screens. The row stays in the document, collapsed, holding the page's name as the
-  // document's h1 for a screen reader and the window title — never drawn twice on screen.
-  if (crumb.parentElement) crumb.parentElement.classList.add('hint-empty');
-  const h = document.createElement('h1');
-  h.className = 'crumbseg cur sr-only';
-  h.textContent = stateTitle(chain[chain.length - 1] || { kind: tv });
-  crumb.appendChild(h);
+  renderBreadcrumb(chain);
   // Every path through render() ends here, so this is the ONE place the URL has to be restated after a
   // screen is drawn. The identity test skips the drill animation's intermediate flashes, which render a
   // throwaway state that is not where the reader ends up.

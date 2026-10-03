@@ -153,27 +153,14 @@
                  Components are now reached by drilling a subsystem; change impact lives on the Subsystems view. -->
           </span>
         </nav>
-        <!-- The breadcrumb is the path INSIDE the open view, and its last item is the page's own h1 —
-             so the content draws no heading of its own. Its left padding is 17px on purpose: 10px of
-             row padding plus the active tab's 7px inner padding, which lands the first crumb directly
-             under that tab's label. The repeated view name then reads as the tab continuing downward
-             rather than as an accident. -->
-        <nav class="hint" id="crumbrow" aria-label="You are here"><span id="crumb"></span></nav>
+        <!-- The complete path stays below the tabs, independently of the page content. -->
+        <nav class="hint" id="crumbrow" aria-label="Breadcrumb"><div id="crumb" class="page-path"></div></nav>
         <!-- THE VIEW'S QUESTION IS NOT HERE ANY MORE. It was the last line of this block, an italic grey
              sentence under the trail; it is the sentence of the landing card now, drawn IN THE PAGE by
              syncPageHero (landingHeadHtml) — as the grey head of the landing's first block. -->
-        <!-- THE PAGE HERO: what the page you drilled into IS — its pills, its one sentence, and one line
-             of context. It does NOT carry the name; the breadcrumb two lines above it is the page's h1,
-             and printing the name again here would say it twice.
-             It used to be the SELECTION CARD's content: a page with nothing selected filled the floating
-             card with its own subject. One floating card then meant two different things — "the page you
-             are on" and "the box you clicked" — with nothing in it saying which, and closing it was undone
-             by the next navigation. The card is now only ever what you clicked.
-             LAST line of the fixed block, so #stagehead's shadow falls below it: the hero belongs with the
-             tabs and the trail (all of them say where you are), and everything under the shadow is the
-             drawing. Empty and hidden on a view's own landing screen, which leads with its own card in the page. -->
-        <div id="pagehero" hidden></div>
       </div>
+      <!-- The content title scrolls with the page; the full breadcrumb stays in the sticky chrome. -->
+      <div id="pagehero" hidden></div>
       <!-- THE WALK'S HEAD: a use case's page (and a shared sub-use case's) is the same kind of screen as
            an actor's page — one element, named, with its board under it — so it draws the same two blocks
            that page draws, IN THE PAGE rather than in the fixed block above: the element's hero, name and

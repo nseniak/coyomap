@@ -3935,11 +3935,8 @@ def test_a_detail_row_holding_blank_lines_draws_paragraphs_too() -> None:
 
 
 
-def test_a_tab_left_below_its_top_wears_the_head_path_chevron_and_no_label_moves() -> None:
-    """A tab you are NOT on that would reopen a page below its top says so, with the › the page head
-    showed while you were inside — and says so OUT OF THE FLOW: every label and every tab box sits
-    where it sat before the mark came. The lit tab wears none, because the head's path is that mark;
-    a tab left at its overview wears none, because it reopens the overview."""
+def test_a_tab_remembers_its_drill_without_a_chevron_or_label_shift() -> None:
+    """Remember the drill and scroll position without adding a tab chevron or moving its label."""
     labels = """() => [...document.querySelectorAll('button[data-view]')].filter((b) => !b.hidden)
         .map((b) => { const r = document.createRange(); r.selectNodeContents(b);
                       const t = r.getBoundingClientRect(); const x = b.getBoundingClientRect();
@@ -3951,18 +3948,22 @@ def test_a_tab_left_below_its_top_wears_the_head_path_chevron_and_no_label_moves
     with _served() as url, _page(url + "#v=capability&cap=CAP1") as page:
         _settle(page)
         before = page.evaluate(labels)
+        saved_scroll = page.evaluate("""() => {
+            const e = document.querySelector('.usecases-wrap'); e.scrollTop = 120; return e.scrollTop;
+        }""")
         assert [m[0] for m in page.evaluate(marks) if m[1]] == [], "nothing is held before a tab is left"
         page.evaluate("() => document.querySelector('button[data-view=\"domain\"]').click()")
         _settle(page)
         assert page.evaluate(labels) == before, "the mark moved a label or widened a tab"
         got = {m[0]: m[1:] for m in page.evaluate(marks)}
-        assert got["usecases"][0] is True and got["usecases"][1] == '"›"', got["usecases"]
+        assert got["usecases"][0] is False and got["usecases"][1] == "none", got["usecases"]
         assert got["usecases"][2].startswith("Reopens at "), got["usecases"]
-        assert [v for v, m in got.items() if m[0]] == ["usecases"], got
+        assert [v for v, m in got.items() if m[0]] == [], got
         # back to Features: it reopens the feature, and the lit tab wears no mark of its own
         page.evaluate("() => document.querySelector('button[data-view=\"usecases\"]').click()")
         _settle(page)
         assert "cap=CAP1" in page.evaluate("() => location.hash")
+        assert page.locator('.usecases-wrap').evaluate('(e) => e.scrollTop') == saved_scroll
         got = {m[0]: m[1:] for m in page.evaluate(marks)}
         assert got["usecases"][0] is False and got["usecases"][2] == "Back to Features", got["usecases"]
         # the lit tab again resets it to its overview; leave once more: nothing below the top, no mark
@@ -5962,3 +5963,39 @@ def test_the_lines_choice_offers_layers_every_line_or_the_happy_path_and_keeps_t
         seen = page.evaluate(state)
         assert seen["layer"] > 0 and seen["box"] == 0, seen
         assert not page.js_errors, page.js_errors
+
+
+@pytest.mark.parametrize("fragment, title, parents", [
+    ("capability&cap=CAP1", "Organizations & teams", ["Features"]),
+    ("usecase&uc=UC1", "Sign up and create an organization", ["Features", "Organizations & teams"]),
+    ("element&id=C14", "Dashboard REST API router", ["Components", "Dashboard REST API"]),
+    ("sysSection&sys=sys-entry-points", "Entry points", ["System"]),
+    ("sysSection&sys=sys-run-commands", "Run commands", ["System"]),
+    ("sysSection&sys=sys-config-environments", "Config & environments", ["System"]),
+    ("updates&at=missing", "An update", ["Updates"]),
+])
+def test_complete_breadcrumb_survives_scroll_and_has_a_working_way_up(fragment, title, parents) -> None:
+    with _served() as url, _page(url + "#v=" + fragment) as page:
+        _settle(page)
+        assert page.locator('#crumb h1[aria-current="page"]').inner_text() == title
+        assert page.locator('#crumb h1').is_visible()
+        assert page.locator('#crumb button').all_text_contents() == parents
+        assert title in page.locator('.page-hero-name').all_text_contents() or any(
+            title in name for name in page.locator('.page-hero-name').all_text_contents())
+        top = page.locator('#crumbrow').bounding_box()['y']
+        page.evaluate("""() => document.querySelectorAll('#stage, .usecases-wrap, .glossary-wrap')
+            .forEach(e => e.scrollTop = e.scrollHeight)""")
+        assert abs(page.locator('#crumbrow').bounding_box()['y'] - top) < 1
+        page.set_viewport_size({"width": 420, "height": 800})
+        _settle(page)
+        assert page.locator('#crumb h1').is_visible()
+        assert page.evaluate("""() => {
+            const row = document.querySelector('#crumbrow').getBoundingClientRect();
+            return [...document.querySelectorAll('#crumb .crumbseg')].every(e => {
+                const r = e.getBoundingClientRect(); return r.left >= row.left && r.right <= row.right + 1;
+            });
+        }""")
+        page.locator('#crumb button').first.click()
+        _settle(page)
+        assert page.locator('#crumb button').count() == 0
+        assert page.js_errors == []
