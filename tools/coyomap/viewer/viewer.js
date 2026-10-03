@@ -7743,23 +7743,32 @@ function archFeatureHtml() {
 // comes and goes. NOT ON THE WHOLE PRODUCT'S PICTURE: the whole product is every story, and its happy
 // path alone is a feature's question.
 const archhp = document.getElementById('archhp');
-// THE DETAILS SWITCH (#archdetail), on a layered map's every picture: off, the picture draws its lines
-// between layers; on, every box's own line. The happy-path switch shows only while it is on.
-const archdetail = document.getElementById('archdetail');
+// THE LINES CHOICE (#archlines), on a layered map's every picture: one row of three, because the
+// picture can show three things: its lines between layers, every box's own line, or the happy path's.
+// It was two switches, "Show all lines" and "Happy path only", which read as contradicting each other.
+// Each choice says how many lines it draws, so a reader can tell 8 from 126 before asking. A map with
+// no layers keeps the happy-path switch alone (#archhp).
+const archlines = document.getElementById('archlines');
 function syncArchHappySwitch(s) {
   const isArch = !!s && s.kind === 'arch';
-  archdetail.hidden = !(isArch && archHasDetail());
-  const detail = !!(isArch && s.detail);
-  archdetail.classList.toggle('on', detail);
-  archdetail.setAttribute('aria-pressed', String(detail));
-  // EACH SWITCH SAYS HOW MANY LINES IT DRAWS, so a reader can tell 8 from 126 before asking.
-  const lines = (key) => (((ARCH_TEXT || {})[key] || {}).lines || []).length;
-  // …and only on a feature some of whose use cases are on the happy path: on any other, a click landed
-  // on another feature's picture.
+  const layered = isArch && archHasDetail();
   const f = isArch ? archFeature(s) : '';
-  if (isArch) archdetail.querySelector('.archhp-label').textContent = `Show all lines (${lines('all|' + archFeature({ ...s, scope: '' }))})`;
-  const show = isArch && !!MERMAID_ARCH_BY['happy|' + f] && (detail || !archHasDetail());
-  if (show) archhp.querySelector('.archhp-label').textContent = `Happy path only (${lines('happy|' + f)})`;
+  const lines = (key) => (((ARCH_TEXT || {})[key] || {}).lines || []).length;
+  const hasHappy = isArch && !!MERMAID_ARCH_BY['happy|' + f];
+  archlines.hidden = !layered;
+  if (layered) {
+    const now = !s.detail ? 'layers' : archScope(s) === 'happy' ? 'happy' : 'all';
+    const counts = { all: lines('all|' + f), happy: lines('happy|' + f) };
+    archlines.querySelectorAll('[data-lines]').forEach((b) => {
+      const which = b.dataset.lines;
+      b.hidden = which === 'happy' && !hasHappy;
+      b.classList.toggle('on', which === now);
+      b.setAttribute('aria-pressed', String(which === now));
+      if (which !== 'layers') b.textContent = `${which === 'all' ? 'All' : 'Happy path'} (${counts[which]})`;
+    });
+  }
+  // …and only on a picture with a happy path of its own: on any other, a click landed on another picture.
+  const show = isArch && !layered && hasHappy;
   archhp.hidden = !show;
   if (!show) return;
   const happy = archScope(s) === 'happy';
@@ -7767,10 +7776,13 @@ function syncArchHappySwitch(s) {
   archhp.setAttribute('aria-pressed', String(happy));
   archhp.dataset.archhp = happy ? '' : 'happy';
 }
-archdetail.addEventListener('click', (e) => {
+archlines.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-lines]');
+  if (!b) return;
   e.stopPropagation();
   const cur = (hi >= 0 && history[hi]) || {};
-  go(archKeepCamera(archState(cur.detail ? '' : archScope(cur), cur.cap || '', '', !cur.detail)));
+  const which = b.dataset.lines;
+  go(archKeepCamera(archState(which === 'happy' ? 'happy' : '', cur.cap || '', '', which !== 'layers')));
 });
 // A SWITCH CHANGES THE LINES, NOT WHERE THE READER LOOKS: the new drawing opens at the zoom and the pan the
 // reader left, as "+N more" does.
@@ -8001,7 +8013,7 @@ function bindArch() {
   }
   markLayerLines(mainScene.root, t);
   markBoxLines(mainScene.root, t);
-  if (archDetailOn()) archRedrawLines();   // "Show all lines": every box line, on top, from the start
+  if (archDetailOn()) archRedrawLines();   // "Lines: All" or "Happy path": every box line, on top, from the start
 }
 // A PART DRAWN OUTSIDE ITS KIND'S OWN LAYER says why on its box's card (`moved`, gen_viewer
 // `_arch_place`): the layer is what its calls decided, and a reader who knows its kind would otherwise
@@ -8677,7 +8689,7 @@ function cardKeepSets(el) {
   // shape of the DRAWING at a time; a control is not part of the drawing, and covering one is never the
   // concession to make. The last-resort clamp below still can — a card off screen is worse.
   // The happy-path switch over the drawing's corner is a control too.
-  const fixed = [zoomctl, document.getElementById('archhp'), document.getElementById('archdetail')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
+  const fixed = [zoomctl, document.getElementById('archhp'), document.getElementById('archlines')].filter((c) => c && !c.hidden).map((c) => grow(rectOf(c), CARD_CLEAR));
   const base = !isArrow ? [[...g(own), ...fixed]]
     : [[...g([...own, rectOf(arrow), ...ends]), ...fixed],
        [...g([...own, ...ends]), ...fixed],

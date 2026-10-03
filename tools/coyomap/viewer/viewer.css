@@ -930,7 +930,15 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
   border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #334155;
 }
 .archhp { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-#archhp[hidden], #archdetail[hidden] { display: none; }
+#archhp[hidden], #archlines[hidden], #archlines button[hidden] { display: none; }
+/* THE LINES CHOICE: one row of three, the one in force ringed like a feature button (.archwho.on). */
+.archlines { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; font-size: 12px;
+  border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.archlines-lbl { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #64748b; margin: 0 4px 0 2px; }
+.archlines button { font: inherit; font-size: 12px; line-height: 1; padding: 5px 9px; cursor: pointer; color: #334155;
+  border: 1px solid transparent; border-radius: 5px; background: none; }
+.archlines button:hover { background: #f1f5f9; }
+.archlines button.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; box-shadow: inset 0 0 0 1px #4f46e5; }
 .archhp:hover { border-color: #94a3b8; background: #f8fafc; }
 .archhp-box { width: 11px; height: 11px; border: 1.5px solid #64748b; border-radius: 2px; background: #fff; }
 .archhp.on { border-color: #4f46e5; background: #eef2ff; color: #312e81; box-shadow: inset 0 0 0 1px #4f46e5; }

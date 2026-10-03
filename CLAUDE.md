@@ -282,7 +282,7 @@ design principles these come from)
   button away.
 - **whole product** (on the Architecture view) — the picture over every feature's use
   cases at once, the first button of the feature row. Like a feature's picture, it offers
-  "Happy path only".
+  the happy path's lines.
 - **macro flow** — what the Architecture picture draws: every story of the picture
   merged into one flow over the product's boxes, so each line is a way some story goes.
   Answers going back and results handed to a person are left out. Every line is drawn
@@ -295,10 +295,10 @@ design principles these come from)
   of layers instead of each box's own lines, and a box's lines on top only while the
   pointer rests on that box or the box is picked. Since 2026-10-03 (on trial) every
   layered picture opens this way, whatever its size; it was only those over 40 lines.
-- **Show all lines (N)** — the switch on a layered Architecture picture that draws every
-  box's own line on top of the same layout, the whole product included; N says how
-  many. Only while it is on does "Happy path only (N)" appear. Neither switch moves the
-  camera.
+- **lines choice** — the row "Lines: Between layers · All (N) · Happy path (N)" on a
+  layered Architecture picture. Between layers is where every picture opens; All draws
+  every box's own line on top of the same layout; Happy path draws only the happy path's.
+  N says how many. A choice never moves the camera.
 - **preview** (on the Architecture picture) — resting the pointer on a box shows its
   lines: drawn on top on a crowded picture, lit on any other. They stay while the pointer
   is on the box, on those lines or in a card, and go when it leaves; a click keeps them.

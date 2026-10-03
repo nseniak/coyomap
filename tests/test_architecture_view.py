@@ -529,7 +529,7 @@ def test_a_layer_line_few_boxes_of_its_layer_take_is_not_drawn():
 
 def test_every_layered_picture_opens_on_its_layer_lines_whatever_its_size():
     """The look no longer depends on a size the reader cannot see. Every box's own line is still in the
-    picture's text, for the view's "Show all lines" switch to draw on top of the same layout."""
+    picture's text, for the view's "Lines: All" choice to draw on top of the same layout."""
     drawings, texts = gv.gen_arch_views(make_graph(make_layered_map()))
     assert texts and all("layerLines" in t and t["lines"] for t in texts.values())
     assert all("CYFP --> CYFD" in d for d in drawings.values())

@@ -5919,36 +5919,38 @@ def test_the_second_card_leaves_the_file_tree_to_what_is_picked() -> None:
 
 
 
-def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_path() -> None:
-    """A layered picture opens on its lines between layers, whatever its size. "Display details" draws
-    every box's own line, in its own address, and only then offers "Happy path only";
-    switching details off takes the happy path back off too."""
-    state = """() => ({ hash: decodeURIComponent(location.hash),
-        detail: !document.getElementById('archdetail').hidden, happy: !document.getElementById('archhp').hidden,
+def test_the_lines_choice_offers_layers_every_line_or_the_happy_path_and_keeps_the_camera() -> None:
+    """A layered picture opens on its lines between layers, whatever its size. One row of three choices
+    says what else it can draw, each with its count: every box's own line, or the happy path's. A
+    choice goes in the address and keeps the camera where the reader left it."""
+    state = """() => ({ hash: decodeURIComponent(location.hash), row: !document.getElementById('archlines').hidden,
+        on: [...document.querySelectorAll('#archlines button.on')].map((b) => b.dataset.lines),
+        labels: [...document.querySelectorAll('#archlines button')].filter((b) => !b.hidden).map((b) => b.textContent),
         layer: [...document.querySelectorAll('#diagram path.arch-layerline')].filter((p) => getComputedStyle(p).display !== 'none').length,
         box: document.querySelectorAll('#diagram .arch-overlay .arch-ov-line').length })"""
+    camera = """() => (document.querySelector('#diagram .svg-pan-zoom_viewport').getAttribute('transform')
+        .match(/-?[0-9.]+/g) || []).map((x) => Math.round(Number(x) * 1000) / 1000)"""
     with _served_map(make_a_scoper) as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         seen = page.evaluate(state)
-        assert seen["detail"] and not seen["happy"] and seen["layer"] > 0 and seen["box"] == 0, seen
-        camera = """() => (document.querySelector('#diagram .svg-pan-zoom_viewport').getAttribute('transform')
-            .match(/-?[0-9.]+/g) || []).map((x) => Math.round(Number(x) * 1000) / 1000)"""
+        assert seen["row"] and seen["on"] == ["layers"] and seen["layer"] > 0 and seen["box"] == 0, seen
+        assert page.evaluate("() => document.getElementById('archhp').hidden"), "one row, not two switches"
         page.click("#zoomin")
         page.wait_for_timeout(400)
         before = page.evaluate(camera)
-        page.click("#archdetail")
+        page.click('#archlines [data-lines="all"]')
         page.wait_for_timeout(800)
         seen = page.evaluate(state)
-        assert "detail=1" in seen["hash"] and seen["happy"] and seen["layer"] == 0 and seen["box"] > 0, seen
-        # each switch says how many lines it draws, and the drawing stays where the reader left it
-        labels = page.evaluate("() => [...document.querySelectorAll('#overlays .archhp-label')].map((l) => l.textContent)")
-        assert labels[0] == f"Show all lines ({seen['box']})" and re.fullmatch(r"Happy path only \(\d+\)", labels[1]), labels
+        assert "detail=1" in seen["hash"] and seen["on"] == ["all"] and seen["layer"] == 0 and seen["box"] > 0, seen
+        assert seen["labels"][0] == "Between layers" and seen["labels"][1] == f"All ({seen['box']})", seen
+        assert re.fullmatch(r"Happy path \(\d+\)", seen["labels"][2]), seen
         assert page.evaluate(camera) == before
-        page.click("#archhp")
-        page.wait_for_timeout(800)
-        assert "scope=happy" in page.evaluate(state)["hash"]
-        page.click("#archdetail")
+        page.click('#archlines [data-lines="happy"]')
         page.wait_for_timeout(800)
         seen = page.evaluate(state)
-        assert "detail" not in seen["hash"] and "scope" not in seen["hash"] and not seen["happy"], seen
+        assert "scope=happy" in seen["hash"] and seen["on"] == ["happy"] and seen["labels"][2] == f"Happy path ({seen['box']})", seen
+        page.click('#archlines [data-lines="layers"]')
+        page.wait_for_timeout(800)
+        seen = page.evaluate(state)
+        assert "detail" not in seen["hash"] and "scope" not in seen["hash"] and seen["on"] == ["layers"], seen
         assert not page.js_errors, page.js_errors
