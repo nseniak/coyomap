@@ -36,6 +36,7 @@ from coyomap.viewer.gen_viewer import gen_arch_views
 from coyomap.viewer.recents import RecentsStore
 from coyomap.viewer.serve import Handler, build_projects
 from coyomap.views import model_to_graph
+from test_architecture_view import make_map_with_a_scoper
 
 _FIXTURE_MAP = Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json"
 
@@ -5055,22 +5056,31 @@ def test_a_picked_box_from_its_address_draws_its_lines_over_the_top_with_true_he
         assert not page.js_errors, page.js_errors
 
 
+def make_one_part_a_screen_called_by_stores(m: dict[str, Any]) -> None:
+    """Every component but the dashboard's API router a store, and the router a screen: the stores then
+    call up into the top layer, and neither kind ever moves, so those lines stay lines up the layers."""
+    for c in m["components"]:
+        c["kind"] = "screen" if c["id"] == "C14" else "store"
+
+
 def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_runs() -> None:
     """A line from a lower layer up to a higher one is written the other way round, so the layers stay
-    stacked. On screen it keeps one head, at the box it goes to, and a click on it picks the line the
-    way it runs."""
-    up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen)["lines"]
+    stacked. On screen it keeps one head, at the box it goes to, wears a dashed amber of its own, and a
+    click on it picks the line the way it runs, whose card says it goes up the layers."""
+    up = [(e["srcBox"], e["dstBox"]) for e in make_whole_product_text(make_one_part_a_screen_called_by_stores)["lines"]
           if e.get("up")]
     assert up, "the changed map must draw a line up the layers"
-    with _served_map(make_one_part_a_screen) as url, _page(url + "#v=arch&cap=all") as page:
+    with _served_map(make_one_part_a_screen_called_by_stores) as url, _page(url + "#v=arch&cap=all") as page:
         _arch_ready(page)
         seen = page.evaluate("""() => {
             const flipped = [...document.querySelectorAll('#diagram .edgePaths path[data-cy-flip]')];
             return { n: flipped.length,
-                     heads: flipped.map((p) => [!!p.getAttribute('marker-start'), !!p.getAttribute('marker-end')]) };
+                     heads: flipped.map((p) => [!!p.getAttribute('marker-start'), !!p.getAttribute('marker-end')]),
+                     looks: flipped.map((p) => [getComputedStyle(p).stroke, getComputedStyle(p).strokeDasharray]) };
         }""")
         assert seen["n"] == len(up), (seen, up)
         assert all(h == [True, False] for h in seen["heads"]), seen
+        assert all(look == ["rgb(217, 119, 6)", "6px, 4px"] for look in seen["looks"]), seen
         # an arrow's invisible click area keeps no head of its own, at either end
         assert page.evaluate("() => document.querySelectorAll('#diagram .cy-edgehit[marker-start], #diagram .cy-edgehit[marker-end]').length") == 0
         page.evaluate("""() => document.querySelector('#diagram .edgePaths path[data-cy-flip]').__cyHits[0]
@@ -5078,6 +5088,44 @@ def test_a_line_up_the_layers_points_the_way_it_runs_and_is_picked_the_way_it_ru
         on = page.evaluate("""() => { const h = decodeURIComponent(location.hash).split('sel=arch:')[1];
             return h ? h.split('&')[0].split('>') : null; }""")
         assert on is not None and tuple(on) in up, (on, up)
+        page.wait_for_selector("#panel .archcard-up", state="attached")
+        assert "goes up the layers" in page.evaluate("() => document.querySelector('#panel .archcard-up').textContent")
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_crowded_picture_draws_a_boxs_line_up_the_layers_in_its_own_look() -> None:
+    """On a crowded picture a box's own lines are drawn on top of it when asked: a line up the layers
+    among them keeps the dashed amber it wears where the picture draws it, head included."""
+    text = make_whole_product_text(make_parts_in_every_layer)
+    src, dst = next((e["srcBox"], e["dstBox"]) for e in text["lines"] if e.get("up"))
+    with _served_map(make_parts_in_every_layer) as url, \
+            _page(url + f"#v=arch&cap=all&sel=node%3A{src}") as page:
+        _settle(page)
+        page.wait_for_selector(".arch-ov-line", state="attached")
+        seen = page.evaluate("""([src, dst]) => {
+            const l = [...document.querySelectorAll('.arch-overlay .arch-ov-line')]
+              .find((x) => x.dataset.src === src && x.dataset.dst === dst);
+            return l ? { up: l.classList.contains('arch-ov-up'), head: l.getAttribute('marker-end'),
+                         look: [getComputedStyle(l).stroke, getComputedStyle(l).strokeDasharray] } : null;
+        }""", [src, dst])
+        assert seen == {"up": True, "head": "url(#arch-ov-head-up)", "look": ["rgb(217, 119, 6)", "6px, 4px"]}, seen
+        assert not page.js_errors, page.js_errors
+
+
+def make_a_scoper(m: dict[str, Any]) -> None:
+    """The picture tests' small layered map, with a Scoper that only its store calls."""
+    m.clear()
+    m.update(make_map_with_a_scoper())
+
+
+def test_a_part_drawn_outside_its_kinds_layer_says_why_on_its_boxs_card() -> None:
+    """The Scoper is a check that only the Saver calls, so it is drawn in Storage, and the card of the
+    box holding it says so."""
+    with _served_map(make_a_scoper) as url, _page(url + "#v=arch&cap=all&sel=node%3ACYG3S2") as page:
+        _arch_ready(page)
+        page.wait_for_selector("#panel .ecard-moved", state="attached")
+        said = page.evaluate("() => [...document.querySelectorAll('#panel .ecard-moved')].map((p) => p.textContent.trim())")
+        assert said == ["Layer Scoper sits in Storage because Saver calls it."], said
         assert not page.js_errors, page.js_errors
 
 
@@ -5319,7 +5367,8 @@ LINE_POINT = """() => { const d = document.getElementById('diagram').getBounding
   for (const l of document.querySelectorAll('.arch-ov-line')) { const L = l.getTotalLength(), m = l.getScreenCTM();
     for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) { const q = l.getPointAtLength(L * f);
       const x = m.a * q.x + m.c * q.y + m.e, y = m.b * q.x + m.d * q.y + m.f; const e = document.elementFromPoint(x, y);
-      if (x > d.left && x < d.right && y > d.top && y < d.bottom && free(x, y) && e && e.classList.contains('arch-ov-hit'))
+      if (x > d.left && x < d.right && y > d.top && y < d.bottom && free(x, y) && e && e.classList.contains('arch-ov-hit')
+          && e.parentNode === l.parentNode)
         return { x, y, src: l.dataset.src, dst: l.dataset.dst }; } }
   return null; }"""
 DRAWN = "() => [...document.querySelectorAll('#diagram .arch-overlay .arch-ov-line')].map((l) => [l.dataset.src, l.dataset.dst])"

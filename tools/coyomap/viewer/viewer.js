@@ -1542,7 +1542,9 @@ function elementCardHtml(id, opts) {
     // "feature · staff · staff". Invisible until now because it only shows on a card whose element
     // HAS pills, and those are a feature's audience, an actor's nature and a dependency's kind.
     extra: (o.extra || '') + cmpBadgeHtml(id),
-    foot: o.foot || '',
+    // `footFor(id)`: a foot the PICTURE the card floats over has for this element (the scene's
+    // `cardOpts`), such as why the Architecture picture draws a part outside its kind's layer.
+    foot: o.foot || (o.footFor ? o.footFor(id) : '') || '',
     bare: o.bare,
     cls: 'ecard',
     attrs: o.bare ? '' : ' tabindex="0"',
@@ -4863,7 +4865,7 @@ function archCurrentText() { return archTextOf((hi >= 0 && history[hi]) || {}); 
 function archCrowded() { return !!(mainScene && mainScene.root.classList.contains('arch-layers')); }
 // One line of the picture, as the overlay draws it.
 function archOverlayItem(e) {
-  return { src: e.srcBox, dst: e.dstBox };
+  return { src: e.srcBox, dst: e.dstBox, up: !!e.up };
 }
 // WHAT THE PICTURE DRAWS OF ITS LINES besides the drawing: the lines KEPT (a picked box's), the line
 // PICKED, and the lines PREVIEWED while the pointer rests on a box. Resting shows, clicking keeps: the
@@ -4996,7 +4998,10 @@ function archOverlay(items) {
     + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head"/></marker>'
     + `<marker id="arch-ov-head-picked" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
     + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
-    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head-picked"/></marker></defs>';
+    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head-picked"/></marker>'
+    + `<marker id="arch-ov-head-up" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
+    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
+    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head-up"/></marker></defs>';
   host.appendChild(g);
   const rectOf = (id) => {
     const el = [...diagram.querySelectorAll('g.node')].find((x) => idOf(x) === id);
@@ -5040,8 +5045,9 @@ function archOverlay(items) {
     // already runs its way, whatever the bend before it.
     const yb = y2 - Math.sign(y2 - c2) * ARCH_OV_HEAD_RUN;
     line.setAttribute('d', `M${x1},${y1} C${x1},${c1} ${x2},${c2} ${x2},${yb} L${x2},${y2}`);
-    line.setAttribute('class', 'arch-ov-line');
-    line.setAttribute('marker-end', 'url(#arch-ov-head)');
+    // A LINE UP THE LAYERS keeps the look it has where it is drawn in the picture (markFlippedLines).
+    line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : ''));
+    line.setAttribute('marker-end', it.up ? 'url(#arch-ov-head-up)' : 'url(#arch-ov-head)');
     line.dataset.src = it.src; line.dataset.dst = it.dst;
     const hit = line.cloneNode(false);
     hit.setAttribute('class', 'arch-ov-hit'); hit.removeAttribute('marker-end');
@@ -5075,7 +5081,8 @@ function archOverlayLineEl(src, dst) {
 function archOverlayMark(line, on) {
   line.classList.toggle('is-selected', on);
   line.classList.toggle('arch-ov-picked', on);
-  line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)' : 'url(#arch-ov-head)');
+  line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)'
+    : line.classList.contains('arch-ov-up') ? 'url(#arch-ov-head-up)' : 'url(#arch-ov-head)');
 }
 function archOverlayDesc(src, dst) {
   const s = (hi >= 0 && history[hi]) || {};
@@ -7818,8 +7825,12 @@ function showArchLine(e) {
   // The boxes a line passes through without drawing them.
   const via = (e.via || []).length
     ? `<p class="archcard-via">Through ${esc(archList(e.via))}, not shown on the picture.</p>` : '';
+  // A LINE UP THE LAYERS says so where it is told as well as where it is drawn: it is what the code does
+  // against the picture's top-to-bottom order (gen_viewer `_arch_lines_mermaid`).
+  const up = e.up ? '<p class="archcard-up">This line goes up the layers, against the picture\u2019s'
+    + ' top-to-bottom order.</p>' : '';
   panel.innerHTML = `<div class="pane-title"><h2>${esc(e.src)} \u2192 ${esc(e.dst)}</h2>`
-    + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + via
+    + (badge ? `<span class="badge edge">${esc(badge)}</span>` : '') + '</div>' + up + via
     + `<div class="archcard-lbl">${flat ? 'Use cases using this line' : 'Features using this line'}</div>`
     + `<div class="archcard-ucs">${archUseCasesHtml(e, flat)}</div>`;
   // The second card leaves the file tree and the code to what is picked.
@@ -7860,7 +7871,8 @@ function bindArch() {
   // interface, keeps their tag; a crowded picture draws no person's line at rest, so it drops none.
   const joined = new Set(archIsCrowded(t) ? [] : ((t && t.lines) || [])
     .filter((e) => e.srcBox.startsWith('CYP')).map((e) => e.src + '>' + e.dstBox));
-  mainScene.cardOpts = { dropChips: (c, id) => !!c.id && actorNodeId(c.name) === c.id && joined.has(c.name + '>' + id) };
+  mainScene.cardOpts = { dropChips: (c, id) => !!c.id && actorNodeId(c.name) === c.id && joined.has(c.name + '>' + id),
+                         footFor: (id) => archMovedFootHtml(t, id) };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box and lights its lines.
   // A CLICK ON THE BOX PICKED ALONE lets go of its lines; after one of its lines was picked, it draws
@@ -7927,6 +7939,17 @@ function bindArch() {
     };
   }
   markLayerLines(mainScene.root, t);
+}
+// A PART DRAWN OUTSIDE ITS KIND'S OWN LAYER says why on its box's card (`moved`, gen_viewer
+// `_arch_place`): the layer is what its calls decided, and a reader who knows its kind would otherwise
+// take it for a mistake. A group's card is its subsystem's, so it tells every moved part the subsystem's
+// groups hold on this picture; a part drawn as a box of its own tells its own.
+function archMovedFootHtml(t, id) {
+  const moved = (t && t.moved) || {};
+  const groups = Object.values((t && t.cells) || {}).filter((c) => c.sub === id);
+  return [...new Set([...groups.flatMap((c) => c.parts), id])].filter((p) => moved[p])
+    .map((p) => `<p class="ecard-extra ecard-moved"><span class="ecard-lbl">Layer</span> ${esc(moved[p])}</p>`)
+    .join('');
 }
 // A PERSON'S BOX is drawn under an alias of its own (a person is a role, not a map element), so
 // bindNodes passes it by. It takes the same gestures as every other box here: resting on it shows the

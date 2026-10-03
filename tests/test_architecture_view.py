@@ -350,15 +350,15 @@ def test_the_layered_picture_frames_each_part_by_its_kind():
     graph = make_graph(make_layered_map())
     drawings, _texts = gv.gen_arch_views(graph)
     drawing = drawings["all|CAP1"]
-    # the work layer names what it holds: here the Checker alone
+    # every layer of parts keeps its fixed name: the Checker alone is in Logic
     # the last frame holds the database alone, and says so
-    for label in ("UI", "APIs", "Checks", "Storage", "Databases"):
+    for label in ("UI", "APIs", "Logic", "Storage", "Databases"):
         assert f'["{label}"]' in drawing, label
     # on a feature's picture the door is in no frame: it sits between the people and the first
     # frame, tied above it
     page, api, checker, saver = (gv._arch_cell_id(f, s) for f, s in ((0, "S1"), (1, "S2"), (2, "S2"), (3, "S2")))
     assert frames_of(drawing, ("I1", page, api, checker, saver, "D1")) == {
-        page: "UI", api: "APIs", checker: "Checks", saver: "Storage", "D1": "Databases"}
+        page: "UI", api: "APIs", checker: "Logic", saver: "Storage", "D1": "Databases"}
     assert f"  I1 ~~~ {page}" in drawing and f"  I2 ~~~ {page}" in drawing
 
 
@@ -382,7 +382,7 @@ def test_the_products_own_timer_sits_in_the_work_layer_not_with_the_people():
     clock = gv._person_id("Nightly clock")
     drawings, _texts = gv.gen_arch_views(graph, crowded=0)
     assert frames_of(drawings["all|"], (clock, gv._person_id("Admin"))) == {
-        clock: "Checks", gv._person_id("Admin"): "Actors"}
+        clock: "Logic", gv._person_id("Admin"): "Actors"}
     # a person is still drawn with the people, on a picture with no people frame too
     assert gv._arch_layer(graph, model, "Admin") == -2
     assert gv._arch_layer(graph, model, "Nightly clock") == gv.ARCH_WORK_LAYER
@@ -449,16 +449,18 @@ def test_the_products_own_timer_takes_its_place_in_its_row_by_when_it_is_reached
     """The nightly clock starts the last story, so it sits after the Checker, which the first story
     reaches."""
     rows = rows_of(gv.gen_arch_views(make_graph(make_map_with_a_timer()), crowded=0)[0]["all|"])
-    assert rows["Checks"] == [gv._arch_cell_id(2, "S2"), gv._person_id("Nightly clock")]
+    assert rows["Logic"] == [gv._arch_cell_id(2, "S2"), gv._person_id("Nightly clock")]
 
 
-def test_the_first_layer_names_only_the_kinds_it_holds():
-    """The page is a screen and the client a script: the first frame holds both, and says both."""
+def test_a_layer_keeps_its_name_whatever_kinds_it_holds():
+    """The page is a screen and the client a script: the first frame holds both and is still "UI". It
+    named the kinds it held for a while ("UI and scripts"), which showed mcpolis's 4 layers under 6
+    names."""
     graph = make_graph(make_kinded_map(C1="screen", C2="script", C3="api", C4="check", C5="store"))
     drawing = gv.gen_arch_views(graph)[0]["all|"]
-    assert '["UI and scripts"]' in drawing and '["UI"]' not in drawing
+    assert '["UI"]' in drawing and '["UI and scripts"]' not in drawing
     page, client = gv._arch_cell_id(0, "S1"), gv._arch_cell_id(0, "S3")
-    assert frames_of(drawing, (page, client)) == {page: "UI and scripts", client: "UI and scripts"}
+    assert frames_of(drawing, (page, client)) == {page: "UI", client: "UI"}
 
 
 def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
@@ -469,7 +471,7 @@ def test_a_crowded_picture_draws_one_line_per_pair_of_layers():
     assert frames_of(drawing, (who, "I1")) == {who: "Actors", "I1": "Interfaces"}
     layer = {(x["src"], x["dst"]): x["lines"] for x in text["layerLines"]}
     assert layer[("Actors", "Interfaces")] == [[who, "I1"], [gv._person_id("Member"), "I2"]]
-    assert layer[("APIs", "Checks")] == [[gv._arch_cell_id(1, "S2"), gv._arch_cell_id(2, "S2")]]
+    assert layer[("APIs", "Logic")] == [[gv._arch_cell_id(1, "S2"), gv._arch_cell_id(2, "S2")]]
     # no box's own line is drawn: each frame is then laid out on its own, as one row of its boxes
     links = [ln.strip() for ln in drawing.splitlines() if "-->" in ln or "-.->" in ln]
     assert len(links) == len(text["layerLines"]) and links[0] == "CYFP --> CYFD"
@@ -625,26 +627,26 @@ def test_a_group_of_parts_is_drawn_as_its_subsystem_and_named_with_its_layer():
     drawing = drawings["all|"]
     assert (f'{group}["<span class=cyslot data-k=cell data-v=map data-id=S2 data-parts=C3%2CC4></span>"]'
             f":::cy-{group}") in drawing
-    work = drawing.split('["Logic and checks"]')[1].split("\n  end")[0]
+    work = drawing.split('["Logic"]')[1].split("\n  end")[0]
     assert f"  {group}[" in work
     assert texts["all|"]["cells"] == {gv._arch_cell_id(0, "S1"): {"sub": "S1", "parts": ["C1"]},
                                       group: {"sub": "S2", "parts": ["C3", "C4"]},
                                       gv._arch_cell_id(3, "S2"): {"sub": "S2", "parts": ["C5"]}}
     line = next(e for e in texts["all|"]["lines"] if e["srcBox"] == gv._arch_cell_id(0, "S1"))
-    assert line["dstBox"] == group and line["dst"] == "Server (Logic and checks)"
+    assert line["dstBox"] == group and line["dst"] == "Server (Logic)"
 
 
 def make_map_with_a_line_up() -> dict[str, Any]:
-    """The layered map with the Saver kinded a screen: the Checker, in the work layer, then calls up
-    into the top layer."""
-    return make_kinded_map(C1="screen", C2="pipe", C3="api", C4="check", C5="screen")
+    """The layered map with the Checker kinded a store and the Saver a screen: the store then calls up
+    into the top layer, and neither kind ever moves, so the line stays a line up the layers."""
+    return make_kinded_map(C1="screen", C2="pipe", C3="api", C4="store", C5="screen")
 
 
 def test_a_line_up_the_layers_is_drawn_from_the_upper_box_and_told_the_way_it_runs():
     graph = make_graph(make_map_with_a_line_up())
     model = gv._arch_model(graph, "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
     assert model is not None
-    checker, saver = gv._arch_cell_id(2, "S2"), gv._arch_cell_id(0, "S2")
+    checker, saver = gv._arch_cell_id(3, "S2"), gv._arch_cell_id(0, "S2")
     assert [(ln["src"], ln["dst"]) for ln in model["lines"] if ln["up"]] == [(checker, saver)]
     drawings, texts = gv.gen_arch_views(graph)
     drawing = drawings["all|"]
@@ -664,6 +666,122 @@ def test_the_picture_over_subsystems_has_no_groups_of_parts():
     _drawings, texts = gv.gen_arch_views(make_graph())
     assert texts["all|"]["cells"] == {}
     assert "data-k=cell" not in _drawings["all|"]
+
+
+# --- the layers read top to bottom: what the call graph corrects --------------------------
+
+def make_story(uc: str, name: str, steps: list[tuple[str, str, str]], feature: str = "CAP1") -> dict[str, Any]:
+    """One more use case for the Admin, its walk given as (from, to, sentence), numbered in order."""
+    return {"use_case": {"id": uc, "name": name, "actors": ["R1"], "capability": feature,
+                         "trigger": "The admin asks.", "outcome": "It is done."},
+            "flow": {"uc": uc, "title": name, "steps": [
+                {"n": i, "src": s, "dst": d, "phrase": p, **({"where": "src/x.py:1"} if s.startswith("C") else {})}
+                for i, (s, d, p) in enumerate(steps, 1)]}}
+
+
+def add_story(doc: dict[str, Any], story: dict[str, Any]) -> dict[str, Any]:
+    doc["use_cases"].append(story["use_case"])
+    doc["flows"].append(story["flow"])
+    return doc
+
+
+def make_map_with_a_scoper() -> dict[str, Any]:
+    """The layered map plus a Scoper, a check that only the Saver calls: it scopes and encrypts each
+    row on its way to the database, as mcpolis's cloud-records part does."""
+    doc = make_layered_map()
+    doc["components"].append({"id": "C6", "name": "Scoper", "subsystem": "S2", "kind": "check",
+                              "purpose": "scopes each row", "files": ["src/scope.py"]})
+    return add_story(doc, make_story("UC3", "Clean things", [
+        ("R1", "I1", "ask to clean"), ("I1", "C1", "carry the ask in"), ("C1", "C2", "send the ask"),
+        ("C2", "C3", "post the ask"), ("C3", "C5", "save the cleaned thing"),
+        ("C5", "C6", "scope and encrypt the row"), ("C6", "E1", "write the row")]))
+
+
+def test_a_check_only_stores_call_is_drawn_in_storage_and_says_why():
+    graph = make_graph(make_map_with_a_scoper())
+    place = gv._arch_place(graph)
+    assert (place["start"]["C6"], place["final"]["C6"]) == (gv.ARCH_WORK_LAYER, 3)
+    text = gv.gen_arch_views(graph)[1]["all|"]
+    assert text["cells"][gv._arch_cell_id(3, "S2")]["parts"] == ["C5", "C6"]
+    assert text["moved"] == {"C6": "Scoper sits in Storage because Saver calls it."}
+    assert not [e for e in text["lines"] if e.get("up")]
+
+
+def make_map_with_a_pushed_event() -> dict[str, Any]:
+    """The layered map plus a live list: the page listens through the client, a pipe, and the Saver later
+    publishes a new thing through the same pipe, which hands it to the API that listens."""
+    return add_story(make_layered_map(), make_story("UC3", "Watch new things", [
+        ("R1", "I1", "open the live list"), ("I1", "C1", "carry the ask in"), ("C1", "C2", "listen for new things"),
+        ("C2", "C3", "open the stream"), ("C5", "C2", "publish the new thing"),
+        ("C2", "C3", "deliver the new thing to the listener")]))
+
+
+def test_a_pushed_event_coming_back_up_a_pipe_is_not_drawn_as_a_call():
+    """Joined to the publish, the delivery drew the Saver calling the API above it."""
+    model = gv._arch_model(make_graph(make_map_with_a_pushed_event()), "", "all", gv.ARCH_LAYER_BUDGET, layered=True)
+    assert model is not None
+    ln = lines_of(model)
+    saver, api, page = gv._arch_cell_id(3, "S2"), gv._arch_cell_id(1, "S2"), gv._arch_cell_id(0, "S1")
+    assert (saver, api) not in ln and (page, api) in ln
+    assert not [pair for pair, line in ln.items() if line["up"]]
+
+
+def make_map_run_in_two_places(client_runs_in: list[str]) -> dict[str, Any]:
+    """The kinded map with the Client a piece of logic, run as `client_runs_in` says; the page runs in
+    the browser, everything else on the server."""
+    doc = make_kinded_map(C1="screen", C2="logic", C3="api", C4="check", C5="store")
+    for c in doc["components"]:
+        c["runs_in"] = client_runs_in if c["id"] == "C2" else ["web"] if c["id"] == "C1" else ["server"]
+    return doc
+
+
+def test_logic_that_runs_only_with_the_screens_sits_in_the_ui_layer():
+    graph = make_graph(make_map_run_in_two_places(["web"]))
+    assert gv._arch_frame(graph, "C2") == 0
+    assert gv._arch_place(graph)["why"]["C2"] == "Client sits in UI because it runs with the screens, not with the APIs."
+    # a place where both run decides nothing: the one-container setup most products also ship
+    both = make_graph(make_map_run_in_two_places(["web", "server"]))
+    assert gv._arch_frame(both, "C2") == gv.ARCH_WORK_LAYER
+
+
+def make_map_with_an_outside_sign_in_page() -> dict[str, Any]:
+    """The layered map plus a sign-in feature: the Checker sends the person to a provider's sign-in page,
+    and the page sends them back to the API. No step draws the person at the page."""
+    doc = make_layered_map()
+    doc["interfaces"].append({"id": "I3", "name": "Sign-in page", "what": "the provider's sign-in page",
+                              "side": "theirs", "facing": "user", "kind": "hosted-screen"})
+    doc["capabilities"].append({"id": "CAP2", "name": "Signing in", "purpose": "signs in", "happy_path": "expected"})
+    return add_story(doc, make_story("UC3", "Sign in", [
+        ("R1", "I1", "ask to sign in"), ("I1", "C1", "carry the ask in"), ("C1", "C2", "send the ask"),
+        ("C2", "C3", "start the sign-in"), ("C3", "C4", "check the ask"),
+        ("C4", "I3", "send the person to the sign-in page"), ("I3", "C3", "send the person back with a code")],
+        feature="CAP2"))
+
+
+def test_an_outside_page_a_person_goes_to_sits_with_the_doors_on_every_picture():
+    """At the bottom with the outside services, its way back in climbed every layer."""
+    graph = make_graph(make_map_with_an_outside_sign_in_page())
+    for feature in ("", "CAP2"):
+        model = gv._arch_model(graph, feature, "all", gv.ARCH_LAYER_BUDGET, layered=True)
+        assert model is not None and "I3" in model["doors"], feature
+        assert "I3" not in model["outside"] and not [ln for ln in model["lines"] if ln["up"]], feature
+
+
+def test_parts_that_call_each_other_share_one_layer():
+    out = gv._arch_fewest_moves([("A", "B"), ("B", "A")], {"A": 1, "B": 2}, {}, {"A": 3, "B": 3})
+    assert out["A"] == out["B"]
+
+
+def test_a_line_no_placement_can_straighten_binds_nothing():
+    """The store calling the screen stays a line up the layers; the check the store calls still moves down."""
+    out = gv._arch_fewest_moves([("store", "screen"), ("store", "check")], {"check": 2},
+                                {"store": 3, "screen": 0}, {"check": 3})
+    assert out == {"check": 3}
+
+
+def test_between_two_placements_that_cost_the_same_the_parts_stay_high():
+    out = gv._arch_fewest_moves([("A", "B")], {"A": 2, "B": 1}, {}, {"A": 3, "B": 3})
+    assert out == {"A": 1, "B": 1}
 
 
 def test_the_layered_picture_keeps_the_story_numbers_and_the_text():

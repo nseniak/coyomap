@@ -273,7 +273,7 @@ design principles these come from)
 - **macro flow** — what the Architecture picture draws: every story of the picture
   merged into one flow over the product's boxes, so each line is a way some story goes.
   Answers going back and results handed to a person are left out. Every line is drawn
-  the same, with no word and no number on it.
+  the same, with no word and no number on it, except an upward line.
 - **line card** — the card of a line on the Architecture picture: its two ends, the
   boxes it passes without drawing them, and the use cases using it, grouped by feature
   on the whole product and listed directly on a feature's picture. A use case's name
@@ -286,6 +286,17 @@ design principles these come from)
   lines: drawn on top on a crowded picture, lit on any other. They stay while the pointer
   is on the box, on those lines or in a card, and go when it leaves; a click keeps them.
   Nothing is previewed while something is picked.
+- **layer** (on the Architecture picture) — one of the 4 frames the parts sit in, top to
+  bottom UI, APIs, Logic, Storage, with the same name on every picture. The people
+  (Actors) and the doors (Interfaces) sit above them, the outside services and databases
+  below. A part starts in its kind's layer. A screen, a command, a script, an API and a
+  store stay there; a check or a piece of logic moves to where its calls put it, and its
+  box's card says why.
+- **upward line** — a line on the layered Architecture picture that runs from a lower
+  layer up to a higher one: the code calling against the top-to-bottom order. Drawn
+  dashed amber, and its card says so. mcpolis's map of 2026-09-30 has none.
+- **pushed event** — the product sends news to a part that asked earlier to be told. The
+  Architecture picture never draws one as a call.
 
 **How coyomap is delivered**
 

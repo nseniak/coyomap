@@ -1,0 +1,112 @@
+[
+ {
+  "name": "pushed-event-drawn-as-a-call",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "if climbs is not None and not through(dst) and climbs(came[\"src\"], dst):",
+    "new": "if False:"
+   }
+  ]
+ },
+ {
+  "name": "no-placement",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "final = {c: placed.get(c, start[c]) for c in parts}",
+    "new": "final = dict(start)"
+   }
+  ]
+ },
+ {
+  "name": "no-browser-rule",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "    if x in (client if client is not None else _arch_client_parts(graph)):\n        return 0",
+    "new": "    if False:\n        return 0"
+   }
+  ]
+ },
+ {
+  "name": "outside-page-not-a-door",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "                    if _arch_person_goes_to(graph, x):",
+    "new": "                    if False:"
+   }
+  ]
+ },
+ {
+  "name": "fixed-kinds-move",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/gen_viewer.py",
+    "old": "elif x in client or _component_kind(graph, x) in grammar.COMPONENT_KINDS_KEEPING_THEIR_LAYER:",
+    "new": "elif x in client:"
+   }
+  ]
+ },
+ {
+  "name": "names-per-kind-again",
+  "edits": [
+   {
+    "file": "tools/coyomap/grammar.py",
+    "old": "(\"Logic\", (\"logic\", \"check\", \"instructions\")),",
+    "new": "(\"Work\", (\"logic\", \"check\", \"instructions\")),"
+   }
+  ]
+ },
+ {
+  "name": "up-line-not-styled",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.css",
+    "old": "#diagram path.flowchart-link[data-cy-flip] { stroke: #d97706 !important; stroke-dasharray: 6 4; }",
+    "new": ""
+   }
+  ]
+ },
+ {
+  "name": "overlay-up-not-styled",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "line.setAttribute('class', 'arch-ov-line' + (it.up ? ' arch-ov-up' : ''));",
+    "new": "line.setAttribute('class', 'arch-ov-line');"
+   }
+  ]
+ },
+ {
+  "name": "no-card-line",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "footFor: (id) => archMovedFootHtml(t, id)",
+    "new": "footFor: () => ''"
+   }
+  ]
+ },
+ {
+  "name": "card-ignores-the-picture-foot",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "foot: o.foot || (o.footFor ? o.footFor(id) : '') || '',",
+    "new": "foot: o.foot || '',"
+   }
+  ]
+ },
+ {
+  "name": "no-up-note-on-the-line-card",
+  "edits": [
+   {
+    "file": "tools/coyomap/viewer/viewer.js",
+    "old": "'</div>' + up + via",
+    "new": "'</div>' + via"
+   }
+  ]
+ }
+]

@@ -61,21 +61,27 @@ DEP_KINDS = ("datastore", "messaging", "service", "platform", "framework", "libr
 COMPONENT_KINDS = ("screen", "command", "script", "api", "logic", "check", "instructions",
                    "store", "pipe", "wiring")
 COMPONENT_KIND_WORDS = {"api": "API", "screen": "UI"}   # how a kind is written on a box; every other word as stored
-#: How a kind is written in a layer's name, where the layer lists the kinds it holds ("UI and
-#: scripts", "Logic and checks"): the word a box shows, as many.
-COMPONENT_KIND_PLURALS = {"screen": "UI", "command": "commands", "script": "scripts", "api": "APIs",
-                          "logic": "logic", "check": "checks", "instructions": "instructions",
-                          "store": "stores", "pipe": "pipes", "wiring": "wiring"}
+#: How a pipe and the wiring are written in the name of a first layer that holds nothing else
+#: ("Wiring"): the one layer name that still says what it holds (see `COMPONENT_KIND_FRAMES`).
+COMPONENT_KIND_PLURALS = {"pipe": "pipes", "wiring": "wiring"}
 COMPONENT_KINDS_DRAWN_THROUGH = ("pipe", "wiring")   # the Architecture picture joins the lines around them
 COMPONENT_KINDS_STANDING_ALONE = ("store", "check")  # …and draws these as boxes of their own
+#: The kinds whose layer the call graph never changes (`gen_viewer._arch_place`): a screen is
+#: what people use, an API what answers them, a store what keeps records, whoever calls them. The
+#: other kinds say what a part does, and a check or a piece of logic can do it at any layer.
+COMPONENT_KINDS_KEEPING_THEIR_LAYER = ("screen", "command", "script", "api", "store")
 #: THE LAYERS a component is drawn in, top to bottom, and the known words each holds. What people
 #: use, then what the product's screens and clients call, then the work, then what keeps records.
 #: A pipe and the wiring are in none: lines go through them. What the product reaches outside is
 #: not a component at all, so it is not here either: the map's dependencies are the bottom layer.
+#: THE NAMES ARE FIXED, one per layer, on every picture. They named the kinds each layer held on
+#: one picture for a while ("UI and scripts", "Logic and checks"), which showed mcpolis's 4 layers
+#: under 6 names; and once the call graph moves a part out of its kind's layer, a list of kinds
+#: no longer says what a layer holds. A name says the layer's job; a part's own kind is on its box.
 COMPONENT_KIND_FRAMES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Screens and commands", ("screen", "command", "script")),
+    ("UI", ("screen", "command", "script")),
     ("APIs", ("api",)),
-    ("Work", ("logic", "check", "instructions")),
+    ("Logic", ("logic", "check", "instructions")),
     ("Storage", ("store",)),
 )
 

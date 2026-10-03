@@ -35,8 +35,8 @@ import subprocess
 import sys
 from html import escape as html_escape
 from pathlib import Path
-from collections import Counter
-from collections.abc import Callable, Iterator
+from collections import Counter, deque
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any, TypedDict, cast
 from urllib.parse import quote
 
@@ -1264,7 +1264,8 @@ def _component_kind(graph: GraphDict, x: str) -> str:
     return str(graph["nodes"].get(x, {}).get("component_kind") or "")
 
 
-def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
+def _draw_through(graph: GraphDict, steps: list[_ArchStep],
+                  climbs: Callable[[str, str], bool] | None = None) -> list[_ArchStep]:
     """PIPES AND THE WIRING ARE DRAWN THROUGH (`grammar.COMPONENT_KINDS_DRAWN_THROUGH`). A step into
     one waits; a step out of it joins the step that came in, so A -> pipe -> B draws A -> B, with A's
     sentence and the map steps of both. A pipe is plumbing: drawn, it stood between every screen and
@@ -1276,6 +1277,13 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
     new call: it never replaces the step that came in from outside, so a pipe that calls two servers
     in one story draws A -> B and A -> C, never B -> C. The second call out says its own sentence,
     because A's was told on the first.
+
+    A JOIN THAT CLIMBS THE LAYERS IS NOT A CALL (`climbs`, the layered picture's only). A pipe carries
+    its traffic both ways: calls go down it, and answers and pushed events come back up. An event
+    stream takes the news from the store that published it and hands it to the part that asked to be
+    told, and joined to the publish, that drew the store calling the API above it. Measured on
+    mcpolis: 8 of the 17 lines that climbed its 19 pictures were such joins, and none was a call. A
+    join is dropped when its end sits above its start by the layer each starts in (`_arch_frame`).
 
     A DOOR IS NEVER DRAWN THROUGH, on either picture. The layered picture once went from a person
     straight to the part they reach, and lost the product's whole edge: on mcpolis's whole-product
@@ -1297,14 +1305,15 @@ def _draw_through(graph: GraphDict, steps: list[_ArchStep]) -> list[_ArchStep]:
 
     kept: set[str] = set()
     while True:
-        out, needed = _draw_through_walk(graph, steps, kept, edge, beyond)
+        out, needed = _draw_through_walk(graph, steps, kept, edge, beyond, climbs)
         if needed <= kept:
             return out
         kept |= needed
 
 
 def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
-                       edge: Callable[[str], bool], beyond: Callable[[str], bool]
+                       edge: Callable[[str], bool], beyond: Callable[[str], bool],
+                       climbs: Callable[[str, str], bool] | None = None
                        ) -> tuple[list[_ArchStep], set[str]]:
     """One pass of `_draw_through`, drawing every pipe and wiring part through but the `kept` ones.
     Also says which parts it drew through that joined an edge of the product to another."""
@@ -1324,6 +1333,10 @@ def _draw_through_walk(graph: GraphDict, steps: list[_ArchStep], kept: set[str],
         if held is not None:
             came = held[0]
             if through(dst) and src in called.get(dst, set()):   # one pipe answering the one that called it
+                continue
+            # …and something coming back UP the pipe: an answer or a pushed event (see `_draw_through`).
+            # Judged at the real end only: a pipe it hands on to is no end, and sits in the first layer.
+            if climbs is not None and not through(dst) and climbs(came["src"], dst):
                 continue
             if edge(came["src"]) and beyond(dst) and dst != came["src"]:
                 needed.add(src)   # the edge straight to the edge: this part is drawn after all
@@ -1359,26 +1372,43 @@ class _ArchFlow(TypedDict):
     ends: dict[str, str]                            # use case -> what hands its result to a person
 
 
-def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False) -> _ArchFlow:
+def _arch_flow(graph: GraphDict, walks: list[str], layered: bool = False,
+               start: dict[str, int] | None = None) -> _ArchFlow:
     """Each walk as the steps the Architecture picture merges (`_arch_steps`), people by name.
 
     Three kinds of step are left out. A REPLY, a step back to a box that called this one earlier in the
     same walk: a walk records the answer coming back as a step of its own, and drawn it is a second
     line pointing back up that says nothing the call did not. And a step INTO a person or INTO a door,
     which is the result going back out: this picture draws the way in. What hands the LAST result to a
-    person is kept aside, as where that story ends."""
+    person is kept aside, as where that story ends.
+
+    `start`: each part's layer before the call graph is read (`_ArchPlacement.start`). The layered
+    picture drops what comes back up a pipe by it (`_draw_through`), so it is given there only.
+
+    AN OUTSIDE PAGE A PERSON GOES TO IS A DOOR on every layered picture (`_arch_person_goes_to`),
+    whether or not the picture's stories draw the person stepping in. A story that sent the person to
+    Google's sign-in page and drew only the page sending them back put the page with the outside
+    services, at the bottom, and its way back in climbed every layer: 5 of mcpolis's 19 pictures
+    drew it so, and the whole product's, whose other stories draw the person, put it with the doors."""
     nodes = graph["nodes"]
     flows = {str(f.get("uc")): f for f in graph["flows"]}
-    stepped = [(uc, _draw_through(graph, _arch_steps(graph, flows[uc], layered)))
-               for uc in walks if uc in flows]
-    people: dict[str, None] = {}
+    raw = [(uc, _arch_steps(graph, flows[uc], layered)) for uc in walks if uc in flows]
     doors: dict[str, None] = {}
+    for _, sts in raw:
+        for st in sts:
+            if st["from_person"] and str(nodes.get(st["dst"], {}).get("kind")) == "interface":
+                doors.setdefault(st["dst"], None)
+            elif layered:
+                for x in (st["src"], st["dst"]):
+                    if _arch_person_goes_to(graph, x):
+                        doors.setdefault(x, None)
+    climbs = _arch_climbs(graph, set(doors), start) if layered and start is not None else None
+    stepped = [(uc, _draw_through(graph, sts, climbs)) for uc, sts in raw]
+    people: dict[str, None] = {}
     for _, sts in stepped:
         for st in sts:
             if st["from_person"]:
                 people.setdefault(st["src"], None)
-                if str(nodes.get(st["dst"], {}).get("kind")) == "interface":
-                    doors.setdefault(st["dst"], None)
     out: list[tuple[str, list[tuple[str, str]]]] = []
     phrases: dict[str, list[str]] = {}
     nums: dict[str, list[list[int]]] = {}
@@ -1421,15 +1451,21 @@ class _ArchLifted(_ArchFlow):
     cells: dict[str, _ArchCell]    # the layered picture's boxes holding several parts, by box id
 
 
-def _arch_frame(graph: GraphDict, x: str) -> int:
-    """The layer a part sits in on the layered picture: its kind's place in
-    `grammar.COMPONENT_KIND_FRAMES`, or one past the last when its kind places it in none.
+def _arch_frame(graph: GraphDict, x: str, client: set[str] | None = None) -> int:
+    """The layer a part STARTS in on the layered picture: its kind's place in
+    `grammar.COMPONENT_KIND_FRAMES`, or one past the last when its kind places it in none. The call
+    graph may move it from there (`_arch_place`).
 
-    A PART THAT RUNS BEFORE THE APIS ANSWER sits with them, when its kind puts it with the work or
-    nowhere (`grammar.runs_before_apis`). Drawn with the work, a request filter made a line from a door
-    down past the APIs and back up to them: on mcpolis, with a kind on every part, its 2 filters were
-    6 of the whole product's 11 exception lines. A pipe and the wiring keep their place: lines go
-    through them."""
+    Two ways in move a part whose kind puts it with the logic or nowhere, before any line is read:
+
+    A PART THAT RUNS ONLY WHERE THE SCREENS RUN sits with them (`_arch_client_parts`, given as
+    `client`). Browser code that keeps a page's state calls the APIs, and drawn with the logic below
+    them, its calls climbed: 3 of the 10 lines that climbed a second build of mcpolis.
+
+    A PART THAT RUNS BEFORE THE APIS ANSWER sits with them (`grammar.runs_before_apis`). Drawn with the
+    work, a request filter made a line from a door down past the APIs and back up to them: on mcpolis,
+    with a kind on every part, its 2 filters were 6 of the whole product's 11 exception lines. A pipe
+    and the wiring keep their place: lines go through them."""
     kind = _component_kind(graph, x)
     # A PIPE OR THE WIRING DRAWN AS A BOX sits in the first layer, with what people run: it is drawn
     # where an interface leads straight into it (`_draw_through`), or where it starts a story.
@@ -1437,10 +1473,244 @@ def _arch_frame(graph: GraphDict, x: str) -> int:
         return 0
     frame = next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words),
                  len(grammar.COMPONENT_KIND_FRAMES))
+    if frame != ARCH_WORK_LAYER and kind:
+        return frame
+    if x in (client if client is not None else _arch_client_parts(graph)):
+        return 0
     ways_in = cast("list[dict[str, Any]]", graph["nodes"].get(x, {}).get("entry_points") or [])
-    if (frame == ARCH_WORK_LAYER or not kind) and grammar.runs_before_apis(str(e.get("kind") or "") for e in ways_in):
+    if grammar.runs_before_apis(str(e.get("kind") or "") for e in ways_in):
         return ARCH_API_LAYER
     return frame
+
+
+def _arch_client_parts(graph: GraphDict) -> set[str]:
+    """THE PARTS THAT RUN WITH THE SCREENS AND NOT WITH THE APIS: each runs (`runs_in`) in at least
+    one place where a screen runs and no API does, and in no place where an API runs and no screen
+    does. A place running both, the one-container setup most products also ship, decides nothing.
+    On mcpolis, 17 parts: its 16 screens' code and 2 pieces of logic kept in the browser."""
+    nodes = graph["nodes"]
+
+    def places(x: str) -> set[str]:
+        return {str(p) for p in cast("list[Any]", nodes[x].get("runs_in") or [])}
+
+    parts = [i for i, n in nodes.items() if str(n.get("kind")) == "component"]
+    screens: set[str] = set()
+    apis: set[str] = set()
+    for c in parts:
+        if _component_kind(graph, c) == "screen":
+            screens |= places(c)
+        elif _component_kind(graph, c) == "api":
+            apis |= places(c)
+    return {c for c in parts if places(c) & (screens - apis) and not places(c) & (apis - screens)}
+
+
+def _arch_person_goes_to(graph: GraphDict, x: str) -> bool:
+    """Is `x` an interface whose kind says a person goes there themselves: someone else's sign-in
+    page, a link we hand them (`grammar.INTERFACE_KINDS_A_PERSON_GOES_TO`)?"""
+    node = graph["nodes"].get(x)
+    if node is None or str(node.get("kind")) != "interface":
+        return False
+    fields = cast("dict[str, Any]", node.get("fields") or {})
+    return grammar.canonical_interface_kind(str(fields.get("Kind") or "")) in grammar.INTERFACE_KINDS_A_PERSON_GOES_TO
+
+
+def _arch_climbs(graph: GraphDict, doors: set[str], start: dict[str, int]) -> Callable[[str, str], bool]:
+    """Does a line from `a` to `b` climb the layers, by the layer each starts in? A person, named by
+    the walk and no node of the map, sits above everything; a door below the people; a part in its
+    starting layer (`start`); and anything else, a database or an outside service, below every part."""
+    nodes = graph["nodes"]
+    bottom = len(grammar.COMPONENT_KIND_FRAMES) + 1
+
+    def level(x: str) -> int:
+        if x not in nodes:
+            return -2
+        if x in doors:
+            return -1
+        if str(nodes[x].get("kind")) == "component":
+            return start[x] if x in start else _arch_frame(graph, x)
+        return bottom
+
+    return lambda a, b: level(a) > level(b)
+
+
+class _ArchPlacement(TypedDict):
+    """WHERE EACH PART IS DRAWN on the layered picture, worked out once over the whole product so that
+    a part sits in the same layer on every picture (`_arch_place`)."""
+    start: dict[str, int]   # each part's layer before the call graph is read (`_arch_frame`)
+    final: dict[str, int]   # …and the layer it is drawn in
+    why: dict[str, str]     # a part drawn outside its kind's own layer -> the sentence saying why
+
+
+def _arch_place(graph: GraphDict) -> _ArchPlacement:
+    """THE CALL GRAPH CORRECTS THE KIND. Each part starts in its kind's layer (`_arch_frame`); the parts
+    whose kind does not fix a layer then move as few layers as possible, so that no line of the whole
+    product's macro flow climbs (`_arch_fewest_moves`). A screen, a command, a script, an API and a
+    store never move (`grammar.COMPONENT_KINDS_KEEPING_THEIR_LAYER`), nor does code kept in the browser.
+
+    WHY READ THE CALLS. A kind says what a part does, not where it runs: mcpolis's part that adds each
+    organization's filter to every database call and encrypts the secret fields is a `check`, and only
+    its stores call it. Drawn with the logic, all 4 of its lines climbed from Storage. It is drawn in
+    Storage now, and its box's card says so (`why`).
+
+    ONE PLACEMENT FOR THE WHOLE PRODUCT, so a part keeps its layer from picture to picture, and every
+    picture, holding fewer lines, climbs no more than the whole product's does. Measured on mcpolis:
+    17 lines climbing on 11 of its 19 pictures before this and the two rules beside it (`_draw_through`,
+    `_arch_flow`), and none after, with 3 of its 93 parts drawn outside their kind's layer."""
+    nodes = graph["nodes"]
+    client = _arch_client_parts(graph)
+    parts = [i for i, n in nodes.items() if str(n.get("kind")) == "component"]
+    start = {c: _arch_frame(graph, c, client) for c in parts}
+    flow = _arch_flow(graph, _arch_walks(graph), layered=True, start=start)
+    links = list(dict.fromkeys(pair for _uc, steps in flow["walks"] for pair in steps))
+    timers = _arch_inside_people(graph)
+    doors = set(flow["doors"])
+    deepest_kinded = len(grammar.COMPONENT_KIND_FRAMES) - 1
+    fixed: dict[str, int] = {}
+    movable: dict[str, int] = {}   # a part that may move -> the deepest layer it may sit in
+    for x in dict.fromkeys(p for pair in links for p in pair):
+        if x in timers:
+            fixed[x] = ARCH_WORK_LAYER
+        elif x not in nodes:
+            fixed[x] = -2
+        elif x in doors:
+            fixed[x] = -1
+        elif str(nodes[x].get("kind")) != "component":
+            fixed[x] = deepest_kinded + 2
+        elif x in client or _component_kind(graph, x) in grammar.COMPONENT_KINDS_KEEPING_THEIR_LAYER:
+            fixed[x] = start[x]
+        else:
+            movable[x] = deepest_kinded if _component_kind(graph, x) else deepest_kinded + 1
+    placed = _arch_fewest_moves(links, start, fixed, movable)
+    final = {c: placed.get(c, start[c]) for c in parts}
+    layer_of = {**fixed, **final}
+    why: dict[str, str] = {}
+    for c in parts:
+        said = _arch_placed_why(graph, c, start[c], final[c], c in client, links, layer_of)
+        if said:
+            why[c] = said
+    return _ArchPlacement(start=start, final=final, why=why)
+
+
+#: The cost of one line left climbing when the parts could have moved instead (`_arch_fewest_moves`):
+#: more than moving every part of any map, less than a part that may not move.
+_ARCH_CLIMB_COST = 1 << 20
+_ARCH_NEVER = 1 << 40
+
+
+def _arch_fewest_moves(links: list[tuple[str, str]], start: dict[str, int], fixed: dict[str, int],
+                       movable: dict[str, int]) -> dict[str, int]:
+    """The layer of each `movable` part (-> the deepest layer it may sit in) that moves the parts the
+    fewest layers in all from `start`, so that no line of `links` climbs: each starts at or above its
+    end. A point of `fixed` sits where it says: a person, a door, a database, a part that never moves.
+
+    A LINE NO PLACEMENT CAN STRAIGHTEN binds nothing: one between two fixed ends, one from a fixed end
+    below every layer its movable end may take, one into a fixed end above every layer its movable
+    start may take. It stays a line up the layers, drawn as one (`_arch_lines_mermaid`). Nor can a
+    loop through fixed ends in different layers: one of its lines stays up, where it costs least.
+
+    The least total of |layer - start| with every line's start above its end is an isotonic
+    regression, solved exactly by one minimum cut per boundary between two layers: each cut says which
+    parts sit below that boundary (Hochbaum's threshold method). Each cut keeps the FEWEST parts below
+    it, so the cuts nest, every part gets one layer, and between two placements that cost the same the
+    parts stay as high as they can."""
+    deepest = max(movable.values(), default=0)
+    out = {x: 0 for x in movable}
+    binding: list[tuple[str, str]] = []
+    for a, b in links:
+        if a in fixed and b in fixed:
+            continue
+        if a in fixed and not 0 < fixed[a] <= movable[b]:
+            continue   # at or above every layer, or below every layer `b` may take
+        if b in fixed and not 0 <= fixed[b] < movable[a]:
+            continue   # above every layer, or at or below every layer `a` may take
+        binding.append((a, b))
+    for t in range(1, deepest + 1):   # the boundary just above layer t
+        cap: dict[str, dict[str, int]] = {"": {}, "\0": {}}   # the source and the sink
+        source, sink = "", "\0"
+
+        def add(u: str, v: str, c: int) -> None:
+            cap.setdefault(u, {})[v] = cap.setdefault(u, {}).get(v, 0) + c
+            cap.setdefault(v, {}).setdefault(u, 0)
+
+        for x, low in movable.items():
+            if low < t:
+                add(x, sink, _ARCH_NEVER)        # it may not sit below this boundary
+            elif start[x] >= t:
+                add(source, x, 1)                # one layer of moving, to sit above it
+            else:
+                add(x, sink, 1)                  # one layer of moving, to sit below it
+        for a, b in binding:                     # `a` below the boundary takes `b` with it
+            if a in fixed:
+                if fixed[a] >= t:
+                    add(source, b, _ARCH_CLIMB_COST)
+            elif b in fixed:
+                if fixed[b] < t:
+                    add(a, sink, _ARCH_CLIMB_COST)
+            else:
+                add(a, b, _ARCH_CLIMB_COST)
+        for x in _min_cut_source_side(cap, source, sink) & out.keys():
+            out[x] += 1
+    return out
+
+
+def _min_cut_source_side(cap: dict[str, dict[str, int]], source: str, sink: str) -> set[str]:
+    """The FEWEST nodes on the source side of a minimum source-sink cut: the ones the source still
+    reaches once the flow is as large as it gets (Edmonds and Karp: always the shortest path that can
+    take more). `cap` holds every edge's capacity, with each reverse edge present, and is used up."""
+    while True:
+        parent = {source: source}
+        queue = deque([source])
+        while queue and sink not in parent:
+            u = queue.popleft()
+            for v, c in cap[u].items():
+                if c > 0 and v not in parent:
+                    parent[v] = u
+                    queue.append(v)
+        if sink not in parent:
+            return set(parent)
+        path: list[tuple[str, str]] = []
+        v = sink
+        while v != source:
+            path.append((parent[v], v))
+            v = parent[v]
+        more = min(cap[u][w] for u, w in path)
+        for u, w in path:
+            cap[u][w] -= more
+            cap[w][u] += more
+
+
+def _arch_placed_why(graph: GraphDict, part: str, start: int, final: int, client: bool,
+                     links: list[tuple[str, str]], layer_of: dict[str, int]) -> str:
+    """The sentence a part drawn outside its kind's own layer carries on its box's card, saying why:
+    the parts whose calls placed it, or the way in that started it there. "" for a part in its
+    kind's own layer, and for a pipe or the wiring drawn as a box where it starts."""
+    nodes = graph["nodes"]
+    name = str(nodes[part].get("name") or part)
+    where = _arch_frame_label(final)
+
+    def names(xs: list[str]) -> str:
+        said = [str(nodes[x].get("name") or x) if x in nodes else x for x in dict.fromkeys(xs)]
+        shown = said if len(said) <= 3 else [*said[:2], f"{len(said) - 2} more"]
+        return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"
+
+    if final > start:
+        callers = [a for a, b in links if b == part and layer_of.get(a) == final]
+        return (f"{name} sits in {where} because {names(callers)} call{'s' if len(set(callers)) == 1 else ''} it."
+                if callers else "")
+    if final < start:
+        called = [b for a, b in links if a == part and layer_of.get(b) == final]
+        return f"{name} sits in {where} because it calls {names(called)}." if called else ""
+    kind = _component_kind(graph, part)
+    own = next((i for i, (_label, words) in enumerate(grammar.COMPONENT_KIND_FRAMES) if kind in words), None)
+    if own is None and kind in grammar.COMPONENT_KINDS_DRAWN_THROUGH:
+        return ""
+    if final == own:
+        return ""
+    if client and final == 0:
+        return f"{name} sits in {where} because it runs with the screens, not with the APIs."
+    if final == ARCH_API_LAYER:
+        return f"{name} sits in {where} because it runs on each request before the APIs answer."
+    return ""
 
 
 def _arch_frame_label(frame: int) -> str:
@@ -1467,35 +1737,31 @@ def _arch_layer_label(layer: int) -> str:
 
 
 def _arch_frame_title(graph: GraphDict, model: _ArchModel, layer: int) -> str:
-    """A layer's name ON ONE PICTURE. A layer that can hold several kinds names only the kinds it
-    holds there: "UI" or "UI and scripts", "Logic" or "Logic and checks". Only 2 of mcpolis's 11
-    pictures held more than one kind in the first layer, under a name that promised all three, and
-    "Work" named no kind at all. Each kind is written as `grammar.COMPONENT_KIND_PLURALS` writes it.
+    """A layer's name ON ONE PICTURE. The four layers of parts keep their fixed names, UI, APIs, Logic
+    and Storage (`grammar.COMPONENT_KIND_FRAMES`), whatever kinds they hold on this picture.
 
-    THE LAST FRAME NAMES WHAT IT HOLDS the same way: the outside services the product reaches, the
-    databases its records live in, or both. The product's own database is no outside service: the
-    glossary's interface leaves out "data the product writes only to read back". It is a database,
-    and not "storage", which is the layer of the parts that keep records."""
+    THE FIRST LAYER IS THE ONE EXCEPTION. It also holds a pipe or the wiring drawn as a box
+    (`_arch_frame`), and is named for them when it holds nothing else: "UI" over a deploy's container
+    stack alone would name what is not there. Beside a screen they are tags in its box, and their own
+    cards say what kind they are.
+
+    THE LAST FRAME NAMES WHAT IT HOLDS: the outside services the product reaches, the databases its
+    records live in, or both. The product's own database is no outside service: the glossary's
+    interface leaves out "data the product writes only to read back". It is a database, and not
+    "storage", which is the layer of the parts that keep records."""
     frames = grammar.COMPONENT_KIND_FRAMES
     if layer == len(frames) + 1:
         said = [name for name, there in (("outside services", model["outside"]), ("databases", model["stores"]))
                 if there]
         return " and ".join(said).capitalize() if said else _arch_layer_label(layer)
-    if not 0 <= layer < len(frames) or len(frames[layer][1]) < 2:
+    if layer != 0:
         return _arch_layer_label(layer)
     held = {_component_kind(graph, p) for b in model["inside"] if _arch_layer(graph, model, b) == layer
             for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])}
-    # The first layer also holds a pipe or the wiring drawn as a box (`_arch_frame`), and its name says so
-    # ONLY when it holds nothing else. Every such part sits inside a subsystem box that also holds
-    # screens: on mcpolis, all 4 of them, on 4 of the 11 pictures. Named for them, the layer read "UI,
-    # scripts, pipes and wiring", a list of whatever happened to be there; the parts are still tags in
-    # their boxes, and their own cards say what kind they are.
-    names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in frames[layer][1] if w in held]
-    if not names and layer == 0:
-        names = [grammar.COMPONENT_KIND_PLURALS.get(w, w) for w in grammar.COMPONENT_KINDS_DRAWN_THROUGH if w in held]
-    if not names:
+    if not held or not held <= set(grammar.COMPONENT_KINDS_DRAWN_THROUGH):
         return _arch_layer_label(layer)
-    said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    names = [grammar.COMPONENT_KIND_PLURALS[w] for w in grammar.COMPONENT_KINDS_DRAWN_THROUGH if w in held]
+    said = " and ".join(names)
     return said[0].upper() + said[1:]
 
 
@@ -1505,7 +1771,8 @@ def _arch_cell_id(frame: int, sub: str) -> str:
     return f"CYG{frame}{sub}"
 
 
-def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _ArchLifted:
+def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False,
+               placed: dict[str, int] | None = None) -> _ArchLifted:
     """The merged steps redrawn over BOXES (see the rule above the Architecture section): each
     component becomes its own subsystem, even when it is the only component of that subsystem the
     stories use.
@@ -1521,7 +1788,8 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
     `_ArchCell`, even when it is the only part of its subsystem in its layer. Measured on
     mcpolis with a kind on every part: the whole-product picture went from 71 boxes to 24 and from 191
     lines to 107, and a feature's from 13 boxes to 8 at the median. The subsystem is the TOP-LEVEL one,
-    the one a reader meets as the box's name."""
+    the one a reader meets as the box's name. A part's layer is the one the placement gives it
+    (`placed`, `_ArchPlacement.final`), else the one it starts in."""
     nodes = graph["nodes"]
     used: dict[str, set[str]] = {}
     met: dict[str, set[str]] = {}   # every component the stories use, first met first -> those stories
@@ -1544,7 +1812,8 @@ def _arch_lift(graph: GraphDict, flow: _ArchFlow, layered: bool = False) -> _Arc
         for c in met:
             area = _top_subsystem(graph, c)
             if area:
-                groups.setdefault((_arch_frame(graph, c), area), []).append(c)
+                frame = placed[c] if placed is not None and c in placed else _arch_frame(graph, c)
+                groups.setdefault((frame, area), []).append(c)
         box_of = {c: c for c in met}
         order = list(met)
         for (frame, area), parts in groups.items():
@@ -1685,17 +1954,26 @@ class _ArchModel(TypedDict):
     timers: list[str]        # the people that are the product's own scheduled work (`grammar.is_inside_role`)
     rank: dict[str, int]     # every box's place LEFT TO RIGHT in its row: the order the stories first
                              # reach it, the stories in `_arch_walks`'s order and each in its steps'
+    placed: dict[str, int]   # the layered picture's: each part's layer (`_ArchPlacement.final`)
 
 
 def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
-                budget: int = ARCH_BOX_BUDGET, layered: bool = False) -> _ArchModel | None:
+                budget: int = ARCH_BOX_BUDGET, layered: bool = False,
+                place: _ArchPlacement | None = None) -> _ArchModel | None:
     """The Architecture picture as data: the chosen stories merged into one flow and simplified by
     the rule in the block above, with every line's number (its place in the macro flow) worked out. `None` when
     the chosen stories reach no component. `gen_overview_mermaid` draws it; keeping the two apart
-    lets the numbering be checked on the flow itself instead of by reading a drawing back."""
+    lets the numbering be checked on the flow itself instead of by reading a drawing back.
+
+    `place`: where each part is drawn on the layered picture (`_arch_place`), worked out here when it
+    is not given. A caller drawing several pictures works it out once and passes it to each."""
     nodes = graph["nodes"]
     subflows = {str(sf.get("id")) for sf in cast("list[dict[str, Any]]", graph.get("subflows") or [])}
-    flow = _arch_lift(graph, _arch_flow(graph, _arch_walks(graph, feature, scope), layered), layered)
+    if layered and place is None:
+        place = _arch_place(graph)
+    flow = _arch_lift(graph, _arch_flow(graph, _arch_walks(graph, feature, scope), layered,
+                                        place["start"] if place else None),
+                      layered, place["final"] if place else None)
     cells = flow["cells"]
 
     def kind_of(i: str) -> str:
@@ -1813,7 +2091,8 @@ def _arch_model(graph: GraphDict, feature: str = "", scope: str = "all",
     model = _ArchModel(people=flow["people"], doors=flow["doors"], inside=inside, outside=outside,
                        stores=stores, lines=lines, stories=stories, ends=ends,
                        cells={b: cells[b] for b in inside if b in cells},
-                       timers=[p for p in flow["people"] if p in _arch_inside_people(graph)], rank=rank)
+                       timers=[p for p in flow["people"] if p in _arch_inside_people(graph)], rank=rank,
+                       placed=place["final"] if place else {})
     if layered:
         for ln in model["lines"]:
             ln["up"] = _arch_layer(graph, model, ln["src"]) > _arch_layer(graph, model, ln["dst"])
@@ -1851,7 +2130,7 @@ def _arch_layer(graph: GraphDict, model: _ArchModel, x: str) -> int:
     if cell is not None:
         return cell["frame"]
     if x in model["inside"]:
-        return _arch_frame(graph, x)
+        return model["placed"][x] if x in model["placed"] else _arch_frame(graph, x)
     return len(grammar.COMPONENT_KIND_FRAMES) + 1
 
 
@@ -1864,7 +2143,8 @@ def gen_overview_mermaid(graph: GraphDict, feature: str = "", scope: str = "all"
     the budget keeps the boxes THOSE stories pass through most.
 
     Every line is drawn the same, with no word on it (`_arch_lines_mermaid`): its card tells it. A
-    line through boxes folded away names them (`via`).
+    line through boxes folded away names them (`via`). A line up the layers alone wears a look of its
+    own, which the view gives it.
 
     `""` when the chosen stories draw nothing: a map with no walks hides the view, and a feature
     with no happy-path story gets no happy-path picture."""
@@ -2059,7 +2339,12 @@ def _arch_lines_mermaid(graph: GraphDict, model: _ArchModel, lines: list[str],
     lines of coyomap's own picture and on none of mcpolis's layered ones, while the key explained it on
     both; a teal dash said a line ran into a database, which the box it ends at says; and a word on a
     line ("calls ×2", "via 2", "keeps") said what its card says. The card tells a line: its use cases,
-    and the boxes a line passes through without drawing them."""
+    and the boxes a line passes through without drawing them.
+
+    A LINE UP THE LAYERS IS THE ONE EXCEPTION, and the view draws it, not this: written flipped, it is
+    marked where it is drawn (`markFlippedLines`), and the stylesheet gives it a colour of its own.
+    The layers read top to bottom, and the few lines left climbing after the parts are placed
+    (`_arch_place`) are what the code does against that order: hidden, they could never be seen."""
 
     def box_id(x: str) -> str:
         return _arch_box_id(model, x)
@@ -2156,7 +2441,8 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
     What it tells is `{lines, cells}`: each line's card (`_arch_text`), and each group of parts with
     the subsystem it stands for and the parts it holds, which the view opens and marks through. A layered picture with more than `crowded`
     lines also carries its lines between layers (`layerLines`), which it draws instead of its
-    boxes' own.
+    boxes' own. A layered picture drawing a part outside its kind's own layer says why (`moved`:
+    part -> its sentence, `_ArchPlacement.why`), and its box's card tells it.
 
     A combination that draws nothing is left out, and the view reads that as "not offered": a
     feature with no happy-path story has no button while the happy path is switched on."""
@@ -2164,19 +2450,23 @@ def gen_arch_views(graph: GraphDict, crowded: int = ARCH_CROWDED_LINES
     texts: dict[str, dict[str, Any]] = {}
     layered = arch_layered(graph)
     budget = ARCH_LAYER_BUDGET if layered else ARCH_BOX_BUDGET
+    place = _arch_place(graph) if layered else None
     for scope in ARCH_SCOPES:
         for feature in ["", *(f["id"] for f in arch_features(graph))]:
             if scope == "happy" and not feature:
                 continue   # the whole product has no happy-path picture: the view offers none
-            model = _arch_model(graph, feature, scope, budget, layered)
+            model = _arch_model(graph, feature, scope, budget, layered, place)
             if model is None:
                 continue
+            drawn = [p for b in model["inside"] for p in (model["cells"][b]["parts"] if b in model["cells"] else [b])]
+            moved = {p: place["why"][p] for p in drawn if p in place["why"]} if place else {}
             whole = layered and len(model["lines"]) > crowded
             layer_lines = _arch_layer_lines(graph, model) if whole else []
             drawings[f"{scope}|{feature}"] = _arch_mermaid(graph, model, layered, whole)
             texts[f"{scope}|{feature}"] = {
                 "lines": _arch_text(graph, model),
                 "cells": {b: {"sub": c["sub"], "parts": c["parts"]} for b, c in model["cells"].items()},
+                **({"moved": moved} if moved else {}),
                 **({"layerLines": [{"src": _arch_frame_title(graph, model, ll["src"]),
                                     "dst": _arch_frame_title(graph, model, ll["dst"]),
                                     "lines": [list(pair) for pair in ll["lines"]],

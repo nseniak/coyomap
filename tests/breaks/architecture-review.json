@@ -54,8 +54,8 @@
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.js",
-    "old": "line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)' : 'url(#arch-ov-head)');",
-    "new": "line.setAttribute('marker-end', 'url(#arch-ov-head)');"
+    "old": "line.setAttribute('marker-end', on ? 'url(#arch-ov-head-picked)'",
+    "new": "line.setAttribute('marker-end', false ? 'url(#arch-ov-head-picked)'"
    }
   ]
  },
@@ -154,8 +154,8 @@
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.js",
-    "old": " && joined.has(c.name + '>' + id) };",
-    "new": " };"
+    "old": " && joined.has(c.name + '>' + id),",
+    "new": ","
    }
   ]
  },

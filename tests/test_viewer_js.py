@@ -3317,7 +3317,8 @@ def test_the_other_axis_is_a_labelled_line_and_not_a_bare_pill() -> None:
     assert js.count("useCaseFeatureFootHtml(") == 4, "one definition, three callers"
     card = js[js.index("function elementCardHtml(id, opts) {"):
               js.index("\n}", js.index("function elementCardHtml(id, opts) {"))]
-    assert "foot: o.foot || ''," in card, "the card hands its labelled line to the one builder"
+    assert "foot: o.foot || (o.footFor ? o.footFor(id) : '') || ''," in card, \
+        "the card hands its labelled line, its own or the picture's, to the one builder"
     # …which puts it after the sentence, once, for every box in the product.
     box = js[js.index("function itemBoxHtml(spec, variant, opts) {"):
              js.index("\nfunction ", js.index("function itemBoxHtml(spec, variant, opts) {") + 10)]

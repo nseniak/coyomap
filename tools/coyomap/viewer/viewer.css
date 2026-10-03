@@ -959,6 +959,11 @@ table.glossary thead th, table.dv-table thead th { font-size: 10px; font-weight:
   color: #64748b; margin: 10px 0 4px; }
 .archcard-via { margin: 6px 0 0; font-size: 12px; color: #64748b; }
 
+/* A LINE UP THE LAYERS (viewer.js markFlippedLines, and archOverlay on a crowded picture): the layers read
+   top to bottom, and a line against that order is what the code does that a reader should see. Dashed,
+   so it still shows when it is lit. */
+#diagram path.flowchart-link[data-cy-flip] { stroke: #d97706 !important; stroke-dasharray: 6 4; }
+.archcard-up { margin: 6px 0 0; font-size: 12px; color: #b45309; }
 /* …and on a picture that draws every line, resting on a box lights its own. */
 #diagram path.flowchart-link.arch-preview-on { stroke: #4f46e5 !important; stroke-width: 2.4px !important; }
 /* …and the Interfaces picture keeps the air above and below its columns that its own padding gave: the
@@ -3545,8 +3550,10 @@ tr.pickbox.ibox-picked > td:first-child { box-shadow: inset 3px 0 0 #4f46e5; }
 .arch-layers .arch-layerline { pointer-events: none; }   /* drawing only: a click goes to what is behind */
 .arch-layer-head { fill: #64748b; }   /* ARCH_LAYER_LINE_COLOR in viewer.js */
 .arch-ov-line { fill: none; stroke: #4f46e5; stroke-width: 1.8px; }
+.arch-ov-line.arch-ov-up { stroke: #d97706; stroke-dasharray: 6 4; }   /* a line up the layers, as drawn */
 .arch-ov-line.arch-ov-picked { stroke: #2563eb; stroke-width: 3.2px; }   /* picked: glowEdge's blue */
 .arch-ov-head { fill: #4f46e5; }
 .arch-ov-head-picked { fill: #2563eb; }
+.arch-ov-head-up { fill: #d97706; }
 .arch-ov-hit { fill: none; stroke: transparent; stroke-width: 12px; cursor: pointer; pointer-events: stroke; }
 
