@@ -5536,14 +5536,14 @@ def make_two_people_at_one_page(m: dict[str, Any]) -> None:
     m.update(doc)
 
 
-def test_an_interfaces_card_drops_only_the_people_this_picture_joins_to_it() -> None:
-    """An interface's card on the Architecture picture drops a person only when the picture draws a line
-    from that person to the interface. On one feature's picture the other feature's Visitor keeps their
-    tag; on the whole product both are joined and both go; a use case map keeps every one."""
+def test_an_interfaces_card_names_no_people_on_the_architecture_picture_only() -> None:
+    """An interface's card on the Architecture picture names no people, on a feature's picture as on the
+    whole product, crowded or not: the picture draws the people as its top row. A use case map keeps
+    every one."""
     people = """() => { const c = document.querySelector('#panel .ecard'); return c ? [...c.querySelectorAll('.item-pill')]
         .filter((p) => ['human', 'service', 'ai-agent'].includes(p.dataset.kind)).map((p) => p.textContent.trim()).sort() : null; }"""
     with _served_map(make_two_people_at_one_page) as url, _page(url) as page:
-        for address, want in (("#v=arch&cap=CAP1&sel=node%3AI1", ["Visitor"]),
+        for address, want in (("#v=arch&cap=CAP1&sel=node%3AI1", []),
                               ("#v=arch&cap=all&sel=node%3AI1", []),
                               ("#v=usecase&uc=UC1&sel=node%3AI1", ["Admin", "Visitor"])):
             page.goto(url + address)

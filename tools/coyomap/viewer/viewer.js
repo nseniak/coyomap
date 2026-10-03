@@ -7892,13 +7892,11 @@ function bindArch() {
   const cells = (t && t.cells) || {};
   const standsFor = (id) => (cells[id] ? cells[id].sub : id);
   mainScene.focusPairs = ((t && t.lines) || []).map((e) => [e.srcBox, e.dstBox]);
-  // AN INTERFACE'S CARD DROPS THE PEOPLE THIS PICTURE JOINS TO IT, by a line from the person's box to
-  // the interface's: "a box does not repeat its picture" allows dropping only what the same picture
-  // draws AND joins to the box. A person the picture does not draw, or draws without a line to this
-  // interface, keeps their tag; a crowded picture draws no person's line at rest, so it drops none.
-  const joined = new Set(archIsCrowded(t) ? [] : ((t && t.lines) || [])
-    .filter((e) => e.srcBox.startsWith('CYP')).map((e) => e.src + '>' + e.dstBox));
-  mainScene.cardOpts = { dropChips: (c, id) => !!c.id && actorNodeId(c.name) === c.id && joined.has(c.name + '>' + id),
+  // AN INTERFACE'S CARD ON THIS PICTURE NAMES NO PEOPLE: the picture draws the people as its top row,
+  // above the doors they come through. Asked for on 2026-10-02. A narrower rule followed the same day,
+  // dropping only a person this picture joins to the interface by a drawn line, and a crowded picture,
+  // which draws no person's line at rest, then dropped nobody, on the picture the view opens on.
+  mainScene.cardOpts = { dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id,
                          footFor: (id) => archMovedFootHtml(t, id) };
   markFlippedLines(mainScene.root, t);   // before anything reads the drawing's lines
   // A plain click picks the box and lights its lines.

@@ -150,12 +150,12 @@
   ]
  },
  {
-  "name": "drops-every-actor",
+  "name": "keeps-every-actor",
   "edits": [
    {
     "file": "tools/coyomap/viewer/viewer.js",
-    "old": " && joined.has(c.name + '>' + id),",
-    "new": ","
+    "old": "dropChips: (c) => !!c.id && actorNodeId(c.name) === c.id,",
+    "new": "dropChips: () => false,"
    }
   ]
  },
