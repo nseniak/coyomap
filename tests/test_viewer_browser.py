@@ -5935,7 +5935,8 @@ def test_display_details_draws_every_boxs_line_and_only_then_offers_the_happy_pa
         _arch_ready(page)
         seen = page.evaluate(state)
         assert seen["detail"] and not seen["happy"] and seen["layer"] > 0 and seen["box"] == 0, seen
-        camera = "() => document.querySelector('#diagram .svg-pan-zoom_viewport').getAttribute('transform')"
+        camera = """() => (document.querySelector('#diagram .svg-pan-zoom_viewport').getAttribute('transform')
+            .match(/-?[0-9.]+/g) || []).map((x) => Math.round(Number(x) * 1000) / 1000)"""
         page.click("#zoomin")
         page.wait_for_timeout(400)
         before = page.evaluate(camera)
