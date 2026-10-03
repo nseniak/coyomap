@@ -4835,12 +4835,13 @@ function markLayerLines(root, t) {
   top.append(paths);
   if (labelGroup) top.append(labelGroup);
 }
-// A LAYER LINE IS THICK AT ANY ZOOM, in a grey dark enough to read over the frames. The whole product's picture is big, so at the zoom it
-// opens at a line of 2.6 units was 0.76 screen pixels wide and read as grey. Its width is counter-scaled
-// against the zoom (rescaleLayerLines), and its heads are sized by its width (markerUnits
-// strokeWidth), so they keep one screen size with it. Mermaid's own heads are sized in units.
+// A LAYER LINE IS 3 SCREEN PIXELS AT 100% and scales with the zoom like the rest of the picture, in the
+// colour of a layer's frame border (gen_viewer ARCH_FRAME_STROKE). The whole product's picture is big,
+// so at the zoom it opens at a line of 2.6 units was 0.76 screen pixels wide and read as grey: its width
+// is set from the 100% zoom (rescaleLayerLines), not from the units. Its heads are sized by its width
+// (markerUnits strokeWidth), so they grow and shrink with it. Mermaid's own heads are sized in units.
 const ARCH_LAYER_LINE_PX = 3;
-const ARCH_LAYER_LINE_COLOR = '#64748b';   // also the heads' fill in viewer.css
+const ARCH_LAYER_LINE_COLOR = '#c9d0f0';   // also the heads' fill in viewer.css
 function archLayerHeads(root) {
   const svg = root.querySelector('svg') || root;
   const ids = { end: 'arch-layer-end', start: 'arch-layer-start' };
@@ -4855,7 +4856,8 @@ function archLayerHeads(root) {
 }
 function rescaleLayerLines() {
   if (!archCrowded()) return;
-  const w = ARCH_LAYER_LINE_PX * curIconInv() + 'px';
+  const home = usableScale(homeReal) ? homeReal : homeRealZoom();
+  const w = ARCH_LAYER_LINE_PX / (usableScale(home) ? home : 1) + 'px';
   mainScene.root.querySelectorAll('path.flowchart-link.arch-layerline')
     .forEach((p) => paintImportant(p, { stroke: ARCH_LAYER_LINE_COLOR, 'stroke-width': w }));
 }
@@ -4878,6 +4880,8 @@ function archRedrawLines() {
   if (!mainScene) return;
   const kept = archKeptTest, peek = archPreviewTest;
   if (!archCrowded()) {
+    // The lines all wear the lit indigo, so the ones not previewed fade, as the whole product's do.
+    mainScene.root.classList.toggle('arch-previewing', !!peek);
     eachEdge(mainScene.root, (p, label, m) => {
       const on = !!peek && peek(m[1], m[2]);
       for (const el of [p, ...(p._segs || []), ...(p.__cyHits || []), label].filter(Boolean))
@@ -4963,6 +4967,31 @@ function archPreviewWatch() {
 const ARCH_OV_LEAD = 40;
 const ARCH_OV_HEAD = 11;       // the head's length and width, in the drawing's units
 const ARCH_OV_HEAD_RUN = 16;   // the straight end the head sits on, longer than the head
+// THE HEAD OF A BOX'S LINE, the same on every Architecture picture: drawn on top of the whole product's
+// (archOverlay), and on a feature's picture, which draws its lines itself (markBoxLines). `start` puts
+// it at the line's first end, for a line drawn up the layers (markFlippedLines).
+function archBoxHead(id, cls, start = false) {
+  return `<marker id="${id}" viewBox="0 0 10 10" refX="${start ? 1 : 9}" refY="5" markerUnits="userSpaceOnUse"`
+    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
+    + `<path d="${start ? 'M10,0 L0,5 L10,10 z' : 'M0,0 L10,5 L0,10 z'}" class="${cls}"/></marker>`;
+}
+// A FEATURE'S PICTURE DRAWS ITS BOXES' LINES as the whole product draws a box's lines on top of itself:
+// the same indigo, width and head (viewer.css `.arch-boxline`, the `.arch-ov-line` look).
+function markBoxLines(root, t) {
+  root.classList.toggle('arch-boxlines', !archIsCrowded(t));
+  if (archIsCrowded(t)) return;
+  const svg = root.querySelector('svg') || root;
+  if (!svg.querySelector('#arch-box-end')) {
+    const defs = document.createElementNS(SVGNS, 'defs');
+    defs.innerHTML = archBoxHead('arch-box-end', 'arch-ov-head') + archBoxHead('arch-box-start', 'arch-ov-head', true);
+    svg.insertBefore(defs, svg.firstChild);
+  }
+  root.querySelectorAll('.edgePaths path.flowchart-link').forEach((p) => {
+    p.classList.add('arch-boxline');
+    if (p.hasAttribute('marker-end')) p.setAttribute('marker-end', 'url(#arch-box-end)');
+    if (p.hasAttribute('marker-start')) p.setAttribute('marker-start', 'url(#arch-box-start)');
+  });
+}
 function archOverlayCurve(s, d) {
   const x1 = s.cx, x2 = d.cx;
   if (s.y1 < d.y2 && d.y1 < s.y2) {   // the two boxes share a row
@@ -4991,12 +5020,8 @@ function archOverlay(items) {
   // THE HEAD KEEPS ONE SIZE, in the drawing's own units: sized by the line's width, it grew by three
   // quarters when the line was picked and thickened, and covered more of the curve than the curve's
   // own straight end (ARCH_OV_HEAD_RUN), so it pointed one way and the line ran another.
-  g.innerHTML = `<defs><marker id="arch-ov-head" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
-    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
-    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head"/></marker>'
-    + `<marker id="arch-ov-head-picked" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse"`
-    + ` markerWidth="${ARCH_OV_HEAD}" markerHeight="${ARCH_OV_HEAD}" orient="auto">`
-    + '<path d="M0,0 L10,5 L0,10 z" class="arch-ov-head-picked"/></marker></defs>';
+  g.innerHTML = '<defs>' + archBoxHead('arch-ov-head', 'arch-ov-head')
+    + archBoxHead('arch-ov-head-picked', 'arch-ov-head-picked') + '</defs>';
   host.appendChild(g);
   const rectOf = (id) => {
     const el = [...diagram.querySelectorAll('g.node')].find((x) => idOf(x) === id);
@@ -7927,6 +7952,7 @@ function bindArch() {
     };
   }
   markLayerLines(mainScene.root, t);
+  markBoxLines(mainScene.root, t);
 }
 // A PERSON'S BOX is drawn under an alias of its own (a person is a role, not a map element), so
 // bindNodes passes it by. It takes the same gestures as every other box here: resting on it shows the
@@ -7963,19 +7989,15 @@ function bindActorBox(scene, el, id, a, afterPick) {
 // feature none of whose use cases is on the happy path. A stale `scope=happy` in an address is read as
 // every use case, rather than drawing a picture nobody can reach from the screen.
 function archScope(s) {
-  if (!s || s.scope !== 'happy' || s.cap === 'all') return 'all';
-  return !s.cap || MERMAID_ARCH_BY['happy|' + s.cap] ? 'happy' : 'all';
+  if (!s || s.scope !== 'happy' || !s.cap || s.cap === 'all') return 'all';
+  return MERMAID_ARCH_BY['happy|' + s.cap] ? 'happy' : 'all';
 }
-// WHICH FEATURE A STATE DRAWS. `all` is the whole product; a feature id is that feature, when this
-// scope draws it; and nothing named opens on the FIRST feature this scope draws, in the Features
-// page's order. The whole product is one click away, but it is the picture with the most lines
-// (113 on mcpolis), so it is no longer where the view opens.
+// WHICH FEATURE A STATE DRAWS. A feature id is that feature, when this scope draws it; `all`, and
+// nothing named, is the whole product, which is where the view opens. Each feature is one click away.
 function archFeature(s) {
   const cap = (s && s.cap) || '';
-  if (cap === 'all') return '';
-  if (cap) return MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
-  const first = (ARCH_FEATURES || []).find((f) => MERMAID_ARCH_BY[archScope(s) + '|' + f.id]);
-  return first ? first.id : '';
+  if (!cap || cap === 'all') return '';
+  return MERMAID_ARCH_BY[archScope(s) + '|' + cap] ? cap : '';
 }
 function archKey(s) { return archScope(s) + '|' + archFeature(s); }
 function archState(scope, cap, open) {

@@ -4250,20 +4250,21 @@ def _arch_ready(page: Any) -> None:
     _settle(page)
 
 
-def test_the_architecture_view_opens_on_the_first_feature_and_all_is_one_click_away() -> None:
-    """The whole product is the picture with the most lines, so the view opens on the first feature
-    the Features page lists, and `All` is a button that names itself in the address."""
+def test_the_architecture_view_opens_on_the_whole_product_and_a_feature_is_one_click_away() -> None:
+    """The view opens on the whole product, the first button of the feature row; each feature is a
+    button that names itself in the address."""
     with _served() as url, _page(url + "#v=arch") as page:
         _arch_ready(page)
         seen = page.evaluate("""() => ({
             lit: document.querySelector('.archwho.on').dataset.archcap,
             buttons: [...document.querySelectorAll('.archwho')].map((b) => b.dataset.archcap) })""")
         assert seen["buttons"][0] == "all"
-        assert seen["lit"] == seen["buttons"][1], seen
-        page.evaluate("() => document.querySelector('.archwho[data-archcap=\"all\"]').click()")
-        page.wait_for_function("() => location.hash.includes('cap=all')")
+        assert seen["lit"] == "all", seen
+        first = seen["buttons"][1]
+        page.evaluate(f"() => document.querySelector('.archwho[data-archcap=\"{first}\"]').click()")
+        page.wait_for_function(f"() => location.hash.includes('cap={first}')")
         _arch_ready(page)
-        assert page.evaluate("() => document.querySelector('.archwho.on').dataset.archcap") == "all"
+        assert page.evaluate("() => document.querySelector('.archwho.on').dataset.archcap") == first
         assert not page.js_errors, page.js_errors
 
 
@@ -4271,7 +4272,7 @@ def test_the_happy_path_switch_is_on_a_features_picture_and_not_on_all() -> None
     """The whole product is every story; its happy path alone is a feature's question. The switch sits
     over a feature's picture, and the whole product's has none: an address asking for it there draws
     the whole product."""
-    with _served() as url, _page(url + "#v=arch") as page:
+    with _served() as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         assert page.evaluate("() => !document.getElementById('archhp').hidden"), "a feature's picture keeps it"
         page.goto(url + "#v=arch&cap=all&scope=happy")
@@ -4546,7 +4547,7 @@ def test_a_part_tag_shows_its_own_card_beside_the_box_card() -> None:
     """Resting on a part's tag inside its subsystem's box shows the PART's card as a second card, and the
     box's card stays: the part is read in its box's context. Each card has its own line, the second one
     pointing at the tag. Back on the box's own body, the part's card goes and the box's stays."""
-    with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch") as page:
+    with _served_map(make_every_part_do_work) as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         cards = """() => { const n = (c) => { const e = document.querySelector(c);
             return !e || e.hidden ? '' : ((e.querySelector('.ibox-name') || {}).textContent || '').trim(); };
@@ -4623,7 +4624,7 @@ def test_a_two_line_name_opens_only_from_its_words() -> None:
     def make_long_names(m: dict[str, Any]) -> None:
         for x in m.get("subsystems", []):
             x["name"] = x["name"] + " and a tail long enough to wrap"
-    with _served_map(make_long_names) as url, _page(url + "#v=arch") as page:
+    with _served_map(make_long_names) as url, _page(url + "#v=arch&cap=CAP1") as page:
         _arch_ready(page)
         spot = page.evaluate("""() => { for (const n of document.querySelectorAll('#diagram .ibox-map .ibox-name')) {
             const range = document.createRange(); range.selectNodeContents(n); const rs = [...range.getClientRects()];
@@ -4881,6 +4882,24 @@ VISIBLE_LINES = """() => {
 }"""
 
 
+def test_a_line_between_layers_scales_with_the_zoom() -> None:
+    """A line between layers is 3 screen pixels at 100%, and grows and shrinks with the picture."""
+    width = """() => { const p = document.querySelector('#diagram path.flowchart-link.arch-layerline');
+        return Math.round(parseFloat(getComputedStyle(p).strokeWidth) * p.getScreenCTM().a * 10) / 10; }"""
+    with _served_map(make_parts_in_every_layer) as url, _page(url + "#v=arch&cap=all") as page:
+        _arch_ready(page)
+        assert page.evaluate(width) == 3.0
+        page.click("#zoomin")
+        page.wait_for_timeout(300)
+        wide = page.evaluate(width)
+        page.click("#zoomout")
+        page.click("#zoomout")
+        page.wait_for_timeout(300)
+        narrow = page.evaluate(width)
+        assert narrow < 3.0 < wide, (narrow, wide)
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_click() -> None:
     """A picture with more lines than a reader can follow draws one line per pair of layers that most of
     its layer takes, with no number, and none of its boxes' own. A layer line is drawing only: it takes
@@ -4895,12 +4914,12 @@ def test_a_crowded_picture_shows_lines_between_layers_and_a_boxs_own_lines_on_a_
         labels = page.evaluate("""() => [...document.querySelectorAll('#diagram .edgeLabel.arch-layerline')]
             .map((l) => l.textContent.trim())""")
         assert labels and not any(labels), labels
-        # THICK AT ANY ZOOM: 3 screen pixels of mid slate grey, whatever the picture's size.
+        # 3 SCREEN PIXELS AT 100%, in a layer frame's border colour, whatever the picture's size.
         drawn = page.evaluate("""() => document.querySelectorAll('#diagram path.flowchart-link.arch-layerline')
             .values().map((p) => { const cs = getComputedStyle(p);
               return [cs.stroke, Math.round(parseFloat(cs.strokeWidth) * p.getScreenCTM().a * 10) / 10]; })
             .toArray()""")
-        assert drawn and all(d == ["rgb(100, 116, 139)", 3.0] for d in drawn), drawn
+        assert drawn and all(d == ["rgb(201, 208, 240)", 3.0] for d in drawn), drawn
         # …and painted ABOVE the frames, or a frame painted after them covers the end that meets its border
         on_top = page.evaluate("""() => { const p = document.querySelector('#diagram .edgePaths path.arch-layerline');
             const g = p.parentNode, top = g.parentNode, kids = [...top.children];
