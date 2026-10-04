@@ -25,15 +25,17 @@ The viewer shows your project in three sections: *Product*, *Under the hood* and
 **Product** shows the project's functionality: who uses it, its features and use cases, the happy
 path, the rules it enforces, and the data it keeps.
 
-<img src="assets/viewer-product.png" alt="MCP Hero's Features diagram, connecting actors, features, and data subdomains" width="80%">
-
-*Features diagram for the [MCP Hero project](https://github.com/nseniak/mcphero).*
+<p align="center">
+  <img src="assets/viewer-product.png" alt="MCP Hero's Features diagram, connecting actors, features, and data subdomains" width="80%"><br>
+  <em>Features diagram for the <a href="https://github.com/nseniak/mcphero">MCP Hero project</a>.</em>
+</p>
 
 **Under the hood** shows how the project is built and run: its architecture, components, dependencies, how its data is stored, and how it is deployed.
 
-<img src="assets/viewer-hood.png" alt="MCP Hero's Architecture diagram, centered at 75% zoom" width="80%">
-
-*Architecture diagram for the [MCP Hero project](https://github.com/nseniak/mcphero), centered at 75% zoom.*
+<p align="center">
+  <img src="assets/viewer-hood.png" alt="MCP Hero's Architecture diagram" width="80%"><br>
+  <em>Architecture diagram for the <a href="https://github.com/nseniak/mcphero">MCP Hero project</a>.</em>
+</p>
 
 **Update log** shows how the product changed, one entry per update of the map (`/coyomap update`), newest first.
 
