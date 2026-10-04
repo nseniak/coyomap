@@ -1,0 +1,37 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "arch-worktree",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "PYTHONPATH=/Users/nitsanseniak/Projects/coyomap/.claude/worktrees/container-workers/tools",
+        "/Users/nitsanseniak/Projects/coyomap/.venv/bin/python",
+        "-m",
+        "coyomap.cli",
+        "serve",
+        "/Users/nitsanseniak/mee6/repos/mcpolis",
+        "--port",
+        "8082",
+        "--dev"
+      ],
+      "port": 8082
+    },
+    {
+      "name": "arch-layered-preview",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "PYTHONPATH=/Users/nitsanseniak/Projects/coyomap/.claude/worktrees/container-workers/tools",
+        "/Users/nitsanseniak/Projects/coyomap/.venv/bin/python",
+        "-m",
+        "coyomap.cli",
+        "serve",
+        "/private/tmp/claude-501/-Users-nitsanseniak-Projects-coyomap/d836630a-be57-4f86-8169-c35a92ff6ae7/scratchpad/mcpolis-layered",
+        "--port",
+        "8083",
+        "--dev"
+      ],
+      "port": 8083
+    }
+  ]
+}
