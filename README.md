@@ -66,7 +66,7 @@ The coyomap CLI runs on Python 3.10+, which needs to be installed on your machin
 
 Run `make install` again after each new `git pull`.
 
-### Map your project
+### Build your project map
 
 To create the map of your project, run the `/coyomap` command in your project's agent. Use a capable coding model at its default effort setting (e.g., Opus 5.5 at medium effort). Allow about an hour for the initial build; larger projects can take longer, depending on the model and agent.
 
@@ -79,9 +79,22 @@ claude
 
 The map is created in your project's `.coyomap/` subdirectory. Commit it with your code if you want to share it.
 
-### Keep it in step
+### Explore the map
 
-After committing your code changes, run an incremental update of the map.
+Open the map in your browser with the coyomap viewer. It runs on your machine and shows every map you have opened.
+
+```
+# Start the viewer
+cd coyomap && make start
+```
+
+Your browser opens at `http://127.0.0.1:8765`. Click your project to see its map. If your project is not listed, add its folder from that page.
+
+Alternatively, you can ask your agent to start the viewer for you.
+
+### Keep the map in sync
+
+After committing code changes, run an incremental update of the map.
 
 ```
 # After committing code changes
