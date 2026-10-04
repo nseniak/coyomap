@@ -109,12 +109,9 @@
              tab click. Each view's caption lives in the info pane's top-level state (see VIEW_Q). -->
         <nav id="stagesubrow" aria-label="Views">
           <span id="viewsw">
-            <!-- PRODUCT — what it does for a user. Features leads and is the landing view: it opens with
-                 what the product is FOR and then lists everything it does. Then one walk end to end,
-                 then who drives it, then what it decides. The product description had a tab of its own
-                 for a moment; three sentences are not a destination, so they lead the Features page. -->
-            <button data-view="overview" data-group="product">Overview</button>  <!-- the product description on a page of its own (hidden when the map records none) -->
-            <button data-view="usecases" data-group="product">Features</button>  <!-- internal kind stays `usecases`; the product description, then a grid of feature cards, each drilling to that feature's page (hidden when no use cases) -->
+            <!-- Features is the default Product view; Description preserves the product introduction. -->
+            <button data-view="usecases" data-group="product">Features</button>
+            <button data-view="overview" data-group="product">Description</button>
             <button data-view="hp" data-group="product">Happy Path</button>  <!-- internal kind stays `hp` -->
             <button data-view="interfaces" data-group="product">Interfaces</button>  <!-- T2b: the outside edge (hidden when the map records none) -->
             <!-- No Actors tab: the Features diagram's cast column IS the actors' home (kind pills keep
@@ -225,8 +222,9 @@
            `hidden` toggles from JS (syncZoomControls), on whether a pan/zoom map exists at all. -->
       <div id="zoomctl" hidden>
         <button id="zoomout" title="Zoom out">−</button>
-        <button id="zoomlevel" title="Fit to screen">100%</button>
+        <button id="zoomlevel" title="Reset to 100%">100%</button>
         <button id="zoomin" title="Zoom in">+</button>
+        <button id="zoomfit" title="Fit entire diagram" aria-label="Fit entire diagram"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4"/></svg></button>
       </div>
       <!-- WHAT YOU SELECTED, as a card floating over the drawing. It used to be a 300px band under the
            diagram, present whether or not anything was selected. Measured over 60 states on the three

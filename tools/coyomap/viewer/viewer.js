@@ -1599,9 +1599,13 @@ function plainCardHtml(o) {
     attrs: ` data-key="${esc(o.key)}" tabindex="0"`,
   });
 }
-function bindPlainCards(root, onOpen) {
-  root.querySelectorAll('.ecard[data-key]').forEach((card) => {
+function bindPlainCards(root, onOpen, opts) {
+  root.querySelectorAll('.ecard[data-key]').forEach((card, index) => {
     const open = () => onOpen(card.getAttribute('data-key'));
+    if (opts && opts.select) {
+      bindPickCard(card, 'area:' + card.dataset.key + ':' + index, '.ibox-name', open);
+      return;
+    }
     card.addEventListener('click', open);
     card.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') open(); });
   });
@@ -1694,7 +1698,7 @@ function drillInto(id) {
 }
 // SHOW IN CONTEXT: the element's home view, focused on it. `selectTargetFor` is the one function that
 // answers which view that is; `selectFromTree` does the navigating and the focusing.
-function showInContext(id) { selectFromTree(id); }
+function showInContext(id, frame = false) { selectFromTree(id, frame); }
 
 // Wire every ITEM PILL under `root` — the pill that names one element, wherever a screen draws one.
 // ONE listener and ONE destination: the pill opens the thing it names, which is the same answer a card
@@ -1741,7 +1745,7 @@ function bindGoDrill(root) {
   });
 }
 // Wire every card under `root`. One binder, so the two actions cannot differ between two card lists.
-function bindElementCards(root, onDrill) {
+function bindElementCards(root, onDrill, opts) {
   bindItemPills(root);
   root.querySelectorAll('.ecard-type[data-ctx]').forEach((b) => b.addEventListener('click', (ev) => {
     ev.stopPropagation();               // the pill's action is not the card's
@@ -1754,7 +1758,11 @@ function bindElementCards(root, onDrill) {
     ev.stopPropagation();
     go({ kind: 'capability', cap: b.getAttribute('data-gofeat') });
   }));
-  root.querySelectorAll('.ecard[data-id]').forEach((card) => {
+  root.querySelectorAll('.ecard[data-id]').forEach((card, index) => {
+    if (opts && opts.select) {
+      bindPickCard(card, 'area:' + card.dataset.id + ':' + index, '.ibox-name', () => onDrill(card.dataset.id));
+      return;
+    }
     // A floating card opens from its title alone (see elementCardHtml); the title is a button, so the
     // keyboard reaches it without the card taking a stop of its own.
     if (card.classList.contains('ibox-bare')) {
@@ -2463,7 +2471,7 @@ function resetScene(scene) {  // clear selection + focus, restore the scene's de
 
 // A click whose pointer moved far from its mousedown is the tail of a drag-pan — ignore it,
 // so panning never deselects.
-function isDrag(e) { return Math.abs(e.clientX - downX) > 5 || Math.abs(e.clientY - downY) > 5; }
+function isDrag(e) { return e.detail !== 0 && (Math.abs(e.clientX - downX) > 5 || Math.abs(e.clientY - downY) > 5); }
 // A ⌥-click (Option / Alt), OR a double-click — a native `click` event's second firing reports
 // `detail >= 2`, and svg-pan-zoom's own double-click-to-zoom is disabled (see render()) precisely so
 // this gesture is free for the diagram to use — turns a select into a drill-in / open-source. (⌘/⌃ is
@@ -3064,6 +3072,8 @@ function showNode(id, cardOpts) {
   panel.innerHTML = paneCardHtml(id, cardOpts);
   bindElementCards(panel);
   bindNodeDetailHandlers(panel);
+  const action = diagramNodeAction(id);
+  if (action) bindCardTitle(panel, action.open);
   // THE SECOND CARD leaves the file tree and the code to what is picked: a hover beside a pick moved
   // the tree to the hovered box.
   if (panel === PEEK_CARD) return;
@@ -3184,9 +3194,9 @@ function showContextEdge(ce) {
 // it twice and drifted: the page was taught the reader's word for the tab ('Dependencies') and that a
 // library bucket is not an external system, and the card — one click away on the same screen — went on
 // saying 'the Context view' and 'External systems grouped by purpose' over React and Vite.
-// The card adds the gesture; the page drops it, because there you have already drilled in.
+// Cards and pages share the description; cards add the shared navigation action separately.
 function foldCardSentence(s) {
-  return '<p class="empty">' + esc(FOLD_NARRATIVE[s.kind](s)) + ' \u2325-click to drill in.</p>';
+  return '<p class="empty">' + esc(FOLD_NARRATIVE[s.kind](s)) + '</p>';
 }
 function showLibsFold() {
   const items = FOLDED_LIBS.map((d) =>
@@ -3194,6 +3204,7 @@ function showLibsFold() {
   panel.innerHTML = '<div class="pane-title"><h2>Libraries</h2><span class="badge kind">libraries</span></div>'
     + foldCardSentence({ kind: 'libs' })
     + (items ? '<dl><dt>Bundled (' + FOLDED_LIBS.length + ' in-process)</dt>' + items + '</dl>' : '');
+  bindCardTitle(panel, () => go({ kind: 'libs' }));
 }
 
 // A folded big-bucket count box (external systems sharing one purpose, collapsed at the Context
@@ -3211,6 +3222,7 @@ function showBucketFold(bkid) {
   panel.innerHTML = '<div class="pane-title"><h2>' + esc(b.name) + '</h2><span class="badge kind">bucket</span></div>'
     + foldCardSentence({ kind: 'bucketfold', bkid: bkid })
     + (items ? '<dl><dt>' + b.count + ' dependencies</dt>' + items + '</dl>' : '');
+  bindCardTitle(panel, () => go({ kind: 'bucketfold', bkid }));
 }
 // Select a folded-bucket count box: roster panel + dim to its neighbourhood (SYS + the arrow), exactly
 // like selecting the Libraries fold. Reuses the node selKey so the hover guard matches.
@@ -3280,8 +3292,7 @@ function arrowCardHtml(o) {
     + '<div class="xcount">' + esc(noun(rows.length)) + '</div>'
     + (shown.length ? '<ul class="xlist">' + shown.join('') + '</ul>'
                     : '<p class="empty">no ' + esc(o.noun) + 's recorded</p>')
-    + (rest > 0 ? '<button type="button" class="xmore" data-drill=\'' + esc(JSON.stringify(o.drill))
-        + '\'>Show all ' + esc(noun(rows.length)) + ' \u2192</button>' : '');
+    + (rest > 0 ? '<p class="xcount">' + moreTailHtml(rest) + '</p>' : '');
 }
 // Selecting (not drilling) a Subsystems arrow: list every component→component crossing it bundles as
 // `from → to:` with its explanation (and a link to its call site) indented below — one uniform font, no
@@ -3957,6 +3968,199 @@ function actorPanelHtml(a) {
 function showActorCard(a) {
   panel.innerHTML = actorPanelHtml(a);
   bindElementCards(panel);
+  bindCardTitle(panel, () => go({ kind: 'actor', act: a.name }));
+}
+
+// One destination resolver for diagram names and their explicit popup actions.
+function diagramNodeAction(id) {
+  const n = GRAPH.nodes[id];
+  const s = history[hi] || {};
+  const dependencyView = ['context', 'libs', 'bucketfold'].includes(s.kind);
+  const deploymentView = ['deployment', 'deploymentGroup', 'deploymentUnit'].includes(s.kind);
+  let target = null, label = '';
+  if (id === LIBS_ID) { target = { kind: 'libs' }; label = 'Explore libraries'; }
+  else if (n && n.kind === 'bucketfold') { target = { kind: 'bucketfold', bkid: id }; label = 'Open ' + n.name; }
+  else if (id === 'SYS' && dependencyView) { target = sysDrillTarget(); label = 'Open components'; }
+  else if (deploymentView) {
+    target = deploymentDrill(id);
+    if (!target || (target.kind === s.kind && target.unit === s.unit && target.gid === s.gid)) return null;
+    label = target.kind === 'deploymentGroup' ? 'Open deployment group'
+      : target.kind === 'deploymentUnit' ? 'Open process' : target.kind === 'subsystem' ? 'Open subsystem'
+      : (dataStoreOf(id) || {}).kind === 'messaging' ? 'View channels' : 'View stored data';
+  }
+  else if (dependencyView) {
+    target = dataDrillFor(id);
+    if (target) label = (dataStoreOf(id) || {}).kind === 'messaging' ? 'View channels' : 'View stored data';
+  }
+  if (target) return { label, open: () => go(target) };
+  if (!n || id === 'SYS') return null;
+  const labels = { subsystem: 'Open subsystem', subdomain: 'Open subdomain', component: 'View component details',
+    entity: 'View entity details', process: 'Open process', interface: 'Open interface',
+    capability: 'Open feature', usecase: 'Open use case', human: 'Open actor', service: 'Open actor', 'ai-agent': 'Open actor' };
+  return { label: labels[n.kind] || 'View details', open: () => drillInto(id) };
+}
+function markDiagramName(name) {
+  name.classList.add('diagram-name-link');
+  if (name.closest('button, a') || name.dataset.navigationKey) return;
+  name.dataset.navigationKey = '1';
+  name.setAttribute('role', 'link');
+  name.setAttribute('tabindex', '0');
+  name.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault(); ev.stopPropagation();
+    name.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+  });
+}
+function markDiagramNames(root) {
+  // Older Mermaid diagrams supply a plain label: its first nonblank text is the name,
+  // followed by breaks/captions. Adapt it here so every renderer uses the same link widget.
+  if (!root.querySelector('button.ibox-name, .cyname')) {
+    const label = root.querySelector('.nodeLabel');
+    if (label) {
+      const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+      let text;
+      while ((text = walker.nextNode())) {
+        if (!text.textContent.trim()) continue;
+        const name = document.createElement('span');
+        name.className = 'cyname';
+        text.replaceWith(name); name.appendChild(text);
+        break;
+      }
+    }
+  }
+  root.querySelectorAll('button.ibox-name, .cyname').forEach(markDiagramName);
+}
+function syncDiagramNavigation(s) {
+  diagram.querySelectorAll('#storystage button.ibox-name, .ifd-box button.ibox-name, [data-godrill], button.hp-fname, button.hp-one, button.journey-zname, button.journey-inclink')
+    .forEach((name) => name.classList.add('diagram-name-link'));
+  // Board steps open directly; underline their title, not their whole description.
+  diagram.querySelectorAll('.pickbox[data-uc] .flow-step-title').forEach((name) => name.classList.add('diagram-name-link'));
+  // Associate every renderer's name with the same interaction surface. Nested step boxes
+  // reset the inherited cue so hovering one step doesn't underline its neighbours.
+  diagram.querySelectorAll('.diagram-name-link').forEach((name) => {
+    const box = name.closest('.ibox, .pickbox, g.node, g.classGroup, .cluster-label, .hp-box, .journey-zlabel') || name;
+    box.classList.add('diagram-navigation-box');
+  });
+  if (mainScene && !TEXT_PAGES.has(s.kind)) {
+    diaghead.insertAdjacentHTML('beforeend', diagramInteractionHint(
+      s.kind === 'arch' ? 'architecture' : ['usecase', 'subflow'].includes(s.kind) ? 'flow' : 'inspect'));
+    diaghead.hidden = false;
+  }
+  diagram.querySelectorAll('.journey-board, .hp-board, .ifd-wrap').forEach((board) => {
+    if (board.dataset.helpBound) return;
+    board.dataset.helpBound = '1';
+    board.insertAdjacentHTML('beforebegin', diagramInteractionHint(board.classList.contains('ifd-wrap') ? 'interfaces' : 'steps'));
+  });
+  bindDiagramHelp();
+}
+function diagramInteractionHint(mode) {
+  const openName = 'Click a box name to open its page.';
+  const inspect = 'Select a box to see its details and related connections.';
+  const text = {
+    inspect: [inspect, openName],
+    architecture: [
+      'Select a box to see its details and connections.',
+      openName,
+      'Select a relationship arrow to see its details.',
+    ],
+    flow: [inspect, openName,
+      'Select a step number or arrow to see its details and recorded code location.',
+    ],
+    relationships: [
+      'Select a card to preview its relationships.',
+      'Click a card name to open its page and view its use cases.',
+    ],
+    interfaces: [
+      'Select an interface to see its actors and use cases.',
+      'Click an interface, actor or use-case name to open its page.',
+    ],
+    steps: [
+      'Select a use-case card to highlight it.',
+      'Click a use-case name to open its flow.',
+      'Click a feature, actor or interface name to open its page.',
+    ],
+  };
+  return '<span class="diagram-interaction-hint"><button type="button" class="diagram-help-button"'
+    + ' aria-label="Diagram interactions" aria-expanded="false"><span class="diagram-help-glyph" aria-hidden="true">ⓘ</span></button>'
+    + '<span class="diagram-help-popover" popover="manual" role="tooltip"><ul>'
+    + text[mode].map((line) => '<li>' + esc(line) + '</li>').join('') + '</ul></span></span>';
+}
+
+let diagramHelpActive = null;
+let diagramHelpId = 0;
+function closeDiagramHelp() {
+  if (!diagramHelpActive) return;
+  const { button, popup } = diagramHelpActive;
+  if (popup.matches(':popover-open')) popup.hidePopover();
+  button.setAttribute('aria-expanded', 'false');
+  diagramHelpActive = null;
+}
+function bindDiagramHelp() {
+  closeDiagramHelp();
+  document.querySelectorAll('.diagram-interaction-hint').forEach((help) => {
+    if (help.dataset.bound) return;
+    help.dataset.bound = '1';
+    help.addEventListener('click', (ev) => ev.stopPropagation());
+    const section = help.closest('.item-sec') || help.closest('.landing-head') || help.closest('#diaghead');
+    const headings = section && section.querySelectorAll('.item-sec-title, .item-sec-caption');
+    const heading = headings && headings.length ? headings[headings.length - 1]
+      : diagram.querySelector('.landing-head .item-sec-title, .page-hero-name');
+    if (heading) {
+      let row = heading.parentElement;
+      if (!row.classList.contains('diagram-help-heading')) {
+        row = document.createElement('div'); row.className = 'diagram-help-heading';
+        heading.before(row); row.appendChild(heading);
+      }
+      row.appendChild(help);
+    }
+    const button = help.querySelector('button'), popup = help.querySelector('[popover]');
+    popup.id = 'diagram-help-' + (++diagramHelpId);
+    button.setAttribute('aria-describedby', popup.id);
+    const show = (pinned = false) => {
+      if (diagramHelpActive && diagramHelpActive.button === button) {
+        diagramHelpActive.pinned = pinned || diagramHelpActive.pinned; return;
+      }
+      closeDiagramHelp(); popup.showPopover();
+      const r = button.getBoundingClientRect();
+      popup.style.left = Math.max(8, Math.min(r.left, innerWidth - popup.offsetWidth - 8)) + 'px';
+      popup.style.top = (r.bottom + popup.offsetHeight + 8 < innerHeight
+        ? r.bottom + 6 : Math.max(8, r.top - popup.offsetHeight - 6)) + 'px';
+      button.setAttribute('aria-expanded', 'true');
+      diagramHelpActive = { button, popup, pinned };
+    };
+    const leave = () => {
+      if (diagramHelpActive && diagramHelpActive.button === button && !diagramHelpActive.pinned
+          && !help.matches(':hover') && !help.contains(document.activeElement)) closeDiagramHelp();
+    };
+    help.addEventListener('mouseenter', () => show());
+    help.addEventListener('mouseleave', leave);
+    help.addEventListener('focusin', () => show());
+    help.addEventListener('focusout', leave);
+    button.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (diagramHelpActive && diagramHelpActive.button === button && diagramHelpActive.pinned) closeDiagramHelp();
+      else show(true);
+    });
+  });
+}
+document.addEventListener('click', (ev) => {
+  if (diagramHelpActive && !ev.target.closest('.diagram-interaction-hint')) closeDiagramHelp();
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && diagramHelpActive) { ev.preventDefault(); closeDiagramHelp(); }
+});
+// The card title is its only navigation action. Existing element-card title handlers
+// are replaced here so context-specific destinations (stores, folds) remain authoritative.
+function bindCardTitle(root, open) {
+  const old = root.querySelector('button.ibox-name, .pane-title-link, .ibox-name, .pane-title h2, .uc-actor');
+  if (!old) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = old.classList.contains('ibox-name') ? 'ibox-name pane-title-link' : 'pane-title-link';
+  button.innerHTML = old.innerHTML;
+  if (/^H[1-6]$/.test(old.tagName)) old.replaceChildren(button);
+  else old.replaceWith(button);
+  button.addEventListener('click', (ev) => { ev.stopPropagation(); open(); });
 }
 
 // --- hover tooltip --------------------------------------------------------------
@@ -4143,7 +4347,7 @@ const groupLast = {};
 const VIEW_LABEL = {};   // view id -> its tab label, filled from the buttons at boot (one source)
 const VIEW_Q = {
   overview: 'What is this product, and who is it for?',
-  hp: 'What does a simple run through the product\'s main features look like?',
+  hp: 'What does a simple run through the product\'s main features and selected use cases look like?',
   usecases: 'What can this product do, feature by feature?',
   arch: 'What are this product\'s layers, which components does each hold, and how are they connected?',
   container: 'How is the code organised, and what depends on what?',
@@ -4399,24 +4603,22 @@ function selectNodeFromCanvas(el, id, e) {
   pickSelBox(mainScene, nodeDesc(mainScene, el, id), el, e);  // shift=frame, ⌘=toggle, plain=replace
 }
 
-// The zoom-by-`scale`-then-recenter step behind matchTextSize (scale === 1 skips straight to just
-// centering). Measures el/diagram BEFORE any mutation: svg-pan-zoom's zoom() only updates its internal
-// state synchronously — the CTM it actually paints is applied on the NEXT animation frame (see
-// `updateCTMOnNextFrame` in the vendored lib) — so a getBoundingClientRect() taken right after would
-// still read the OLD, pre-zoom geometry. zoomAtPoint anchors on the SVG's own center, which is exactly
-// `diagramRect`'s center (the svg fills #diagram, which sits below the header — not the whole #stage) —
-// so the post-zoom position is derived analytically (every point scales toward/away from that shared
-// center by `scale`) instead of re-measured.
+// Shared Shift-click/navigation framing. Zoom first, then measure the painted box: the
+// SVG viewport can differ from the diagram's padded box, so deriving its position from
+// the diagram centre produces an offset. Pan only after the zoom transform is painted.
 function applyZoomAndCenter(el, scale) {
+  if (scale !== 1) {
+    const camera = mainPz;
+    camera.zoom(camera.getZoom() * scale);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (mainPz === camera && el.isConnected) applyZoomAndCenter(el, 1);
+    }));
+    return;
+  }
   const stageRect = diagram.getBoundingClientRect();
   const stageCx = stageRect.left + stageRect.width / 2, stageCy = stageRect.top + stageRect.height / 2;
   const elRect = rectOf(el);
   let elCx = elRect.left + elRect.width / 2, elCy = elRect.top + elRect.height / 2;
-  if (scale !== 1) {
-    mainPz.zoom(mainPz.getZoom() * scale);
-    elCx = stageCx + (elCx - stageCx) * scale;
-    elCy = stageCy + (elCy - stageCy) * scale;
-  }
   const dx = stageCx - elCx;
   const dy = stageCy - elCy;
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;  // already centered — skip the no-op pan (+ its animation)
@@ -4623,11 +4825,13 @@ function bindNodes(scene, onActivate, opts) {
     // itself, the Libraries drill, a bucket drill) and is a no-op on the rest.
     if (el.classList.contains('human')) stickFigureNode(el);
     else if (el.classList.contains('agent')) botFigureNode(el);
+    if (diagramNodeAction(elem)) markDiagramNames(el);
     markOpenSrc(el, elem);  // leaf with a source ref -> ⌘-held cursor shows the open-source affordance
     bindBox(scene, el, id, {
       tip: () => actionTipNode(elem),
       show: o.hover ? boxCard(elem, scene.cardOpts) : null,
       onClick: (e) => {
+        if (nameClick(e) && !isDrillClick(e)) { const action = diagramNodeAction(elem); if (action) { action.open(); return; } }
         if (openSrcClick(elem, e)) return;  // ⌥-click a leaf with a source ref opens it instead of selecting
         onActivate(id, el, e);
       } });
@@ -6063,7 +6267,7 @@ function bindGroupContainer(drillFor, edgeBinder, noDrillId, opts) {
     // box inert (visible, but neither selectable nor drillable).
     if (!id || !(GRAPH.nodes[id] || isDeploymentGroup(id))) return;
     const target = id === noDrillId ? null : drillFor(id);
-    if (target) el.classList.add('drill');
+    if (target) { el.classList.add('drill'); markDiagramNames(el); }
     bindBox(mainScene, el, id, {
       tip: () => actionTipNode(id),
       show: o.hover ? boxCard(id) : null,
@@ -6501,23 +6705,11 @@ function showFlowPair(uc, a, b) {
 // slot carrying the kind; the eleven drawings and the kind→drawing table live here, beside the
 // Interfaces picture that already uses them — so the two pictures can never draw a door's kind
 // differently. `currentColor` keeps the glyph in the box's own text colour.
-// Was the click ON THE NAME — the words themselves, not the label around them? The generator wraps
-// every box's name in `.cyname` for exactly this. The LABEL is not the name: an actor's carries a blank
-// line holding the stick figure, a shared sub-use case's carries its step count and its chips, a door's carries
-// its kind glyph. Targeting the label made the whole box a link — 94% of an actor's — and left nothing
-// to select on. Targeting the words leaves every one of those extra lines to selection.
-// TWO CLASSES, ONE QUESTION. `.ibox-name` is the item box's name; `.cyname` is what the generators
-// still wrap a name in on the pictures that have not moved onto the item box yet. Both answer "was the
-// click on the words themselves", and this is the one place that asks.
-//
-// ON THE TEXT, NOT THE BUTTON'S BOX. A name that wraps is a button two lines tall and as wide as its
-// longer line, so the space beside the shorter line was the button too, and a click there opened the
-// thing: on the Architecture picture, the blank half of a two-line subsystem name. The click counts
-// only where a line of the name's text is drawn. A click from the KEYBOARD (Enter on the focused name,
-// `detail` 0, no pointer) has no point to test and is always on the name.
+// Both current item boxes and legacy Mermaid names use the shared navigation marker.
+// A pointer must hit a line of text; keyboard activation still opens the focused name.
 function nameClick(ev) {
   const t = ev && ev.target;
-  const name = t && t.closest && t.closest('.ibox-name, .cyname');
+  const name = t && t.closest && t.closest('.ibox-name, .cyname, .diagram-name-link');
   if (!name) return false;
   if (!ev.detail || !Number.isFinite(ev.clientX)) return true;
   return pointOnNameText(name, ev.clientX, ev.clientY);
@@ -6525,18 +6717,37 @@ function nameClick(ev) {
 // Is (x, y) on a line of the name's own text? A pixel or two round the glyphs counts, so a click on a
 // letter's edge still does.
 function pointOnNameText(name, x, y) {
+  const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
-  range.selectNodeContents(name);
   const slack = 2;
-  return [...range.getClientRects()].some((r) => x >= r.left - slack && x <= r.right + slack
-                                               && y >= r.top - slack && y <= r.bottom + slack);
+  let text;
+  while ((text = walker.nextNode())) {
+    if (!text.textContent.trim() || text.parentElement.closest('svg.ibox-gly')) continue;
+    range.selectNodeContents(text);
+    if ([...range.getClientRects()].some((r) => x >= r.left - slack && x <= r.right + slack
+      && y >= r.top - slack && y <= r.bottom + slack)) return true;
+  }
+  return false;
 }
+// One guard for every diagram renderer, including HTML cards and SVG labels. A blank
+// part of a name belongs to its containing box; retarget it before any name handler runs.
+document.addEventListener('click', (ev) => {
+  const name = ev.target.closest && ev.target.closest('.diagram-name-link, .pane-title-link');
+  if (name && !name.closest('#diagram, #panel, #peekcard')) return;
+  if (!name || !ev.detail || pointOnNameText(name, ev.clientX, ev.clientY)) return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  const box = name.closest('.diagram-navigation-box');
+  if (!box || box === name) return;
+  box.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1,
+    clientX: ev.clientX, clientY: ev.clientY, shiftKey: ev.shiftKey,
+    ctrlKey: ev.ctrlKey, metaKey: ev.metaKey }));
+}, true);
 // …AND THE UNDERLINE SAYS THE SAME. It came on anywhere over the name's button, so the blank beside a
 // wrapped name's shorter line looked like a link and was not one (a click there picks the box). The
 // name wears `name-off` while the pointer is over its button but off its words.
 diagram.addEventListener('mousemove', (ev) => {
   const name = ev.target && ev.target.closest && ev.target.closest('.ibox-name, .cyname');
-  if (name) name.classList.toggle('name-off', !pointOnNameText(name, ev.clientX, ev.clientY));
+  if (name) name.classList.toggle('name-off', !name.classList.contains('diagram-name-link') && !pointOnNameText(name, ev.clientX, ev.clientY));
 }, { passive: true });
 function bindFlowMap(uc) {
   const scene = mainScene;
@@ -6720,6 +6931,7 @@ function showDeploymentGroup(gid) {
     + `readable. The arrows on the overview are the sum of these processes' own arrows; open a `
     + `process for its real ones.</div>`
     + `<table class="glossary"><tbody>${rows}</tbody></table></section>`;
+  bindCardTitle(panel, () => go({ kind: 'deploymentGroup', gid }));
   bindNodeDetailHandlers(panel);
 }
 // THE THREADS A PROCESS HOSTS — the loops and listeners it starts for itself. The one fact about a process
@@ -6892,7 +7104,7 @@ function bindFrameDrill(scene) {
     // The NAME carries its own class, so the stylesheet can offer it as a door without every cluster
     // label on every view (a landing picture's frames open nothing) claiming to be one.
     const name = c.querySelector('.cluster-label');
-    if (name) name.classList.add('cyname');
+    if (name) { name.classList.add('cyname'); markDiagramName(name); }
     c.addEventListener('click', (ev) => {
       // A plain click on the NAME opens it — `nameClick` is the same test a box's name is read by, so
       // the two cannot drift into two gestures for one idea.
@@ -7030,8 +7242,8 @@ function bindClassBoxes(drillTo) {
     if (!id || !GRAPH.nodes[id] || mainScene.nodeEls[id]) return;
     markClassTitle(el);
     const target = drillTo(id, GRAPH.nodes[id].kind);
-    if (target) el.classList.add('drill');
-    else markOpenSrc(el, id);
+    if (target) { el.classList.add('drill'); markDiagramNames(el); }
+    else { markOpenSrc(el, id); markDiagramNames(el); }
     bindBox(mainScene, el, id, {
       tip: () => actionTipNode(id),
       show: () => showNode(id),
@@ -8045,6 +8257,7 @@ function bindArchPeople(t, pickBox) {
 // it, ⌘ adds it), and where `opensOn(ev)` says so the click opens it instead. `afterPick` is what the
 // picture adds to a pick. The one binder for every such box, so a gesture lands on all of them at once.
 function bindAliasBox(scene, el, id, opts) {
+  if (opts.open) markDiagramNames(el);
   // Built lazily (like every other node descriptor): `nodeFocus` reads scene.edgeEls, which bindEdges
   // fills in after the boxes are bound.
   const desc = () => ({ key: 'node:' + id, glow: () => glowNode(el), focus: nodeFocus(scene, id), show: opts.show });
@@ -9148,7 +9361,7 @@ function stateTitle(s) {
     return i ? i.name : 'Interfaces';
   }
   if (s.kind === 'rule') return ruleCrumbTitle(s.br);
-  if (s.kind === 'overview') return 'Overview';
+  if (s.kind === 'overview') return VIEW_LABEL.overview;
   if (s.kind === 'glossary') return 'Glossary';
   if (s.kind === 'updates') return s.at ? versionTitle(timelineRow(s.at)) : 'Updates';
   if (s.kind === 'removed') return removedTitle(s);
@@ -9366,6 +9579,7 @@ function renderChrome(s) {
   // landing screen and an item page were two different objects, and the sentence is what made them so.
   syncPageHero(s, chain, q ? tv : '');
   ensurePageTitle(s, chain);
+  syncDiagramNavigation(s);
   // No dividing rule any more. It existed because the question sat among the TABS, at their size and
   // weight, where it read as a fifth disabled one. Beside a 16px bold page title it is a 12.5px grey
   // italic sentence, and nothing about it can be mistaken for a control, so a gap is separation enough.
@@ -9543,6 +9757,16 @@ function fitStage() {
   if (cur.kind === 'arch') fitWidth(); else clampFitZoom(true);
   homeReal = mainPz.getSizes().realZoom;   // where a fit leaves the camera reads 100% (zoomPercent)
   updateZoomLevel();
+}
+// Fit every edge with padding, without changing the readable 100% reference scale.
+function fitEntireDiagram() {
+  mainPz.resize();
+  const s = mainPz.getSizes(), vb = s.viewBox;
+  if (!vb || !vb.width || !vb.height || !usableScale(s.realZoom)) return;
+  const scale = Math.min(Math.max(1, s.width - 2 * FIT_EDGE_PX) / vb.width,
+    Math.max(1, s.height - 2 * FIT_EDGE_PX) / vb.height);
+  mainPz.zoom(mainPz.getZoom() * scale / s.realZoom);
+  mainPz.center();
 }
 // THE ARCHITECTURE PICTURE FITS ITS WIDTH, AND SCROLLS DOWN. A fit to the whole drawing made a tall
 // picture small, as the picture is tall; the floor then left it part-drawn anyway. Fitted to the width, a reader starts at the top and pans down. The same floor and
@@ -10969,6 +11193,14 @@ function ucWhatHtml(ucId) {
 // deliberately (see journeyZoneHtml). `marks` are the "changed" and "not traced" footnotes a rail
 // carries. `ifs` is the table of surfaces to chip. `actor` is whose designator the title may drop.
 // A caller that wants none of them passes none and gets the plain box.
+function useCaseNameHtml(text) {
+  return `<span class="usecase-name">${itemGlyphSvg('usecase')}<span>${esc(text)}</span></span>`;
+}
+function flowStepTitleHtml(text, dead = false) {
+  const title = useCaseNameHtml(sentenceCase(text));
+  return dead ? `<span class="flow-step-title">${title}</span>`
+    : `<button type="button" class="flow-step-title" title="Open ${esc(sentenceCase(text))}">${title}</button>`;
+}
 function flowStepBoxHtml(st, o) {
   const opt = o || {};
   // No use case behind the step, no door: the drill had nowhere to go and landed on "Not in this
@@ -10977,42 +11209,66 @@ function flowStepBoxHtml(st, o) {
   // `pickbox` is the CLASS THAT MAKES A BOX PICKABLE, and it says nothing about layout: the ring on
   // hover and the ring-plus-lift when picked are written once for it, and a lane's own class still
   // decides the shape. A dead step keeps the class off — there is nothing to pick.
-  return `<button type="button" class="flow-step${dead ? ' flow-step-dead' : ' pickbox'}" `
+  return `<div ${dead ? '' : 'role="button" tabindex="0"'} class="flow-step${dead ? ' flow-step-dead' : ' pickbox'}" `
     + `data-step="${esc(st.id)}"${dead ? '' : ` data-uc="${esc(st.uc)}" data-pick="hpstep:${esc(st.id)}"`} `
     + `title="${dead ? 'This map does not say how this step works'
-                     : 'Open how this works: ' + esc(hpStepText(st) || 'this step')}">`
+                     : 'Select ' + esc(hpStepText(st) || 'this step')}">`
     + '<span class="flow-step-dot"></span>'
     + (opt.num ? `<span class="flow-step-num">${esc(String(hpStepPos(st.id)))}</span>` : '')
-    + `<span class="flow-step-title">${esc(sentenceCase(hpStepText(st) || st.id))}</span>`
+    + flowStepTitleHtml(hpStepText(st) || st.id, dead)
     + ucWhatHtml(st.uc)
     + (opt.marks ? journeyMarksHtml(st.uc) : '')
     + journeyIfsHtml((opt.ifs || {})[st.uc])
-    + '</button>';
+    + '</div>';
 }
-// ONE DOOR HANDLER for every board's steps. A step opens the USE CASE it realizes — the map, not the
+// ONE HANDLER for every board: the card selects and its title opens the use case — the map, not the
 // walk — so a use case keeps one home wherever you meet it. The actor rail used to send its stations
 // to the Happy Path instead, which answered a question the reader had not asked and lost the actor
 // they were reading about.
 //
 // `act` carries the actor page's drill context, exactly as its side stops do: a use case has two
 // homes, and passing the actor is what keeps the crumb running through this page.
+// One selection/opening widget for use-case boards and decision-area cards.
+function bindPickCard(card, key, titleSelector, open) {
+  card.classList.add('pickbox', 'diagram-navigation-box');
+  card.dataset.pick = key;
+  card.setAttribute('role', 'button');
+  card.tabIndex = 0;
+  const select = () => { pickNow = key; applyPick(false); refreshUrl(); };
+  card.addEventListener('click', select);
+  card.addEventListener('keydown', (ev) => {
+    if (ev.target !== card || !['Enter', ' '].includes(ev.key)) return;
+    ev.preventDefault(); select();
+  });
+  let title = card.querySelector(titleSelector);
+  if (!title) return;
+  if (title.tagName !== 'BUTTON') {
+    const button = document.createElement('button');
+    for (const a of title.attributes) button.setAttribute(a.name, a.value);
+    button.type = 'button'; button.innerHTML = title.innerHTML;
+    title.replaceWith(button); title = button;
+  }
+  markDiagramName(title);
+  title.addEventListener('click', (ev) => {
+    ev.stopPropagation(); pickNow = key; open();
+  });
+}
 function bindStepDoors(root, o) {
   const opts = o || {};
   // THE PILLS INSIDE A BOX GO FIRST. A station carries the interfaces its use case reaches, and each of
   // those now opens the door it names; the station's own click, bound below, opens the use case. The
   // pill's listener stops the event, so one box answers two questions without ever answering both.
   bindItemPills(root);
-  // EVERY PICKABLE BOX, not just a step: a side stop and a takes-part box open the same use case by
-  // the same click and are remembered the same way. The rails bound their stops separately, which is
+  // EVERY PICKABLE BOX, not just a step: side stops and takes-part boxes select and open
+  // through the same handler and are remembered the same way. The rails bound their stops separately, which is
   // why a stop could be clicked and never came back lit.
-  root.querySelectorAll('.pickbox[data-uc]').forEach((b) => b.addEventListener('click', () => {
-    // The step this reader was on, so leaving and coming Back returns to it rather than to the start.
-    // Set on BOTH boards now, which is what makes a picked station survive a trip out and back.
-    pickNow = b.getAttribute('data-pick');
-    const to = { kind: 'usecase', uc: b.getAttribute('data-uc') };
-    if (opts.act) to.act = opts.act;
-    go(to);
-  }));
+  root.querySelectorAll('.pickbox[data-uc]').forEach((b) => {
+    bindPickCard(b, b.getAttribute('data-pick'), '.flow-step-title', () => {
+      const to = { kind: 'usecase', uc: b.getAttribute('data-uc') };
+      if (opts.act) to.act = opts.act;
+      go(to);
+    });
+  });
   bindPickClear();
 }
 // CLICKING THE BACKGROUND PUTS THE BOX DOWN. A pick is a decision and nothing but another click took
@@ -11185,21 +11441,21 @@ function journeyZoneHtml(z, opts) {
   // the circle. As a third item on the circle's own row they would have been a second column, and the
   // name would break onto a line of its own as soon as the two passed 190px.
   const sides = (z.sides || []).map((uc) =>
-    `<button type="button" class="journey-side pickbox" data-uc="${esc(uc.id)}" `
+    `<div role="button" tabindex="0" class="journey-side pickbox" data-uc="${esc(uc.id)}" `
     + `data-pick="ucstop:${esc(uc.id)}" `
-    + `title="Open ${esc(uc.name)}"><span class="journey-o">○</span>`
-    + `<span class="journey-sidet"><span class="flow-step-title">${esc(sentenceCase(uc.name))}</span>`
-    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
+    + `title="Select ${esc(uc.name)}">`
+    + `<span class="journey-sidet">${flowStepTitleHtml(uc.name)}`
+    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></div>`).join('');
   // THE THIRD LANE, and the same box the lower lane draws — one circle, one text column beside it —
   // with the driver's chip leading that column. It is not a fourth kind of thing to learn: what makes
   // it different is the one chip saying whose use case this is, and the gutter naming the lane.
   const parts = (z.parts || []).map((uc) =>
-    `<button type="button" class="journey-side journey-part pickbox" data-uc="${esc(uc.id)}" `
+    `<div role="button" tabindex="0" class="journey-side journey-part pickbox" data-uc="${esc(uc.id)}" `
     + `data-pick="ucstop:${esc(uc.id)}" `
-    + `title="Open ${esc(uc.name)}"><span class="journey-o">○</span>`
+    + `title="Select ${esc(uc.name)}">`
     + `<span class="journey-sidet">${journeyDriversHtml(uc)}`
-    + `<span class="flow-step-title">${esc(sentenceCase(uc.name))}</span>`
-    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></button>`).join('');
+    + `${flowStepTitleHtml(uc.name)}`
+    + `${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}${journeyIfsHtml(ifs[uc.id])}</span></div>`).join('');
   // The zone's own feature decides its colour on the actor rail. The FEATURE rail passes one tint
   // for every zone instead: that whole board is one feature, and a colour changing from zone to zone
   // would claim a difference the zones do not have.
@@ -11822,14 +12078,16 @@ function levelHpBoxes(root) {
 // list answers "show in context".
 // The step a state names, if it names one. Both spellings, because a freshly built navigation
 // carries the scalar `sel` while a restored history point carries the `sels` list.
-// THE PICKED BOX'S KEY, read back off a state. Two prefixes, because two kinds of box are pickable
+// THE PICKED BOX'S KEY, read back off a state. Shared by the boards and decision-area cards.
+// The use-case prefixes distinguish the two kinds of box that are pickable
 // and both are one use case to the reader: `hpstep:` a step on either board's line, `ucstop:` one of
 // the lower lanes' stops. The key is carried WHOLE — a bare id could not have said which kind it was,
 // and `hpstep:` is unchanged, so a link shared before the second kind existed still lands.
 // `ep:` is the third: one entry point's ROW in the System tab's table. No screen could select an
 // entry point before, so a link could land on its kind's table and point at nothing; the row wears
 // the same pick every board box does, and `coyomap url EPn` is what writes the key.
-const PICK_KEYS = ['hpstep:', 'ucstop:', 'ep:'];
+// `area:` includes the card position because a shared decision area can appear under two features.
+const PICK_KEYS = ['hpstep:', 'ucstop:', 'ep:', 'area:'];
 function pickKeyOf(s) {
   return ((s && s.sels) || [s && s.sel]).filter(Boolean)
     .map(String).find((k) => PICK_KEYS.some((pre) => k.startsWith(pre))) || null;
@@ -11881,10 +12139,7 @@ function applyPick(scroll) {
 // realizes (the same flow the Features tab drills to, so a use case keeps ONE home), a feature's
 // name to that feature's page, a person's name to theirs.
 function bindHappyPath(root) {
-  // A STEP IS A DOOR to the walk of the use case it realizes — the same walk the Features tab
-  // drills to, so a use case keeps ONE home. The step's own BOX is what says "this one": it lights
-  // on hover, and it stays lit when a link arrives here naming a step (see applyPick). Nothing
-  // pops up: the board is a picture to read across, and a card over it is in the way.
+  // Shared with feature and actor rails: the body selects, the title opens.
   bindStepDoors(root);
   root.querySelectorAll('.hp-fname').forEach((b) => b.addEventListener('click', () =>
     go({ kind: 'capability', cap: b.getAttribute('data-cap') })));
@@ -12242,7 +12497,7 @@ function fillAreaTouchLabel(lab, t) {
     b.title = 'Show ' + name + ' in context';
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();          // the record's door is not the label's, nor the stage's unpin
-      showInContext(id);
+      showInContext(id, true);  // reuse the Shift-click camera framing after the destination renders
     });
     line.appendChild(b);
     lab.appendChild(line);
@@ -12702,7 +12957,8 @@ function renderOverview() {
   // THE DIAGRAM IS A SECTION TOO, titled, framed and headed like the overview above it and like every
   // block of an item page — it used to sit bare between the overview and the cards, with no name.
   const drawn = storyDiagramHtml();
-  const story = drawn ? itemSectionHtml(secs, 'story', 'Feature overview', ids.length, '', drawn) : '';
+  const storyHint = diagramInteractionHint('relationships');
+  const story = drawn ? itemSectionHtml(secs, 'story', 'Feature overview', ids.length, '', storyHint + drawn) : '';
   // The grid repeated every feature the diagram already shows, sentence for sentence, so it hides
   // whenever the diagram draws — EXCEPT in diff mode, whose "changed" badges only the grid carries.
   // The loose-use-cases card survives alone: it is the one card the diagram has no column for.
@@ -14104,7 +14360,7 @@ function bindIfaceDiagram(root) {
     const body = document.createElement('div');
     body.className = 'ifd-elabel-body';
     lab.appendChild(body);
-    const sec = (headText, ucs, cap, glyph, who) => {
+    const sec = (ucs, cap, glyph, who) => {
       const row = document.createElement('div');
       row.className = 'ifd-elabel-row';
       const h = document.createElement('span');
@@ -14118,7 +14374,7 @@ function bindIfaceDiagram(root) {
       // already had. Only the NAME: the count after it is a fact about this interface, not about them.
       h.innerHTML = (glyph || '')
         + (who ? `<button type="button" class="ifd-elabel-who">${esc(who)}</button>` : '')
-        + esc(headText);
+        + countPillHtml(ucs.length, 'use case');
       if (who) {
         h.querySelector('.ifd-elabel-who')
           .addEventListener('click', (ev) => { ev.stopPropagation(); go({ kind: 'actor', act: who }); });
@@ -14128,7 +14384,7 @@ function bindIfaceDiagram(root) {
         const it = document.createElement('button');
         it.type = 'button';
         it.className = 'ifd-elabel-uc';
-        it.textContent = (GRAPH.nodes[u] || {}).name || u;
+        it.innerHTML = useCaseNameHtml((GRAPH.nodes[u] || {}).name || u);
         // A USE CASE IS A DOOR. The box lists what brings someone here, and each of those is a
         // screen of its own — the same treatment a record on this box already had.
         it.addEventListener('click', (ev) => { ev.stopPropagation(); showInContext(u); });
@@ -14149,14 +14405,14 @@ function bindIfaceDiagram(root) {
     if (rows.length) {
       for (const r of rows) {
         const nm = (ROLE_BY_ID[r.role] || {}).name || r.role;
-        sec(`· ${countLabel(r.ucs.length, 'use case')}`, r.ucs, UC_CAP,
+        sec(r.ucs, UC_CAP,
             itemGlyphSvg(itemSpecRole(nm).k), nm);
       }
     } else {
       // NOBODY AT THE FAR SIDE is a normal answer, not a gap — 5 of MCP Hero's 16 are reached by the
       // product itself. The heading says so by naming no one, and a sentence explaining it was one
       // more line to read on every hover for something the section already states.
-      sec(`reached in ${countLabel(ucs.length, 'use case')}`, ucs, UC_CAP + 1);
+      sec(ucs, UC_CAP + 1);
     }
     lab.style.top = y + 'px';
     // Not a door, but not empty background either: a click on it must not clear the pin.
@@ -14671,8 +14927,9 @@ function renderRules(s) {
     // `Also under` foot on an area two features share.
     diagram.innerHTML = '<div class="usecases-wrap">' + viewHeadHtml('Rules')
       + (body || '<p class="empty">No business rules recorded.</p>') + '</div>';
-    bindElementCards(diagram, (id) => go({ kind: 'rules', blk: id }));
-    bindPlainCards(diagram, (key) => go({ kind: 'rules', blk: key }));
+    bindElementCards(diagram, (id) => go({ kind: 'rules', blk: id }), { select: true });
+    bindPlainCards(diagram, (key) => go({ kind: 'rules', blk: key }), { select: true });
+    bindPickClear();
     return;
   }
   // ONE decision area, as a page: its own hero, then its rules as the SAME element cards every other
@@ -14896,7 +15153,10 @@ async function renderView(sArg, transient, seq) {
   if (s.kind === 'capability') {
     renderUseCases({ cap: s.cap, actor: s.act, sec: s.sec });
     mainScene = null;
-    renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
+    pickNow = pickKeyOf(s);
+    renderChrome(s); restoreTextScroll(s); applyPendingFlash();
+    applyPick(true);
+    return;
   }
   // The Happy Path is HTML now, not a mermaid sequence diagram — same shape as the pages above. The
   // walk on one line: a tinted box per run of steps in one feature, broken wherever the person
@@ -14968,7 +15228,11 @@ async function renderView(sArg, transient, seq) {
   // The Business rules tab is the block rail + rule panes (HTML) — the same shape as Data.
   if (s.kind === 'rules') {
     renderRules(s);   // the area cards, or one area's rules when `s.blk` names it
-    mainScene = null; renderChrome(s); restoreTextScroll(s); applyPendingFlash(); return;
+    mainScene = null;
+    pickNow = pickKeyOf(s);
+    renderChrome(s); restoreTextScroll(s); applyPendingFlash();
+    applyPick(true);
+    return;
   }
   // One rule's page — the drill out of that list. Everything the map holds about this rule is on the
   // page itself, so nothing floats beside it.
@@ -15111,8 +15375,7 @@ async function renderView(sArg, transient, seq) {
     // step), because svg-pan-zoom paints a zoom on the next frame and the measurement would read the
     // unclamped fit. The centre move clamps afterwards, about the box it just centred.
     else if (!pendingMatchTextId && !pendingCenterId) { clampFitZoom(true); homeReal = mainPz.getSizes().realZoom; }
-    if (pendingMatchTextId) matchTextSize(mainScene.nodeEls[pendingMatchTextId]);
-    else if (pendingCenterId) { applyZoomAndCenter(mainScene.nodeEls[pendingCenterId], 1); clampFitZoom(false); }  // centre only, then the clamp about that centre
+    if (pendingCenterId) { applyZoomAndCenter(mainScene.nodeEls[pendingCenterId], 1); clampFitZoom(false); }  // centre only, then the clamp about that centre
     pendingHoldAt = null;   // used once, whichever way the camera was set
     updateZoomLevel();
     // ARRIVING AT A PAGE THAT NAMES A STEP CHANGES NO CAMERA. The page opens at its own fit, the step
@@ -15142,6 +15405,13 @@ async function renderView(sArg, transient, seq) {
   // selection's source. Only history points carry `content` (set on leave); a fresh go() has none.
   if (!transient && s.content) applyContent(s.content);
   renderChrome(s);
+  if (pendingMatchTextId) {
+    // The page header changes the canvas dimensions. Let layout and the pan/zoom
+    // transform settle before using the same camera move as Shift-click.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    if (seq !== renderSeq) return;
+    matchTextSize(mainScene.nodeEls[pendingMatchTextId]);
+  }
 }
 
 // --- file browser (left pane) ---------------------------------------------------
@@ -17500,7 +17770,8 @@ zoomout.addEventListener('click', () => { if (mainPz) { mainPz.zoomOut(); update
 // changed size since (a column opened, a window resized, a breadcrumb wrapped) it restored a stale fit
 // rather than computing a new one. Measured on a use-case flow: the content stood at 102% of the box
 // height, clipped at the bottom, and pressing this button changed nothing at all.
-zoomlevel.addEventListener('click', () => { if (mainPz) refitStage(); });  // fit to screen
+zoomlevel.addEventListener('click', () => { if (mainPz) refitStage(); });
+document.getElementById('zoomfit').addEventListener('click', () => scheduleStage(fitEntireDiagram));
 diagram.addEventListener('wheel', wheelNavigate, { passive: false });  // scroll=pan, Ctrl/Cmd/pinch=zoom
 flowprev.addEventListener('click', () => flowStepBy(-1));  // step player: previous / next flow action
 flownext.addEventListener('click', () => flowStepBy(1));
@@ -18542,14 +18813,9 @@ if (impactbtn && !EXPORTED) {
   }));
 }
 
-// Land on the Subsystems view for a diff render (the change-impact overlay lives there); otherwise on
-// the OVERVIEW, the description of what the product is for, which is what a reader arriving from the
-// root page should meet first (2026-09-12). Then FEATURES, which lists everything it does, and each
-// fallback after that is the next thing down the product row: the Happy Path, and only then the
-// machine (Subsystems, and Dependencies for a map with no grouping at all). Actors left this chain
-// with their tab: their home is the Features diagram's cast column now.
-const LANDING = HAS_OVERVIEW ? 'overview'
-  : HAS_USECASES ? 'usecases'
+// Features is the product entry point; keep Description as the next fallback.
+const LANDING = HAS_USECASES ? 'usecases'
+  : HAS_OVERVIEW ? 'overview'
   : HAS_HP ? 'hp'
   : HAS_GROUPING ? 'container'
   : 'context';

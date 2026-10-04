@@ -734,12 +734,12 @@ def test_a_station_is_a_dot_and_a_title_and_the_actor_s_rail_adds_the_step_numbe
     step = js[js.index("function flowStepBoxHtml(st, o) {"):
               js.index("\nfunction ", js.index("function flowStepBoxHtml(st, o) {") + 10)]
     assert '<span class="flow-step-dot"></span>' in step
-    assert step.index('flow-step-dot') < step.index('opt.num ?') < step.index('flow-step-title'), \
+    assert step.index('flow-step-dot') < step.index('opt.num ?') < step.index('flowStepTitleHtml'), \
         "the number sits between the dot and the title, as on the Happy Path"
     # THE USE CASE'S SENTENCE, on every box that names one — the station AND the two lower lanes.
     # Three builders draw a box; one helper writes the sentence, so a fourth cannot be added
     # without it and the three cannot word the same fact three ways.
-    assert step.index('flow-step-title') < step.index('ucWhatHtml(st.uc)'), \
+    assert step.index('flowStepTitleHtml') < step.index('ucWhatHtml(st.uc)'), \
         "the sentence sits under the name, not over it"
     for lane in ("${ucWhatHtml(uc.id)}${journeyMarksHtml(uc.id)}",):
         assert zone.count(lane) == 2, "the side stop and the takes-part box both carry the sentence"
@@ -2090,7 +2090,7 @@ def test_an_arrow_card_holds_three_calls_and_drills_for_the_rest() -> None:
     assert "const full = !o.drill;" in fn, "no page to go to means nothing is hidden"
     assert "o.full" not in js, "nothing asks for the whole list any more"
     assert "rows.slice(0, ARROW_CARD_ROWS)" in fn
-    assert "class=\"xmore\" data-drill=" in fn
+    assert "pane-title-link" in fn
     for caller in ("function showContainerEdge(a, b, drawn) {",
                    "function showDomainContainerEdge(a, b, drawn) {",
                    # The bridge card takes the arrow's own target, because it cannot always work one
@@ -3021,8 +3021,8 @@ def test_a_row_is_only_a_use_case_when_it_names_one() -> None:
     # `.ecard[data-id]`, and a caller's own control inside a card opts out with `data-card-own`.
     # Only the BINDER half is pinned: the opt-out has no producer since the use-case Happy-Path pill
     # was removed, and pinning a producer that no longer exists would fail on the next honest edit.
-    bind = js[js.index("function bindElementCards(root, onDrill) {"):
-              js.index("\nfunction ", js.index("function bindElementCards(root, onDrill) {") + 10)]
+    bind = js[js.index("function bindElementCards(root, onDrill, opts) {"):
+              js.index("\nfunction ", js.index("function bindElementCards(root, onDrill, opts) {") + 10)]
     assert "root.querySelectorAll('.ecard[data-id]')" in bind
     assert "ev.target.closest('[data-card-own]')" in bind
 
@@ -3347,8 +3347,8 @@ def test_the_other_axis_is_a_labelled_line_and_not_a_bare_pill() -> None:
     # BOTH FEET DRAW THE SAME PILL. The actor's is `itemPillHtml` too, so "who drives it" and "which
     # feature it is in" are one component wearing two different kinds' colours, not two components.
     assert "itemPillHtml(actorPage, {" in ucs
-    binder = js[js.index("function bindElementCards(root, onDrill) {"):
-                js.index("\n}", js.index("function bindElementCards(root, onDrill) {"))]
+    binder = js[js.index("function bindElementCards(root, onDrill, opts) {"):
+                js.index("\n}", js.index("function bindElementCards(root, onDrill, opts) {"))]
     assert "bindItemPills(root);" in binder, "bound where every card is bound, not per screen"
     assert "data-gofeat" in binder, "…and the section-head door stays bound here too"
     assert binder.count("ev.stopPropagation();") >= 2, "a click on the door is not the card's drill"
@@ -3570,34 +3570,26 @@ console.log(JSON.stringify(out));
 
 
 def test_a_map_lands_on_what_the_product_does() -> None:
-    """The map should read as WHAT THE PRODUCT DOES first, with code as the evidence you drill into. So
-    a reader arriving from the root page lands on the Overview, the product description (2026-09-12),
-    then Features, which lists everything the product does. Each fallback is the next thing down the
-    product row, and only then the machine.
-
-    The description had a tab of its own for one round. A tab is the wrong home for three sentences: the
-    reader visits it once and never returns. As the lead of the landing page it cannot be missed and
-    costs nothing to scroll past."""
+    """Features leads Product; Description follows and remains the fallback without use cases."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     # The boot call now reads the URL first and falls back to LANDING, so the end marker is the fallback
     # itself, searched from the table — `{ kind: LANDING }` also appears in the URL-adopt path above.
     start = js.index("const LANDING =")
     landing = js[start: js.index("{ kind: LANDING });", start)]
-    assert landing.index("HAS_OVERVIEW ? 'overview'") < landing.index("HAS_USECASES ? 'usecases'"), \
-        "the description is the first thing a reader meets"
+    assert landing.index("HAS_USECASES ? 'usecases'") < landing.index("HAS_OVERVIEW ? 'overview'"), \
+        "Features is the first thing a reader meets"
     assert "HAS_HP ? 'hp'" in landing
     assert "'actors'" not in landing, "the Actors view left the fallback chain with its tab"
     assert "HAS_DIFF" not in js, "the baked report path is gone: change mode is armed by the reader, not by a file"
     assert "'goal'" not in js and "renderGoal" not in js, "the Goal tab is gone, not hidden"
-    # …and the description leads the Features page, above a labelled block of feature cards.
+    # Features leads with its diagram; the description retains its own page.
     over = js[js.index("function renderOverview() {"): js.index("\nfunction ", js.index("function renderOverview() {") + 10)]
-    # THE DESCRIPTION HAS A TAB OF ITS OWN NOW, Overview, first under Product; the Features landing
-    # leads with its diagram.
+    # Description follows Features under Product.
     assert "productLeadHtml" not in over, "the description left the Features landing"
     tab = js[js.index("function renderOverviewTab() {"): js.index("\n}", js.index("function renderOverviewTab() {"))]
     assert "productLeadHtml([])" in tab and "overviewDigestHtml" not in js, "the tab is the description alone"
     html = (VIEWER_DIR / "viewer.html").read_text()
-    assert html.index('data-view="overview" data-group="product"') < html.index('data-view="usecases" data-group="product"'), \
+    assert html.index('data-view="usecases" data-group="product"') < html.index('data-view="overview" data-group="product"'), \
         "first tab under Product"
     assert "if (b.dataset.view === 'overview' && !HAS_OVERVIEW)" in js, "hidden on a map with no description"
     assert "'<p class=\"block-lbl\">Product features</p>' + grid" in over
@@ -4057,7 +4049,7 @@ def test_the_story_diagram_rides_the_features_landing_and_replaces_the_grid() ->
     over = js[js.index("function renderOverview() {"):
               js.index("\nfunction ", js.index("function renderOverview() {") + 10)]
     assert "const drawn = storyDiagramHtml();" in over and "bindStoryDiagram(diagram)" in over
-    assert "itemSectionHtml(secs, 'story', 'Feature overview', ids.length, '', drawn)" in over, \
+    assert "itemSectionHtml(secs, 'story', 'Feature overview', ids.length, '', storyHint + drawn)" in over, \
         "the diagram is a titled, framed section like every block of an item page"
     assert "const below = (!story || (mode === 'diff' && hasDiff()))" in over
     assert ": cardGridHtml(looseCard);" in over, "the loose card outlives the hidden grid"
@@ -4282,7 +4274,7 @@ def test_a_record_named_on_a_reference_arrow_is_a_door() -> None:
     is a claim they have to take on trust. The "+N more" tail stays plain text: no single record."""
     js = (VIEWER_DIR / "viewer.js").read_text()
     fill = _story_fn(js, "fillAreaTouchLabel")
-    assert "showInContext(id);" in fill
+    assert "showInContext(id, true);" in fill
     assert "ev.stopPropagation();" in fill, "the record's door is not the label's, nor the unpin"
     assert "story-elabel-ent" in fill
     # An id the graph does not hold draws its name as TEXT — a button opening nothing is worse
@@ -5607,7 +5599,7 @@ def test_a_pointer_that_did_not_move_is_not_hovering() -> None:
     # …and the stylesheet's own :hover reads the same gate, through the resting-colour variable
     assert "--ibox-rest: #dcdff0; border: 1.5px solid var(--ibox-rest);" in css
     assert "#diagram.pointer-held .ibox:hover:not(.ibox-picked) { border-color: var(--ibox-rest); }" in css
-    assert "#diagram.pointer-held .ibox-name:hover, #diagram.pointer-held .cyname:hover { text-decoration: none; }" in css
+    assert "#diagram.pointer-held .ibox-name:not(.diagram-name-link):hover, #diagram.pointer-held .cyname:not(.diagram-name-link):hover { text-decoration: none; }" in css
     assert "{--ibox-rest:color-mix(in srgb, ${t.stroke} ${mix}%, #fff)}" in js, "the per-kind resting line is the variable"
 
 
@@ -5906,10 +5898,10 @@ def test_every_pin_an_address_carries_puts_its_target_on_the_screen() -> None:
         "a pinned box the reader cannot see is the address not being honoured"
 
 
-def test_only_the_file_tree_asks_for_the_zoom_that_matches_the_sidebar_text() -> None:
+def test_context_navigation_frames_only_when_explicitly_requested() -> None:
     """Selecting a box can carry a camera move: zoom until the box's own label reads at the size of the
     sidebar's text. It exists because a tree row has no modifier key to gate it on, unlike a click on
-    the canvas — so it is the FILE TREE's gesture, and the code viewer's beside it.
+    the canvas. Tree/code navigation and entity links in Features explicitly request this framing.
 
     `selectFromTree` is what every other route also calls: an item pill, a type pill, a search hit, a
     reference in prose. All of them mean "show me that box", and being shown it means landing where the
@@ -5928,12 +5920,12 @@ def test_only_the_file_tree_asks_for_the_zoom_that_matches_the_sidebar_text() ->
     # The render honours it, and clears it whether or not it fired.
     assert "const wantsZoom = pendingMatchText; pendingMatchText = false;" in js
     assert "if (el && wantsZoom) pendingMatchTextId = id;" in js
-    # EXACTLY the tree and the code viewer ask for it. Every other caller passes nothing.
+    # Tree/code navigation requests framing; contextual links must explicitly opt in.
     assert js.count("selectFromTree(e.node, true)") == 1
     assert js.count("selectFromTreeAnchors([e.node, ...e.others], true)") == 2
     assert js.count("selectFromTree(e.sel, true)") == 1
     assert js.count("selectFromTree(id, true)") == 1
-    assert "showInContext(id) { selectFromTree(id); }" in js, "showing is not the tree's gesture"
+    assert "showInContext(id, frame = false) { selectFromTree(id, frame); }" in js, "context navigation frames only on request"
 
 
 def test_the_focus_ring_stays_off_the_box_the_reader_already_picked() -> None:

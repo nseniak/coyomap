@@ -144,8 +144,7 @@ def test_back_after_an_address_bar_paste_walks_the_real_screens() -> None:
     those stale indexes still matched: Back rendered whatever now sat at that index, and the URL was
     then rewritten over the entry, losing the screen it named for the life of the tab.
 
-    Read the steps as a walk: Tests, then Glossary, then the landing screen, the Overview since
-    2026-09-12 (Features before). Before the fix it was Tests, then Subsystems, then Tests."""
+    Read the steps as a walk: Tests, then Glossary, then the Features landing screen. Before the fix it was Tests, then Subsystems, then Tests."""
     with _served() as url, _page(url) as page:
         page.evaluate("() => document.querySelector('button[data-view=\"glossary\"]').click()")
         _settle(page)
@@ -159,8 +158,8 @@ def test_back_after_an_address_bar_paste_walks_the_real_screens() -> None:
             page.go_back()
             _settle(page)
             walked.append(page.evaluate("() => location.hash"))
-        assert walked == ["#v=tests", "#v=glossary", "#v=overview"], walked
-        assert "Overview" in _crumb(page)
+        assert walked == ["#v=tests", "#v=glossary", "#v=features"], walked
+        assert "Features" in _crumb(page)
         assert not page.js_errors, page.js_errors
 
 
@@ -272,7 +271,7 @@ def test_the_walk_has_three_doors_and_each_opens_that_thing_s_own_page() -> None
     """
     with _served() as url, _page(url + "#v=hp") as page:
         _settle(page)
-        page.evaluate("() => document.querySelector('.flow-step').click()")
+        page.evaluate("() => document.querySelector('.flow-step-title').click()")
         _settle(page)
         assert page.evaluate("() => location.hash").startswith("#v=usecase&uc="), \
             page.evaluate("() => location.hash")
@@ -1589,7 +1588,7 @@ def test_a_surface_card_has_one_door_and_it_is_the_name() -> None:
         }))""")
         assert got, got
         for card in got:
-            assert card["doors"] == ["ibox-name"], card
+            assert len(card["doors"]) == 1 and "ibox-name" in card["doors"][0].split(), card
         # …and the facts are still drawn, so this is not passing by them having disappeared.
         assert sum(c["chips"] for c in got) > 0, got
         assert sum(c["provs"] for c in got) > 0, got
@@ -2728,7 +2727,7 @@ def test_every_use_case_on_a_board_is_picked_and_put_down_the_same_way() -> None
         picked = page.evaluate("""async () => {
             const stop = document.querySelector('.journey-side.pickbox');
             const key = stop.getAttribute('data-pick');
-            stop.click();
+            stop.querySelector('.flow-step-title').click();
             await new Promise((r) => setTimeout(r, 500));
             const went = location.hash;
             history.back();
@@ -2759,7 +2758,7 @@ def test_leaving_the_page_is_not_the_gesture_that_puts_a_box_down() -> None:
             _page(url + "#v=actor&act=Team%20member") as page:
         _settle(page)
         kept = page.evaluate("""async () => {
-            document.querySelector('.pickbox[data-uc]').click();
+            document.querySelector('.pickbox[data-uc] .flow-step-title').click();
             await new Promise((r) => setTimeout(r, 500));
             history.back();
             await new Promise((r) => setTimeout(r, 800));
@@ -3365,8 +3364,7 @@ def test_no_arrow_draws_a_magnifier_and_every_drillable_one_keeps_a_door() -> No
           if (!title || seen.has(title)) continue;
           seen.add(title);
           out.push({title: title.slice(0, 60),
-                    door: !!document.querySelector('#panel .pane-title-link')
-                       || !!document.querySelector('#panel .xmore')});
+                    door: !!document.querySelector('#panel .pane-title-link')});
         }
         resolve(out);
       })"""
@@ -3419,7 +3417,7 @@ def test_a_bridge_arrow_opens_the_same_page_by_gesture_and_by_its_card() -> None
         page.wait_for_timeout(400)
         link = page.locator("#panel .pane-title-link")
         assert link.count() == 1, "the arrow's card names its door"
-        link.click()
+        link.press('Enter')
         _settle(page)
         assert page.evaluate("() => location.hash") == by_gesture, \
             "the card's title opens exactly where the drill gesture goes"
@@ -3455,7 +3453,7 @@ def test_a_folds_card_and_its_page_say_the_same_sentence() -> None:
         if card:
             assert "Context view" not in card, f"the card said the code's word for the tab: {card!r}"
             assert "folded out of the Dependencies view" in card, card
-            assert "drill in" in card, "a card is offered BEFORE you drill, so it keeps the gesture"
+            assert page.locator("#panel .pane-title-link").inner_text() == "Libraries"
         assert not page.js_errors, page.js_errors
 
 
@@ -4619,9 +4617,8 @@ def test_more_on_a_group_box_opens_it_to_list_every_part() -> None:
         assert not page.js_errors, page.js_errors
 
 
-def test_a_two_line_name_opens_only_from_its_words() -> None:
-    """A name that wraps is a button two lines tall, and the space beside its shorter line was the
-    button too: a click there opened the thing. Only the words open it now; the space picks the box."""
+def test_a_two_line_name_opens_only_from_its_text() -> None:
+    """Whitespace beside a wrapped line selects the box; only the words open it."""
     def make_long_names(m: dict[str, Any]) -> None:
         for x in m.get("subsystems", []):
             x["name"] = x["name"] + " and a tail long enough to wrap"
@@ -4634,18 +4631,16 @@ def test_a_two_line_name_opens_only_from_its_words() -> None:
             return { blank: [last.right + (b.right - last.right) / 2, (last.top + last.bottom) / 2],
                      words: [(rs[0].left + rs[0].right) / 2, (rs[0].top + rs[0].bottom) / 2] }; } return null; }""")
         assert spot, "no two-line name with space beside its second line"
-        # …and the underline says the same: none on the blank, one on the words
+        # The whole-box hover cue stays underlined; opening still requires hitting the words.
         under = "() => { const n = document.querySelector('#diagram .ibox-name:hover'); return n ? getComputedStyle(n).textDecorationLine : ''; }"
         page.mouse.move(spot["blank"][0] - 1, spot["blank"][1])
         page.mouse.move(*spot["blank"])
-        assert page.evaluate(under) == "none"
+        assert page.evaluate(under) == "underline"
         page.mouse.move(*spot["words"])
         assert page.evaluate(under) == "underline"
-        before = page.evaluate("() => location.hash")
         page.mouse.click(*spot["blank"])
-        page.wait_for_timeout(600)
-        after = page.evaluate("() => location.hash")
-        assert after.split("&sel=")[0] == before.split("&sel=")[0] and "sel=" in after, (before, after)
+        assert page.evaluate('location.hash').startswith('#v=arch')
+        assert page.locator('#diagram .is-selected').count() > 0
         page.mouse.click(*spot["words"])
         page.wait_for_function("() => !location.hash.startsWith('#v=arch')")
         assert not page.js_errors, page.js_errors
@@ -5566,6 +5561,17 @@ def test_the_zoom_number_reads_100_where_each_view_opens_and_after_a_click_on_it
             page.click("#zoomin")
             page.wait_for_timeout(300)
             assert page.evaluate(level) != "100%", view
+            page.click("#zoomfit")
+            page.wait_for_timeout(300)
+            fit = page.evaluate("""() => {
+                const svg = document.querySelector('#diagram svg');
+                const pz = window.svgPanZoom(svg), s = pz.getSizes(), p = pz.getPan();
+                const v = s.viewBox, z = s.realZoom;
+                return {left: p.x + v.x*z, top: p.y + v.y*z,
+                    right: s.width - p.x - (v.x+v.width)*z,
+                    bottom: s.height - p.y - (v.y+v.height)*z};
+            }""")
+            assert min(fit.values()) >= 23, (view, fit)
             page.click("#zoomlevel")
             page.wait_for_timeout(700)
             assert page.evaluate(level) == "100%", (view, page.evaluate(level))
@@ -5999,3 +6005,315 @@ def test_complete_breadcrumb_survives_scroll_and_has_a_working_way_up(fragment, 
         _settle(page)
         assert page.locator('#crumb button').count() == 0
         assert page.js_errors == []
+
+
+def _assert_diagram_name_cue(page: Any, name: Any) -> None:
+    decoration = lambda: name.evaluate('(e) => getComputedStyle(e).textDecorationLine')
+    page.mouse.move(1, 1)
+    assert decoration() == 'none'
+    # Hover the containing box away from the link itself.
+    spot = name.evaluate("""name => {
+        const box = name.closest('.diagram-navigation-box');
+        const r = box.getBoundingClientRect();
+        for (let y = Math.max(0, r.top + 2); y < Math.min(innerHeight, r.bottom); y += 5)
+          for (let x = Math.max(0, r.left + 2); x < Math.min(innerWidth, r.right); x += 5) {
+            const hit = document.elementFromPoint(x, y);
+            if (hit && box.contains(hit) && !hit.closest('.diagram-name-link')) return {x, y};
+          }
+        return null;
+    }""")
+    assert spot, 'the containing box needs an inspectable area outside its name'
+    page.mouse.move(spot['x'], spot['y'])
+    assert decoration() == 'underline'
+    page.mouse.move(1, 1)
+    assert decoration() == 'none'
+    name.focus()
+    assert decoration() == 'underline'
+    name.evaluate('e => e.blur()')
+    assert decoration() == 'none'
+
+
+@pytest.mark.parametrize('fragment', [
+    'arch', 'container', 'subsystem&sid=S1', 'context', 'libs',
+    'domain', 'domsub&sd=SD1', 'deployment', 'usecase&uc=UC1',
+])
+def test_diagram_name_and_explicit_popup_action_open_the_same_destination(fragment) -> None:
+    with _served_map(_with_deployment_arrow) as url, _page(url + '#v=' + fragment) as page:
+        _settle(page)
+        names = page.locator('#diagram g.node .diagram-name-link')
+        assert names.count(), fragment
+        # Large diagrams can put their first node outside the clipped canvas. Exercise a
+        # name a reader can actually see and click, rather than dispatching a synthetic click.
+        index = names.evaluate_all('''es => es.findIndex(e => {
+            const r = e.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return hit && e.contains(hit);
+        })''')
+        assert index >= 0, fragment
+        name = names.nth(index)
+        _assert_diagram_name_cue(page, name)
+        node = name.locator('xpath=ancestor::*[contains(concat(" ",normalize-space(@class)," ")," node ")][1]')
+        node.evaluate("e => e.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))")
+        _settle(page)
+        assert name.evaluate('(e) => getComputedStyle(e).textDecorationLine') == 'underline'
+        action = page.locator('#panel .pane-title-link').first
+        assert action.is_visible(), fragment
+        assert page.locator('.diagram-open-action').count() == 0
+        assert action.evaluate('e => getComputedStyle(e).textDecorationLine') == 'underline'
+        action.press('Enter')
+        _settle(page)
+        destination = page.evaluate('location.hash')
+        assert destination != '#v=' + fragment
+        page.goto(url + '#v=' + fragment)
+        _settle(page)
+        name = page.locator('#diagram g.node .diagram-name-link').nth(index)
+        name.press('Enter')
+        _settle(page)
+        assert page.evaluate('location.hash') == destination
+        page.goto(url + '#v=' + fragment)
+        _settle(page)
+        point = page.locator('#diagram g.node .diagram-name-link').nth(index).evaluate("""e => {
+            const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+            let text;
+            while ((text = walker.nextNode())) {
+                if (!text.textContent.trim() || text.parentElement.closest('svg.ibox-gly')) continue;
+                const range = document.createRange(); range.selectNodeContents(text);
+                const r = range.getClientRects()[0];
+                if (r) return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }
+        }""")
+        page.mouse.click(point['x'], point['y'])
+        _settle(page)
+        assert page.evaluate('location.hash') == destination
+        assert not page.js_errors, page.js_errors
+
+
+@pytest.mark.parametrize('fragment,selector', [
+    ('features', '#storystage button.ibox-name'),
+    ('hp', 'button.hp-fname'),
+    ('interfaces', '.ifd-box button.ibox-name'),
+])
+def test_board_names_use_the_shared_navigation_cue(fragment, selector) -> None:
+    with _served_map(_two_sided_interfaces()) as url, _page(url + '#v=' + fragment) as page:
+        _settle(page)
+        assert page.locator('.diagram-interaction-hint').count() == 1
+        names = page.locator(selector)
+        assert names.count()
+        _assert_diagram_name_cue(page, names.first)
+        names.first.press('Enter')
+        _settle(page)
+        assert page.evaluate('location.hash') != '#v=' + fragment
+        assert not page.js_errors, page.js_errors
+
+
+def test_feature_entity_link_frames_the_entity_like_shift_click() -> None:
+    with _served_map(make_owner_states_map) as url, _page(url + '#v=features') as page:
+        _settle(page)
+        link = page.locator('.story-elabel-ent').first
+        label = link.locator('xpath=ancestor::div[contains(@class,"story-elabel")][1]')
+        feature = label.get_attribute('data-sfeat')
+        page.locator(f'.story-feature[data-sfeat="{feature}"]').click()
+        entity_name = link.inner_text()
+        link.click()
+        _settle(page)
+        assert '#v=domsub&' in page.url
+        node = page.locator('#diagram g.node.is-selected, #diagram g.classGroup.is-selected').first
+        assert entity_name in node.text_content()
+        geometry = '''e => {
+            const r = e.getBoundingClientRect(), d = document.querySelector('#diagram').getBoundingClientRect();
+            return {x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height,
+                    cx: d.x + d.width / 2, cy: d.y + d.height / 2};
+        }'''
+        before = node.evaluate(geometry)
+        assert abs(before['x'] - before['cx']) < 2, before
+        assert abs(before['y'] - before['cy']) < 2, before
+        # The existing Shift-click move should now leave both scale and centre unchanged.
+        node.evaluate('''e => {
+            const r = e.getBoundingClientRect();
+            for (const type of ['mousedown', 'click']) e.dispatchEvent(new MouseEvent(type,
+                {bubbles: true, detail: 1, shiftKey: true, clientX: r.x + 2, clientY: r.y + 2}));
+        }''')
+        _settle(page)
+        after = node.evaluate(geometry)
+        for key in ('x', 'y', 'w', 'h'):
+            assert abs(after[key] - before[key]) < 2, (before, after)
+        assert not page.js_errors, page.js_errors
+
+
+@pytest.mark.parametrize('fragment', ['hp', 'capability&cap=CAP1', 'actor&act=Team%20member'])
+def test_happy_path_card_selects_and_its_title_opens(fragment) -> None:
+    with _served_map(_a_door_for_a_bystander()) as url, _page(url + '#v=' + fragment) as page:
+        _settle(page)
+        card = page.locator('.pickbox[data-uc]').first
+        uc = card.get_attribute('data-uc')
+        before = page.evaluate('history.length')
+        card.evaluate('e => e.click()')
+        assert 'ibox-picked' in card.get_attribute('class')
+        assert page.evaluate('history.length') == before
+        assert page.evaluate("fragment => { const actual = new URLSearchParams(location.hash.slice(1)); return [...new URLSearchParams('v=' + fragment)].every(([k,v]) => actual.get(k) === v); }", fragment)
+        assert 'sel=' in page.url
+        page.locator('.journey-board, .hp-board').first.evaluate("e => e.dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        assert 'ibox-picked' not in card.get_attribute('class')
+        card.press('Space')
+        assert 'ibox-picked' in card.get_attribute('class')
+        card.locator('.flow-step-title').press('Enter')
+        _settle(page)
+        assert '#v=usecase&uc=' + uc in page.url
+        page.go_back()
+        _settle(page)
+        assert page.locator('.pickbox.ibox-picked').count() == 1
+        assert not page.js_errors, page.js_errors
+
+
+
+def test_decision_area_card_selects_and_title_opens_with_selection_restored() -> None:
+    with _served_map(_with_specified_rules) as url, _page(url + '#v=rules') as page:
+        _settle(page)
+        card = page.locator('.ecard[data-id]').first
+        area = card.get_attribute('data-id')
+        card.evaluate('e => e.click()')
+        assert 'ibox-picked' in card.get_attribute('class')
+        assert 'blk=' not in page.url and 'sel=area' in page.url
+        card.locator('button.ibox-name').press('Enter')
+        _settle(page)
+        assert 'blk=' + area in page.url
+        page.go_back()
+        _settle(page)
+        assert page.locator(f'.ecard[data-id="{area}"].ibox-picked').count() == 1
+        page.locator('.rules-board').evaluate("e => e.dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        assert not page.locator('.ecard.ibox-picked').count()
+        page.locator(f'.ecard[data-id="{area}"]').first.press('Space')
+        assert page.locator(f'.ecard[data-id="{area}"].ibox-picked').count() == 1
+        # A shared area can appear under two features: preserve the clicked copy, too.
+        duplicate = page.locator(f'.ecard[data-id="{area}"]').last
+        duplicate.evaluate('e => e.click()')
+        assert 'ibox-picked' in duplicate.get_attribute('class')
+        duplicate.locator('button.ibox-name').click()
+        _settle(page)
+        page.go_back()
+        _settle(page)
+        assert 'ibox-picked' in page.locator(f'.ecard[data-id="{area}"]').last.get_attribute('class')
+        page.screenshot(path='/tmp/coyomap-rules-selection.png')
+        assert not page.js_errors, page.js_errors
+
+
+def test_use_case_icons_and_counts_are_shared_across_boards_and_interface_popups() -> None:
+    with _served_map(_two_sided_interfaces()) as url, _page(url + '#v=interfaces') as page:
+        _settle(page)
+        row = page.locator('.ifd-elabel-row').filter(has=page.locator('.ifd-elabel-who')).first
+        label = row.locator('xpath=ancestor::div[contains(concat(" ",normalize-space(@class)," ")," ifd-elabel ")][1]')
+        iid = label.get_attribute('data-iface')
+        page.locator(f'.ifd-box[data-iface="{iid}"]').click()
+        assert 'use case' in row.locator('.count-pill').inner_text().lower()
+        names = row.locator('.ifd-elabel-uc')
+        assert names.count() > 0
+        assert names.locator('.usecase-name > svg').count() == names.count()
+        assert names.first.evaluate("e => getComputedStyle(e, '::before').content") in ('none', 'normal')
+        assert names.first.locator('svg').bounding_box()['x'] > row.locator('.ifd-elabel-who').bounding_box()['x']
+        page.screenshot(path='/tmp/coyomap-interface-usecases.png')
+        for route in ('hp', 'capability&cap=CAP1', 'actor&act=Org%20admin'):
+            page.goto(url + '#v=' + route)
+            _settle(page)
+            titles = page.locator('.pickbox .flow-step-title')
+            assert titles.count() > 0
+            assert titles.locator('.usecase-name > svg').count() == titles.count()
+            assert page.locator('.journey-o').count() == 0
+            card = titles.first.locator('xpath=ancestor::*[contains(concat(" ",normalize-space(@class)," ")," pickbox ")][1]')
+            text = titles.first.locator('.usecase-name > span')
+            page.mouse.move(1, 1)
+            assert text.evaluate('e => getComputedStyle(e).textDecorationLine') == 'none'
+            card.hover()
+            assert text.evaluate('e => getComputedStyle(e).textDecorationLine') == 'underline'
+            page.mouse.move(1, 1)
+            assert text.evaluate('e => getComputedStyle(e).textDecorationLine') == 'none'
+            card.evaluate('e => e.click()')
+            assert text.evaluate('e => getComputedStyle(e).textDecorationLine') == 'underline'
+            page.screenshot(path='/tmp/coyomap-usecases-' + route.split('&')[0] + '.png')
+        assert not page.js_errors, page.js_errors
+
+
+def test_wrapped_use_case_name_whitespace_selects_without_opening() -> None:
+    with _served() as url, _page(url + '#v=hp') as page:
+        _settle(page)
+        page.add_style_tag(content='.flow-step-title { width: 130px !important; }')
+        spot = page.evaluate('''() => {
+            for (const name of document.querySelectorAll('.flow-step-title')) {
+                const text = name.querySelector('.usecase-name > span');
+                if (!text) continue;
+                const range = document.createRange(); range.selectNodeContents(text);
+                const lines = [...range.getClientRects()];
+                const r = name.getBoundingClientRect(), last = lines.at(-1);
+                if (lines.length < 2 || r.right - last.right < 15 || r.bottom > innerHeight) continue;
+                return { blank: [last.right + (r.right - last.right) / 2, (last.top + last.bottom) / 2],
+                    words: [(lines[0].left + lines[0].right) / 2, (lines[0].top + lines[0].bottom) / 2] };
+            }
+        }''')
+        assert spot
+        page.mouse.click(*spot['blank'])
+        assert page.evaluate('location.hash').startswith('#v=hp')
+        assert page.locator('.pickbox.ibox-picked').count() == 1
+        page.mouse.click(*spot['words'])
+        _settle(page)
+        assert page.evaluate('location.hash').startswith('#v=usecase&uc=')
+        assert not page.js_errors, page.js_errors
+
+
+
+@pytest.mark.parametrize('fragment', ['arch', 'features', 'hp', 'capability&cap=CAP1', 'interfaces'])
+def test_diagram_help_is_inline_and_opens_by_hover_focus_and_click(fragment) -> None:
+    with _served_map(_two_sided_interfaces()) as url, _page(url + '#v=' + fragment) as page:
+        _settle(page)
+        button = page.get_by_role('button', name='Diagram interactions')
+        assert button.count() == 1
+        popup = page.locator('.diagram-help-popover')
+        assert not popup.is_visible()
+        assert button.locator('xpath=../..').get_attribute('class') == 'diagram-help-heading'
+        alignment = button.evaluate('''b => {
+            const r = b.getBoundingClientRect();
+            const h = b.closest('.diagram-help-heading').firstElementChild.getBoundingClientRect();
+            return Math.abs(r.top + r.height / 2 - h.top - h.height / 2);
+        }''')
+        assert alignment < 1, alignment
+        assert button.evaluate('''b => {
+            const center = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+            const badge = b.closest('.diagram-help-heading').querySelector('.count-pill');
+            return !badge || Math.abs(center(b) - center(badge)) < 1;
+        }''')
+        before = page.locator('#diagram').bounding_box()
+        button.hover()
+        assert popup.is_visible()
+        assert page.locator('#diagram').bounding_box() == before
+        help_text = popup.inner_text()
+        assert 'Click' in help_text
+        expected = {'arch': 'Select a relationship arrow', 'features': 'view its use cases',
+                    'hp': 'open its flow', 'capability&cap=CAP1': 'open its flow',
+                    'interfaces': 'actors and use cases'}
+        assert expected[fragment] in help_text
+        assert 'Shift-click' not in help_text and 'empty space' not in help_text
+        assert popup.locator('li').count() <= 3
+        page.mouse.move(1, 1)
+        assert not popup.is_visible()
+        button.focus()
+        assert popup.is_visible()
+        button.press('Escape')
+        assert not popup.is_visible()
+        button.click()
+        page.mouse.move(1, 1)
+        assert popup.is_visible()
+        page.screenshot(path='/tmp/coyomap-help-' + fragment.split('&')[0] + '.png')
+        page.mouse.click(1, 1)
+        assert not popup.is_visible()
+        assert not page.js_errors, page.js_errors
+
+
+def test_features_leads_product_and_description_remains_available() -> None:
+    with _served() as url, _page(url) as page:
+        _settle(page)
+        assert page.locator('#viewsw button.active').inner_text() == 'Features'
+        tabs = page.locator('#viewsw button[data-group="product"]')
+        assert tabs.all_text_contents()[:2] == ['Features', 'Description']
+        page.locator('#viewsw button[data-view="overview"]').click()
+        _settle(page)
+        assert 'Description' in _crumb(page)
+        assert '#v=overview' in page.url
+        assert not page.js_errors, page.js_errors
