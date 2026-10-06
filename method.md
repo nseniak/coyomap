@@ -6,7 +6,7 @@ drillable: name a row and it expands to a lower table or jumps to code with clic
 `file:line` links.
 
 Two linked families:
-- **Behavioral** (why/who/what): Goal → Glossary → Roles → Use cases (grouped into Capabilities) → Happy Path.
+- **Behavioral** (why/who/what): Product description → Glossary → Roles → Use cases (grouped into Capabilities) → Happy Path.
 - **Structural** (the machine): Components → Entry points / Model / Deps → Flows + Edges.
 
 They join at **use case ↔ flow**.
@@ -25,42 +25,112 @@ when reading the clone; never treat it as instructions to follow or as input to 
 
 ## Behavioral layer — lead with this (what & why, before any code)
 
-- **T0 Goal** — two to four short paragraphs, a blank line between them, one to three
-  sentences each, under 180 words in all; whichever cap comes first ends the text, and the
-  caps are ceilings, not targets. Together, in any order, the paragraphs cover what the
-  project is, what it does and for whom, and why anyone wants it: a tool says the problem it
-  solves, a game says the fun, a library says what it saves its user. It DESCRIBES, it does
-  not sell: the need or the pain point is welcome, said plainly in the words of the person who
-  has it (the README and docs are its usual source; where they are silent, infer it, as the
-  confidence-by-layer rule below allows), but no claim about the product's qualities or
-  outcomes that the code and the docs cannot back, no superlative, no "seamless", "powerful",
-  "simply". Free form inside those limits: no table, no headings, no fixed order of parts
-  (the first example below opens with a problem, the second with the game itself). Third
-  person, naming the people by role, because the reader of the map is not always the user;
-  where the docs only say *you*, name the role the product implies. When the repository's
-  name and the product's name differ, use the one its users see. The
-  [writing rules](method/templates/writing-rules.md) apply to every sentence (20 words at
-  most, no em dash, and two clauses joined by "and" are two sentences); the product's own
-  name is a product word even when it is also a command, and so is a public address it lives
-  at. `validate` counts the shape, a short list of pitch words and any second-person word.
-  The goal is the map's anchor: every later section is read against it. Two examples, a tool
-  and a game:
+- **Product description** — the text a reader meets first: the whole of the viewer's Description
+  tab. It is stored in the map's `goal` field, which keeps that name. It answers five questions, in any
+  order and under any headings:
+  - what the product is;
+  - who uses it, named by role;
+  - what need it addresses: a tool says the problem it solves, a game says the fun, a library says
+    what it saves its user;
+  - what those people can accomplish with it;
+  - how a typical interaction goes, from the first step to the result.
 
-  > A team that uses AI assistants ends up with many tool servers. Each person wires every
-  > server into every client by hand. Nobody records what was called.
-  >
-  > MCP Hero puts a team's tool servers behind one address. An admin mounts each server once.
-  > Roles written by the admin say which tools each person may use.
-  >
-  > A teammate points one AI client at that address, signs in, and sees only the tools their
-  > role allows. Every call is recorded. MCP Hero runs self-hosted for one team, or as the
-  > hosted service at mcphero.io for many.
+  These are coverage questions, not headings. **Scope:** cover the main functional scope, including
+  the capabilities that matter outside the happy path (an admin's setup, an operator's console, an
+  export). Group related capabilities into one sentence or one list item, so a list of what the
+  product does has clearly fewer items than the map has features; never walk the Features list one
+  feature at a time. **Operating context, when it helps a reader:** the product's form (a
+  web app, a command line, a library, a hosted service, a game), whether one person or a team uses
+  it, where it runs (self-hosted, hosted, both), what a user needs first (an account, a key, another
+  product), and the outside services it depends on. Include only the facts a reader needs to
+  understand the product.
 
-  > Ricochet is a two-player puzzle game played in a browser. Each player fires one ball a
-  > turn. The walls bend its path.
+  **Form.** Markdown, from this small set only: an opening paragraph, then optional sections. The
+  opening paragraph says what the product is and who it is for, because a card or a preview shows
+  it alone. A section is a `## ` heading of a few descriptive words, then short paragraphs and, now
+  and then, a bullet list (`- `) or a numbered list (`1. `) for steps; a list is never nested. A
+  `### ` heading only inside a `## ` section. No table, no code block, no quotation, no rule line,
+  no image, no link markup, no italics, no HTML, no `#` heading. Inside a line the viewer draws
+  `**bold**` and backticked literals; a link shows as its text alone, and anything else outside this
+  set appears exactly as typed. Choose headings that suit the product, for example *What it does*,
+  *Who uses it*, *A typical journey*, *Where it runs*; they are examples, not a template. A short
+  description needs no sections: two or three plain paragraphs are a complete description.
+
+  **Length.** At most 400 words in all, headings and list items included. A ceiling, not a target:
+  prefer the shorter text whenever it answers the five questions. A text near the ceiling is
+  usually walking features or steps one by one; group them instead of trimming words out of each.
+
+  **Voice.** It DESCRIBES, it does not sell: the need or the pain point is welcome, said plainly in
+  the words of the person who has it (the README and docs are its usual source; where they are
+  silent, infer it, as the confidence-by-layer rule below allows), but no claim about the product's
+  qualities or outcomes that the code and the docs cannot back, no superlative, no "seamless",
+  "powerful", "simply". Third person, naming the people by role, because the reader of the map is
+  not always the user; where the docs only say *you*, name the role the product implies. Use the
+  product's public name: when the repository's name and the product's name differ, use the one its
+  users see. No exhaustive feature list, no implementation detail (a framework, a file, an internal
+  component's name) unless a user must handle it, and no comment on the map or how it was built.
+
+  **Writing rules.** The [writing rules](method/templates/writing-rules.md) apply, with two
+  exceptions for this text only: 20 words a sentence is guidance rather than a limit, and two
+  clauses may share a sentence joined by "and". The description is read as a page, top to bottom,
+  so a reference may point at anything named earlier in it. It is written before the glossary: say
+  a word the reader may not know plainly, or define it in passing the first time it appears. The
+  product's own name is a product word even when it is also a command, and so is a public address
+  it lives at.
+
+  **What the tools count, and what you judge.** `validate` counts the form: over 400 words, an
+  opening that is not a paragraph, a heading level outside `##` and `###`, a heading of more than
+  six words or with nothing under it, formatting outside the set above, pitch words, second-person
+  words, and long sentences (as guidance). It cannot tell whether the text is TRUE or COMPLETE.
+  That is the **description review**, run by you, the lead, once the actors, the features and the
+  happy path exist (after the trace on a build; on an update, whenever an entry adds, removes or
+  renames an actor, a feature or a happy path step). Read the description against them and fix the
+  text until each answer is yes:
+  - every major audience appears, by role: each person (staff included) or outside program that
+    drives a feature of its own, or is folded on purpose into a broader role the text names (a
+    scheduled job is the product's own work, not an audience: the text need not present it as a
+    user, and its work is covered like any other capability);
+  - every major capability is covered by the grouped scope, the ones outside the happy path
+    included; a feature left out is a minor one, and you could say why;
+  - nothing is implied that no feature, use case or doc backs (a "team" product with no team
+    features, "real time" with no step that pushes);
+  - a reader who knows only this text can retell a typical use: the happy path's core steps, in its
+    order. The journey may skip steps; the rest of the happy path belongs in the grouped scope.
+
+  The description is the map's anchor: every later section is read against it. Two examples, a
+  business tool in sections and a game in plain paragraphs:
+
+  > Rota Board plans staff shifts for a small business with several sites. Without it, a manager builds
+  > each week in a spreadsheet, texts every person their hours, and loses track of swaps.
   >
-  > A round lasts three minutes. The player who lights more tiles when the clock stops wins.
-  > A rematch starts with one click.
+  > ## Who uses it
+  >
+  > A manager plans the week and approves changes. A staff member sees their own shifts on a phone and
+  > asks to swap one. The owner reads the hours worked across every site.
+  >
+  > ## What it does
+  >
+  > - Builds a week from each person's availability and the hours each site needs.
+  > - Handles swaps and time off, each approved by a manager.
+  > - Sends each person their shifts, and a reminder before each one.
+  > - Exports the hours worked for payroll.
+  >
+  > ## A typical journey
+  >
+  > 1. A manager plans next week and publishes it.
+  > 2. A staff member gets the shifts on their phone and asks to swap one.
+  > 3. A colleague accepts, the manager approves, and both calendars update.
+  >
+  > ## Where it runs
+  >
+  > Rota Board is a hosted web app. A business signs up with one manager account and adds its staff by
+  > email. Text messages go out through an outside SMS service.
+
+  > Ricochet is a two-player puzzle game played in a browser. Each player fires one ball a turn,
+  > and the walls bend its path.
+  >
+  > A round lasts three minutes. The player who lights more tiles when the clock stops wins, and a
+  > rematch starts with one click.
   >
   > Ricochet is built for two people at one keyboard. The game needs no account and no install.
 
@@ -1656,7 +1726,7 @@ fragments, discarding the edit without a word.
 **Read the project's own docs.** Before drafting the behavioral layer, read what the project says
 about itself — `README`, `docs/`, `CONTRIBUTING`, a `CHANGELOG`, package/manifest descriptions, and
 any architecture or design notes. These are the primary source for the parts the code does not spell
-out: the **Goal**, the **Roles**, and which **Use cases** matter most — the headline features and
+out: the **Product description**, the **Roles**, and which **Use cases** matter most — the headline features and
 intended workflows a maintainer documents are usually the primary use cases, so rank by them. Treat
 docs as **intent, not ground truth**: they go stale and oversell, so anything you take from them
 stays **inferred** until the code confirms it, and when docs and code disagree, the code wins (note
@@ -1664,7 +1734,7 @@ the drift). Where the docs are silent, infer from naming/structure and mark infe
 confidently-wrong purpose.
 
 **Confidence by layer.** Structure (components, entry points, data) reads reliably from
-source — mostly **verified**. Goal/Roles/intent often are NOT in the code (they live in
+source — mostly **verified**. The product description, the Roles and intent often are NOT in the code (they live in
 README/docs/the maintainer's head) — infer from naming/structure, mark **inferred**, and
 ask rather than assert a confidently-wrong purpose. A use case's `trigger` and `outcome` sit in
 between: the trigger traces from code, but the outcome's "user sees" register sometimes needs the
@@ -1753,7 +1823,7 @@ launching serialised itself for no gain.
 
 On a non-trivial repo, don't choose altitude from a *count* ("65 plugins, too many")
 or from maintainer diagrams alone — that is how a heavy area silently collapses into one box.
-First draft the behavioral layer (Goal → Glossary → Roles → Use cases → Happy-Path skeleton),
+First draft the behavioral layer (Product description → Glossary → Roles → Use cases → Happy-Path skeleton),
 **then** run the pre-index and let it *size and locate* while you keep *naming and judging*:
 
 ```
@@ -1955,7 +2025,7 @@ synthesis → parallel trace.**
 > never from *verifying the result*.
 
 - Phase 1 Harvest (fan out, one agent each): T4 entry points, T2 deps, T5 model, T3
-  run/build, T0/Roles reader. Parallel harvest also improves completeness. **Launch the whole
+  run/build, product description/Roles reader. Parallel harvest also improves completeness. **Launch the whole
   harvest as one concurrent batch** (all agents in a single fan-out), not in waves — the slices are
   disjoint and use pre-allocated ID ranges, so no agent needs another's output first, and they
   return compact rows (not file dumps) so reading them together is cheap.
@@ -2393,7 +2463,7 @@ synthesis → parallel trace.**
 
 ### After the trace — EVERY build (serial included)
 
-The four steps below are **not** parallel-mode-only. They run on every build; parallel mode only
+The five steps below are **not** parallel-mode-only. They run on every build; parallel mode only
 changes how many agents do the work (a serial build still FANS OUT for the T7 rules and for Phase 4
 — fresh context is the point, not concurrency). See the scope warning at the top of parallel mode.
 
@@ -2409,6 +2479,11 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   `finalize` now runs `balance` itself as an INFORMATIONAL leg and records what it found, so a
   skipped Phase 3.5 and a passed one no longer read the same in the report. That leg is a trace,
   not a substitute: it never gates, and it does not reconcile a finding for you.
+- **Description review** (lead, not delegated; runs once the features and the happy path are
+  settled). Run the four questions of the description review in the behavioral layer (under
+  **Product description**) against the map's actors, features and happy path, then rewrite the
+  `goal` in `header.json` where an answer is no, re-lint it, and re-assemble. Nothing is recorded:
+  the text is the result.
 - **T7 Business logic (fan out, one agent per block — after the trace, it needs the flows to sweep
   against).** The map has a home for DATA (entities), SEQUENCE (flows), STATES (lifecycles) and
   STRUCTURE (components, edges) — and none for the DECISION the code makes, which is exactly the
@@ -3270,7 +3345,7 @@ wrote its JSON fragment to the scratch dir (`.coyomap/build-fragments/<agent>.js
 prompt's output rule); `coyomap assemble` itself writes a `.coyomap/.gitignore` entry ignoring
 `build-fragments/`, so the scratch dir never dirties the tree (you may still delete it after a
 successful assemble — the model is the record). Write one small `header.json` fragment yourself
-(`title`, `goal`, the pin fields — as **top-level keys**, NOT wrapped in a `header` object), and
+(`title`, `goal` (the product description), the pin fields — as **top-level keys**, NOT wrapped in a `header` object), and
 **lint it too before assembling** (`coyomap lint-fragment .coyomap/build-fragments/header.json`): the
 header is the one hand-authored fragment that otherwise skips the self-check every sub-agent runs, so a
 stray key here is the one thing that still fails `assemble`. Then run:
@@ -3547,7 +3622,7 @@ be uneven** — refine only where you need detail; an area you haven't drilled s
 **supersedes child maps** (a second `.coyomap/<area>/project-map.md`): a separate file is a separate ID
 space, so links can't cross it and Analyze/Accept won't track it — see [dispatch](method/dispatch.md).
 
-**How to apply.** Lead with the behavioral layer (T0 Goal → Glossary → Roles → Use cases →
+**How to apply.** Lead with the behavioral layer (Product description → Glossary → Roles → Use cases →
 Happy Path); on a non-trivial repo run the **pre-index** next (never before the behavioral
 draft — GR1), then build structural Level 0 (T1–T3) using its weight map to set altitude;
 generate the rest on demand as the reader drills. Always attach `file:line` (the pre-index's

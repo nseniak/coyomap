@@ -3883,7 +3883,7 @@ _MEASURE = """() => {
 
 
 def test_the_overview_draws_the_goal_as_its_paragraphs_at_a_readable_width() -> None:
-    """A goal written as three paragraphs (method.md, T0 Goal) used to render as ONE block: HTML
+    """A description written as three paragraphs used to render as ONE block: HTML
     collapses the blank lines. And at full column width a 1440px screen ran 137 characters a line,
     twice what body text is readable at, which was the first reason the text read as a block.
 
@@ -3905,6 +3905,44 @@ def test_the_overview_draws_the_goal_as_its_paragraphs_at_a_readable_width() -> 
             _settle(page)
             loose = page.evaluate(_MEASURE)
             assert loose["width"] > 900 and loose["chars"] / loose["lines"] > 80, loose
+
+
+def _sectioned_description(m: dict) -> None:
+    m["goal"] = ("Alpha puts a team's tool servers behind one address.\n\n"
+                 "## Who uses it\n\nAn admin mounts each server once.\n\n"
+                 "### Teammates\n\nA teammate calls the tools their role allows.\n\n"
+                 "## What it does\n\n- Mounts remote servers.\n- Records every call.\n\n"
+                 "## A typical journey\n\n1. An admin mounts a server.\n2. A teammate calls a tool.")
+
+
+_MEASURE_SECTIONS = """() => {
+  const body = document.querySelector('.view-lead-body');
+  const box = (el) => el.getBoundingClientRect();
+  const h = [...body.querySelectorAll('h3.desc-h, h4.desc-h')];
+  const gaps = h.slice(1).map((el) => {   // space above a heading against space below it
+    const prev = el.previousElementSibling, next = el.nextElementSibling;
+    return { above: box(el).top - box(prev).bottom, below: box(next).top - box(el).bottom };
+  });
+  return { h3: body.querySelectorAll('h3.desc-h').length, h4: body.querySelectorAll('h4.desc-h').length,
+           ul: body.querySelectorAll('ul.desc-list > li').length, ol: body.querySelectorAll('ol.desc-list > li').length,
+           raw: body.textContent.includes('##'), h3size: parseFloat(getComputedStyle(h[0]).fontSize),
+           bodysize: parseFloat(getComputedStyle(body).fontSize), width: box(body).width, gaps,
+           section: parseFloat(getComputedStyle(document.querySelector('.overview-wrap .item-sec-title')).fontSize) };
+}"""
+
+
+def test_a_sectioned_description_draws_its_headings_and_lists_compactly_at_a_readable_width() -> None:
+    with _served_map(_sectioned_description) as base:
+        with _page(base + "#v=overview") as page:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            _settle(page)
+            got = page.evaluate(_MEASURE_SECTIONS)
+            assert page.js_errors == []
+    assert (got["h3"], got["h4"], got["ul"], got["ol"]) == (3, 1, 2, 2), got
+    assert not got["raw"], "a ## mark reached the screen"
+    assert got["bodysize"] <= got["h3size"] <= got["section"], got   # under the section title, above the text
+    assert got["width"] < 700, got
+    assert all(g["above"] > g["below"] for g in got["gaps"]), got    # a heading sits with its own text
 
 
 def test_a_goal_with_no_blank_line_still_draws_as_one_run_of_text() -> None:

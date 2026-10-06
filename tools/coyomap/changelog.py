@@ -39,7 +39,8 @@ from coyomap import subverb_help
 from coyomap.audit_model import record_gap
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, is_empty_value, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
-from coyomap.prose import Finding, field_findings, history_findings, iter_prose_fields
+from coyomap.prose import (DESCRIPTION_WHERE, Finding, field_findings, history_findings,
+                           iter_prose_fields)
 from coyomap.validate_model import validate_model
 
 FORMAT = "coyomap-changes"
@@ -626,7 +627,10 @@ def _finding_line(f: Finding) -> str:
 
 def _walk_box(where: str) -> str:
     """The box a label of the validator's field walk is about: its first word (`BR1 risk`,
-    `UC1 step 2 phrase`), or the synthetic id of a glossary term (`glossary 'guild'`)."""
+    `UC1 step 2 phrase`), the synthetic id of a glossary term (`glossary 'guild'`), or the map's
+    own header for the product description, which an entry edits as `map` with the key `goal`."""
+    if where == DESCRIPTION_WHERE:
+        return MAP_ID
     if where.startswith("glossary '") and where.endswith("'"):
         return "glossary:" + where[len("glossary '"):-1]
     return where.split(" ", 1)[0]
@@ -660,7 +664,10 @@ def _prose_warnings(log: ChangeLog, doc: dict[str, Any], after: ProjectModel | N
             if (held is not None and (where, text) in held) or (held is None and box not in owner):
                 continue
             label = f"entry {owner[box]} {where}" if box in owner else where
-            out.extend(_finding_line(f) for f in field_findings(label, text, terms=terms) + history_findings(label, text))
+            # Judged under the walk's own name, which is what tells `field_findings` how to read the
+            # field (the description is read as a page), then reported under the entry's.
+            found = field_findings(where, text, terms=terms) + history_findings(where, text)
+            out.extend(_finding_line(Finding(f.kind, label, f.detail)) for f in found)
     for label, box, text in edits:
         if (box, text) in walked:
             continue

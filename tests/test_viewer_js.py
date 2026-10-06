@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from coyomap import grammar
+from coyomap import grammar, prose
 
 VIEWER_DIR = Path(__file__).resolve().parent.parent / "tools" / "coyomap" / "viewer"
 
@@ -5967,9 +5967,9 @@ def test_a_step_number_is_a_type_and_its_layout_belongs_to_what_carries_it() -> 
 
 
 def test_text_with_blank_lines_is_drawn_as_paragraphs_and_a_single_newline_is_a_wrap() -> None:
-    """The product overview is written as two to four paragraphs (method.md, T0 Goal). Before this
-    helper the viewer handed the whole text to one inline renderer and HTML collapsed the blank lines,
-    so a three-paragraph goal came out as one block. Runs the real function."""
+    """A legacy product description is two to four plain paragraphs. Before this helper the viewer
+    handed the whole text to one inline renderer and HTML collapsed the blank lines, so a
+    three-paragraph description came out as one block. Runs the real function."""
     out = _run_js("""
       const three = 'First one.\\n\\nSecond `one`.\\n  \\nThird one.';
       const refs = {C54: {id: 'C54', name: 'Request Context Middleware', node: 'C54'}};
@@ -5990,10 +5990,90 @@ def test_text_with_blank_lines_is_drawn_as_paragraphs_and_a_single_newline_is_a_
     assert empty == ""
 
 
+DESCRIPTION_SAMPLES = [
+    "",
+    "One plain paragraph.\nWrapped.",
+    "First.\n\nSecond.\r\n\r\nThird.",
+    "Opening.\n\n## Who uses it\n\nAn admin.\n\n### Teammates ###\n\nA teammate.\n\n"
+    "## What it does\n\n- Mounts servers.\n- Records calls,\n  with who made them.\n\n"
+    "1. Step one.\n2) Step two.\n\n* Star item.",
+    "## Opens with a heading\n\n#### Deep\n\n# Top\n\n| a | b |\n\n> quoted",
+    # The inputs on which the two languages' `\d`, `\s`, `.` and trim used to disagree (review of
+    # 2026-10-06): a lone CR inside a heading, Arabic-Indic and full-width digits, a byte-order mark,
+    # NEL, a file separator, a line separator, a no-break space and a form feed on a "blank" line.
+    "## Who\rA manager plans.",
+    "\u0661. first\n\n\uff11. first\n\n\ufeff## Heading",
+    "One.\x85Two.\n\nThree\x1cFour.\u2028Five.",
+    "Para one.\n\u00a0\nPara two.\n\f\nPara three.",
+    "1. one\n2. two\n\nA paragraph.\n\n3. three\n- bullet\n12345678901. too long a number",
+]
+
+
+def test_the_description_blocks_are_cut_the_same_way_in_the_viewer_and_in_validate() -> None:
+    """What `validate` counts must be what the viewer draws: one grammar, written twice (Python and
+    JavaScript), held equal here on every shape the method allows and a few it does not."""
+    out = _run_js(f"""
+      const samples = {json.dumps(DESCRIPTION_SAMPLES)};
+      console.log(JSON.stringify(samples.map((t) => [descriptionBlocks(t), descriptionLead(t),
+                                                     descriptionPreview(t)])));
+    """)
+    for text, (js_blocks, js_lead, js_preview) in zip(DESCRIPTION_SAMPLES, json.loads(out)):
+        py = [{"kind": b.kind, "text": b.text, "level": b.level, "ordered": b.ordered, "number": b.number}
+              for b in prose.description_blocks(text)]
+        assert js_blocks == py, repr(text)
+        assert js_lead == prose.description_lead(text), repr(text)
+        assert js_preview == prose.description_preview(text), repr(text)
+
+
+def test_a_legacy_description_renders_exactly_as_the_paragraph_helper_draws_it() -> None:
+    out = _run_js(f"""
+      const samples = {json.dumps(DESCRIPTION_SAMPLES[:3])};
+      console.log(JSON.stringify(samples.map((t) => [descriptionHtml(t, mdInline), proseBlocksHtml(t, mdInline)])))
+    """)
+    for new, old in json.loads(out):
+        assert new == old
+
+
+def test_a_sectioned_description_draws_headings_one_level_under_the_section_and_its_lists() -> None:
+    out = _run_js(f"""
+      const refs = {{C54: {{id: 'C54', name: 'Request Context', node: 'C54'}}}};
+      console.log(descriptionHtml({json.dumps(DESCRIPTION_SAMPLES[3] + " See C54.")}, (p) => mdRefs(p, refs)));
+    """)
+    assert out.startswith('<p class="prose-para">Opening.</p><h3 class="desc-h">Who uses it</h3>'
+                          '<p class="prose-para">An admin.</p><h4 class="desc-h">Teammates</h4>')
+    assert ('<ul class="desc-list"><li>Mounts servers.</li><li>Records calls, with who made them.</li>'
+            '</ul><ol class="desc-list"><li>Step one.</li><li>Step two.</li></ol>'
+            '<ul class="desc-list"><li>Star item. See <button type="button" class="sys-ref" data-id="C54">'
+            'Request Context</button>.</li></ul>') in out
+    assert out.endswith("</ul>")
+
+
+def test_a_numbered_list_resumed_after_a_paragraph_keeps_its_authored_number() -> None:
+    out = _run_js(f"console.log(descriptionHtml({json.dumps(DESCRIPTION_SAMPLES[-1])}, mdInline));")
+    assert out.startswith('<ol class="desc-list"><li>one</li><li>two</li></ol><p class="prose-para">A paragraph.</p>'
+                          '<ol class="desc-list" start="3"><li>three</li></ol><ul class="desc-list"><li>bullet')
+
+
+def test_a_description_renders_safely_and_unsupported_markdown_stays_plain_text() -> None:
+    """Escape first, then add our own tags: an author's tag, a script in a heading or a list item, and
+    a table or a quotation all reach the page as text. Headings outside ## and ### are clamped to the
+    nearer level, so the page outline never jumps."""
+    text = ("Opening <script>alert(1)</script>.\n\n## Who <img src=x onerror=alert(1)>\n\n"
+            "- <b>bold</b> item\n\n# Top\n\n| a | b |\n\n#### Deep\n\n> quoted [link](https://x.io)")
+    out = _run_js(f"console.log(descriptionHtml({json.dumps(text)}, mdInline));")
+    assert "<script" not in out and "<img" not in out and "<b>" not in out
+    assert "&lt;script&gt;" in out and "&lt;img src=x onerror=alert(1)&gt;" in out
+    assert '<h3 class="desc-h">Top</h3>' in out and '<h4 class="desc-h">Deep</h4>' in out
+    assert '<p class="prose-para">| a | b |</p>' in out
+    assert '<p class="prose-para">&gt; quoted link</p>' in out   # a link collapses to its text
+
+
 def test_the_overview_and_the_detail_rows_both_draw_paragraphs_through_the_one_helper() -> None:
     js = (VIEWER_DIR / "viewer.js").read_text(encoding="utf-8")
-    assert "proseBlocksHtml(overview, (p) => mdRefs(p, GRAPH.nodes))" in js
+    assert "descriptionHtml(overview, (p) => mdRefs(p, GRAPH.nodes))" in js
     assert "proseBlocksHtml(v, mdInline)" in js
+    # …and the description's renderer falls back to that helper for a text of plain paragraphs.
+    assert "if (blocks.every((b) => b.kind === 'paragraph')) return proseBlocksHtml(text, render);" in js
 
 
 def test_every_box_is_bound_through_one_binder() -> None:

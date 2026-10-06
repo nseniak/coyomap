@@ -633,6 +633,16 @@ body:not(.served) #leftcol { flex: 1 1 auto; width: auto; }
 /* A text with blank lines is drawn as paragraphs (proseBlocksHtml); the last one carries no gap below. */
 .prose-para { margin: 0 0 10px; }
 .prose-para:last-child { margin-bottom: 0; }
+/* The product description's own sections (descriptionHtml). A heading sits closer to its text than to
+   the block above it, so a section reads as one unit; the sizes stay a step under the frame's title. */
+.view-lead-body .desc-h { margin: 18px 0 6px; font-size: 15px; font-weight: 650; line-height: 1.35;
+                          color: #1f2937; }
+.view-lead-body h4.desc-h { margin: 14px 0 4px; font-size: 14px; color: #374151; }
+.view-lead-body .desc-h:first-child { margin-top: 0; }
+.view-lead-body .desc-list { margin: 0 0 10px; padding-left: 22px; }
+.view-lead-body .desc-list li { margin: 0 0 4px; }
+.view-lead-body .desc-list li::marker { color: #6b7280; }
+.view-lead-body .desc-list:last-child { margin-bottom: 0; }
 /* One small-caps label for the blocks of a page — the product overview, then the feature cards. */
 .block-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase;
              letter-spacing: .05em; color: #6b7280; margin: 0 0 7px; }

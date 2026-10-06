@@ -31,6 +31,7 @@ from coyomap.viewer.serve import (
     _FRONTEND_DIR,
     _has_coyomap,
     _loopback_host,
+    _recents_payload,
     safe_rel,
     _strip_dirty,
     _valid_commit,
@@ -249,6 +250,25 @@ def test_recents_store_dedupes_same_dir_via_symlink() -> None:
         s.add(str(real))
         s.add(str(link))  # same dir via the symlink -> should replace, not duplicate
         assert len(s.list()) == 1
+
+
+def test_a_recents_card_shows_only_the_description_s_opening_paragraph() -> None:
+    """The landing card clamps to two lines; a sectioned description's `##` marks would show as text.
+    A text of plain paragraphs goes whole, as before sections existed."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = make_project_dir(Path(td), "alpha")
+        f = folder / ".coyomap" / "project-map.json"
+        m = json.loads(f.read_text())
+        store = RecentsStore(Path(td) / "recents.json")
+        for goal, shown in (("Alpha maps a codebase.\nWrapped here.\n\n## Who uses it\n\n- A developer.",
+                             "Alpha maps a codebase. Wrapped here."),
+                            ("A team loses track.\n\nAlpha maps it.", "A team loses track.\n\nAlpha maps it.")):
+            m["goal"] = goal
+            f.write_text(json.dumps(m))
+            proj = load_project(str(folder.resolve()))   # the store keeps resolved paths (/private/var)
+            assert proj is not None
+            store.add(str(proj.repo_root))
+            assert [it["goal"] for it in _recents_payload(store, {proj.slug: proj})] == [shown]
 
 
 # --- load_project / build_projects ----------------------------------------------

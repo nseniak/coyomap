@@ -284,17 +284,99 @@ const esc = (s) => (s || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&g
 const mdInline = (s) => esc(String(s || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'))
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-// Reader-facing text with a BLANK LINE in it is paragraphs. The product overview is written as two to
-// four of them (method.md, "T0 Goal"), and any other field an author breaks the same way reads the
-// same. `render` turns one paragraph into inline markup (mdInline, or mdRefs where ids may appear),
+// Reader-facing text with a BLANK LINE in it is paragraphs. A legacy product description is written
+// as two to four of them, and any other field an author breaks the same way reads the same. `render` turns one paragraph into inline markup (mdInline, or mdRefs where ids may appear),
 // so a single newline stays a wrap and a text with no blank line renders exactly as before. One helper,
 // because the overview and the detail rows both drew a run of text and both silently lost the breaks:
 // HTML collapses a newline to a space, so a three-paragraph goal came out as one block.
-const _PARAGRAPH_BREAK = /\n[ \t\r]*\n/;   // a blank line, CRLF included — the same split as prose.py
+const _PARAGRAPH_BREAK = /\n[ \t\r]*\n/;   // a blank line, CRLF included — where prose.description_blocks ends a block
 function proseBlocksHtml(text, render) {
   const paras = String(text || '').split(_PARAGRAPH_BREAK).map((p) => p.trim()).filter(Boolean);
   if (paras.length < 2) return render(String(text || ''));
   return paras.map((p) => `<p class="prose-para">${render(p)}</p>`).join('');
+}
+// THE PRODUCT DESCRIPTION is a small Markdown document (method.md, "Product description"): an opening
+// paragraph, then optional `##` sections of short paragraphs and bullet or numbered lists, `###`
+// inside a section. These are the blocks `prose.description_blocks` cuts on the Python side, by the
+// same grammar, so what `validate` counts is what this draws. A line is cut on "\n" alone and trimmed
+// of spaces, tabs and carriage returns only; a single newline is a wrap, a blank line ends a block,
+// and a line right under a list item continues that item. ASCII classes only, never `\d`, `\s`, `.` or
+// `trim()`: each means something different here and in Python (an Arabic digit, a no-break space).
+const _DESC_TRIM = /^[ \t\r]+|[ \t\r]+$/g;
+const descTrim = (s) => s.replace(_DESC_TRIM, '');
+const _DESC_HEADING = /^(#{1,6})[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t]*$/;
+const _DESC_ITEM = /^(?:[-*•]|([0-9]{1,9})[.)])[ \t]+/;
+function descriptionBlocks(text) {
+  const blocks = [];
+  let open = null;   // the paragraph or item a wrapped line continues
+  for (const raw of String(text || '').split('\n')) {
+    const line = descTrim(raw);
+    if (!line) { open = null; continue; }
+    const h = _DESC_HEADING.exec(line);
+    if (h) {
+      blocks.push({ kind: 'heading', text: descTrim(h[2]), level: h[1].length, ordered: false, number: 0 });
+      open = null;
+      continue;
+    }
+    const item = _DESC_ITEM.exec(line);
+    if (item) {
+      // `number` is the one its author wrote: a numbered list resumed after a paragraph starts there.
+      open = { kind: 'item', text: descTrim(line.slice(item[0].length)), level: 0,
+               ordered: item[1] !== undefined, number: item[1] !== undefined ? parseInt(item[1], 10) : 0 };
+      blocks.push(open);
+    } else if (open) {
+      open.text += ' ' + line;
+    } else {
+      open = { kind: 'paragraph', text: line, level: 0, ordered: false, number: 0 };
+      blocks.push(open);
+    }
+  }
+  return blocks;
+}
+// The opening paragraph alone, for a place that shows one sentence's worth (a card). The same answer
+// as `prose.description_lead`; empty when the text opens with something else.
+function descriptionLead(text) {
+  const first = descriptionBlocks(text)[0];
+  return first && first.kind === 'paragraph' ? first.text : '';
+}
+// What a card shows of the description (`prose.description_preview`): a text of plain paragraphs
+// whole, as every description was shown before sections existed, and a sectioned one's opening
+// paragraph, so no `##` mark reaches a card.
+function descriptionPreview(text) {
+  const blocks = descriptionBlocks(text);
+  return blocks.every((b) => b.kind === 'paragraph') ? String(text || '') : descriptionLead(text);
+}
+// The description as HTML. Every piece of text goes through `render` (paragraphs and list items) or
+// `mdInline` (headings), which escape first, so the only tags are the ones written here: anything
+// outside the supported set (a table, a tag, a code fence) reaches the reader as plain, escaped text.
+// The page's section title is an h2, so a `##` heading is an h3 and a `###` an h4; any other level is
+// clamped to the nearer of the two rather than breaking the outline. A text that is only paragraphs,
+// which is every legacy description, goes through `proseBlocksHtml` and renders exactly as before.
+function descriptionHtml(text, render) {
+  const blocks = descriptionBlocks(text);
+  if (blocks.every((b) => b.kind === 'paragraph')) return proseBlocksHtml(text, render);
+  let html = '';
+  let list = '';     // the list tag open now, '' when none
+  const close = () => { if (list) { html += `</${list}>`; list = ''; } };
+  for (const b of blocks) {
+    if (b.kind === 'item') {
+      const tag = b.ordered ? 'ol' : 'ul';
+      // `start` is an integer the grammar parsed from digits, so it is safe in the attribute.
+      const start = b.ordered && b.number > 1 ? ` start="${b.number}"` : '';
+      if (list !== tag) { close(); html += `<${tag} class="desc-list"${start}>`; list = tag; }
+      html += `<li>${render(b.text)}</li>`;
+      continue;
+    }
+    close();
+    if (b.kind === 'heading') {
+      const tag = b.level <= 2 ? 'h3' : 'h4';
+      html += `<${tag} class="desc-h">${mdInline(b.text)}</${tag}>`;
+    } else {
+      html += `<p class="prose-para">${render(b.text)}</p>`;
+    }
+  }
+  close();
+  return html;
 }
 
 // Authored prose is the ONE place the viewer would otherwise print a raw element id: a recorded line
@@ -816,6 +898,9 @@ function cardFacts(id) {
   const said = parts.filter(Boolean);
   let desc = join ? said.map((p, i) => joinedPart(p, i === said.length - 1)).join(join)
                   : (parts.find(Boolean) || '');
+  // The System card's sentence is the product description, which can hold sections: a card shows a
+  // sectioned one's opening paragraph alone, and the Description tab draws the rest.
+  if (n.kind === 'system') desc = descriptionPreview(desc);
   // A map that gives a rule no short name of its own uses the whole statement as the title, and the
   // description field then holds the same words. One copy, not two.
   if (desc.trim() === (n.name || '').trim()) desc = '';
@@ -10638,7 +10723,7 @@ function productLeadHtml(secs) {
   if (!overview) return '';
   return itemSectionHtml(secs || [], 'overview', 'Product overview', '', '',
     `<div class="view-lead"><div class="view-lead-body">`
-    + proseBlocksHtml(overview, (p) => mdRefs(p, GRAPH.nodes)) + '</div></div>');
+    + descriptionHtml(overview, (p) => mdRefs(p, GRAPH.nodes)) + '</div></div>');
 }
 function renderOverviewTab() {
   // The description alone. A digest of the map's people, features and interfaces as pills sat under

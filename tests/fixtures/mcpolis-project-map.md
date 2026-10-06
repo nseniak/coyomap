@@ -3,7 +3,7 @@
 <!-- GENERATED VIEW — do not edit. The source of truth is project-map.json; regenerate this
      file with `coyomap render project-map.json project-map.md`. -->
 
-> Built with the **coyomap** method. Behavioral layer first (Goal → Glossary → Roles →
+> Built with the **coyomap** method. Behavioral layer first (Product description → Glossary → Roles →
 > Use cases → Happy Path), then the structural machine (Components → Entry points /
 > Model / Deps → Flows + Edges), joined at **use case ↔ flow**.
 > The committed source of truth is `project-map.json` (JSON); this file is a generated
@@ -13,7 +13,7 @@
 
 ---
 
-## T0 — Goal (the anchor)
+## Product description
 
 MCP Hero (codename `mcpolis`) is a self-hostable **gateway for Model Context Protocol (MCP)
 servers**. Normally every person wires each MCP server into each AI client separately, with no

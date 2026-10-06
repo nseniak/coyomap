@@ -16,7 +16,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict
 
-from coyomap import grammar, records
+from coyomap import grammar, prose, records
 from coyomap.model import (
     declared_kinds,
     record_parents,
@@ -307,7 +307,7 @@ def model_to_markdown(m: ProjectModel) -> str:
     omitted (a small map without subsystems reads exactly like any other small map)."""
     out: list[str] = [f"# {m.title} — Codebase Analysis" if m.title else "# Codebase Analysis", ""]
     out += [_GENERATED_NOTICE, ""]
-    out += ["> Built with the **coyomap** method. Behavioral layer first (Goal → Glossary → Roles →",
+    out += ["> Built with the **coyomap** method. Behavioral layer first (Product description → Glossary → Roles →",
             "> Use cases → Happy Path), then the structural machine (Components → Entry points /",
             "> Model / Deps → Flows + Edges), joined at **use case ↔ flow**.",
             "> The committed source of truth is `project-map.json` (JSON); this file is a generated",
@@ -328,7 +328,9 @@ def model_to_markdown(m: ProjectModel) -> str:
         out.extend(["---", "", f"## {title}", ""] + body + [""])
 
     if m.goal:
-        section("T0 — Goal (the anchor)", [m.goal])
+        # The description's own `##` sections sit under this document's `##` section heading, so
+        # they go two levels down; a legacy plain-paragraph text has no heading and is unchanged.
+        section("Product description", [prose.shift_description_headings(m.goal, 2)])
     if m.glossary:
         section("Glossary — the ubiquitous language",
                 _table(["Term", "Meaning", "Defined / used in"],

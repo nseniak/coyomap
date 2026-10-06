@@ -488,7 +488,7 @@ def _gr1_status(root: Path, out_path: Path) -> str:
     frags = next((c for c in candidates if c.is_dir()), candidates[0])
     if not frags.is_dir():
         return ("  GR1 NOT MET: no .coyomap/build-fragments/ yet, so no behavioral draft exists. "
-                "Draft Goal -> Glossary -> Roles -> Use cases -> Happy-Path skeleton FIRST; the "
+                "Draft Product description -> Glossary -> Roles -> Use cases -> Happy-Path skeleton FIRST; the "
                 "structural slices exist to serve it.\n")
     # By CONTENT, not by filename. `behavioral.json` is a habit, not a contract — the method names
     # no such file, so a build that called it `L1-usecases.json` would get a false "NOT MET", which

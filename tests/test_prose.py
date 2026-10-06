@@ -241,7 +241,7 @@ def test_each_kind_gets_its_own_line_and_an_absent_kind_gets_none() -> None:
 
 def test_every_reader_facing_field_is_walked() -> None:
     labels = {where for where, _text in prose.iter_prose_fields(make_model())}
-    assert labels == {"goal", "C1 purpose", "CAP1 purpose", "CAP1 stake for R1",
+    assert labels == {"description", "C1 purpose", "CAP1 purpose", "CAP1 stake for R1",
                       # ONE ENTRY for the pair, although the map holds them apart: the BOX these
                       # checks read by is the card, and the card shows the two together.
                       "UC1 trigger and outcome",
@@ -261,13 +261,34 @@ def test_a_stake_and_the_tests_note_ride_the_narrow_surface_and_the_rest_do_not(
                          "record 'Unclaimed surfaces' line 1"}
 
 
-def test_the_goal_is_walked_first_and_on_the_narrow_surface_too() -> None:
-    """The one reader-facing field the walk skipped until 2026-09-11: on the three live maps 7 of its
-    22 sentences were over the limit and nothing had said so."""
+def test_the_description_is_walked_first_as_one_page_on_both_surfaces() -> None:
+    """The one reader-facing field the walk skipped until 2026-09-11. ONE field on both surfaces, read
+    as a page: a heading is never read as the first words of the paragraph under it."""
     m = make_model()
-    m.goal = make_sentence(30)
-    assert next(prose.iter_prose_fields(m, wide=False)) == ("goal", m.goal)
-    assert [f.where for f in prose.scan(prose.iter_prose_fields(m))] == ["goal"]
+    m.goal = make_sentence(30) + "\n\n## Who uses it\n\nA shopper.\n\n- Pays.\n- Leaves."
+    assert next(prose.iter_prose_fields(m)) == ("description", m.goal)
+    assert next(prose.iter_prose_fields(m, wide=False)) == ("description", m.goal)
+    found = prose.scan(prose.iter_prose_fields(m))
+    assert [(f.kind, f.where) for f in found] == [("long description sentence", "description")]
+
+
+def test_the_reference_checks_read_the_description_as_one_page() -> None:
+    """A paragraph or a list item opening "They" after one that names the people is fine in the
+    description, and so is "either mode" after "self-hosted or hosted": the page is the box. The same
+    words in a box of their own are two findings, and the description's very first words still
+    have nothing before them."""
+    page = ("Alpha puts servers behind one address. It runs self-hosted or hosted.\n\n## Who uses it\n\n"
+            "- An admin mounts servers.\n- They share them, in either mode.")
+    assert prose.field_findings("description", page) == []
+    assert [f.kind for f in prose.field_findings("C1 purpose", "They share them, in either mode.")] == [
+        "bare pointer", "unresolved reference"]
+    assert [f.kind for f in prose.field_findings("description", "It maps a codebase.")] == ["bare pointer"]
+
+
+def test_the_description_reads_as_sentences_that_end_at_every_block() -> None:
+    text = "Alpha maps code.\n\n## Who uses it\n\nIt does three things:\n\n1. Reads\n2. Draws!"
+    assert prose.description_sentences(text) == (
+        "Alpha maps code. Who uses it. It does three things. Reads. Draws!")
 
 
 def test_a_plainly_written_map_produces_no_findings() -> None:
@@ -487,7 +508,7 @@ def test_the_long_sentence_gate_now_sees_a_recorded_line_and_not_its_key():
     assert not any("code name" in w or "em dash" in w for w in warnings), warnings
 
 
-# --- the goal's shape ---------------------------------------------------------------------------
+# --- the product description's form --------------------------------------------------------
 
 def make_paragraph(sentences: int, words: int = 8) -> str:
     return " ".join(make_sentence(words) for _ in range(sentences))
@@ -497,72 +518,144 @@ def make_goal(paragraphs: int, sentences: int = 2, words: int = 8) -> str:
     return "\n\n".join(make_paragraph(sentences, words) for _ in range(paragraphs))
 
 
-def test_a_goal_inside_the_rule_has_no_shape_finding() -> None:
-    for n in range(prose.GOAL_PARAGRAPHS[0], prose.GOAL_PARAGRAPHS[1] + 1):
-        assert prose.goal_shape_findings(make_goal(n, sentences=prose.GOAL_PARAGRAPH_SENTENCES)) == []
+def make_sectioned_description() -> str:
+    return ("MCP Hero puts a team's tool servers behind one address.\n\n"
+            "## Who uses it\n\nAn admin mounts each server once.\n\n"
+            "### Teammates\n\nA teammate points one AI client at the address.\n\n"
+            "## What it does\n\n- Mounts remote servers.\n- Records every call,\n  with who made it.\n\n"
+            "## A typical journey\n\n1. An admin mounts a server.\n2. A teammate calls a tool.")
 
 
-def test_a_single_paragraph_is_one_finding_that_counts_its_sentences() -> None:
-    found = prose.goal_shape_findings(make_paragraph(8))
-    assert [f.kind for f in found] == ["goal shape"]
-    assert found[0].where == "goal"
-    assert found[0].detail == "one paragraph of 8 sentences; the rule is 2 to 4 paragraphs"
+def details(text: str) -> list[str]:
+    return [f.detail for f in prose.description_shape_findings(text)]
 
 
-def test_too_many_paragraphs_and_a_long_paragraph_are_each_named_with_their_number() -> None:
-    goal = make_goal(5) + "\n\n" + make_paragraph(4)
-    details = [f.detail for f in prose.goal_shape_findings(goal)]
-    assert details == ["6 paragraphs; the rule is 2 to 4", "paragraph 6 has 4 sentences; the rule is 1 to 3"]
+def test_a_legacy_plain_paragraph_description_has_no_shape_finding_whatever_its_paragraphs() -> None:
+    """The old rule's two to four paragraphs pass, and so do one paragraph and five: the paragraph and
+    sentence counts are gone."""
+    for n in (1, 2, 4, 5):
+        assert details(make_goal(n, sentences=4)) == [], n
 
 
-def test_the_word_total_counts_every_paragraph_and_under_means_under() -> None:
-    at_limit = make_goal(3, sentences=3, words=20)                  # 180 words in all
-    assert [f.detail for f in prose.goal_shape_findings(at_limit)] == ["180 words in all; the rule is under 180"]
-    under = at_limit.replace("word word.", "word.", 1)              # 179
-    assert prose.goal_shape_findings(under) == []
+def test_a_sectioned_description_with_lists_has_no_shape_finding() -> None:
+    assert details(make_sectioned_description()) == []
 
 
-def test_a_single_newline_is_a_wrap_not_a_paragraph_and_blank_lines_may_carry_spaces() -> None:
-    assert prose.paragraphs("one line.\nstill the same paragraph.") == ["one line.\nstill the same paragraph."]
-    assert prose.paragraphs("first.\n  \nsecond.") == ["first.", "second."]
+def test_the_blocks_are_headings_paragraphs_and_items_and_a_wrapped_line_continues_its_item() -> None:
+    blocks = prose.description_blocks(make_sectioned_description())
+    assert [(b.kind, b.level) for b in blocks][:4] == [("paragraph", 0), ("heading", 2),
+                                                       ("paragraph", 0), ("heading", 3)]
+    items = [b for b in blocks if b.kind == "item"]
+    assert [(b.text, b.ordered, b.number) for b in items] == [
+        ("Mounts remote servers.", False, 0), ("Records every call, with who made it.", False, 0),
+        ("An admin mounts a server.", True, 1), ("A teammate calls a tool.", True, 2)]
+    assert [b.text for b in prose.description_blocks("one line.\nstill the same paragraph.")] == [
+        "one line. still the same paragraph."]
+    # Lines are cut on "\n" alone, as the viewer cuts them: a form feed is not a line break.
+    assert [b.text for b in prose.description_blocks("one\x0cline.")] == ["one\x0cline."]
 
 
-def test_a_windows_line_ending_still_makes_a_paragraph() -> None:
-    """A goal saved with CRLF used to count as one block: a false shape warning, and one run on screen."""
-    assert prose.paragraphs("a.\r\n\r\nb.") == ["a.", "b."]
-    assert prose.paragraphs("a.\n\r\nb.") == ["a.", "b."]
+def test_the_word_ceiling_counts_headings_and_items_and_400_is_allowed() -> None:
+    body = make_sentence(4) + "\n\n## Two words\n\n- " + make_sentence(3)   # 4 + 2 + 3 = 9 words
+    assert prose.description_word_count(body) == 9
+    at_limit = make_goal(4, sentences=10, words=10)                            # 400 words
+    assert prose.description_word_count(at_limit) == prose.DESCRIPTION_WORD_LIMIT == 400
+    assert details(at_limit) == []
+    over = at_limit + " word."                                                  # 401
+    assert details(over) == ["401 words in all; the limit is 400"]
 
 
-def test_a_single_paragraph_over_the_word_cap_gets_both_findings() -> None:
-    """The early return after the one-block finding used to skip the word cap, so a 201-word block
-    was reported as a block only and its length surfaced one run later."""
-    details = [f.detail for f in prose.goal_shape_findings(make_paragraph(10, words=20))]
-    assert details == ["one paragraph of 10 sentences; the rule is 2 to 4 paragraphs",
-                       "200 words in all; the rule is under 180"]
+def test_the_opening_must_be_a_paragraph() -> None:
+    assert details("## What it is\n\nA map.") == ["opens with a heading; open with a paragraph"]
+    assert details("- A map.\n- A viewer.") == ["opens with a list; open with a paragraph"]
 
 
-def test_an_empty_goal_has_no_shape_the_completeness_checks_own_that() -> None:
-    assert prose.goal_shape_findings("") == []
+def test_heading_levels_outside_two_and_three_and_a_stray_level_three_are_each_named() -> None:
+    text = ("A map.\n\n### Early\n\nText.\n\n# Top\n\nText.\n\n## Fine\n\nText.\n\n"
+            "#### Deep\n\nText.")
+    assert details(text) == ["heading 'Early' is a ### outside a ## section",
+                             "heading 'Top' uses #; use ## or ###",
+                             "heading 'Deep' uses ####; use ## or ###"]
 
 
-def test_the_advisory_lines_carry_the_shape_and_the_sentence_findings_together() -> None:
+def test_a_long_heading_and_an_empty_section_are_named() -> None:
+    text = "A map.\n\n## One two three four five six seven\n\nText.\n\n## Empty\n\n## Last"
+    assert details(text) == ["heading 'One two three four five six seven' has 7 words; the limit is 6",
+                             "heading 'Empty' has nothing under it", "heading 'Last' has nothing under it"]
+    assert details("A map.\n\n## Parent\n\n### Child\n\nText.") == []   # a ### is content
+
+
+def test_formatting_the_viewer_does_not_draw_is_named_once_per_kind() -> None:
+    text = ("A map with a [link](https://x.io) and <https://y.io>.\n\n| a | b |\n| - | - |\n\n> quoted\n\n"
+            "```\ncode\n```\n\n---\n\n##\n\n- one\n  - nested\n\n![shot](a.png) and <b>bold</b>, "
+            "*leaning* and&nbsp;spaced. A literal `<tag>` is a quotation.")
+    assert details(text) == [f"uses {label}, which the viewer does not draw" for label in (
+        "a table", "a code block", "a quotation", "a rule or an underline", "an empty heading",
+        "a nested list", "an image", "link markup", "italic marks", "an HTML entity", "an HTML tag")]
+
+
+def test_text_the_viewer_shows_as_written_is_not_unsupported_formatting() -> None:
+    """A placeholder or a key name in angle brackets reads as typed, so it is not an HTML tag; a bold
+    word and a quoted literal are drawn; a list item's star is a bullet, not an italic mark."""
+    text = ("Alpha serves `mcp.example.com/<team>` and **one** address.\n\n"
+            "- Press <Enter> to send.\n* A starred item, 3 * 4 = 12.\n1) Step one.")
+    assert details(text) == []
+
+
+def test_an_empty_description_has_no_shape_the_completeness_checks_own_that() -> None:
+    assert prose.description_shape_findings("") == []
+
+
+def test_the_lead_is_the_opening_paragraph_alone() -> None:
+    assert prose.description_lead(make_sectioned_description()) == (
+        "MCP Hero puts a team's tool servers behind one address.")
+    assert prose.description_lead("## Head\n\nText.") == ""
+    assert prose.description_lead("One.\nWrapped.\n\nTwo.") == "One. Wrapped."
+
+
+def test_a_preview_keeps_plain_paragraphs_whole_and_cuts_a_sectioned_text_to_its_lead() -> None:
+    """A legacy description often opens with the problem, so its first paragraph alone would not say
+    what the product is: plain paragraphs are previewed whole, as before sections existed."""
+    legacy = "A team loses track of its servers.\n\nAlpha puts them behind one address."
+    assert prose.description_preview(legacy) == legacy
+    assert prose.description_preview(make_sectioned_description()) == (
+        "MCP Hero puts a team's tool servers behind one address.")
+
+
+def test_shifting_the_headings_moves_only_what_the_grammar_reads_as_one() -> None:
+    text = "A.\n\n## Who\n\n##\n\n#tag\n\n##### Deep\n  ### Indented ###"
+    assert prose.shift_description_headings(text, 2) == (
+        "A.\n\n#### Who\n\n##\n\n#tag\n\n###### Deep\n  ##### Indented ###")
+
+
+def test_a_long_description_sentence_is_guidance_with_its_own_remedy() -> None:
     m = make_model()
-    m.goal = make_sentence(30)   # one paragraph, one long sentence
+    m.goal = make_sentence(30) + "\n\nA shopper buys and the shop ships the order the same day."
     lines = prose.advisory_lines(m)
-    assert any(line.startswith("1 prose field with a long sentence") for line in lines)
-    shape = [line for line in lines if "goal shape" in line]
-    assert len(shape) == 1 and shape[0].startswith("1 prose field with a goal shape")
-    assert "two to four short paragraphs" in shape[0]
+    assert not any(line.startswith("1 prose field with a long sentence") for line in lines)
+    long_line = [line for line in lines if "long description sentence" in line]
+    assert len(long_line) == 1 and "guidance" in long_line[0]
+    assert not any("description shape" in line for line in lines)
 
 
-def test_the_method_states_the_shape_the_tool_counts() -> None:
+def test_the_advisory_lines_carry_the_shape_finding_with_its_remedy() -> None:
+    m = make_model()
+    m.goal = "## Opening heading\n\nA demo."
+    shape = [line for line in prose.advisory_lines(m) if "description shape" in line]
+    assert len(shape) == 1 and shape[0].startswith("1 prose field with a description shape")
+    assert "at most 400 words in all" in shape[0]
+
+
+def test_the_method_states_the_form_the_tool_counts() -> None:
     """The rule lives in prose and the count lives in code; this is the line that keeps them equal."""
     text = (Path(__file__).resolve().parent.parent / "method.md").read_text(encoding="utf-8")
-    at = text.index("**T0 Goal**")
-    rule = " ".join(text[at:at + 900].split())   # one line, so a re-wrap of the rule is not a failure
-    assert "two to four short paragraphs" in rule and prose.GOAL_PARAGRAPHS == (2, 4)
-    assert "one to three sentences each" in rule and prose.GOAL_PARAGRAPH_SENTENCES == 3
-    assert f"under {prose.GOAL_WORD_LIMIT} words in all" in rule
+    at = text.index("**Product description**")
+    rule = " ".join(text[at:at + 6000].split())   # one line, so a re-wrap of the rule is not a failure
+    assert f"At most {prose.DESCRIPTION_WORD_LIMIT} words in all, headings and list items included" in rule
+    assert f"a heading of more than {('six' if prose.DESCRIPTION_HEADING_WORDS == 6 else '?')} words" in rule
+    assert "`##` and `###`" in rule and prose.DESCRIPTION_HEADING_LEVELS == (2, 3)
+    assert "20 words a sentence is guidance" in rule
+    assert "T0 Goal" not in text
 
 
 # --- the map is a snapshot: the words an update writes into it tell no history -------------------
@@ -589,15 +682,15 @@ def test_the_product_s_own_present_is_not_history() -> None:
 
 def test_a_marketing_word_in_the_goal_is_one_finding_naming_the_words() -> None:
     goal = "Alpha simply works.\n\nA seamless, powerful map. Its `simply` flag is a quoted literal."
-    found = prose.goal_pitch_findings(goal)
-    assert [(f.kind, f.where) for f in found] == [("pitch word", "goal")]
+    found = prose.description_pitch_findings(goal)
+    assert [(f.kind, f.where) for f in found] == [("pitch word", "description")]
     assert found[0].detail == "says simply, seamless, powerful"
 
 
 def test_a_plain_description_and_the_need_behind_it_are_not_a_pitch() -> None:
     goal = ("A coding agent can write more code than anyone follows. The code runs fine until the day "
             "somebody needs to understand it.\n\ncoyomap reads the project and writes a map.")
-    assert prose.goal_pitch_findings(goal) == []
+    assert prose.description_pitch_findings(goal) == []
     assert prose.pitch_words("simplicity and uniqueness are not the words") == []   # whole words only
 
 
@@ -609,7 +702,7 @@ def test_the_pitch_finding_rides_the_advisory_lines_with_its_remedy() -> None:
 
 
 def test_a_pitch_word_is_reported_as_written() -> None:
-    assert prose.goal_pitch_findings("Seamless setup.\n\nIt works.")[0].detail == "says Seamless"
+    assert prose.description_pitch_findings("Seamless setup.\n\nIt works.")[0].detail == "says Seamless"
 
 
 def test_words_with_a_plain_literal_use_are_not_pitch_words() -> None:
@@ -621,13 +714,13 @@ def test_words_with_a_plain_literal_use_are_not_pitch_words() -> None:
 # --- the goal speaks in the third person ------------------------------------------------------
 
 def test_a_second_person_goal_is_one_finding_naming_the_words() -> None:
-    found = prose.goal_person_findings("You open the map.\n\nYour agent builds it, and we check it.")
-    assert [(f.kind, f.where, f.detail) for f in found] == [("second person", "goal", "says You, Your, we")]
+    found = prose.description_person_findings("You open the map.\n\nYour agent builds it, and we check it.")
+    assert [(f.kind, f.where, f.detail) for f in found] == [("second person", "description", "says You, Your, we")]
 
 
 def test_a_third_person_goal_has_no_person_finding_and_us_is_left_alone() -> None:
-    assert prose.goal_person_findings("A developer opens the map.\n\nThe US market is not named.") == []
-    assert prose.goal_person_findings("") == []
+    assert prose.description_person_findings("A developer opens the map.\n\nThe US market is not named.") == []
+    assert prose.description_person_findings("") == []
 
 
 def test_the_person_finding_rides_the_advisory_lines_with_its_remedy() -> None:

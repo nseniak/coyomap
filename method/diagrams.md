@@ -8,7 +8,7 @@ separate persisted model is needed.
 
 | Zoom level | Shows | From the map |
 |---|---|---|
-| **Context** | the system, actors, external deps | T0 Goal · Roles · T2 |
+| **Context** | the system, actors, external deps | Product description · Roles · T2 |
 | **Container** | runtime pieces (services, datastores, sandboxes) | Deployment + components |
 | **Component** | T1 components + their verbed arrows | T1 + the edge list |
 | **Code** | entry points → `file:line`; the **domain model as a `classDiagram`** (entities with attributes + typed, cardinal relations) — led by a **Subdomains overview** when the model is grouped into subdomains | T4 anchors · T5 [domain cards](domain-cards.md) · Subdomains |

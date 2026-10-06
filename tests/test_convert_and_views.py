@@ -804,3 +804,15 @@ def test_the_grounding_ledger_is_rendered_one_row_per_wave():
     assert "one row per wave of skeptics" in md
     assert "| build aaaaaaa | 2026-09-01 | 40 | 40 | 0 | 0 | 0 | 0 | the whole map | 6 |" in md, md
     assert "| update aaaaaaa-bbbbbbb | 2026-09-17 | 9 | 8 | 1 | 0 | 31 | 4 | 3 changed · 4 touched · 2 reached | 2 |" in md, md
+
+
+def test_the_markdown_view_titles_the_description_and_puts_its_sections_two_levels_down() -> None:
+    """The description's `##` sections sit under the document's own `## Product description`, so they
+    are written as `####`; a legacy plain-paragraph text is copied as it is."""
+    m = ProjectModel(title="Demo", goal="Opening.\n\n## Who uses it\n\nA shopper.\n\n### Staff\n\n- A clerk.\n\n##")
+    md = model_to_markdown(m)
+    assert ("## Product description\n\nOpening.\n\n#### Who uses it\n\nA shopper.\n\n##### Staff\n\n"
+            "- A clerk.\n\n##\n") in md   # a bare `##` is not a heading, so it is not moved
+    assert "T0" not in md
+    legacy = model_to_markdown(ProjectModel(title="Demo", goal="One.\n\nTwo."))
+    assert "## Product description\n\nOne.\n\nTwo.\n" in legacy

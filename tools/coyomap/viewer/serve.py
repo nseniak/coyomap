@@ -47,6 +47,7 @@ from coyomap.impact_git import PREINDEX_JSON, compute_impact, load_map_extents
 from coyomap.impact_git import resolve_ref as impact_resolve_ref
 from coyomap.impact_ripple import RippleOptions, build_impact_result
 from coyomap.model import old_map_folder_hint
+from coyomap.prose import description_preview
 from coyomap.changelog import commit_matches, load_log, to_view
 from coyomap.mapdiff import kinds_json
 from coyomap.viewer.changes import LOG_NAME, LogHead, log_name, order_logs, pin_of
@@ -109,7 +110,7 @@ class Project:
     map_json: Path
     commit: str
     title: str = ""   # the map's human title (shown on the landing card) — folder name if the map has none
-    goal: str = ""    # the map's one-paragraph goal (shown, clamped, under the title)
+    goal: str = ""    # the map's product description (its preview shows, clamped, under the title)
     map_mtime: int | None = None      # st_mtime_ns of map_json when loaded — the staleness key
     tree: FileTreeNode | None = None  # cached tree (built once per map version, on first /api/tree)
     view: ViewBundle | None = None    # cached view bundle (built once per map version, on first /api/view)
@@ -913,7 +914,9 @@ def _recents_payload(store: RecentsStore, projects: dict[str, Project]) -> list[
             "path": folder,
             "name": Path(folder).name,
             "title": proj.title if proj else Path(folder).name,
-            "goal": proj.goal if proj else "",
+            # A sectioned description's opening paragraph only: the card clamps to two lines, and
+            # the sections under it would show their `##` marks as text. Plain paragraphs go whole.
+            "goal": description_preview(proj.goal) if proj else "",
             "slug": slug,
             # The map's own address, composed HERE so the landing page never spells the prefix itself.
             "url": map_url(slug) if slug else "",

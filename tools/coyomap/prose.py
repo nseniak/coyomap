@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
 from coyomap import records
 from coyomap.model import ProjectModel
@@ -28,21 +29,28 @@ from coyomap.reporting import clip, shown
 SENTENCE_WORD_LIMIT = 20   # one idea per sentence; longer is a split, not a style opinion
 EXAMPLES_PER_KIND = 3      # how many offending fields a summary line names before it counts the rest
 
-# The goal is the one field a reader meets as a TEXT rather than a box, and the method gives it a
-# shape (method.md, "T0 Goal"): two to four short paragraphs, a blank line between them, one to
-# three sentences each, under 180 words in all. Counted here for the reason sentence length is: a
-# paragraph count is a shape, and a limit the tool never counts is a wish. The 2026-09-11 live maps
-# were one paragraph of 108 to 167 words each, and 7 of their 22 sentences were over the limit —
-# the goal was the one reader-facing field `iter_prose_fields` did not walk.
-GOAL_PARAGRAPHS = (2, 4)        # fewest and most paragraphs
-GOAL_PARAGRAPH_SENTENCES = 3    # most sentences in one paragraph
-GOAL_WORD_LIMIT = 180           # most words in all, over every paragraph
+# THE PRODUCT DESCRIPTION is the one field a reader meets as a TEXT rather than a box, stored as the
+# map's `goal` (method.md, "Product description"). It is a small Markdown document: an opening
+# paragraph, then optional `##` sections of short paragraphs and lists, at most 400 words in all,
+# headings and list items included. The counted half of that rule is here, for the reason sentence
+# length is: a limit the tool never counts is a wish. Whether the text is TRUE and COMPLETE is the
+# lead's description review, which no counter can do.
+#
+# Before 2026-10-06 the rule was two to four plain paragraphs of one to three sentences, under 180
+# words. It made the text too thin to say who uses the product and how a typical use goes, so the
+# paragraph and sentence counts went and the word ceiling rose. It was 300 for one day: three test
+# runs on mcpolis (6 actors, 9 features) each drafted 383 to 424 words and cut definitions to fit. A legacy plain-paragraph text still
+# passes: it is the description with no sections.
+DESCRIPTION_WORD_LIMIT = 400        # most words in all, headings and list items included
+DESCRIPTION_HEADING_LEVELS = (2, 3)  # `##` sections, `###` inside one; the page owns the top level
+DESCRIPTION_HEADING_WORDS = 6       # a heading is a short label, not a sentence
+DESCRIPTION_WHERE = "description"   # the field label the description is walked and reported under
 
-# The goal DESCRIBES, it does not sell (method.md, "T0 Goal"): the need is welcome, a pitch is
-# not. Most of that is a judgement and stays in the method prompt; this is the countable sliver —
-# words that almost never belong in a plain description of what a product does. Deliberately short
-# and whole-word, for the same reason `_CODE_PATTERNS` is narrow: a noisy check is one nobody
-# leaves switched on.
+# The description DESCRIBES, it does not sell (method.md, "Product description"): the need is
+# welcome, a pitch is not. Most of that is a judgement and stays in the method prompt; this is the
+# countable sliver — words that almost never belong in a plain description of what a product does.
+# Deliberately short and whole-word, for the same reason `_CODE_PATTERNS` is narrow: a noisy check is
+# one nobody leaves switched on.
 # Only words with NO plain literal use: "leading" (to), "unique" (id), "trusted" (device), "unlock"
 # (a lock, a game level) and bare "blazing" (a fire) were in the first list and tripped on honest
 # descriptions, so they are out (review of 2026-09-11).
@@ -53,9 +61,9 @@ _PITCH_WORDS = ("seamless", "seamlessly", "effortless", "effortlessly", "frictio
                 "lightning-fast", "delightful", "magical", "supercharge", "supercharges",
                 "empower", "empowers")
 _PITCH = re.compile(r"\b(?:%s)\b" % "|".join(re.escape(w) for w in _PITCH_WORDS), re.IGNORECASE)
-# The goal is written in the third person, naming people by role (method.md, "T0 Goal"): a
-# second-person goal talks to a reader who may not be the user. "us" is left out on purpose — it
-# is also a country.
+# The description is written in the third person, naming people by role (method.md, "Product
+# description"): a second-person description talks to a reader who may not be the user. "us" is
+# left out on purpose — it is also a country.
 _SECOND_PERSON = re.compile(r"\b(?:you|your|yours|we|our|ours)\b", re.IGNORECASE)
 # THE MAP IS A SNAPSHOT (method/change-impact.md, "What an entry says"): a sentence in it describes
 # the product as it is, as if it had always been so; the story of a change — what it was before,
@@ -70,7 +78,6 @@ _HISTORY = re.compile(r"(?<!right )\bnow\b|\bno longer\b|\bany ?more\b|\bpreviou
 
 _BACKTICKED = re.compile(r"`[^`]*`")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-_PARAGRAPH_SPLIT = re.compile(r"\n[ \t\r]*\n")   # a blank line (CRLF too); a single newline is a wrap
 _EM_DASH = "—"
 
 # A token that is CODE rather than product language. Deliberately narrow — a shape nobody writes by
@@ -122,6 +129,34 @@ _TRAILING_OR = re.compile(r"\bor\b", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?]")
 # A list item's marker, at the start of a line of a freeform note: a bullet or a number.
 _LIST_ITEM = re.compile(r"^(?:[-*•]|\d+[.)])\s+")
+# The description's Markdown, the small set the viewer draws (viewer.js `descriptionBlocks` reads the
+# same grammar, written the same way): a heading line, a list item, and everything else paragraph
+# text. A line is cut on "\n" alone and trimmed of spaces, tabs and carriage returns only; a blank
+# line ends a block, a single newline is a wrap, and a line right under a list item continues it.
+# ASCII classes only (`[0-9]`, `[ \t]`, `[^\n]`), because `\d`, `\s`, `.` and `strip()` each mean
+# something different in Python and in JavaScript, and a difference means `validate` counts one
+# thing while the reader sees another.
+_DESC_TRIM = " \t\r"
+_HEADING = re.compile(r"^(#{1,6})[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t]*$")
+_DESC_ITEM = re.compile(r"^(?:[-*•]|([0-9]{1,9})[.)])[ \t]+")
+# What the description must not use, because the viewer does not draw it: one label per shape,
+# reported once each however often it appears. Read on the trimmed line, except a nested list, which
+# is told by its indent. An HTML tag is a KNOWN tag name, so a placeholder such as `<team>` or a key
+# such as `<Enter>`, which the viewer shows exactly as written, is not one.
+_UNSUPPORTED: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("a table", re.compile(r"^\|.*\|$")),
+    ("a code block", re.compile(r"^(?:```|~~~)")),
+    ("a quotation", re.compile(r"^>")),
+    ("a rule or an underline", re.compile(r"^(?:[-*_=][ \t]*){3,}$")),
+    ("an empty heading", re.compile(r"^#{1,6}$")),
+    ("a nested list", re.compile(r"^[ \t]{2,}(?:[-*•]|[0-9]{1,9}[.)])[ \t]+")),
+    ("an image", re.compile(r"!\[[^\]]*\]\(")),
+    ("link markup", re.compile(r"(?<!!)\[[^\]]+\]\([^)]*\)|<https?://[^>\s]+>")),
+    ("italic marks", re.compile(r"(?<![*\w])\*[^*\s][^*]*\*(?![*\w])")),
+    ("an HTML entity", re.compile(r"&(?:[A-Za-z]+|#[0-9]+);")),
+    ("an HTML tag", re.compile(r"</?(?:a|b|i|u|s|em|strong|br|hr|p|div|span|img|ul|ol|li|h[1-6]|table|"
+                               r"tr|td|th|code|pre|sup|sub|blockquote)\b[^<>]*>", re.IGNORECASE)),
+)
 
 
 def strip_literals(text: str) -> str:
@@ -138,12 +173,6 @@ def sentences(text: str) -> list[str]:
 
 def word_count(sentence: str) -> int:
     return len(sentence.split())
-
-
-def paragraphs(text: str) -> list[str]:
-    """Split on blank lines. The viewer draws the same split, so what this counts is what a reader
-    sees as a paragraph."""
-    return [p.strip() for p in _PARAGRAPH_SPLIT.split(text.strip()) if p.strip()]
 
 
 def long_sentences(text: str, limit: int = SENTENCE_WORD_LIMIT) -> list[str]:
@@ -255,8 +284,15 @@ def field_findings(where: str, text: str, limit: int = SENTENCE_WORD_LIMIT,
     if not body:
         return []
     found: list[Finding] = []
+    # The product description is one field read as a page (see `description_sentences`), and in it
+    # 20 words is guidance, not a limit (method.md, "Product description"): its long sentences are
+    # their own kind with their own, softer remedy.
+    long_kind = "long sentence"
+    if where == DESCRIPTION_WHERE:
+        body = description_sentences(body)
+        long_kind = "long description sentence"
     for sentence in long_sentences(body, limit):
-        found.append(Finding("long sentence", where,
+        found.append(Finding(long_kind, where,
                              f"{word_count(sentence)} words: \"{clip(sentence)}\""))
     dashes = em_dash_count(body)
     if dashes:
@@ -273,37 +309,151 @@ def field_findings(where: str, text: str, limit: int = SENTENCE_WORD_LIMIT,
     return found
 
 
-def goal_shape_findings(goal: str) -> list[Finding]:
-    """The goal's SHAPE, which no per-sentence check can see: how many paragraphs, how many
-    sentences each, how many words in all. One finding kind, so the summary stays one line; each
-    detail names the number that broke the rule. An empty goal is a completeness problem elsewhere,
-    not a shape."""
-    body = strip_literals(goal or "").strip()
+@dataclass
+class DescriptionBlock:
+    """One block of the product description as a reader sees it: a heading, a paragraph, or one
+    list item. `level` is a heading's number of `#`; `ordered` says a list item is numbered, and
+    `number` is the number its author wrote, which a numbered list resumed after a paragraph starts at."""
+    kind: str               # "heading" | "paragraph" | "item"
+    text: str
+    level: int = 0
+    ordered: bool = False
+    number: int = 0
+
+
+def description_blocks(text: str) -> list[DescriptionBlock]:
+    """The description cut into the blocks the viewer draws. A text with no Markdown is a run of
+    paragraphs, exactly as a legacy description was read."""
+    blocks: list[DescriptionBlock] = []
+    open_block: DescriptionBlock | None = None   # the paragraph or item a wrapped line continues
+    # Split on "\n" alone, never `splitlines`: the viewer splits the same way, and `splitlines` also
+    # cuts on separators the viewer keeps (a form feed, U+2028), so the two would count different blocks.
+    for raw in (text or "").split("\n"):
+        line = raw.strip(_DESC_TRIM)
+        if not line:
+            open_block = None
+            continue
+        heading = _HEADING.match(line)
+        if heading:
+            blocks.append(DescriptionBlock("heading", heading.group(2).strip(_DESC_TRIM),
+                                           len(heading.group(1))))
+            open_block = None
+            continue
+        item = _DESC_ITEM.match(line)
+        if item:
+            number = item.group(1)
+            open_block = DescriptionBlock("item", line[item.end():].strip(_DESC_TRIM),
+                                          ordered=number is not None,
+                                          number=int(number) if number is not None else 0)
+            blocks.append(open_block)
+        elif open_block is not None:
+            open_block.text = f"{open_block.text} {line}"
+        else:
+            open_block = DescriptionBlock("paragraph", line)
+            blocks.append(open_block)
+    return blocks
+
+
+def description_word_count(text: str) -> int:
+    """Every word a reader meets, headings and list items included, without the Markdown marks."""
+    return sum(word_count(block.text) for block in description_blocks(text))
+
+
+def description_lead(text: str) -> str:
+    """The opening paragraph alone: what a one-line preview of the map shows (the root page's card).
+    Empty when the text opens with something other than a paragraph."""
+    blocks = description_blocks(text)
+    return blocks[0].text if blocks and blocks[0].kind == "paragraph" else ""
+
+
+def description_preview(text: str) -> str:
+    """What a place with room for a sentence or two shows of the description (the start page's card,
+    the System card): the opening paragraph of a text with sections or lists, and a text of plain
+    paragraphs whole, as every legacy description was shown before sections existed."""
+    blocks = description_blocks(text)
+    if all(block.kind == "paragraph" for block in blocks):
+        return text
+    return description_lead(text)
+
+
+def description_sentences(text: str) -> str:
+    """The description as one run of sentences, which is how the per-sentence checks read it: every
+    block's words, a full stop added where a heading or a list item has none, so a heading is never
+    read as the first words of the paragraph under it. The whole page stays ONE field, because the
+    description is read as a page: a reference may point at anything named earlier in it, and only
+    its very first words have nothing before them."""
+    parts: list[str] = []
+    for block in description_blocks(text):
+        words = block.text.strip()
+        if not words:
+            continue
+        if words[-1] == ":":               # a lead-in to a list ends there, as its own sentence
+            words = words[:-1] + "."
+        parts.append(words if words[-1] in ".!?" else words + ".")
+    return " ".join(parts)
+
+
+def shift_description_headings(text: str, levels: int) -> str:
+    """The description with every heading the grammar reads pushed `levels` deeper, for a document
+    that nests it under headings of its own. Six `#` is the floor, so a level never wraps round, and a
+    line the grammar does not read as a heading (a bare `##`, a `#tag`) is left as written."""
+    out: list[str] = []
+    for raw in (text or "").split("\n"):
+        heading = _HEADING.match(raw.strip(_DESC_TRIM))
+        if heading:
+            indent = raw[:len(raw) - len(raw.lstrip(_DESC_TRIM))]
+            hashes = "#" * min(6, len(heading.group(1)) + levels)
+            raw = f"{indent}{hashes}{raw.lstrip(_DESC_TRIM)[len(heading.group(1)):]}"
+        out.append(raw)
+    return "\n".join(out)
+
+
+def description_shape_findings(text: str) -> list[Finding]:
+    """The description's FORM, which no per-sentence check can see: the word ceiling, an opening
+    paragraph, the heading levels, short headings with something under them, and no Markdown the
+    viewer does not draw. One finding kind, so the summary stays one line; each detail names what
+    broke. An empty description is a completeness problem elsewhere, not a shape."""
+    body = (text or "").strip()
     if not body:
         return []
     found: list[Finding] = []
-    paras = paragraphs(body)
-    low, high = GOAL_PARAGRAPHS
-    one_block = len(paras) < low
-    if one_block:
-        found.append(Finding("goal shape", "goal",
-                             f"one paragraph of {len(sentences(body))} sentences; the rule is {low} to "
-                             f"{high} paragraphs"))
-    elif len(paras) > high:
-        found.append(Finding("goal shape", "goal",
-                             f"{len(paras)} paragraphs; the rule is {low} to {high}"))
-    # One block IS the finding; counting its sentences too would say it twice. The word cap still
-    # runs: a 201-word block used to report only the block, and the length surfaced one run later.
-    for n, para in enumerate(paras if not one_block else [], 1):
-        count = len(sentences(para))
-        if count > GOAL_PARAGRAPH_SENTENCES:
-            found.append(Finding("goal shape", "goal",
-                                 f"paragraph {n} has {count} sentences; the rule is 1 to "
-                                 f"{GOAL_PARAGRAPH_SENTENCES}"))
-    words = word_count(body)
-    if words >= GOAL_WORD_LIMIT:   # "under 180", as the method says it
-        found.append(Finding("goal shape", "goal",
-                             f"{words} words in all; the rule is under {GOAL_WORD_LIMIT}"))
+
+    def add(detail: str) -> None:
+        found.append(Finding("description shape", DESCRIPTION_WHERE, detail))
+
+    words = description_word_count(body)
+    if words > DESCRIPTION_WORD_LIMIT:
+        add(f"{words} words in all; the limit is {DESCRIPTION_WORD_LIMIT}")
+    blocks = description_blocks(body)
+    if blocks and blocks[0].kind != "paragraph":
+        add(f"opens with a {'heading' if blocks[0].kind == 'heading' else 'list'}; "
+            "open with a paragraph")
+    low, high = DESCRIPTION_HEADING_LEVELS
+    inside_section = False
+    for n, block in enumerate(blocks):
+        if block.kind != "heading":
+            continue
+        name = clip(block.text)
+        if not low <= block.level <= high:
+            add(f"heading '{name}' uses {'#' * block.level}; use {'#' * low} or {'#' * high}")
+        elif block.level == high and not inside_section:
+            add(f"heading '{name}' is a {'#' * high} outside a {'#' * low} section")
+        inside_section = inside_section or block.level == low
+        if word_count(block.text) > DESCRIPTION_HEADING_WORDS:
+            add(f"heading '{name}' has {word_count(block.text)} words; the limit is "
+                f"{DESCRIPTION_HEADING_WORDS}")
+        after = blocks[n + 1] if n + 1 < len(blocks) else None
+        if after is None or (after.kind == "heading" and after.level <= block.level):
+            add(f"heading '{name}' has nothing under it")
+    # Line by line, so a fence's backticks are seen before the literal stripping would eat them, and
+    # a quoted literal on one line never swallows text on the next.
+    raw_lines = body.split("\n")
+    for label, pattern in _UNSUPPORTED:
+        for raw in raw_lines:
+            line = raw if label == "a nested list" else raw.strip(_DESC_TRIM)
+            if pattern.search(line if label == "a code block" else strip_literals(line)):
+                add(f"uses {label}, which the viewer does not draw")
+                break
     return found
 
 
@@ -313,13 +463,14 @@ def pitch_words(text: str) -> list[str]:
     return [m.group(0) for m in _PITCH.finditer(strip_literals(text))]
 
 
-def goal_pitch_findings(goal: str) -> list[Finding]:
-    """One finding when the goal reaches for the words of a pitch. The judgement half — a claim the
-    map cannot back, a promise about outcomes — stays with the method prompt and the audit."""
-    words = pitch_words(goal or "")
+def description_pitch_findings(text: str) -> list[Finding]:
+    """One finding when the description reaches for the words of a pitch. The judgement half — a
+    claim the map cannot back, a promise about outcomes — stays with the method prompt and the
+    audit."""
+    words = pitch_words(text or "")
     if not words:
         return []
-    return [Finding("pitch word", "goal", f"says {shown(words, 3)}")]
+    return [Finding("pitch word", DESCRIPTION_WHERE, f"says {shown(words, 3)}")]
 
 
 def second_person_words(text: str) -> list[str]:
@@ -341,12 +492,13 @@ def history_findings(where: str, text: str) -> list[Finding]:
     return [Finding("history word", where, f"says {shown(words, 3)}: \"{clip((text or '').strip())}\"")]
 
 
-def goal_person_findings(goal: str) -> list[Finding]:
-    """One finding when the goal talks to "you" or speaks as "we" instead of naming the roles."""
-    words = second_person_words(goal or "")
+def description_person_findings(text: str) -> list[Finding]:
+    """One finding when the description talks to "you" or speaks as "we" instead of naming the
+    roles."""
+    words = second_person_words(text or "")
     if not words:
         return []
-    return [Finding("second person", "goal", f"says {shown(words, 3)}")]
+    return [Finding("second person", DESCRIPTION_WHERE, f"says {shown(words, 3)}")]
 
 
 def scan(fields: Iterable[tuple[str, str]], limit: int = SENTENCE_WORD_LIMIT,
@@ -368,11 +520,15 @@ _REMEDY = {
     "bare pointer": "name the thing — a box is read alone, with no paragraph before it",
     "unresolved reference": "name the alternatives in the same box — \"either kind\" must say "
                             "which kinds, with the names or the glossary words",
-    # The counts in words, as the method says them; test_prose pins them to GOAL_PARAGRAPHS and
-    # GOAL_PARAGRAPH_SENTENCES so the two cannot drift apart.
-    "goal shape": f"two to four short paragraphs, a blank line between them, one to three "
-                  f"sentences each, under {GOAL_WORD_LIMIT} words in all",
-    "pitch word": "the goal describes, it does not sell — say what the product does and for whom, "
+    "long description sentence": f"over {SENTENCE_WORD_LIMIT} words is guidance in the product "
+                                 "description, not a limit: split the sentence when it carries two "
+                                 "ideas",
+    # The numbers as the method says them; test_prose pins them to the constants so the two cannot
+    # drift apart.
+    "description shape": f"an opening paragraph, then optional ## sections of short paragraphs and "
+                         f"lists, headings of at most {DESCRIPTION_HEADING_WORDS} words, at most "
+                         f"{DESCRIPTION_WORD_LIMIT} words in all",
+    "pitch word": "the description describes, it does not sell — say what the product does and for whom, "
                   "in plain words, and drop the word",
     "second person": "third person, naming the people by role — the reader of the map is not "
                      "always the user",
@@ -427,13 +583,15 @@ def _note_blocks(body: str) -> list[str]:
 
 def advisory_lines(model: ProjectModel) -> list[str]:
     """The readability report for one map, as the advisory lines `validate` and `lint-fragment`
-    print: every prose field through `field_findings`, then the goal's shape. ONE function for both
+    print: every prose field through `field_findings`, then the description's shape. ONE function for both
     callers, so a check added here reaches the fragment lint and the assembled-map validation
     together — they used to build the same expression by hand, and a check added to one would have
     been missing from the other."""
     terms = [g.term for g in model.glossary]
-    return summarize(scan(iter_prose_fields(model), terms=terms) + goal_shape_findings(model.goal)
-                     + goal_pitch_findings(model.goal) + goal_person_findings(model.goal))
+    return summarize(scan(iter_prose_fields(model), terms=terms)
+                     + description_shape_findings(model.goal)
+                     + description_pitch_findings(model.goal)
+                     + description_person_findings(model.goal))
 
 
 def iter_prose_fields(model: ProjectModel, *, wide: bool = True) -> Iterator[tuple[str, str]]:
@@ -444,10 +602,11 @@ def iter_prose_fields(model: ProjectModel, *, wide: bool = True) -> Iterator[tup
     limit on a label is meaningless. So is the key of a recorded line: a section under a registered
     extras heading is walked one line at a time and only the line's why (`records.why_of`), because
     a `path:line` key is a file path by design and a template's `complete —` is not an em dash."""
-    # The goal first: it is the one text a reader meets before any box, and until 2026-09-11 the one
-    # reader-facing field this walk skipped (see GOAL_PARAGRAPHS). In the narrow surface too — one
-    # field costs the fan-out nothing, and it is the anchor.
-    yield "goal", model.goal
+    # The description first: it is the one text a reader meets before any box, and until 2026-09-11
+    # the one reader-facing field this walk skipped. In the narrow surface too: one field costs the
+    # fan-out nothing, and it is the anchor. ONE field, not one per block: it is read as a page, so a
+    # paragraph opening "They" after one naming the people is fine (`field_findings` reads it whole).
+    yield DESCRIPTION_WHERE, model.goal
     for component in model.components:
         yield f"{component.id} purpose", component.purpose
     for group in (*model.capabilities, *model.subsystems, *model.subdomains, *model.blocks):

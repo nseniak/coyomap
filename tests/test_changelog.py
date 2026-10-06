@@ -579,6 +579,19 @@ def test_the_new_words_of_an_edit_face_the_readability_check():
     assert any(w.startswith("entry e1 BR1.name: long sentence") for w in lint(named, doc).warnings)
 
 
+def test_a_sectioned_description_edit_is_read_once_as_a_page_and_named_by_its_entry():
+    """The description is the map's own box (`map`, key `goal`): an update that rewrites it is read
+    once, by the walk, as a page. Its heading never fuses into a long sentence, its long sentence is
+    guidance, and the warning names the entry that wrote it."""
+    doc = make_doc()
+    long = " ".join(["word"] * 24) + "."
+    goal = "Alpha maps a codebase.\n\n## Who uses it\n\n- A developer reads the map.\n- " + long
+    p = lint(make_log(make_entry(elements=["map"], edits=[FieldEdit("map", "goal", doc["goal"], goal)])), doc)
+    assert p.ok, p.errors
+    longs = [w for w in p.warnings if "long" in w]
+    assert len(longs) == 1 and longs[0].startswith("entry e1 description: long description sentence"), longs
+
+
 def test_lint_refuses_a_path_that_is_not_there_and_edits_on_rows_that_come_or_go():
     """F17: a missing list position, an edit on a row another entry removes, an edit on a row this
     log adds — each a plain error, never a traceback or a silent write."""

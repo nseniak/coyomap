@@ -50,7 +50,7 @@ needs no escaping (the markdown-view generator escapes it when rendering tables)
 ```
 { "format": "coyomap-map",
   "title":  "<project display name>",
-  "goal":   "<T0 prose — two to four short paragraphs, \n\n between them: what it is, what it does and for whom, why anyone wants it>",
+  "goal":   "<the product description: Markdown, an opening paragraph then optional ## sections, at most 400 words (method.md, Product description)>",
   "commit": "<short sha>", "committed": "<YYYY-MM-DD>", "built": "<YYYY-MM-DD HH:MM>",
 
   "roles":       [ { "id": "Rn", "name", "kind": "human|service|ai-agent", "audience": "user|internal",

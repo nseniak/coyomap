@@ -35,6 +35,11 @@ code, and has no paragraph around the box to lean on. Six rules:
 6. **Plain words at the SAME precision.** "The system checks the user" is short and useless. Buying
    shortness by dropping the specific is worse than a long sentence.
 
+The **product description** is the one text read as a page rather than a box, and it relaxes two
+rules there. Rule 1: 20 words is guidance, and two clauses may share a sentence joined by "and".
+Rule 4: the whole description is the box, so a reference may point at anything named earlier in it.
+Its other rules are in method.md, under **Product description**.
+
 ## Naming an element
 
 A NAME is not a sentence. It is a LABEL, read on a card, in a breadcrumb and in a column of other

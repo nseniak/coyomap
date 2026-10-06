@@ -1,6 +1,6 @@
 # <Project> — Codebase Analysis
 
-> Built with the **coyomap** method. Behavioral layer first (Goal → Glossary → Roles →
+> Built with the **coyomap** method. Behavioral layer first (Product description → Glossary → Roles →
 > Use cases → Happy Path), then the structural machine (Components → Entry points /
 > Model / Deps → Flows + Edges), joined at **use case ↔ flow**.
 > Every row is drillable: name a row and it expands to a lower table or a `file:line`.
@@ -14,10 +14,10 @@
 
 ---
 
-## T0 — Goal (the anchor)
+## Product description
 
-<Two to four short paragraphs, a blank line between them, one to three sentences each, under
-180 words in all: what the project is, what it does and for whom, and why anyone wants it.>
+<An opening paragraph, then optional sections under short `####` headings (the map's `##` headings,
+two levels down), at most 400 words in all. See method.md, "Product description".>
 
 ---
 

@@ -2086,7 +2086,8 @@ def test_prose_batches_carry_every_non_empty_field_and_the_rules() -> None:
         assert written == [("prose-1.json", 4)]     # C2's empty purpose is dropped
         payload = json.loads((out / "prose-1.json").read_text())
         assert payload["schema"] == audit_model.PROSE_BATCH_SCHEMA
-        assert [f["where"] for f in payload["fields"]] == ["goal", "C1 purpose", "BR1 statement", "BR1 risk"]
+        assert [f["where"] for f in payload["fields"]] == ["description", "C1 purpose", "BR1 statement",
+                                                          "BR1 risk"]
         assert "UNKNOWN WORD" in payload["instructions"]
 
 
