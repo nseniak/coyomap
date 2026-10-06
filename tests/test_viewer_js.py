@@ -2382,7 +2382,8 @@ def test_a_flow_arrow_opens_the_step_it_names_not_the_pair_it_crosses() -> None:
     assert "'sn'];" in js, "the address can name a step"
     assert "if (s.kind === 'step') {" in js
     assert "flowStepIndex(uc, uc, Number(sn))" in js, "one lookup, and an address carries strings"
-    assert "if (s.kind === 'step') return 'Step ' + s.sn;" in js, "the crumb is the number, not the phrase"
+    assert "if (s.kind === 'step') return stepHeld(s) ? 'Step ' + s.sn : UNKNOWN_NAME;" in js, \
+        "the crumb is the number, not the phrase, and a step the map does not hold is not given one"
     # ONE `data-drill` HANDLER, for the card AND the page. It was written on the card alone, and the
     # first page to draw a drill button looked live and went nowhere.
     assert "PANEL_HOST.addEventListener('click', drillFrom);" in js
@@ -5164,7 +5165,7 @@ def test_a_stale_link_names_no_internal_id_on_screen() -> None:
     for line in ("if (s.kind === 'domsub') return elName(s.sd);",
                  "if (s.kind === 'usecase') return elName(s.uc);",
                  "if (s.kind === 'subsystem') return elName(s.sid);",
-                 "if (s.kind === 'depedge') return elName(s.a) + ' → ' + elName(s.b);",
+                 "if (s.kind === 'depedge') return depEdgeHeld(s.a, s.b) ? elName(s.a) + ' → ' + elName(s.b) : UNKNOWN_NAME;",
                  "if (s.kind === 'bridge') return elName(s.sid) + ' → ' + elName(s.sd);"):
         assert line in title, line
     assert "const nm = featureName(s.cap);" in title
