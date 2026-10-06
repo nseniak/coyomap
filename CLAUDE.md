@@ -27,7 +27,7 @@ walks over a new authored field: it guides us when we extend the model, and it
 attacks existing fields on every rebuild if the method ever states it.
 
 **Known gap, agreed and not scheduled.** The viewer does not match this yet. It has
-12 views in 4 groups, and several that should be drill-down destinations are
+15 views in 3 groups, and several that should be drill-down destinations are
 top-level tabs. We will restructure at some point, not now.
 
 **Known gap, recorded 2026-10-02: a keyboard cannot reach an arrow's card.** On every
@@ -64,8 +64,8 @@ the code's names.
   away hand edits.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
-  Description, Features, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,
-  Subsystems, Storage, Dependencies, Tests, Deployment, System, Updates.
+  Features, Description, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,
+  Components, Storage, Dependencies, Tests, Deployment, System, Updates.
 - **group** — the three tabs above the views: Product, Under the hood, Update
   log. A group is a set of tabs, never a page you can be on. Data (the entities)
   and Glossary moved under Product on 2026-09-08, Storage under the hood, and the
@@ -222,9 +222,10 @@ design principles these come from)
 - **second card** — with something picked, the card of what the pointer rests on,
   shown beside the picked thing's card (the **main card**). A click makes it the
   main card, in the same place.
-- **page hero** — the block at the top of a page about one element: its pills,
-  the sentence saying what it is, one line of context. It does NOT carry the
-  name; the breadcrumb does.
+- **page hero** — the block at the top of a page about one element: what kind of
+  thing it is and its name (`Use case: Weigh up the product`), the pills it earns,
+  the sentence saying what it is, one line of context. It scrolls with the page;
+  the breadcrumb above it stays.
 - **element details page** — everything the map holds about one element,
   reached by clicking its card. The info pane shows only the card.
 - **home view** — the one view that draws a given element type. One function
@@ -238,18 +239,21 @@ design principles these come from)
 - **group tab row** — the strip of group tabs: Product, Under the hood, Update
   log. The first strip under the title bar.
 - **view tab row** — the strip of view tabs, under the group tab row. With
-  Product open it holds Description, Features, Happy Path, Interfaces, Rules, Data,
+  Product open it holds Features, Description, Happy Path, Interfaces, Rules, Data,
   Glossary.
 - **the trail** — the group tab row, the view tab row and the breadcrumb, read
-  as one path. Where you are is the last item in it, and nothing else names it.
-  The breadcrumb's last item is the page's title, so no page draws its own
-  heading, and on a page about one element it carries that element's pills.
+  as one path. Where you are is the last item in it. The breadcrumb is the row
+  under the view tabs: on every page below a view's own screen it shows the whole
+  path from the view down, each level a link back to it, and it stays put while the
+  page scrolls. Its last item is the page's title, and a link to something the map
+  does not hold ends in "Not in this map".
 - **source column** — the file browser and the code viewer, on the right. It is
   optional on every screen. The **source rail**, a strip on the right edge,
   opens it; the × in its header closes it.
 - **product description** — the Description tab's text, stored as the map's goal: an opening
   paragraph, then optional short sections with headings and lists, at most 400 words. It
-  describes, it does not sell. The tab a reader lands on from the root page.
+  describes, it does not sell. Its tab comes second, after Features, which is where a
+  reader lands from the root page.
 - **description review** — the lead's check of the product description against the map's
   actors, features and happy path: every major audience and capability is there, nothing is
   claimed without backing, and a reader can retell a typical use. Agent-led; `validate` only
