@@ -245,8 +245,8 @@ design principles these come from)
   as one path. Where you are is the last item in it. The breadcrumb is the row
   under the view tabs: on every page below a view's own screen it shows the whole
   path from the view down, each level a link back to it, and it stays put while the
-  page scrolls. Its last item is the page's title, and a link to something the map
-  does not hold ends in "Not in this map".
+  page scrolls. Its last item is the page's title, and a **broken link**'s trail
+  ends in "Not in this map".
 - **source column** — the file browser and the code viewer, on the right. It is
   optional on every screen. The **source rail**, a strip on the right edge,
   opens it; the × in its header closes it.
@@ -263,6 +263,11 @@ design principles these come from)
   which tab, how far you drilled, and what is selected. Copy it and someone else
   opens the same screen; reload and you keep your place. The browser's own Back
   and Forward walk it, and the viewer has no Back button of its own.
+- **broken link** — a shareable link to something the map does not hold: an old
+  link from before a rebuild, or one typed by hand. Its trail ends in "Not in this
+  map", once, and its page says so in one sentence ("This actor is not in the
+  map."). It never draws a page for the missing thing, and never prints a word the
+  link carried.
 - **objective** — the labelled sentence at the top of a feature's page or an
   actor's page, saying what that feature or that actor is for.
 - **timeline** — the picture on a feature's page and on an actor's page: one
