@@ -3899,7 +3899,7 @@ function syncFlowCard(s) {
   const card = document.getElementById('flowpicker');
   const mode = document.getElementById('flowmode');
   if (!card) return;
-  card.hidden = !isFlowState(s);
+  card.hidden = !isFlowState(s) || !flowHeld(s);
   if (mode) mode.innerHTML = '';
 }
 function flowInit(s) {
@@ -6629,7 +6629,7 @@ function applyEnvDim(scene) {
 // Map is the default because it preserves the structural vocabulary used by the rest of the viewer;
 // the choice is sticky across navigation (like DEPLOY_ENV), so a reader who switches to Sequence keeps
 // it while drilling from use case to use case.
-const EMPTY_FLOW_MAP = 'flowchart LR\n  NOFLOW["No T6 flow recorded"]';
+const EMPTY_FLOW_MAP = 'flowchart LR\n  NOFLOW["No flow recorded for this use case"]';
 
 function flowMermaidFor(uc) {
   return FLOWS_MAP[uc] || EMPTY_FLOW_MAP;
@@ -6653,12 +6653,16 @@ function isDataPicture(s) { return !!(s && (s.kind === 'domain' || s.kind === 'd
 // The Subsystems tab's three drawings: the boxes, one box, and a pair of boxes — the Data pictures' twins.
 function isStructurePicture(s) { return !!(s && (s.kind === 'container' || s.kind === 'subsystem' || s.kind === 'edge')); }
 function flowIdOf(s) { return s.kind === 'subflow' ? s.sf : s.uc; }
-function subflowName(sid) { return (SUBFLOW_BY_ID[sid] || {}).name || sid; }
+function subflowName(sid) { return (SUBFLOW_BY_ID[sid] || {}).name || UNKNOWN_NAME; }
 // THE NAME OF A WALK, whichever kind it is. A use case is a graph node; a shared sub-use case is not, so a
 // single `GRAPH.nodes` lookup printed a raw `SFn` wherever the two kinds meet.
 function flowName(id) {
-  return SUBFLOW_BY_ID[id] ? subflowName(id) : ((GRAPH.nodes[id] && GRAPH.nodes[id].name) || id);
+  return SUBFLOW_BY_ID[id] ? subflowName(id) : elName(id);
 }
+// DOES THE MAP HOLD THE WALK a state names? A stale link's walk is not in it, and its page says so in
+// words: drawn, it was a box saying no flow was recorded, which claims the map holds the use case.
+function useCaseHeld(uc) { return (GRAPH.nodes[uc] || {}).kind === 'usecase'; }
+function flowHeld(s) { return s.kind === 'subflow' ? !!SUBFLOW_BY_ID[s.sf] : useCaseHeld(s.uc); }
 function flowMapToken(uc, mid) {
   if (!/^FA\d+$/.test(mid)) return mid;
   const a = (FLOW_ACTORS[uc] || []).find((x) => x.aid === mid);
@@ -7940,6 +7944,13 @@ function pairPageSpec(s) {
   // threw before it drew a pixel.)
   return fits ? Object.assign({}, spec, { ends }) : null;
 }
+// A PAIR LINK THE GUARD REFUSES: a pair page's address whose ends are missing or of the wrong kind.
+// Its page draws no title, and the trail names it as a stale link is named: the two ends joined by
+// an arrow would announce a pair the map does not hold. Two leaves are not refused here: they have
+// a page of their own (renderLeafPair).
+function refusedPairLink(s) {
+  return !!(s && PAIR_PAGE[s.kind]) && !pairPageSpec(s) && !(s.kind === 'edge' && isLeafPair(s.a, s.b));
+}
 // A PAIR'S MARK: the kind's own figure when both ends are the SAME kind (two subsystems, two
 // subdomains), and none for a bridge, whose two ends are different things and where either mark would
 // stand for half the page. The hero and the strip are built to read without one.
@@ -8467,9 +8478,7 @@ function ensurePageTitle(s, chain) {
   if (chain.length < 2) return;
   const root = document.querySelector('#pagehero .page-hero, #diaghead .page-hero, #diagram .page-hero');
   if (root && root.querySelector('.page-hero-name')) return;
-  // A PAIR LINK THE GUARD REFUSED stays unnamed. Its ends are missing or of the wrong kind, and
-  // `stateTitle` would print them as a pair over a page that cannot draw one (see pairPageSpec).
-  if (PAIR_PAGE[s.kind] && !pairPageSpec(s)) return;
+  if (refusedPairLink(s)) return;   // a pair link the guard refuses draws no title (see pairPageSpec)
   const name = stateTitle(s);
   if (root) {
     const title = document.createElement('p');
@@ -9485,6 +9494,8 @@ function stateTitle(s) {
   if (s.kind === 'deploymentUnit') return s.unit;
   // Every name below goes through `elName`, the one place that knows what to call an element the map
   // does not hold. Four hand-rolled `nm` closures did the same lookup with the ID as their fallback.
+  // A pair link the guard refuses is one more thing the map does not hold, so it takes the same word.
+  if (refusedPairLink(s)) return UNKNOWN_NAME;
   if (s.kind === 'depedge') return elName(s.a) + ' → ' + elName(s.b);
   if (s.kind === 'domsub') return elName(s.sd);
   if (s.kind === 'domedge') return elName(s.a) + ' → ' + elName(s.b);
@@ -9562,7 +9573,9 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
     // undo. It was a THIRD case before, guessing an actor from a global axis setting for a use case
     // reached some other way; the guess put a card the reader never opened into their trail.
     if (s.act) return [{ kind: 'usecases' }, { kind: 'actor', act: s.act }, { kind: 'usecase', uc: s.uc }];
-    const cap = HAS_CAPABILITIES ? (CAP_OF_UC[s.uc] ? CAP_OF_UC[s.uc].id : '-') : '';
+    // …but only for a use case the map HOLDS. A stale link's use case is in no feature because it is
+    // in no map, and hung under the "not assigned" card the trail claimed it was in the map.
+    const cap = HAS_CAPABILITIES && useCaseHeld(s.uc) ? (CAP_OF_UC[s.uc] ? CAP_OF_UC[s.uc].id : '-') : '';
     return cap ? [{ kind: 'usecases' }, { kind: 'capability', cap }, { kind: 'usecase', uc: s.uc }]
                : [{ kind: 'usecases' }, { kind: 'usecase', uc: s.uc }];
   }
@@ -15204,6 +15217,12 @@ async function renderView(sArg, transient, seq) {
   // degraded "could not render" branch never reach the end of render, so a card shown on a walk would
   // otherwise still be floating over the table you switched to.
   syncFlowCard(s);
+  // A walk the map does not hold draws nothing to walk, and says so as a missing element's page does.
+  if (isFlowState(s) && !flowHeld(s)) {
+    diagram.innerHTML = `<p class="empty">This ${s.kind === 'subflow' ? 'shared sub-use case' : 'use case'}`
+      + ' is not in the map.</p>';
+    mainScene = null; renderChrome(s); return;
+  }
   // The Glossary tab is a term TABLE, not a mermaid diagram — render it straight into the stage and
   // keep the chrome (breadcrumb + active tab). No panZoom/scene/tree machinery to set up, so return
   // before the diagram path, the same shape as the degraded "could not render" branch below.
@@ -15343,6 +15362,9 @@ async function renderView(sArg, transient, seq) {
   } catch (_) {
     if (seq !== renderSeq) return;
     diagram.innerHTML = '<p class="empty">This view could not be rendered.</p>';
+    // THE PREVIOUS PAGE'S DRAWING IS GONE TOO. Every other way out of a render says so; this one did
+    // not, and the chrome then offered the help for boxes that are not on the screen.
+    mainScene = null;
     renderChrome(s);
     return;
   }

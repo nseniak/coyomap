@@ -194,12 +194,78 @@ def test_a_stale_link_shows_no_internal_id_on_screen() -> None:
     with _served() as url, _page(url) as page:
         for fragment, gone in (("#v=subsystem&sid=S99", "S99"),
                                ("#v=element&id=C999", "C999"),
-                               ("#v=usecase&uc=UC99", "UC99")):
+                               ("#v=usecase&uc=UC99", "UC99"),
+                               ("#v=subflow&sf=SF99", "SF99")):
             page.evaluate("(h) => { location.hash = h; }", fragment)
             _settle(page)
             crumb = _crumb(page)
             assert gone not in crumb, f"{fragment} put the id in the trail: {crumb!r}"
             assert "Not in this map" in crumb, crumb
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_missing_use_case_hangs_under_no_feature() -> None:
+    """Once the trail was on screen, a link to a use case the map does not hold read `Features ›
+    Not assigned to a feature › Not in this map`: in the map and in no feature, when it is in
+    neither. A use case the map holds in no feature keeps that level, where it is real and the only
+    way back to its card."""
+    def unassign(m: dict) -> None:
+        for u in m["use_cases"]:
+            if u["id"] == "UC2":
+                del u["capability"]
+
+    with _served_map(unassign) as url, _page(url + "#v=usecase&uc=UC99") as page:
+        _settle(page)
+        assert _crumb(page) == "Features›Not in this map", _crumb(page)
+        page.evaluate("(h) => { location.hash = h; }", "#v=usecase&uc=UC2")
+        _settle(page)
+        assert _crumb(page).startswith("Features›Not assigned to a feature›"), _crumb(page)
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_walk_the_map_does_not_hold_is_said_in_words_not_drawn() -> None:
+    """A link to a use case the map does not hold drew a flow of one box, "No T6 flow recorded": a
+    drawing of nothing, under a title saying the use case is not in the map, in a word from the
+    method that no reader knows. Across 32 maps on the developer's machine no use case lacks a flow,
+    so an old link was nearly the only way to see that box. Such a page says what it is in words, as
+    a missing element's page does, with no drawing, no step player and no help for boxes. A use case
+    the map holds with no flow keeps its box, in words a reader knows."""
+    read = """() => ({
+        text: document.getElementById('diagram').textContent.trim(),
+        drawn: !!document.querySelector('#diagram svg'),
+        player: !document.getElementById('flowpicker').hidden,
+        help: document.querySelectorAll('.diagram-interaction-hint').length,
+      })"""
+    with _served() as url, _page(url + "#v=usecase&uc=UC1") as page:
+        _settle(page)
+        assert page.evaluate(read)["player"], "a drawn walk shows its step player, or the check below proves nothing"
+        for fragment, said in (("#v=usecase&uc=UC99", "This use case is not in the map."),
+                               ("#v=subflow&sf=SF99", "This shared sub-use case is not in the map.")):
+            page.evaluate("(h) => { location.hash = h; }", fragment)
+            _settle(page)
+            assert page.evaluate(read) == {"text": said, "drawn": False, "player": False, "help": 0}, fragment
+        # UC9 is in the committed fixture with no flow recorded.
+        page.evaluate("(h) => { location.hash = h; }", "#v=usecase&uc=UC9")
+        _settle(page)
+        seen = page.evaluate(read)
+        assert seen["drawn"] and "No flow recorded for this use case" in seen["text"], seen
+        assert "T6" not in seen["text"], seen
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_page_that_could_not_be_drawn_offers_no_help_for_boxes() -> None:
+    """A failed drawing left the viewer holding the previous page's drawing, so the page under "This
+    view could not be rendered." offered the help for selecting boxes. Reached from a drawn page,
+    which is the only way it showed."""
+    hint = "() => document.querySelectorAll('.diagram-interaction-hint').length"
+    with _served() as url, _page(url + "#v=usecase&uc=UC1") as page:
+        _settle(page)
+        assert page.evaluate(hint) >= 1, "the drawn page offers its help, or the check below proves nothing"
+        page.evaluate("(h) => { location.hash = h; }", "#v=subsystem&sid=S99")
+        _settle(page)
+        assert "This view could not be rendered." in page.evaluate(
+            "() => document.getElementById('diagram').textContent")
+        assert page.evaluate(hint) == 0
         assert not page.js_errors, page.js_errors
 
 
@@ -3469,11 +3535,16 @@ def test_a_pair_page_refuses_a_link_whose_ends_are_the_wrong_kind() -> None:
     """The guard checked that both ids EXIST, not that they are what the page is about — so a stale or
     hand-typed link printed a confident wrong word: `#v=domedge` naming two RECORDS announced them as
     `Subdomain pair: Organization → Membership`. These pages drew no words at all before this change,
-    so a wrong one is worse than what it replaced: the guard has to be as narrow as the sentence."""
+    so a wrong one is worse than what it replaced: the guard has to be as narrow as the sentence.
+
+    THE TRAIL TOO, once it was on screen: it named the two ends joined by an arrow, the pair the page
+    refuses to be. It ends in the word for anything the map does not hold. Two components joined by a
+    flow step are not refused: that pair has a page of its own, and keeps its name."""
     wrong = ["#v=domedge&a=E1&b=E2",          # two records, not two data areas
              "#v=bridge&sid=S1&sd=S3",        # two subsystems, not a subsystem and a data area
              "#v=edge&a=SD1&b=SD5"]           # two data areas, not two subsystems
     right = ["#v=edge&a=S1&b=S10", "#v=domedge&a=SD3&b=SD2", "#v=bridge&sid=S13&sd=SD3"]
+    names = {c["id"]: c["name"] for c in json.loads(_FIXTURE_MAP.read_text())["components"]}
     read = """() => ({
         kind: (document.querySelector('.page-hero-kind') || {}).textContent || '',
         name: (document.querySelector('.page-hero-subject') || {}).textContent || '',
@@ -3485,11 +3556,16 @@ def test_a_pair_page_refuses_a_link_whose_ends_are_the_wrong_kind() -> None:
             seen = page.evaluate(read)
             assert not seen["kind"] and not seen["name"], \
                 f"{hash_} named a pair it is not: {seen}"
+            assert _page_title(page) == "Not in this map", f"{hash_} named a pair in the trail: {_crumb(page)!r}"
         for hash_ in right:
             page.goto(url + hash_)
             _settle(page)
             seen = page.evaluate(read)
             assert seen["kind"] and " → " in seen["name"], f"{hash_} lost its header: {seen}"
+            assert _page_title(page) == seen["name"], f"{hash_}: {_crumb(page)!r}"
+        page.goto(url + "#v=edge&a=C15&b=C101")    # UC1 steps from one to the other
+        _settle(page)
+        assert _page_title(page) == f"{names['C15']} → {names['C101']}", _crumb(page)
         assert not page.js_errors, page.js_errors
 
 
