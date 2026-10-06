@@ -68,6 +68,8 @@ gates:
 # Land the worktree branch on main: merge main INTO the branch, run the gates on the result,
 # fast-forward main FROM the main checkout (ref, index and files together), and go again if main
 # moved meanwhile. Stops on a conflict for you to resolve here. Run from inside the worktree.
+# Tests listed in tests/known-failures.txt are skipped by the gates and re-run alone: one that
+# passes stops the landing until its line is removed.
 # Stdlib only, so it needs no venv of its own; the gates it runs use the main checkout's.
 land:
 	python3 tools/land.py

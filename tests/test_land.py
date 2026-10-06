@@ -6,12 +6,26 @@ main under the script's feet — the case the loop exists for.
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 
 LAND = Path(__file__).resolve().parent.parent / "tools" / "land.py"
+
+DEMO_TESTS = "def test_fails():\n    assert False\n\n\ndef test_passes():\n    assert True\n"
+
+
+def load_land() -> ModuleType:
+    """The script as a module, for the pure helpers; the loop itself is tested end to end below."""
+    spec = importlib.util.spec_from_file_location("land_under_test", LAND)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module      # a dataclass resolves its annotations through sys.modules
+    spec.loader.exec_module(module)
+    return module
 
 
 def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -43,8 +57,16 @@ def head(checkout: Path) -> str:
 
 
 def land(worktree: Path, *extra: str, gates: str = "true") -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(LAND), "--gates", gates, *extra], cwd=worktree,
-                          capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(LAND), "--gates", gates, "--python", sys.executable, *extra],
+                          cwd=worktree, capture_output=True, text=True)
+
+
+def make_known_failures(worktree: Path, *lines: str) -> None:
+    """A branch carrying two demo tests (one fails, one passes) and a known-failures list."""
+    (worktree / "tests").mkdir(exist_ok=True)
+    make_commit(worktree, "tests/check_demo.py", DEMO_TESTS, "demo tests")
+    make_commit(worktree, "tests/known-failures.txt", "# listed\n" + "".join(f"{line}\n" for line in lines),
+                "known failures")
 
 
 def test_a_branch_ahead_of_main_lands_and_the_main_checkouts_files_move_with_the_ref() -> None:
@@ -119,3 +141,49 @@ def test_a_dirty_worktree_and_the_main_checkout_itself_are_refused() -> None:
     assert land(worktree).returncode == 1
     (worktree / "loose.txt").unlink()
     assert land(main).returncode == 1
+
+
+def test_a_known_failure_is_skipped_in_the_gates_and_landing_goes_on_while_it_still_fails() -> None:
+    main, worktree = make_repo()
+    make_known_failures(worktree, "tests/check_demo.py::test_fails # broken on main, fixed elsewhere")
+    seen = worktree.parent / "addopts.txt"
+    done = land(worktree, gates=f"printenv PYTEST_ADDOPTS > {seen}")
+    assert done.returncode == 0, done.stderr
+    assert seen.read_text().strip() == "--deselect tests/check_demo.py::test_fails"
+    assert "skipping 1 known failure(s)" in done.stdout
+    assert head(main) == head(worktree)
+
+
+def test_a_known_failure_that_now_passes_stops_landing_until_its_line_goes() -> None:
+    main, worktree = make_repo()
+    before = head(main)
+    make_known_failures(worktree, "tests/check_demo.py::test_fails # broken",
+                        "tests/check_demo.py::test_passes # was broken, fixed since")
+    done = land(worktree)
+    assert done.returncode == 6, done.stderr
+    assert "now pass" in done.stderr and "tests/check_demo.py::test_passes" in done.stderr
+    assert "test_fails" not in done.stderr.split("now pass", 1)[1]
+    assert head(main) == before
+
+
+def test_a_known_failures_line_that_is_not_one_named_test_is_refused_before_the_gates() -> None:
+    """A whole file, a line with no reason, a file that is gone: each would skip or hide something
+    nobody chose to skip, so each stops landing before any gate runs."""
+    for line, message in (("tests/check_demo.py # the whole file", "not one test"),
+                          ("tests/check_demo.py::test_fails", "say why"),
+                          ("tests/gone.py::test_x # gone", "does not exist")):
+        main, worktree = make_repo()
+        make_known_failures(worktree, line)
+        marker = worktree.parent / "gates.ran"
+        done = land(worktree, gates=f"touch {marker}")
+        assert done.returncode == 6 and message in done.stderr, (line, done.stderr)
+        assert not marker.exists(), line
+
+
+def test_the_skips_ride_after_any_pytest_options_already_set() -> None:
+    module = load_land()
+    known = [module.KnownFailure("tests/a.py::test_b[x y]", "why")]
+    env = module.gate_env(Path("/repo"), known)
+    assert env["PYTEST_ADDOPTS"].endswith("--deselect 'tests/a.py::test_b[x y]'")
+    assert module.passing_tests("x\nPASSED tests/a.py::test_b\nFAILED tests/a.py::test_c - boom\n") == [
+        "tests/a.py::test_b"]

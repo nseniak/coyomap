@@ -64,7 +64,7 @@ the code's names.
   away hand edits.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
-  Overview, Features, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,
+  Description, Features, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,
   Subsystems, Storage, Dependencies, Tests, Deployment, System, Updates.
 - **group** — the three tabs above the views: Product, Under the hood, Update
   log. A group is a set of tabs, never a page you can be on. Data (the entities)
@@ -238,7 +238,7 @@ design principles these come from)
 - **group tab row** — the strip of group tabs: Product, Under the hood, Update
   log. The first strip under the title bar.
 - **view tab row** — the strip of view tabs, under the group tab row. With
-  Product open it holds Overview, Features, Happy Path, Interfaces, Rules, Data,
+  Product open it holds Description, Features, Happy Path, Interfaces, Rules, Data,
   Glossary.
 - **the trail** — the group tab row, the view tab row and the breadcrumb, read
   as one path. Where you are is the last item in it, and nothing else names it.
@@ -250,6 +250,11 @@ design principles these come from)
 - **product description** — the Description tab's text, stored as the map's goal: an opening
   paragraph, then optional short sections with headings and lists, at most 400 words. It
   describes, it does not sell. The tab a reader lands on from the root page.
+- **description review** — the lead's check of the product description against the map's
+  actors, features and happy path: every major audience and capability is there, nothing is
+  claimed without backing, and a reader can retell a typical use. Agent-led; `validate` only
+  counts the form. A build runs it after the trace, an update when an actor, a feature or a
+  happy path step changes.
 - **shareable link** — a viewer address that names one screen, not just the map:
   which tab, how far you drilled, and what is selected. Copy it and someone else
   opens the same screen; reload and you keep your place. The browser's own Back
