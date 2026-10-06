@@ -7,6 +7,7 @@ main under the script's feet — the case the loop exists for.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -57,8 +58,11 @@ def head(checkout: Path) -> str:
 
 
 def land(worktree: Path, *extra: str, gates: str = "true") -> subprocess.CompletedProcess[str]:
+    # Without the caller's PYTEST_ADDOPTS: under `make land` the suite itself runs with the real
+    # list's skips there, and the throwaway landing would inherit them.
+    env = {key: value for key, value in os.environ.items() if key != "PYTEST_ADDOPTS"}
     return subprocess.run([sys.executable, str(LAND), "--gates", gates, "--python", sys.executable, *extra],
-                          cwd=worktree, capture_output=True, text=True)
+                          cwd=worktree, capture_output=True, text=True, env=env)
 
 
 def make_known_failures(worktree: Path, *lines: str) -> None:
