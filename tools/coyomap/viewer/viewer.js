@@ -707,11 +707,19 @@ const UNKNOWN_NAME = 'Not in this map';
 function roleName(rid) { return (ROLE_BY_ID[rid] || {}).name || UNKNOWN_NAME; }
 // A feature id in its readable form, from the derived layer first (it carries every feature) and the
 // graph node second.
+// Does the map hold this feature? `-` is the card of the use cases in no feature, a real level.
+function featureHeld(fid) { return fid === '-' || !!FEAT_BY_ID[fid] || (GRAPH.nodes[fid] || {}).kind === 'capability'; }
 function featureName(fid) {
   return (FEAT_BY_ID[fid] || {}).name || (GRAPH.nodes[fid] || {}).name || UNKNOWN_NAME;
 }
 // Any element id in its readable form. Names on screen, ids only in the markup.
 function elName(id) { return (GRAPH.nodes[id] || {}).name || UNKNOWN_NAME; }
+// A PAGE THAT IS ONE LINE: a link to something the map does not hold, a drawing that failed, a
+// document still on its way. It sits in the column every page of text uses, so its words start where
+// the title card above them starts. Written straight into the stage, they sat against the drawing
+// frame's edge with no margin at all.
+function linePageHtml(html) { return `<div class="usecases-wrap">${html}</div>`; }
+function emptyPageHtml(text) { return linePageHtml(`<p class="empty">${esc(text)}</p>`); }
 
 // ── THE ELEMENT CARD ──────────────────────────────────────────────────────────────────────────────
 // ONE card design for every element, in every place an element is shown: a card list, a group of
@@ -2978,7 +2986,7 @@ function renderFlowStepPage(uc, sn) {
   // It compares numbers, and a number out of an address is a string.
   const i = flowStepIndex(uc, uc, Number(sn));
   const st = i >= 0 ? FLOWS_NARR[uc][i] : null;
-  if (!st) { diagram.innerHTML = '<p class="empty">This step is not in the map.</p>'; return; }
+  if (!st) { diagram.innerHTML = emptyPageHtml('This step is not in the map.'); return; }
   const all = FLOWS_NARR[uc] || [];
   // THE ENDS, as the pills that name them — who acts, and on what. They are the first thing a reader
   // wants at a step and the popup already carries them nowhere, because the board around it drew them.
@@ -3049,7 +3057,7 @@ function leafPairSteps(a, b) {
 }
 function renderLeafPair(a, b) {
   const na = GRAPH.nodes[a], nb = GRAPH.nodes[b];
-  if (!na || !nb) { diagram.innerHTML = '<p class="empty">This pair is not in the map.</p>'; return; }
+  if (!na || !nb) { diagram.innerHTML = emptyPageHtml('This pair is not in the map.'); return; }
   const hero = pageHeroHtml({
     glyph: elementHeroGlyph(na.kind), name: elName(a) + ' \u2192 ' + elName(b), type: 'Pair',
     desc: '', noDesc: false,
@@ -3096,7 +3104,7 @@ function renderLeafPair(a, b) {
 // screen from the diagram it was describing.
 function renderElementDetails(id) {
   const n = GRAPH.nodes[id];
-  if (!n) { diagram.innerHTML = '<p class="empty">This element is not in the map.</p>'; return; }
+  if (!n) { diagram.innerHTML = emptyPageHtml('This element is not in the map.'); return; }
   const chg = cmpBadgeHtml(id);
   // The type (and a dependency's kind) now ride the breadcrumb beside the name, so the hero holds only
   // what is left: a dependency's bucket and roles, and a change badge in diff mode. For an entity, a
@@ -9402,6 +9410,13 @@ function pageElementId(s) {
   if (s.kind === 'actor') return actorNodeId(s.act);
   return null;
 }
+// Does the map hold an actor of this name? An actor's page is addressed by NAME, and the roles table
+// and the drawn actors are the two places a name can come from. An own-property test, because a
+// lowercased word can still name a member every plain object inherits.
+function actorHeld(name) {
+  const key = String(name || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ROLE_BY_NAME, key) || !!actorNodeId(name);
+}
 function actorNodeId(name) {
   const n = Object.values(GRAPH.nodes || {}).find((x) =>
     (x.kind === 'human' || isMachineActor(x.kind)) && x.name === name);
@@ -9450,12 +9465,12 @@ function stateTitle(s) {
   if (s.kind === 'rules') {  // the view lists RULES; "business logic" named a code layer, not the content
     if (!s.blk) return 'Rules';
     const g = ruleBlockGroups().find((x) => x.id === s.blk);
-    return g ? g.name : 'Rules';
+    return g ? g.name : UNKNOWN_NAME;
   }
   if (s.kind === 'interfaces') {    // the list, or the one surface drilled into
     if (!s.iface) return 'Interfaces';
     const i = ifaceById(s.iface);
-    return i ? i.name : 'Interfaces';
+    return i ? i.name : UNKNOWN_NAME;
   }
   if (s.kind === 'rule') return ruleCrumbTitle(s.br);
   if (s.kind === 'overview') return VIEW_LABEL.overview;
@@ -9464,8 +9479,10 @@ function stateTitle(s) {
   if (s.kind === 'removed') return removedTitle(s);
   if (s.kind === 'system') return 'System';
   if (s.kind === 'sysSection') {
-    if (s.epk) return s.epk;   // one entry-point kind, named by the kind itself
-    const f = systemSections().find((x) => x.id === s.sys); return f ? f.title : 'System';
+    const f = systemSections().find((x) => x.id === s.sys);
+    if (!f) return UNKNOWN_NAME;
+    if (s.epk) return sysKindOf(f, s.epk) ? s.epk : UNKNOWN_NAME;   // one entry-point kind, named by the kind itself
+    return f.title;
   }
   if (s.kind === 'data') return 'Storage';  // user-facing label; internal kind stays `data`
   if (s.kind === 'tests') return 'Tests';
@@ -9480,7 +9497,9 @@ function stateTitle(s) {
     const nm = featureName(s.cap);
     return s.act ? nm + ' · ' + s.act : nm;   // a grid cell names both axes it crossed
   }
-  if (s.kind === 'actor') return s.act;   // the actor NAME is already the crumb's own words
+  // The actor NAME is already the crumb's own words, once the map is known to hold that actor: the
+  // address carries a name, and a link can carry any word.
+  if (s.kind === 'actor') return actorHeld(s.act) ? s.act : UNKNOWN_NAME;
   // A PROCESS is the one element whose details page hangs under a page about that SAME element — its own
   // page on the Deployment view, which draws where it runs. Both crumbs printed the process's name, so the
   // trail read `Deployment › api › api`: two crumbs, one word, and nothing saying which was which. The
@@ -9490,8 +9509,8 @@ function stateTitle(s) {
     return (GRAPH.nodes[s.id] || {}).kind === 'process' ? 'Details' : elName(s.id);
   }
   if (s.kind === 'deployment') return 'Deployment';
-  if (s.kind === 'deploymentGroup') return groupTitle(s.gid);
-  if (s.kind === 'deploymentUnit') return s.unit;
+  if (s.kind === 'deploymentGroup') return isDeploymentGroup(s.gid) ? groupTitle(s.gid) : UNKNOWN_NAME;
+  if (s.kind === 'deploymentUnit') return unitProcessNodeId(s.unit) ? s.unit : UNKNOWN_NAME;
   // Every name below goes through `elName`, the one place that knows what to call an element the map
   // does not hold. Four hand-rolled `nm` closures did the same lookup with the ID as their fallback.
   // A pair link the guard refuses is one more thing the map does not hold, so it takes the same word.
@@ -9530,6 +9549,9 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   if (s.kind === 'bridge') return [{ kind: 'container' }, { kind: 'bridge', sid: s.sid, sd: s.sd }];  // S×SD bridge under Subsystems
   if (s.kind === 'hp') return [{ kind: 'hp' }];
   if (s.kind === 'sysSection') {
+    // A section the map does not hold has no level under it, so its trail is the view and then the word
+    // for anything the map does not hold, once, whatever kind the link also names.
+    if (!systemSections().some((x) => x.id === s.sys)) return [{ kind: 'system' }, { kind: 'sysSection', sys: s.sys }];
     const base = [{ kind: 'system' }, { kind: 'sysSection', sys: s.sys }];
     return s.epk ? base.concat([{ kind: 'sysSection', sys: s.sys, epk: s.epk }]) : base;
   }
@@ -9618,7 +9640,9 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
     // was already this state; what changed is that it renders that area's rules instead of scrolling a
     // stacked page to them, so the top crumb has somewhere of its own to go.
     const r = ruleById(s.br);
-    return [{ kind: 'rules' }, { kind: 'rules', blk: ruleGroupKeyFor(r && r.block) },
+    // …and a rule the map does not hold has no area to hang under, as a missing use case has no feature.
+    if (!r) return [{ kind: 'rules' }, { kind: 'rule', br: s.br }];
+    return [{ kind: 'rules' }, { kind: 'rules', blk: ruleGroupKeyFor(r.block) },
             { kind: 'rule', br: s.br }];
   }
   if (s.kind === 'overview') return [{ kind: 'overview' }];
@@ -12107,8 +12131,7 @@ function hpStepPos(hpId) {
 function renderHappyPath() {
   const rows = hpRows();
   if (!rows.length) {
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="empty">'
-      + 'This map records no happy path.</p></div>';
+    diagram.innerHTML = emptyPageHtml('This map records no happy path.');
     return;
   }
   const feats = new Set(rows.flatMap((r) => r.segs.map((sg) => sg.fid)).filter(Boolean)).size;
@@ -13481,9 +13504,13 @@ function renderSystem() {
 // Level 2 — one collection. It draws NO title: the breadcrumb's last item is this page's name, and the
 // bordered block that used to hold the table was a card wrapped around content. Both were the shape
 // this viewer removed on a role's page, standing here too.
+// One entry-point kind of a System section, when the section is cut by kind and holds that one.
+function sysKindOf(section, epk) {
+  return (section && section.kinds && epk) ? (section.kinds.find((k) => k.key === epk) || null) : null;
+}
 function renderSystemSection(sysId, epk) {
   const found = systemSections().find((s) => s.id === sysId);
-  if (!found) { renderSystem(); return; }
+  if (!found) { diagram.innerHTML = emptyPageHtml('This section is not in the map.'); return; }
   // A collection that carries KINDS gets the card treatment one level deeper: its cards first, then
   // one kind's table. Every other collection is a single page.
   if (found.kinds && !epk) {
@@ -13495,7 +13522,8 @@ function renderSystemSection(sysId, epk) {
     bindPlainCards(diagram, (key) => go({ kind: 'sysSection', sys: sysId, epk: key }));
     return;
   }
-  const one = found.kinds ? found.kinds.find((k) => k.key === epk) : null;
+  const one = sysKindOf(found, epk);
+  if (epk && !one) { diagram.innerHTML = emptyPageHtml('This kind of entry point is not in the map.'); return; }
   const count = one ? countLabel(one.count, 'entry point') : found.count;
   const body = one ? one.html : found.html;
   diagram.innerHTML = '<div class="usecases-wrap system-wrap">'
@@ -13826,7 +13854,9 @@ function ruleStatementLine(r) { return (r && (r.name || '').trim()) ? r.statemen
 function ruleCrumbTitle(id) {
   // NEVER the raw `BRn` — a rule the payload does not carry (or one with neither field) still gets a
   // crumb, and an element id on screen is the one thing the viewer does not do.
-  const t = ruleTitle(ruleById(id)) || 'Rule';
+  const r = ruleById(id);
+  if (!r) return UNKNOWN_NAME;   // a rule the payload does not carry is not in this map
+  const t = ruleTitle(r) || 'Rule';
   return t.length > 58 ? t.slice(0, 57).trimEnd() + '\u2026' : t;
 }
 // The decision areas, depth-first, each with its own rules. Blocks nest (validate supports
@@ -14918,7 +14948,7 @@ function renderInterfaces(s) {
 function renderInterface(s) {
   const i = ifaceById(s.iface);
   if (!i) {
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="empty">This interface is not in the map.</p></div>';
+    diagram.innerHTML = emptyPageHtml('This interface is not in the map.');
     return;
   }
   const pills = [
@@ -15038,7 +15068,7 @@ function renderRules(s) {
   // as the model to copy everywhere, which makes it the last place that had not copied itself.
   const g = groups.find((x) => x.id === s.blk);
   if (!g) {
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="empty">This decision area is not in the map.</p></div>';
+    diagram.innerHTML = emptyPageHtml('This decision area is not in the map.');
     return;
   }
   // WHICH FEATURE THIS AREA IS SPECIFIED UNDER, said here too. The board's whole organisation is that
@@ -15087,7 +15117,7 @@ function renderRules(s) {
 function renderRule(s) {
   const r = ruleById(s.br);
   if (!r) {
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="empty">This business rule is not in the map.</p></div>';
+    diagram.innerHTML = emptyPageHtml('This business rule is not in the map.');
     return;
   }
   const blk = (RULES_VIEW.blocks || []).find((b) => b.id === r.block);
@@ -15184,7 +15214,7 @@ async function render(sArg, transient) {
     // SAID IN THE CONSOLE TOO. The message on screen is all a reader needs; whoever is asked to fix it
     // needs the stack, and a swallowed error left nothing to read anywhere.
     console.error('coyomap: this view could not be rendered', s, err);
-    diagram.innerHTML = '<p class="empty">This view could not be rendered.</p>';
+    diagram.innerHTML = emptyPageHtml('This view could not be rendered.');
     mainScene = null;
     try { renderChrome(s); } catch (_) { /* the chrome is the last thing that can fail; leave the rest */ }
   } finally {
@@ -15219,8 +15249,7 @@ async function renderView(sArg, transient, seq) {
   syncFlowCard(s);
   // A walk the map does not hold draws nothing to walk, and says so as a missing element's page does.
   if (isFlowState(s) && !flowHeld(s)) {
-    diagram.innerHTML = `<p class="empty">This ${s.kind === 'subflow' ? 'shared sub-use case' : 'use case'}`
-      + ' is not in the map.</p>';
+    diagram.innerHTML = emptyPageHtml(`This ${s.kind === 'subflow' ? 'shared sub-use case' : 'use case'} is not in the map.`);
     mainScene = null; renderChrome(s); return;
   }
   // The Glossary tab is a term TABLE, not a mermaid diagram — render it straight into the stage and
@@ -15258,6 +15287,8 @@ async function renderView(sArg, transient, seq) {
   // One feature's use cases — the drill out of those cards ('*' = all of them). The feature's own name
   // and purpose head the list itself; the view's question is one level up, on the view's own screen.
   if (s.kind === 'capability') {
+    // A feature the map does not hold has no use cases to list, and "No use cases recorded" said it had.
+    if (!featureHeld(s.cap)) { diagram.innerHTML = emptyPageHtml('This feature is not in the map.'); mainScene = null; renderChrome(s); return; }
     renderUseCases({ cap: s.cap, actor: s.act, sec: s.sec });
     mainScene = null;
     pickNow = pickKeyOf(s);
@@ -15287,6 +15318,7 @@ async function renderView(sArg, transient, seq) {
     // …and the surface this page was left pinned on. Same one `sel` field the Interfaces view uses,
     // and guarded on its key inside the binder, so it can only ever be read as a surface id.
     if (!transient && !pendingStoryPin) pendingStoryPin = storyPinFromKey((s.sels || [])[0]);
+    if (!actorHeld(s.act)) { diagram.innerHTML = emptyPageHtml('This actor is not in the map.'); mainScene = null; renderChrome(s); return; }
     renderActorPage(s.act);
     mainScene = null;
     // The picked STEP, claimed before the chrome for the reason the Happy Path branch states: the
@@ -15361,7 +15393,7 @@ async function renderView(sArg, transient, seq) {
     ({ svg } = await mermaid.render('coyomapGraph' + (rc++), src));
   } catch (_) {
     if (seq !== renderSeq) return;
-    diagram.innerHTML = '<p class="empty">This view could not be rendered.</p>';
+    diagram.innerHTML = emptyPageHtml('This view could not be rendered.');
     // THE PREVIOUS PAGE'S DRAWING IS GONE TOO. Every other way out of a render says so; this one did
     // not, and the chrome then offered the help for boxes that are not on the screen.
     mainScene = null;
@@ -18597,7 +18629,7 @@ function renderTimeline(s) {
   }
   if (!HISTORY_LOADED && !EXPORTED) {
     // The list is still on its way (a link opened an update's page directly): wait for it, then draw.
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="cmp-noevidence">Reading the updates…</p></div>';
+    diagram.innerHTML = linePageHtml('<p class="cmp-noevidence">Reading the updates…</p>');
     loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
     return;
   }
@@ -18605,7 +18637,7 @@ function renderTimeline(s) {
   if (!row) {
     // A link can name an update this folder does not hold — a mistyped name, another clone's log.
     // Said at once, never waited for.
-    diagram.innerHTML = '<div class="usecases-wrap"><p class="empty">This update is not beside this map.</p></div>';
+    diagram.innerHTML = emptyPageHtml('This update is not beside this map.');
     return;
   }
   const ref = timelineRef(s.at);
@@ -18650,21 +18682,21 @@ function bindTimelinePage(root, s, doc) {
 // ── a removed box's page: as it was in the old map ────────────────────────────────────────────
 function renderRemoved(s) {
   if (!HISTORY_LOADED && !EXPORTED) {
-    diagram.innerHTML = '<p class="cmp-noevidence">Reading the updates…</p>';
+    diagram.innerHTML = linePageHtml('<p class="cmp-noevidence">Reading the updates…</p>');
     loadLogs().then(() => { if (history[hi] === s) { captureViewState(); render(); } });
     return;
   }
   const ref = timelineRef(s.at);
   const doc = docFor(ref);
   if (!doc) {
-    diagram.innerHTML = ref ? docWaitHtml(ref) : '<p class="empty">This box is not in the comparison.</p>';
+    diagram.innerHTML = ref ? linePageHtml(docWaitHtml(ref)) : emptyPageHtml('This box is not in the comparison.');
     if (ref) { loadDocThen(ref, s); bindTimelinePage(diagram, s, null); }
     return;
   }
   const e = docRemoved(doc, s.id);
   const lb = logBox(doc.log, s.id);
   const told = lb && lb.state === 'removed' ? lb : null;   // the log says it went, even with no old map to show
-  if (!e && !told) { diagram.innerHTML = '<p class="empty">This box is not in the comparison.</p>'; return; }
+  if (!e && !told) { diagram.innerHTML = emptyPageHtml('This box is not in the comparison.'); return; }
   const k = e ? (docKindSpec(doc, e.kind) || { word: 'box' }) : { word: told.word || 'box' };
   const hero = pageHeroHtml({ name: (e ? e.name_old : told.name) || ('a removed ' + k.word), type: k.word,
                               pills: '<span class="badge deleted">removed</span>',

@@ -223,6 +223,38 @@ def test_a_missing_use_case_hangs_under_no_feature() -> None:
         assert not page.js_errors, page.js_errors
 
 
+def _with_surfaces_and_rules(m: dict) -> None:
+    """The committed fixture plus the two families it lacks: interfaces, and decision areas with rules."""
+    _two_sided_interfaces()(m)
+    _with_specified_rules(m)
+
+
+@pytest.mark.parametrize("fragment,said", [
+    ("#v=interfaces&iface=I99", "This interface is not in the map."),
+    ("#v=rules&blk=BLK99", "This decision area is not in the map."),
+    ("#v=rule&br=BR99", "This business rule is not in the map."),
+    ("#v=sysSection&sys=sys-nope", "This section is not in the map."),
+    ("#v=sysSection&sys=sys-entry-points&epk=nope", "This kind of entry point is not in the map."),
+    ("#v=actor&act=Nobody", "This actor is not in the map."),
+    ("#v=actor&act=Constructor", "This actor is not in the map."),   # lowercased, a member every object has
+    ("#v=capability&cap=CAP99", "This feature is not in the map."),
+    ("#v=deploymentUnit&unit=nope", "This view could not be rendered."),
+    ("#v=deploymentGroup&gid=G99", "This view could not be rendered."),
+])
+def test_a_link_to_something_the_map_does_not_hold_says_so_once(fragment: str, said: str) -> None:
+    """Once the trail was on screen, these links ended it in another word: `Interfaces › Interfaces`,
+    `Rules › Rules › Rule`, a typed process name, a generic group name. An actor's link drew a page for
+    an actor nobody declared, a feature's said it had no use cases, and a System section's showed the
+    whole System view. Every one now ends its trail in the word for anything the map does not hold,
+    once, and its page says the same in a sentence."""
+    with _served_map(_with_surfaces_and_rules) as url, _page(url + fragment) as page:
+        _settle(page)
+        crumb = _crumb(page)
+        assert _page_title(page) == "Not in this map" and crumb.count("Not in this map") == 1, crumb
+        assert page.evaluate("() => document.getElementById('diagram').textContent.trim()") == said
+        assert not page.js_errors, page.js_errors
+
+
 def test_a_walk_the_map_does_not_hold_is_said_in_words_not_drawn() -> None:
     """A link to a use case the map does not hold drew a flow of one box, "No T6 flow recorded": a
     drawing of nothing, under a title saying the use case is not in the map, in a word from the
@@ -250,6 +282,28 @@ def test_a_walk_the_map_does_not_hold_is_said_in_words_not_drawn() -> None:
         seen = page.evaluate(read)
         assert seen["drawn"] and "No flow recorded for this use case" in seen["text"], seen
         assert "T6" not in seen["text"], seen
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_one_line_page_starts_its_words_where_its_title_card_starts() -> None:
+    """A page that is one line (a link to something the map does not hold, a drawing that failed) was
+    written straight into the drawing's frame, so its words sat against the frame's edge with no
+    margin: 9px left of the title card above them, in a white box drawn around nothing. It sits in
+    the column every page of text uses now, its words level with the card's edge."""
+    measure = """() => {
+        const p = document.querySelector('#diagram p.empty');
+        const range = document.createRange(); range.selectNodeContents(p);
+        const hero = document.querySelector('#pagehero .page-hero');
+        return { text: p.textContent, words: Math.round(range.getBoundingClientRect().left),
+                 card: Math.round(hero.getBoundingClientRect().left) };
+    }"""
+    with _served() as url, _page(url + "#v=usecase&uc=UC1") as page:
+        _settle(page)
+        for fragment in ("#v=usecase&uc=UC99", "#v=subflow&sf=SF99", "#v=subsystem&sid=S99"):
+            page.evaluate("(h) => { location.hash = h; }", fragment)
+            _settle(page)
+            seen = page.evaluate(measure)
+            assert seen["words"] == seen["card"], (fragment, seen)
         assert not page.js_errors, page.js_errors
 
 

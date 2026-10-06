@@ -2051,9 +2051,11 @@ def test_a_rules_crumb_walks_back_to_its_own_decision_area() -> None:
     # …through the SAME re-keying the list uses. Reading the raw `r.block` asked the list to scroll
     # to `#blk-BLK9` for a rule whose `BLK9` the map never declared — no card, so the crumb dumped
     # the reader at the top instead of on the group holding the rule they just left.
-    assert "{ kind: 'rules', blk: ruleGroupKeyFor(r && r.block) }" in trail[:800]
+    assert "{ kind: 'rules', blk: ruleGroupKeyFor(r.block) }" in trail[:900]
     # Three crumbs now the tab lands on area CARDS: Rules > the area > the rule.
-    assert "return [{ kind: 'rules' }, { kind: 'rules', blk: ruleGroupKeyFor(r && r.block) }," in trail[:800]
+    assert "return [{ kind: 'rules' }, { kind: 'rules', blk: ruleGroupKeyFor(r.block) }," in trail[:900]
+    # …and a rule the map does not hold has no area to hang under: Rules > Not in this map.
+    assert "if (!r) return [{ kind: 'rules' }, { kind: 'rule', br: s.br }];" in trail[:900]
     assert "ruleBlockGroups().some((g) => g.id === bid)" in _js_function("ruleGroupKeyFor")
     # THE CRUMB IS THE ONLY PLACE THE AREA IS NAMED. The hero carried it too — the same name twenty
     # pixels below the crumb the reader had just clicked, with the area's own sentence after it — so the
