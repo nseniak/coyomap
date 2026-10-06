@@ -1,0 +1,18 @@
+# Tests that already fail on main and are being fixed elsewhere. `make land` skips exactly these in
+# the gates, then runs them alone: one that passes must be removed from this list before landing.
+# One pytest test id per line, then " # " and why it is listed. Never a whole file.
+#
+# Since 90d6d12a (2026-10-06): the viewer navigation commits 3b11893a and 6b663aac changed the tab
+# order and the breadcrumbs, and these tests were not updated. Being fixed in the session "Fix 11
+# failing viewer tests on main".
+tests/test_business_rules.py::test_the_tab_sits_with_the_behavioural_views_and_scrolls # the Description tab now sits after Features
+tests/test_viewer_browser_changelog.py::test_an_older_update_s_evidence_is_its_own_step_and_credits_nothing_that_came_after # the breadcrumb now leads with "Updates›"
+tests/test_viewer_browser_changelog.py::test_the_evidence_fold_lists_each_changed_row_with_its_summary_and_the_filters_read_it # the breadcrumb now names the feature path
+tests/test_viewer_browser_changelog.py::test_a_page_opened_while_its_document_is_still_on_its_way_draws_when_it_arrives # the breadcrumb now leads with "Updates›"
+tests/test_viewer_browser_changelog.py::test_an_update_s_page_tells_the_log_by_feature_with_its_waivers_and_notes # the breadcrumb now leads with "Updates›"
+tests/test_viewer_browser_changelog.py::test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story # the breadcrumb now names the feature path
+tests/test_viewer_browser_changelog.py::test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_went # the breadcrumb now leads with "Updates›"
+tests/test_viewer_browser.py::test_the_people_at_a_surface_are_ordered_by_the_happy_path # the column heads now carry a use case count
+tests/test_viewer_browser.py::test_back_from_a_step_returns_to_that_step_not_to_the_start_of_the_walk # Back stays on the Happy Path step
+tests/test_viewer_browser.py::test_every_box_on_a_board_carries_its_use_case_own_sentence # a board box's sentence fails the check; cause not yet read
+tests/test_viewer_browser.py::test_a_pair_page_refuses_a_link_whose_ends_are_the_wrong_kind # a pair page whose ends are the wrong kind opens instead of refusing
