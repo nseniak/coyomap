@@ -6394,6 +6394,13 @@ function deploymentDrill(id) {
 // The async channels a process→process arrow carries — DEPLOYMENT_EDGES['U_a>U_b'], the deployment
 // analog of containerEdgeList. Empty for a `runs`/infra arrow (those bundle nothing selectable).
 function deploymentEdgeList(a, b) { return (DEPLOYMENT_EDGES && DEPLOYMENT_EDGES[a + '>' + b]) || []; }
+// Does the map hold a Deployment arrow from a to b? Its page lists what the arrow stands for, so an
+// arrow with nothing behind it in any of the three tables is a link to something the map lacks.
+function depEdgeHeld(a, b) {
+  const k = a + '>' + b;
+  return deploymentEdgeList(a, b).length > 0 || ((DEPLOYMENT_CALL_EDGES || {})[k] || []).length > 0
+    || ((DEPLOYMENT_INFRA_EDGES || {})[k] || []).length > 0;
+}
 // Where ⌘-clicking a process→process arrow drills: the Data tab's section for the broker the channels
 // ride, where each one already has a full card (publishers, consumers, payload). Only when every
 // channel on the arrow shares ONE broker — otherwise the drill would have to pick a winner. null when
@@ -6510,6 +6517,7 @@ function showDeploymentInfraEdge(a, b, full) {
 // is a page of prose and not a diagram — a Deployment arrow was the last kind with nowhere to drill, and
 // its card was the only one that had to show up to 25 rows because there was no page to send them to.
 function renderDeploymentEdgePage(s) {
+  if (!depEdgeHeld(s.a, s.b)) { diagram.innerHTML = emptyPageHtml('This connection is not in the map.'); return; }
   const r = deploymentEdgeRows(s.a, s.b);
   const count = countLabel(r.rows.length, r.noun);
   // THE PAIR IS THE PAGE'S TITLE, and this hero is where a reader reads it. It used to be left to the
@@ -6670,6 +6678,7 @@ function flowName(id) {
 // DOES THE MAP HOLD THE WALK a state names? A stale link's walk is not in it, and its page says so in
 // words: drawn, it was a box saying no flow was recorded, which claims the map holds the use case.
 function useCaseHeld(uc) { return (GRAPH.nodes[uc] || {}).kind === 'usecase'; }
+function stepHeld(s) { return useCaseHeld(s.uc) && flowStepIndex(s.uc, s.uc, Number(s.sn)) >= 0; }
 function flowHeld(s) { return s.kind === 'subflow' ? !!SUBFLOW_BY_ID[s.sf] : useCaseHeld(s.uc); }
 function flowMapToken(uc, mid) {
   if (!/^FA\d+$/.test(mid)) return mid;
@@ -9495,7 +9504,9 @@ function stateTitle(s) {
   if (s.kind === 'capability') {
     if (s.cap === '-') return 'Not assigned to a feature';
     const nm = featureName(s.cap);
-    return s.act ? nm + ' · ' + s.act : nm;   // a grid cell names both axes it crossed
+    // A grid cell names both axes it crossed; an actor the map does not hold is a word from the link,
+    // and the page under it is the feature's own, so the title names the feature alone.
+    return s.act && actorHeld(s.act) ? nm + ' · ' + s.act : nm;
   }
   // The actor NAME is already the crumb's own words, once the map is known to hold that actor: the
   // address carries a name, and a link can carry any word.
@@ -9515,14 +9526,14 @@ function stateTitle(s) {
   // does not hold. Four hand-rolled `nm` closures did the same lookup with the ID as their fallback.
   // A pair link the guard refuses is one more thing the map does not hold, so it takes the same word.
   if (refusedPairLink(s)) return UNKNOWN_NAME;
-  if (s.kind === 'depedge') return elName(s.a) + ' → ' + elName(s.b);
+  if (s.kind === 'depedge') return depEdgeHeld(s.a, s.b) ? elName(s.a) + ' → ' + elName(s.b) : UNKNOWN_NAME;
   if (s.kind === 'domsub') return elName(s.sd);
   if (s.kind === 'domedge') return elName(s.a) + ' → ' + elName(s.b);
   if (s.kind === 'bridge') return elName(s.sid) + ' → ' + elName(s.sd);
   if (s.kind === 'hp') return 'Happy Path';
   // A STEP'S OWN CRUMB is its number, not its phrase: the phrase is the page's heading a line below,
   // and a trail carrying a whole sentence stops being a path.
-  if (s.kind === 'step') return 'Step ' + s.sn;
+  if (s.kind === 'step') return stepHeld(s) ? 'Step ' + s.sn : UNKNOWN_NAME;
   if (s.kind === 'usecase') return elName(s.uc);
   if (s.kind === 'subflow') return subflowName(s.sf);
   if (s.kind === 'libs') return 'Libraries';
@@ -9585,6 +9596,8 @@ function ancestors(s) {  // structural nesting path (top → s), independent of 
   // ONE STEP sits under the use case it belongs to, which is the only place it exists. Its own crumb
   // is last, so the trail reads Features > the feature > the use case > the step.
   if (s.kind === 'step') {
+    // A step of a use case the map does not hold hangs under no use case, so the word comes once.
+    if (!useCaseHeld(s.uc)) return [{ kind: 'usecases' }, { kind: 'step', uc: s.uc, sn: s.sn }];
     return [...ancestors({ kind: 'usecase', uc: s.uc, act: s.act }), { kind: 'step', uc: s.uc, sn: s.sn }];
   }
   if (s.kind === 'usecase') {

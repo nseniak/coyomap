@@ -229,29 +229,75 @@ def _with_surfaces_and_rules(m: dict) -> None:
     _with_specified_rules(m)
 
 
-@pytest.mark.parametrize("fragment,said", [
-    ("#v=interfaces&iface=I99", "This interface is not in the map."),
-    ("#v=rules&blk=BLK99", "This decision area is not in the map."),
-    ("#v=rule&br=BR99", "This business rule is not in the map."),
-    ("#v=sysSection&sys=sys-nope", "This section is not in the map."),
-    ("#v=sysSection&sys=sys-entry-points&epk=nope", "This kind of entry point is not in the map."),
-    ("#v=actor&act=Nobody", "This actor is not in the map."),
-    ("#v=actor&act=Constructor", "This actor is not in the map."),   # lowercased, a member every object has
-    ("#v=capability&cap=CAP99", "This feature is not in the map."),
-    ("#v=deploymentUnit&unit=nope", "This view could not be rendered."),
-    ("#v=deploymentGroup&gid=G99", "This view could not be rendered."),
-])
+_NOT_DRAWN = "This view could not be rendered."
+#: EVERY PAGE KIND THE TRAIL CAN NAME, sorted three ways. A page about one thing gets a link to one the
+#: map does not hold, and what that page then says. A view names nothing, so no link can miss. An Update
+#: log page is about an update beside the map, not a thing in it, and has words of its own for a missing
+#: one. `stateTitle` is where a kind gets its words, so a kind added there without a row here fails
+#: `test_every_page_kind_the_trail_names_is_sorted` below.
+_BROKEN_LINKS: dict[str, list[tuple[str, str]]] = {
+    "actor": [("#v=actor&act=Nobody", "This actor is not in the map."),
+              ("#v=actor&act=Constructor", "This actor is not in the map.")],  # lowercased, every object has it
+    "bridge": [("#v=bridge&sid=S99&sd=SD99", _NOT_DRAWN)],
+    "bucketfold": [("#v=bucketfold&bkid=nope", _NOT_DRAWN)],
+    "capability": [("#v=capability&cap=CAP99", "This feature is not in the map.")],
+    "depedge": [("#v=depedge&a=U_98&b=U_99", "This connection is not in the map.")],
+    "deploymentGroup": [("#v=deploymentGroup&gid=G99", _NOT_DRAWN)],
+    "deploymentUnit": [("#v=deploymentUnit&unit=nope", _NOT_DRAWN)],
+    "domedge": [("#v=domedge&a=SD98&b=SD99", _NOT_DRAWN)],
+    "domsub": [("#v=domsub&sd=SD99", _NOT_DRAWN)],
+    "edge": [("#v=edge&a=S98&b=S99", _NOT_DRAWN)],
+    "element": [("#v=element&id=C999", "This element is not in the map.")],
+    "interfaces": [("#v=interfaces&iface=I99", "This interface is not in the map.")],
+    "rule": [("#v=rule&br=BR99", "This business rule is not in the map.")],
+    "rules": [("#v=rules&blk=BLK99", "This decision area is not in the map.")],
+    "step": [("#v=step&uc=UC1&sn=99", "This step is not in the map."),
+             ("#v=step&uc=UC99&sn=1", "This step is not in the map.")],
+    "subflow": [("#v=subflow&sf=SF99", "This shared sub-use case is not in the map.")],
+    "subsystem": [("#v=subsystem&sid=S99", _NOT_DRAWN)],
+    "sysSection": [("#v=sysSection&sys=sys-nope", "This section is not in the map."),
+                   ("#v=sysSection&sys=sys-entry-points&epk=nope", "This kind of entry point is not in the map.")],
+    "usecase": [("#v=usecase&uc=UC99", "This use case is not in the map.")],
+}
+_VIEWS_NAMING_NOTHING = {"arch", "component", "container", "context", "data", "deployment", "domain",
+                         "glossary", "hp", "libs", "overview", "system", "tests", "usecases"}
+_UPDATE_LOG_PAGES = {"updates", "removed"}
+
+
+def test_every_page_kind_the_trail_names_is_sorted() -> None:
+    """A new page kind gets its words in `stateTitle`. It has to be sorted into the table above too, or
+    a link to a missing one of it could end its trail in any word and no test would look."""
+    js = (Path(__file__).resolve().parent.parent / "tools" / "coyomap" / "viewer" / "viewer.js").read_text()
+    start = js.index("function stateTitle(s) {")
+    named = set(re.findall(r"s\.kind === '(\w+)'", js[start: js.index("\n}", start)]))
+    named.add("edge")   # the function's last line, the kind it falls through to
+    sorted_ = set(_BROKEN_LINKS) | _VIEWS_NAMING_NOTHING | _UPDATE_LOG_PAGES
+    assert named == sorted_, f"unsorted: {named - sorted_}; gone: {sorted_ - named}"
+
+
+@pytest.mark.parametrize("fragment,said", [case for cases in _BROKEN_LINKS.values() for case in cases])
 def test_a_link_to_something_the_map_does_not_hold_says_so_once(fragment: str, said: str) -> None:
     """Once the trail was on screen, these links ended it in another word: `Interfaces › Interfaces`,
-    `Rules › Rules › Rule`, a typed process name, a generic group name. An actor's link drew a page for
-    an actor nobody declared, a feature's said it had no use cases, and a System section's showed the
-    whole System view. Every one now ends its trail in the word for anything the map does not hold,
-    once, and its page says the same in a sentence."""
+    `Rules › Rules › Rule`, a typed process name, `Step 99`, two missing ends joined by an arrow. An
+    actor's link drew a page for an actor nobody declared, a feature's said it had no use cases, and a
+    System section's showed the whole System view. Every one now ends its trail in the word for
+    anything the map does not hold, once, and its page says so."""
     with _served_map(_with_surfaces_and_rules) as url, _page(url + fragment) as page:
         _settle(page)
         crumb = _crumb(page)
         assert _page_title(page) == "Not in this map" and crumb.count("Not in this map") == 1, crumb
-        assert page.evaluate("() => document.getElementById('diagram').textContent.trim()") == said
+        assert said in page.evaluate("() => document.getElementById('diagram').textContent"), fragment
+        assert not page.js_errors, page.js_errors
+
+
+def test_a_word_typed_into_a_link_never_reaches_the_trail() -> None:
+    """An old feature link can carry an actor too, from a grid that crossed the two. The page under it
+    is the feature's own, so an actor the map does not hold is a word from the link and nothing else:
+    the trail named it, `Organizations & teams · Nobody`. It names the feature alone now."""
+    feature = next(c["name"] for c in json.loads(_FIXTURE_MAP.read_text())["capabilities"] if c["id"] == "CAP1")
+    with _served() as url, _page(url + "#v=capability&cap=CAP1&act=Nobody") as page:
+        _settle(page)
+        assert _page_title(page) == feature and "Nobody" not in _crumb(page), _crumb(page)
         assert not page.js_errors, page.js_errors
 
 
