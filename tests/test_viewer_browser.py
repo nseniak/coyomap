@@ -119,6 +119,13 @@ def _crumb(page: Any) -> str:
     return str(page.evaluate("() => (document.getElementById('crumb').textContent || '').trim()"))
 
 
+def _page_title(page: Any) -> str:
+    """The trail's last item: the name of the page you are on. `_crumb` is the whole trail, which
+    carries every level above the page too."""
+    return str(page.evaluate(
+        "() => ((document.querySelector('#crumb [aria-current=\"page\"]') || {}).textContent || '').trim()"))
+
+
 def _settle(page: Any) -> None:
     """Let a navigation's render (and its drill animation) finish before reading the screen."""
     page.wait_for_timeout(700)
@@ -455,9 +462,10 @@ def test_the_walk_keeps_the_step_a_link_named_in_the_address() -> None:
 
 
 def test_back_from_a_step_returns_to_that_step_not_to_the_start_of_the_walk() -> None:
-    """Clicking a step and pressing Back put the reader at the start of the walk, screens away from
+    """Opening a step and pressing Back put the reader at the start of the walk, screens away from
     where they were, because nothing remembered the place. The step you leave by is now the step you
-    come back to: the address names it, and the page arrives scrolled to it."""
+    come back to: the address names it, and the page arrives scrolled to it. A step's box only picks
+    it; its title is what opens the use case."""
     with _served() as url, _page(url + "#v=hp") as page:
         _settle(page)
         left_by = page.evaluate("""() => {
@@ -465,7 +473,7 @@ def test_back_from_a_step_returns_to_that_step_not_to_the_start_of_the_walk() ->
             const all = [...document.querySelectorAll('.flow-step[data-uc]')];
             const el = all[all.length - 1];
             el.scrollIntoView({ block: 'center' });
-            el.click();
+            el.querySelector('.flow-step-title').click();
             return el.dataset.step;
         }""")
         _settle(page)
@@ -1388,13 +1396,13 @@ def test_the_people_at_a_surface_are_ordered_by_the_happy_path() -> None:
             chips: [...document.querySelectorAll('.ifd-box[data-iface="I1"] .item-pill')]
                      .map(e => e.textContent.trim()),
             heads: [...document.querySelectorAll('.ifd-elabel.ifd-lab-on .ifd-elabel-dir')]
-                     .map(e => e.textContent)
+                     .map(e => (e.querySelector('.ifd-elabel-who') || {}).textContent || '')
         })""")
         # `Org admin` wins the alphabet; `Org creator` comes first on the story, and wins here.
         assert got["chips"] == ["Org creator", "Org admin"], got
-        # The name is its own button now, so the space before the dot is a flex gap rather than a
-        # character: split on the dot itself.
-        assert [h.split("·")[0].strip() for h in got["heads"]] == ["Org creator", "Org admin"], got
+        # The name is its own button, and the use case count after it is a pill of its own: read the
+        # name alone.
+        assert got["heads"] == ["Org creator", "Org admin"], got
         assert not page.js_errors, page.js_errors
 
 
@@ -2625,8 +2633,8 @@ def test_every_box_on_a_board_carries_its_use_case_own_sentence() -> None:
                 return { uc: b.getAttribute('data-uc'),
                          text: w ? w.textContent.trim() : null,
                          // The sentence sits between the name and the chips, never after them.
-                         afterTitle: !!w && w.previousElementSibling
-                                     && w.previousElementSibling.className === 'flow-step-title',
+                         afterTitle: !!w && !!w.previousElementSibling
+                                     && w.previousElementSibling.classList.contains('flow-step-title'),
                          // Nothing hidden: an unclamped run shows everything it holds.
                          clipped: !!w && w.scrollHeight > w.clientHeight + 1 };
             };

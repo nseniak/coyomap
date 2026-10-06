@@ -24,7 +24,7 @@ from coyomap.viewer.recents import RecentsStore
 from coyomap.viewer.serve import Handler, build_projects
 
 from test_impact import commit
-from test_viewer_browser import _crumb, _page, _settle, make_served_map
+from test_viewer_browser import _page, _page_title, _settle, make_served_map
 
 OLD_UC = "Archive an organization"
 NEW_NAME = "Sign up and create a workspace"
@@ -232,7 +232,7 @@ def test_the_overview_says_nothing_of_how_the_map_was_checked() -> None:
 def test_the_updates_list_holds_the_updates_and_nothing_else() -> None:
     with _served_update() as url, _page(url + "#v=updates") as page:
         _ready(page)
-        assert _crumb(page) == "Updates"
+        assert _page_title(page) == "Updates"
         assert [b for b in page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")] \
             == ["Product", "Under the hood", "Update log"]
         rows = _cards(page)
@@ -260,7 +260,7 @@ def test_an_update_s_page_tells_the_log_by_feature_with_its_waivers_and_notes() 
         doc = json.loads((Path(__file__).resolve().parent / "fixtures" / "mcpolis-project-map.json").read_text())
         feature = _feature_of(doc, "UC1")
         _open_update(page)
-        assert _crumb(page) == f"Update {OLD_PIN} → {NEW_PIN}"
+        assert _page_title(page) == f"Update {OLD_PIN} → {NEW_PIN}"
         head = _text(page, ".cmp-head")
         assert "2026-09-17" in head and "2 entries" in head and "Mark this update on the map" in head
         titles = page.evaluate("() => [...document.querySelectorAll('.item-sec')].map((s) => s.querySelector('.item-sec-strip').textContent.trim())")
@@ -281,7 +281,7 @@ def test_an_update_s_page_tells_the_log_by_feature_with_its_waivers_and_notes() 
             assert f" {internal}" not in text, f"an id on screen: {internal}"
         page.click('.item-sec-door[data-gofeat]')
         _ready(page)
-        assert _crumb(page) == feature, "the section's name is a door to the feature"
+        assert _page_title(page) == feature, "the section's name is a door to the feature"
         assert not page.js_errors, page.js_errors
 
 
@@ -290,7 +290,7 @@ def test_a_pill_opens_the_box_and_an_unmarked_page_tells_no_story() -> None:
         _ready(page)
         page.click('.ecard-entry .item-pill[data-item="UC1"]')
         _ready(page)
-        assert _crumb(page) == NEW_NAME
+        assert _page_title(page) == NEW_NAME
         assert not page.query_selector(".cmpsec"), "unmarked, a box's page tells no story"
         assert not page.js_errors, page.js_errors
 
@@ -339,7 +339,7 @@ def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_wen
         _ready(page)
         page.click('.cmp-log-pill[data-key="removed:UC99"]')
         _ready(page)
-        assert _crumb(page) == OLD_UC
+        assert _page_title(page) == OLD_UC
         text = _screen_text(page)
         assert "Removed because" in text and HEADLINE_2 in text and SENTENCE_2 in text
         assert "Not in the current map" in text and "marks the organization archived" in text, "the old map's own words follow"
@@ -358,7 +358,7 @@ def test_without_git_the_update_still_has_a_page_and_its_removed_box_a_story() -
         assert "cannot be shown" in _screen_text(page), "no committed version: the fold says so"
         page.click('.cmp-log-pill[data-key="removed:UC99"]')
         _ready(page)
-        assert "removed use case" in _crumb(page)
+        assert "removed use case" in _page_title(page)
         text = _screen_text(page)
         assert "Removed because" in text and HEADLINE_2 in text and "UC99" not in text
         assert not page.js_errors, page.js_errors
@@ -375,7 +375,7 @@ def test_an_older_update_s_evidence_is_its_own_step_and_credits_nothing_that_cam
         assert "not committed yet" in rows[0] and "landed" in rows[1].lower()
         page.click(f'#diagram .ecard[data-key="at:{LOG}"]')
         _ready(page)
-        assert _crumb(page) == f"Update {OLD_PIN} → {NEW_PIN}"
+        assert _page_title(page) == f"Update {OLD_PIN} → {NEW_PIN}"
         assert "from the version before this update to the version it made" in _text(page, "details.cmp-evidence > summary")
         page.click("details.cmp-evidence > summary")
         _ready(page)
@@ -431,7 +431,7 @@ def test_the_evidence_fold_lists_each_changed_row_with_its_summary_and_the_filte
         assert "code link moved" in _text(page, 'details.cmp-evidence .ecard[data-id="C2"]')
         page.click('details.cmp-evidence .ecard[data-id="UC1"]')
         _ready(page)
-        assert _crumb(page) == NEW_NAME
+        assert _page_title(page) == NEW_NAME
         block = _text(page, ".cmpsec")
         assert "organization" in _texts(page, ".cmpsec del") and "workspace" in _texts(page, ".cmpsec ins")
         assert NEW_STEP in block and "renumbered" in block
@@ -460,7 +460,7 @@ def test_a_map_with_no_update_shows_the_tab_with_what_it_is_for_and_how_to_get_o
         try:
             with _page(f"http://127.0.0.1:{httpd.server_address[1]}/coyomap/{slug}/#v=updates") as page:
                 _ready(page)
-                assert _crumb(page) == "Updates"
+                assert _page_title(page) == "Updates"
                 assert "Update log" in page.evaluate("() => [...document.querySelectorAll('#groupsw button')].map((b) => b.textContent)")
                 text = _screen_text(page)
                 assert "No update yet" in text and "update log" in text and "/coyomap update" in text and "coyomap update" in text
@@ -483,7 +483,7 @@ def test_every_kind_of_box_is_filed_under_its_own_feature() -> None:
         placed = page.evaluate("""() => {
           const out = {};
           for (const sec of document.querySelectorAll('.item-sec')) {
-            const title = sec.querySelector('.item-sec-strip').textContent.trim().replace(/\s+/g, ' ');
+            const title = sec.querySelector('.item-sec-strip').textContent.trim().replace(/\\s+/g, ' ');
             for (const pill of sec.querySelectorAll('.item-pill')) (out[pill.textContent.trim()] = out[pill.textContent.trim()] || []).push(title.slice(0, 30));
           }
           return out;
@@ -546,14 +546,14 @@ def test_a_page_opened_while_its_document_is_still_on_its_way_draws_when_it_arri
         page.wait_for_timeout(300)
         page.goto(f"{url}#v=removed&id=UC99&at={LOG}")
         page.wait_for_function("() => !document.getElementById('diagram').textContent.includes('Reading the map')", timeout=15000)
-        assert _crumb(page) == OLD_UC and "Removed because" in _screen_text(page)
+        assert _page_title(page) == OLD_UC and "Removed because" in _screen_text(page)
         assert not page.js_errors, page.js_errors
 
 
 def test_the_rules_landing_marks_the_area_of_an_edited_rule() -> None:
     with _served_update() as url, _page(f"{url}#v=rules&cmp=log:{LOG}") as page:
         _ready(page)
-        assert _crumb(page) == "Rules"
+        assert _page_title(page) == "Rules"
         assert "modified" in _text(page, '#diagram [data-id="BLK1"] .badge'), "the area of the edited rule is badged"
         assert not page.js_errors, page.js_errors
 

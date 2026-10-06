@@ -8467,6 +8467,9 @@ function ensurePageTitle(s, chain) {
   if (chain.length < 2) return;
   const root = document.querySelector('#pagehero .page-hero, #diaghead .page-hero, #diagram .page-hero');
   if (root && root.querySelector('.page-hero-name')) return;
+  // A PAIR LINK THE GUARD REFUSED stays unnamed. Its ends are missing or of the wrong kind, and
+  // `stateTitle` would print them as a pair over a page that cannot draw one (see pairPageSpec).
+  if (PAIR_PAGE[s.kind] && !pairPageSpec(s)) return;
   const name = stateTitle(s);
   if (root) {
     const title = document.createElement('p');

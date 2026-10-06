@@ -1807,10 +1807,11 @@ def test_the_frontend_never_re_derives_an_owner_or_a_step_link() -> None:
 
 def test_the_tab_sits_with_the_behavioural_views_and_scrolls() -> None:
     """Business logic is read straight after what the product DOES, long before how it is built. The
-    product row reads in the order a newcomer needs it: everything the product does (led by what it
-    is FOR), then one walk end to end, then what it decides. So Rules is last of the three — the
-    Actors tab that used to sit between Happy Path and Rules is retired (the Features diagram's cast
-    column is the actors' home, and each actor's page hangs under Features).
+    product row reads in the order a newcomer needs it: everything the product does (Features leads,
+    and the Description of what it is FOR follows it), then one walk end to end, then what it
+    decides. So Rules is last of the three — the Actors tab that used to sit between Happy Path and
+    Rules is retired (the Features diagram's cast column is the actors' home, and each actor's page
+    hangs under Features).
     Both of the tab's levels must live in `usecases-wrap`, the catalog's scroll container (`height:
     100%; overflow: auto`). An invented wrapper has no CSS at all, so the tab renders at full height
     inside a clipped parent and cannot be scrolled."""
@@ -1818,7 +1819,7 @@ def test_the_tab_sits_with_the_behavioural_views_and_scrolls() -> None:
     order = re.findall(r'data-view="(\w+)"', html)
     # Interfaces sits between the walk and the decisions: what the product does, then one run of
     # it, then where it meets the outside, then what it decides.
-    assert order[:5] == ["overview", "usecases", "hp", "interfaces", "rules"], order
+    assert order[:5] == ["usecases", "overview", "hp", "interfaces", "rules"], order
     assert "actors" not in order, "the Actors tab is retired; the cast column is the actors' home"
     for fn in ("renderRules", "renderRule"):
         assert '<div class="usecases-wrap">' in _js_function(fn), fn
