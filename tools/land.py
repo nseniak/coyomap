@@ -23,11 +23,18 @@ so the list only ever shrinks to the truth. A line that is not a single test (no
 file that does not exist, or gives no reason is refused before anything runs: a whole file
 skipped by a typo is how a list like this would hide a new failure.
 
+LOAD IS NOT A FAILURE. The browser tests time out at random on a busy machine: on 2026-10-06 one
+gates run failed 39 of them on page loads, and all 39 passed when run alone. So when the gates fail,
+the tests their summary names run again alone. One that fails alone too stops the landing, as
+before. When every one passes alone, the gates run once more with those tests deselected, and that
+run's exit code decides: anything else that failed, pyright included, still stops the landing.
+
 Usage: land.py [--target main] [--attempts 3] [--gates "<shell command>"] [--python <path>]
                [--known-failures tests/known-failures.txt]
   --gates replaces the gate command (the tests pass `true`); the default is `make gates` with the
   main checkout's venv and this worktree's tools on PYTHONPATH, which is what a worktree needs.
-  --python is the interpreter that re-runs the known failures (default: the main checkout's venv).
+  --python is the interpreter that re-runs the known failures and the failed tests (default: the main
+  checkout's venv).
 """
 from __future__ import annotations
 
@@ -43,6 +50,10 @@ from pathlib import Path
 VIEWER_DIR = "tools/coyomap/viewer/"
 KNOWN_FAILURES = "tests/known-failures.txt"
 _PASSED = re.compile(r"^PASSED (\S.*?)\s*$")   # a pytest `-rA` summary line for a test that passed
+# …and one for a test that failed or errored. The id runs to the ` - ` before the message, because an
+# id can hold spaces: a parametrized test is `test_x[a b]`, and cutting at the first space named a
+# test pytest could not find.
+_FAILED = re.compile(r"^(?:FAILED|ERROR) (\S.*?)(?: - .*)?$")
 
 
 class LandError(Exception):
@@ -145,16 +156,46 @@ def gate_env(repo: Path, known: list[KnownFailure]) -> dict[str, str]:
     return env
 
 
+def stream(cmd: str, cwd: Path, env: dict[str, str]) -> tuple[int, str]:
+    """Run a shell command with its output streamed as it comes, and kept: the exit code, and the text."""
+    proc = subprocess.Popen(cmd, cwd=cwd, shell=True, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True)
+    lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        lines.append(line)
+    return proc.wait(), "".join(lines)
+
+
 def run_gates(repo: Path, main: Path, command: str | None, known: list[KnownFailure],
-              known_rel: str = KNOWN_FAILURES) -> None:
+              known_rel: str = KNOWN_FAILURES, python: str | None = None) -> None:
     """The gates on the tree as it stands, output streamed. The exit code decides, never the banner."""
     cmd = command or f"make gates VENV={main / '.venv'}"
     print(f"gates: {cmd}", flush=True)
     if known:
         print(f"gates: skipping {len(known)} known failure(s) listed in {known_rel}", flush=True)
-    done = subprocess.run(cmd, cwd=repo, shell=True, env=gate_env(repo, known))
-    if done.returncode != 0:
-        raise LandError(f"gates failed (exit {done.returncode}); nothing landed", 3)
+    code, output = stream(cmd, repo, gate_env(repo, known))
+    if code == 0:
+        return
+    failed = failed_tests(output)
+    if not failed:
+        raise LandError(f"gates failed (exit {code}); nothing landed", 3)
+    print(f"gates: re-running the {len(failed)} failed test(s) alone", flush=True)
+    py = python or str(main / ".venv" / "bin" / "python")
+    passed = set(passing_tests(run_alone(repo, py, failed).stdout))
+    still = [t for t in failed if t not in passed]
+    if still:
+        raise LandError(f"gates failed; {len(still)} test(s) fail alone too, so nothing landed:\n  "
+                        + "\n  ".join(still), 3)
+    print(f"gates: all {len(failed)} passed alone; running the gates again without them", flush=True)
+    rescued = [KnownFailure(t, "failed under load, passed alone") for t in failed]
+    code, _ = stream(cmd, repo, gate_env(repo, known + rescued))
+    if code != 0:
+        raise LandError(f"gates failed again (exit {code}) after {len(failed)} test(s) passed alone; "
+                        "nothing landed", 3)
+    print(f"gates: passed; {len(failed)} test(s) failed under load and passed alone:\n  "
+          + "\n  ".join(failed), flush=True)
 
 
 def passing_tests(pytest_output: str) -> list[str]:
@@ -162,16 +203,29 @@ def passing_tests(pytest_output: str) -> list[str]:
     return [m.group(1) for line in pytest_output.splitlines() if (m := _PASSED.match(line.strip()))]
 
 
+def failed_tests(pytest_output: str) -> list[str]:
+    """The test ids a pytest run's short summary names as failed or in error, each once, in order.
+    A collection error names a file, not a test; it runs again whole, and fails again whole."""
+    found = [m.group(1) for line in pytest_output.splitlines() if (m := _FAILED.match(line.strip()))]
+    return list(dict.fromkeys(found))
+
+
+def run_alone(repo: Path, python: str, tests: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run tests on their own: one process, no parallel workers and no skips, with `-rA` so every
+    test that passes says so."""
+    env = gate_env(repo, [])
+    env.pop("PYTEST_ADDOPTS", None)
+    return subprocess.run([python, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", *tests],
+                          cwd=repo, env=env, capture_output=True, text=True)
+
+
 def check_known_failures(repo: Path, python: str, known: list[KnownFailure], rel: str) -> None:
     """Run the listed tests alone, without the deselection. One that passes is fixed, so its line
     must go before anything lands; one that cannot run at all (a typo in its name) stops too."""
     if not known:
         return
-    env = gate_env(repo, [])
-    env.pop("PYTEST_ADDOPTS", None)
     print(f"known failures: re-running the {len(known)} listed test(s) alone", flush=True)
-    done = subprocess.run([python, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider",
-                           *[k.test for k in known]], cwd=repo, env=env, capture_output=True, text=True)
+    done = run_alone(repo, python, [k.test for k in known])
     passed = [t for t in passing_tests(done.stdout) if t in {k.test for k in known}]
     if passed:
         raise LandError(f"{len(passed)} known failure(s) now pass; remove them from {rel} and run "
@@ -206,8 +260,9 @@ def land(repo: Path, target: str, attempts: int, gates_command: str | None,
         print(f"[{attempt}] {target} merged into {branch}: "
               f"{'a new merge commit' if moved else 'already up to date'}", flush=True)
         known = read_known_failures(repo, known_rel)
-        run_gates(repo, main, gates_command, known, known_rel)
-        check_known_failures(repo, python or str(main / ".venv" / "bin" / "python"), known, known_rel)
+        py = python or str(main / ".venv" / "bin" / "python")
+        run_gates(repo, main, gates_command, known, known_rel, py)
+        check_known_failures(repo, py, known, known_rel)
         if target_moved(repo, target):
             print(f"[{attempt}] {target} moved while the gates ran; merging it in again", flush=True)
             continue
@@ -231,7 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--attempts", type=int, default=3, help="how often to retry when the target moves")
     parser.add_argument("--gates", default=None, help="shell command to run as the gates (default: make gates)")
     parser.add_argument("--python", default=None,
-                        help="interpreter that re-runs the known failures (default: the main checkout's venv)")
+                        help="interpreter that re-runs the known failures and the failed tests "
+                             "(default: the main checkout's venv)")
     parser.add_argument("--known-failures", default=KNOWN_FAILURES,
                         help=f"the list of tests that already fail on main (default: {KNOWN_FAILURES})")
     args = parser.parse_args(argv)

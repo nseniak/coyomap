@@ -139,6 +139,52 @@ def test_failing_gates_land_nothing() -> None:
     assert head(main) == before
 
 
+def test_a_test_that_failed_under_load_and_passes_alone_does_not_stop_the_landing() -> None:
+    """The gates name a failed test, as a page load that timed out on a busy machine does. It passes
+    alone, the gates pass once it is deselected, and the landing goes on, naming the test it re-ran."""
+    main, worktree = make_repo()
+    make_known_failures(worktree)
+    gates = ('case "$PYTEST_ADDOPTS" in *test_passes*) true;; '
+             '*) echo "FAILED tests/check_demo.py::test_passes - TimeoutError"; false;; esac')
+    done = land(worktree, gates=gates)
+    assert done.returncode == 0, done.stderr
+    assert "passed alone" in done.stdout and "tests/check_demo.py::test_passes" in done.stdout
+    assert head(main) == head(worktree)
+
+
+def test_a_test_that_fails_alone_too_stops_the_landing() -> None:
+    main, worktree = make_repo()
+    before = head(main)
+    make_known_failures(worktree)
+    done = land(worktree, gates='echo "FAILED tests/check_demo.py::test_fails - boom"; false')
+    assert done.returncode == 3
+    assert "fail alone too" in done.stderr and "tests/check_demo.py::test_fails" in done.stderr
+    assert head(main) == before
+
+
+def test_gates_that_fail_again_without_the_rescued_tests_land_nothing() -> None:
+    """Whatever else failed in the first run, pyright included, still fails the second, which runs
+    everything but the tests that passed alone, and its exit code decides."""
+    main, worktree = make_repo()
+    before = head(main)
+    make_known_failures(worktree)
+    done = land(worktree, gates='echo "FAILED tests/check_demo.py::test_passes - TimeoutError"; false')
+    assert done.returncode == 3
+    assert "failed again" in done.stderr
+    assert head(main) == before
+
+
+def test_a_failed_test_is_read_whole_from_the_summary_even_with_a_space_in_its_id() -> None:
+    """A parametrized id holds spaces. Cut at the first one, it named a test pytest could not find,
+    and break-check then counted a test that only failed under load as a failure."""
+    out = ("FAILED tests/a.py::test_b[x y] - TimeoutError: 30000ms\n"
+           "ERROR tests/c.py - ImportError while importing\n"
+           "FAILED tests/a.py::test_d\n"
+           "FAILED tests/a.py::test_b[x y] - again\n"
+           "GATES FAILED (pytest=1 pyright=0)\n")
+    assert load_land().failed_tests(out) == ["tests/a.py::test_b[x y]", "tests/c.py", "tests/a.py::test_d"]
+
+
 def test_a_dirty_worktree_and_the_main_checkout_itself_are_refused() -> None:
     main, worktree = make_repo()
     (worktree / "loose.txt").write_text("x", encoding="utf-8")

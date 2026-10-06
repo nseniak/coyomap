@@ -44,12 +44,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from land import LandError, main_checkout
+from land import LandError, failed_tests, main_checkout
 
 #: What the scratch copy leaves out: history, caches, sessions, and anything installed.
 SKIP = shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache", ".claude", ".venv", "node_modules")
-#: A failed test or a collection error in pytest's short summary (`-rfE`).
-FAILED_LINE = re.compile(r"^(?:FAILED|ERROR) (\S+)", re.M)
+#: How many tests a run passed, off pytest's last line. Its failures are read by `land.failed_tests`,
+#: which keeps a parametrized test's id whole when it holds a space.
 PASSED_COUNT = re.compile(r"(\d+) passed")
 
 
@@ -157,7 +157,7 @@ def run_tests(runner: list[str], copy: Path, tests: list[str], workers: int) -> 
 
 
 def failed_ids(run: Run) -> list[str]:
-    return sorted(set(FAILED_LINE.findall(run.output)))
+    return sorted(set(failed_tests(run.output)))
 
 
 def failing_alone(runner: list[str], copy: Path, ids: list[str]) -> list[str]:
