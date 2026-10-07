@@ -20,7 +20,7 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import get_args, get_type_hints
 
-from coyomap import assemble, fix, prose
+from coyomap import assemble, buildstate, fix, prose
 from coyomap.assemble import (_infer_ce_verb, ensure_fragments_ignored, load_fragment,
                               load_fragment_paths, merge_fragments)
 from coyomap.model import (ConfigRow, ExtraSection, ModelError, ObservabilityRow,
@@ -1697,3 +1697,55 @@ def test_the_ship_lines_name_a_repo_only_for_a_map_in_its_coyomap_folder():
     assert f"does not close the map at {td / 'map'}" in elsewhere.stdout, elsewhere.stdout
     assert f"coyomap ship {td / 'repo'}\n" in in_repo.stdout, in_repo.stdout
     assert f"coyomap ship {td / 'repo'} --note-file <path>" in in_repo.stdout, in_repo.stdout
+
+
+# --- the build state (round 1 of the context work, 2026-10-07) ----------------------------------------
+# After a summary, `--reconcile` is the flag a re-assemble most easily loses, and an assemble without it
+# silently reverts every assignment the reconcile file holds. The build state keeps the command.
+
+def run_assemble_from(cwd: Path, argv: list[str]) -> tuple[int, str]:
+    """`assemble` in-process from the repo's own folder, the paths as a lead types them: its exit
+    code and everything it printed. The folder is always restored."""
+    buf = io.StringIO()
+    here = Path.cwd()
+    try:
+        os.chdir(cwd)
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = assemble.main(argv)
+    finally:
+        os.chdir(here)
+    return code, buf.getvalue()
+
+
+def test_an_assemble_appends_its_command_with_the_reconcile_flag():
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td) / "repo"
+        frags = repo / ".coyomap" / "build-fragments"
+        frags.mkdir(parents=True)
+        (frags / "frag.json").write_text(make_reconcile_fragment(), encoding="utf-8")
+        (repo / ".coyomap" / "reconcile.json").write_text(
+            json.dumps({"set": [{"ids": ["C1", "C2"], "subsystem": "S1"}]}), encoding="utf-8")
+        buildstate.start(repo)
+        first = run_assemble_from(repo, [".coyomap/build-fragments/frag.json", "--out", ".coyomap",
+                                         "--reconcile", ".coyomap/reconcile.json"])
+        second = run_assemble_from(repo, [".coyomap/build-fragments", "--out", ".coyomap"])
+        log = buildstate.state_path(repo).read_text(encoding="utf-8").splitlines()
+    assert first[0] == 0 and second[0] == 0, (first, second)
+    events = [line.split(" assemble ", 1)[1] for line in log if " assemble " in line]
+    assert len(events) == 2, events
+    assert events[0].startswith("1 fragments (.coyomap/build-fragments/*.json) --out .coyomap "
+                                "--reconcile .coyomap/reconcile.json · model: "), events[0]
+    assert "reconcile set subsystem:2" in events[0], "the digest rides the line"
+    assert events[1].startswith("1 fragments (.coyomap/build-fragments/*.json) --out .coyomap "
+                                "no --reconcile · model: "), events[1]
+
+
+def test_the_map_gitignore_keeps_the_build_state_and_findings_out():
+    """The state is archived with its map and the findings reach the operator through the reports;
+    `finalize`'s `git add -f` line must not sweep either into the commit."""
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        ensure_fragments_ignored(out)
+        lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
+    for entry in ("build-state.log", "build-state.prev.log", "findings/", "findings-report.md"):
+        assert entry in lines, f"{entry} is not ignored in the map folder: {lines}"

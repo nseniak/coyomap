@@ -16,6 +16,7 @@ import io
 import tempfile
 from pathlib import Path
 
+from coyomap import finalize
 from coyomap.credentials import REDACTED, SHAPES, main, map_folder_files, redact, scan
 
 
@@ -134,3 +135,84 @@ def test_the_credentials_verb_exits_1_and_never_prints_the_value() -> None:
     assert code == 1
     said = out.getvalue() + err.getvalue()
     assert "v.json:1: E2B API key" in said and value not in said, said
+
+
+# --- a file no commit takes (round 1, 2026-10-07) ------------------------------------------------
+# The build state, the findings and their report stay on this machine. `finalize` reported a value
+# there as an advisory, and this verb, which an update's close runs and needs at exit 0, failed on it.
+
+#: Files of a map folder that no commit takes, as the tools write them.
+LOCAL_FILES = ["findings/harvest-1.jsonl", "build-state.log", "build-state.prev.log",
+               "findings-report.md"]
+
+
+def make_map_folder(td: str, files: list[str]) -> tuple[Path, str]:
+    """A map folder with a key-shaped value in each of `files`: (the folder, the value)."""
+    folder = Path(td) / ".coyomap"
+    value = make_shaped_values()["GitHub token"]
+    for rel in files:
+        f = folder / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"a line holding {value}\n", encoding="utf-8")
+    return folder, value
+
+
+def run_credentials(folder: Path) -> tuple[int, str, str]:
+    """`coyomap credentials <folder>` in process: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main([str(folder)])
+    return code, out.getvalue(), err.getvalue()
+
+
+def make_warned(err: str) -> list[str]:
+    """The files the WARNING lines of `err` name."""
+    return [line[len("WARNING: "):].split(": line ", 1)[0] for line in err.splitlines()
+            if line.startswith("WARNING: ")]
+
+
+def test_a_key_in_a_file_no_commit_takes_warns_and_does_not_fail() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        folder, value = make_map_folder(td, LOCAL_FILES)
+        code, out, err = run_credentials(folder)
+    assert code == 0, (out, err)
+    assert sorted(make_warned(err)) == sorted(str(folder / rel) for rel in LOCAL_FILES), err
+    assert all("so it stops no commit. Remove that line from the file" in line
+               for line in err.splitlines()), err
+    assert "CREDENTIALS FOUND" not in err
+    assert out.rstrip().endswith("4 in 4 file(s) no commit takes, each named in a WARNING line"), out
+    assert value not in out + err, "the scan printed the value it found"
+
+
+def test_a_key_in_a_committed_file_still_fails_beside_a_warning() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        folder, value = make_map_folder(td, ["verify/verdicts-backbone-1.json",
+                                             "findings/harvest-1.jsonl"])
+        code, out, err = run_credentials(folder)
+    assert code == 1, (out, err)
+    assert out.splitlines() == [f"{folder / 'verify' / 'verdicts-backbone-1.json'}:1: GitHub token"]
+    assert make_warned(err) == [str(folder / "findings" / "harvest-1.jsonl")], err
+    assert "CREDENTIALS FOUND: 1 credential-shaped value(s) in 1 file(s)" in err, err
+    assert value not in out + err
+
+
+def test_finalize_and_the_credentials_verb_agree_on_every_file() -> None:
+    """ONE answer to which files no commit takes: a file finalize blocks on is a file this verb
+    fails on, and a file finalize only advises about is one this verb only warns about. A name of a
+    file no commit takes, deeper in the folder or as a file where a folder is meant, is a committed
+    file all the same."""
+    committed = ["project-map.json", ".ignore", "verify/verdicts-backbone-1.json",
+                 "build-fragments/harvest-1.json", "changes/a1-b2.json", "verify/build-state.log",
+                 "findings"]
+    with tempfile.TemporaryDirectory() as td:
+        folder, _value = make_map_folder(td, [*committed, *LOCAL_FILES[1:],
+                                              "findings-old/harvest-1.jsonl"])
+        leg = finalize._credential_leg(folder / "project-map.json")
+        _code, out, err = run_credentials(folder)
+    failed = sorted(line.split(":", 1)[0] for line in out.splitlines() if ": GitHub token" in line)
+    blocked = sorted(row.split(": line ", 1)[0] for row in leg.blocking)
+    advised = sorted(row.split(": line ", 1)[0] for row in leg.advisory)
+    assert failed == blocked == sorted(str(folder / rel) for rel in
+                                       [*committed, "findings-old/harvest-1.jsonl"]), (failed, blocked)
+    assert sorted(make_warned(err)) == advised == sorted(str(folder / rel)
+                                                         for rel in LOCAL_FILES[1:]), (err, advised)

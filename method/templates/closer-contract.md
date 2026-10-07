@@ -39,12 +39,15 @@ verdicts file>` does it automatically; `--exclude rule-1#12` (a refutation id) o
 filtered on rule ids tested against the claim TEXT — which carries the rule statement and never the
 id — matched 0 of 20, and re-sent four settled refutations to the second closer.
 
-- **«REPO»** — absolute path of the repo being mapped. The closer reads its source and is forbidden
-  its `.coyomap/`.
+- **«REPO»** — absolute path of the repo being mapped. The closer reads its source and never reads
+  its `.coyomap/`; the two files of its own that land there are its verdicts file and the findings
+  file the findings command writes.
 - **«AGENT_ID»** — this closer's id, one word. It names the verdicts file this closer writes, so two
   waves never write over each other.
 - **«CLAIMS»** — the refuted claims with their map rows, built by `--from-verdicts`. Leave it empty
   in the slots file; that verb refuses to run if you filled it.
+- **«COYOMAP_HOME»** — absolute path of the coyomap clone; the closer runs the findings command
+  from it and never `cd`s into it.
 
 **Send the Outvoted dissent section whole, and never drop an entry as "a duplicate vote or a
 minority".** A split vote files a claim as confirmed, and its dissent then appears in no count. On
@@ -73,7 +76,9 @@ lead; nothing above this line goes into an agent prompt.
 >
 > **Do NOT read `«REPO»/.coyomap/`.** You are deliberately outside the build's context: seeing the
 > map whole, or the claims that were CONFIRMED, would give you the build's own reasoning back and
-> defeat the reason you exist. Everything about the map that you need is in this brief.
+> defeat the reason you exist. Everything about the map that you need is in this brief. Two files of
+> yours land in that folder all the same, and neither needs a read: your verdicts file (below), and
+> your findings file, which the findings command below writes for you.
 >
 > **Do NOT spawn sub-agents.** Read the files yourself.
 >
@@ -168,6 +173,7 @@ lead; nothing above this line goes into an agent prompt.
 > why: <one or two sentences>
 > ```
 >
-> Nothing else. Do not rewrite the claim, do not propose a correction, and do not edit the map or
-> any source file: the one file you write is your own verdicts file, and the lead applies what you
+> Nothing else, but the `findings:` line the findings rule below asks for. Do not rewrite the claim,
+> do not propose a correction, and do not edit the map or any source file: you write your own
+> verdicts file, the findings command writes your own findings file, and the lead applies what you
 > uphold.

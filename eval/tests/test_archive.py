@@ -24,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT / "eval" / "tools"))
 # A plain import now. This used to be an `importlib.util.spec_from_file_location` dance against an
 # absolute path, because the module was a loose script under `eval/scripts/` rather than part of a
 # package — the same pathness that made every caller spell the path out by hand.
+from coyomap import buildstate  # noqa: E402
 from coyomap_eval import archive as archive_map  # noqa: E402
 
 
@@ -276,3 +277,27 @@ def test_the_fan_out_timings_stay_put():
         assert (root / ".coyomap" / "fanout-timings.json").read_text() == '{"harvest": []}'
         assert not any(p.name == "fanout-timings.json" for p in entries)
         assert dest is not None and not (dest / "fanout-timings.json").exists()
+
+
+def test_an_open_build_state_stays_when_the_map_is_archived():
+    """A lead that opens the state before archiving must not lose it: only `state start` creates
+    the file, so a moved state drops every later event of the build in silence."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(tmp)
+        buildstate.start(root)
+        dest, entries = archive_map.archive(root)
+        assert dest is not None
+        assert buildstate.STATE_NAME not in {p.name for p in entries}
+        assert (root / ".coyomap" / buildstate.STATE_NAME).is_file()
+        assert buildstate.append(root, "decision", "pin A") is True
+
+
+def test_an_ended_build_state_moves_with_its_map():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(tmp)
+        buildstate.start(root)
+        buildstate.append(root, "end", "ship complete")
+        dest, entries = archive_map.archive(root)
+        assert dest is not None
+        assert buildstate.STATE_NAME in {p.name for p in entries}
+        assert (dest / buildstate.STATE_NAME).is_file()

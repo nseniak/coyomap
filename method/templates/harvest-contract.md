@@ -48,8 +48,9 @@ lead; nothing above this line goes into an agent prompt.
 > **This slice serves: «SERVES».** They are why the slice is cut this way. Where a
 > file matters to one of them, that is the fact worth returning; where it matters to none, say so
 > rather than padding the slice.
-> Read these files completely, then produce ONLY the rows below — the only file you may write is
-> your own fragment file (see the output rule below).
+> Read these files completely, then produce ONLY the rows below — the only file you may write
+> yourself is your own fragment file (see the output rule below); the findings command below writes
+> your findings file for you.
 > **Do this work yourself — do NOT spawn your own sub-agents / delegate, and do NOT write a program
 > that GENERATES your fragment.** Author the rows. Speed is not the argument — the fastest agent on
 > a measured build used one. The cost is every lint round: patch-generator, regenerate, copy,

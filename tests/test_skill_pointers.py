@@ -96,3 +96,16 @@ def test_the_install_targets_cover_every_skill():
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     for rel in SKILLS:
         assert rel in makefile, f"{rel} is not referenced by any Makefile install target"
+
+
+def test_the_coyomap_skill_opens_with_what_to_do_after_a_summary():
+    """A summary replaces the lead's context mid-build, and the harness re-adds only the start of a
+    skill. So the first paragraph under the title is the one that must send the lead to the build
+    state, and to each command's `--help`, before its next step: the summary keeps the gist and
+    drops the flags."""
+    body = make_body("skill/coyomap/SKILL.md")
+    paragraphs = [p.strip() for p in body.strip().split("\n\n") if p.strip()]
+    assert paragraphs[0] == "# coyomap", paragraphs[0]
+    first = paragraphs[1]
+    for needed in ("summary", "coyomap state show", "--help"):
+        assert needed in first, f"the skill's first paragraph does not name {needed!r}: {first}"

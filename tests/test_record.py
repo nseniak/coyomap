@@ -16,12 +16,15 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from coyomap import buildstate
 from coyomap.model import ExtraSection, ProjectModel, to_canonical_json
 from coyomap.record import KNOWN_HEADINGS, USAGE, append_line, main
 from test_business_rules import make_swept_model
@@ -590,3 +593,113 @@ def test_a_replace_given_a_batch_names_the_way_out_and_the_way_out_works():
                            "--lines-from", str(lines)])[0] == 0
         body = json.loads(frag.read_text(encoding="utf-8"))["extras"][0]["body"]
         assert "old why" not in body and body.count("the new why") == 2, body
+
+
+# --- each write leaves its command in the build state (round 1 of the context work, 2026-10-07) ----
+# After a summary a lead recorded into the assembled map instead of the fragment: the summary kept the
+# gist of the command and dropped its `--map`. The build state keeps the file and the command.
+
+def make_build_extras(tmp: Path, body: str) -> Path:
+    """An extras fragment in a build's `.coyomap/build-fragments/`, with the build state open."""
+    frags = tmp / "repo" / ".coyomap" / "build-fragments"
+    frags.mkdir(parents=True)
+    buildstate.start(tmp / "repo")
+    return make_extras_file(frags, body)
+
+
+def make_record_events(frag: Path) -> list[str]:
+    """The `record` lines of the build state the fragment belongs to."""
+    log = buildstate.state_path(frag.parents[2]).read_text(encoding="utf-8")
+    return [line for line in log.splitlines() if " record   " in line]
+
+
+def run_record_from(cwd: Path, argv: list[str]) -> tuple[int, str, str]:
+    """`run_record` from the repo's own folder, the paths as a lead types them. The folder is
+    always restored: a leaked cwd would corrupt every later test."""
+    here = Path.cwd()
+    try:
+        os.chdir(cwd)
+        return run_record(argv)
+    finally:
+        os.chdir(here)
+
+
+def test_a_record_write_appends_its_command_and_the_fragment_it_named():
+    why = "UC5: the two clauses are one goal, and the checkout reads them as one step"
+    frag_arg = ".coyomap/build-fragments/extras.json"
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_build_extras(Path(td), "UC1: an earlier why\n")
+        code, _out, err = run_record_from(frag.parents[2], ["--map", frag_arg, "--heading",
+                                                           "Balance exceptions", "--line", why])
+        events = make_record_events(frag)
+        body = json.loads(frag.read_text(encoding="utf-8"))["extras"][0]["body"]
+    assert code == 0, err
+    assert why in body
+    assert len(events) == 1, events
+    event = events[0].split(" record   ", 1)[1]
+    assert event == (f'+1 under "Balance exceptions" → {frag_arg} · coyomap record --map {frag_arg} '
+                     f"--heading 'Balance exceptions' --line 'UC5: the two clauses are one goal, and…'"
+                     ), event
+    assert why not in event, "the fragment holds the text, not the state"
+
+
+def test_the_recorded_command_reads_back_as_the_words_it_was_given():
+    """The state's command is the one the lead runs again after a summary: a shell must read it
+    back as the same words, each record's text cut to its first 40 characters."""
+    line = 'UC5: the "$HOME" path\'s `guard`'
+    long_line = "UC7: " + "a reason that runs on " * 4
+    frag_arg = ".coyomap/build-fragments/extras.json"
+    argv = ["--map", frag_arg, "--heading", "Balance exceptions", "--line", line,
+            "--line", long_line]
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_build_extras(Path(td), "UC1: an earlier why\n")
+        code, _out, err = run_record_from(frag.parents[2], argv)
+        events = make_record_events(frag)
+    assert code == 0, err
+    assert len(events) == 1, events
+    command = events[0].split(" · ", 1)[1]
+    clipped = long_line[:39].rstrip() + "…"
+    assert shlex.split(command) == ["coyomap", "record", *argv[:-1], clipped], command
+
+
+def test_a_line_holding_a_byte_that_is_not_utf8_is_refused_and_the_fragment_kept():
+    """A byte the shell could not decode reaches Python as a lone surrogate. The write opened the
+    fragment, which emptied it, and then failed to encode the line: every record it held was gone."""
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_build_extras(Path(td), "UC1: an earlier why\n")
+        before = frag.read_bytes()
+        code, out, err = run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                                     "--line", "UC5: caf\udce9 is one goal"])
+        after = frag.read_bytes()
+        events = make_record_events(frag)
+    assert code == 2, (out, err)
+    assert "'UC5: caf\\udce9 is one goal' holds a byte that is not UTF-8" in err, err
+    assert after == before, "the refused record changed the fragment"
+    assert events == [], "a refused record appended a line"
+
+
+def test_a_lines_file_that_is_not_utf8_is_refused_by_name():
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_build_extras(Path(td), "UC1: an earlier why\n")
+        lines = Path(td) / "lines.txt"
+        lines.write_bytes(b"UC5: caf\xe9 is one goal\n")
+        before = frag.read_bytes()
+        code, out, err = run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                                     "--lines-from", str(lines)])
+        after = frag.read_bytes()
+    assert code == 2 and f"ERROR: cannot read --lines-from {lines}: " in err, (out, err)
+    assert after == before
+
+
+def test_a_refused_record_appends_nothing():
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_build_extras(Path(td), "UC1: an earlier why\n")
+        refused = [run_record(["--map", str(frag), "--heading", "My notes", "--line", "UC5: why"]),
+                   run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                               "--line", "UC5:"]),
+                   run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                               "--line", "UC1: an earlier why"])]
+        events = make_record_events(frag)
+    assert [r[0] for r in refused] == [2, 2, 0], refused
+    assert "already recorded" in refused[2][1]
+    assert events == [], "only a write leaves a record line"

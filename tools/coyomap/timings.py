@@ -41,12 +41,15 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from coyomap import subverb_help
+from coyomap import buildstate, subverb_help
 from coyomap.provenance import agent_spans, session_agent_transcripts
+from coyomap.reporting import item_lines, shown
+from coyomap.waveplan import load_plan
 
 #: The fan-out phases a build actually has. A typo'd phase would record fine and then be found by
 #: nothing at `order` time, so an unknown one is refused with the list — the same choice
@@ -314,8 +317,23 @@ def cmd_record(args: argparse.Namespace) -> int:
                 f"every line or on none. Filling the rest with 0 would write a number nobody typed "
                 f"into telemetry the next build orders by.")
         item_args += have
+    plans = list(getattr(args, "plan", None) or [])
+    planned: list[str] = []
+    if plans:
+        # A WAVE PLAN'S VOTERS ARE ITS SLICES, so a wave runner never types 69 ids. Their minutes
+        # can only come from their transcripts: a runner reads no barrier, and a typed number for
+        # one of them is the folklore this file exists to replace.
+        if getattr(args, "from_agents", None) is None:
+            raise ValueError("--plan names the voters, and their minutes come from their own "
+                             "transcripts: pass --from-agents [<subagents dir>] with it.")
+        for plan_path in plans:
+            planned += [a.id for a in load_plan(Path(plan_path)).agents]
+    untimed: list[str] = []
+    where: Path | None = None
     if getattr(args, "from_agents", None) is not None:
-        minute_args = _minutes_from_agents(args, slice_args, minute_args)
+        timed = _minutes_from_agents(args, slice_args, minute_args, planned)
+        slice_args, minute_args = timed.slices, timed.minutes
+        untimed, where = timed.untimed, timed.where
     pairs = _pair_slices(slice_args, minute_args)
     if not pairs:
         raise ValueError("nothing to record: pass at least one --slice with its --minutes.")
@@ -324,29 +342,64 @@ def cmd_record(args: argparse.Namespace) -> int:
     if items and len(items) != len(pairs):
         raise ValueError(f"--items was given {len(items)} time(s) for {len(pairs)} slice(s); "
                          "give one per slice or none at all.")
-    path = record_path(_repo_of(args))
+    repo = _repo_of(args)
+    path = record_path(repo)
     runs = load_runs(path)
     for i, (name, value) in enumerate(pairs):
         runs.append(Run(phase, name, value, items[i] if items else None, args.commit))
     write_runs(path, runs)
     print(f"recorded {len(pairs)} slice(s) for phase '{phase}' -> {path}")
-    for name, value in sorted(pairs, key=lambda p: -p[1]):
+    ranked = sorted(pairs, key=lambda p: -p[1])
+    for name, value in ranked:
         print(f"  {value:6.1f} min  {name}")
+    if untimed:
+        # ONE LINE, THEN EACH VOTER ON ITS OWN: the runner says in its report how many it timed,
+        # and the lead can read which ones from a cut of this output.
+        print(f"WARNING: {len(untimed)} of {len(planned)} voter(s) the plan names have no "
+              f"transcript under {where}, so they are not recorded:\n"
+              + item_lines(untimed, None), file=sys.stderr)
+    buildstate.append(Path(repo).resolve(), "timings",
+                      f"{phase}: {len(pairs)} slice(s), longest "
+                      + shown([f"{name} {value:.1f} min" for name, value in ranked], 3)
+                      + (" · from the transcripts" if getattr(args, "from_agents", None) is not None
+                         else "")
+                      + (f" · plan {', '.join(plans)}" if plans else "")
+                      + (f" · {len(untimed)} voter(s) with no transcript: {shown(untimed, 6)}"
+                         if untimed else "")
+                      + f" → {path}")
     return 0
 
 
-def _minutes_from_agents(args: argparse.Namespace, slices: list[str],
-                         minutes: list[str]) -> list[str]:
+@dataclass(frozen=True)
+class AgentMinutes:
+    """What `--from-agents` read: each slice it found a transcript for, with its minutes, and the
+    plan voters it found none for, which are named and not recorded. NAMED rather than a tuple: two
+    of its lists hold slice names, and a swap would read as correct behaviour."""
+
+    slices: list[str]
+    minutes: list[str]
+    untimed: list[str]
+    where: Path
+
+
+def _minutes_from_agents(args: argparse.Namespace, slices: list[str], minutes: list[str],
+                         planned: Sequence[str] = ()) -> AgentMinutes:
     """The named slices' minutes, read off their agents' transcripts.
 
     Each `--slice` names an agent the way its brief was sent (the pointer prompt's first word), or
     by the harness's description of it. `--from-agents` with no value is this session's own
     transcripts directory. Nothing here is estimated: the span is the transcript's first record to
-    its last, which is what the barrier actually waited for."""
+    its last, which is what the barrier actually waited for.
+
+    `planned` are a wave plan's voters, after the slices. A `--slice` with no transcript refuses
+    the whole record, because it is a name somebody typed and a typo is the likely reason. A voter
+    with none is LEFT OUT and named in `untimed`: one start the agent refused, or one transcript a
+    session lost, made the whole wave's record refuse, and the runner recorded nothing at all. Only
+    when no name at all has a transcript is there nothing to record, and it refuses."""
     if minutes:
         raise ValueError("--from-agents reads each slice's minutes off its transcript; do not also "
                          "pass --minutes.")
-    if not slices:
+    if not slices and not planned:
         raise ValueError("--from-agents needs the --slice names of the agents to record — the id "
                          "each brief was sent as.")
     repo = Path(_repo_of(args))
@@ -365,14 +418,20 @@ def _minutes_from_agents(args: argparse.Namespace, slices: list[str],
                 by_name[key] = span.minutes
                 seen.setdefault(key, []).append(f"{span.agent_id} ({span.minutes:.1f} min)")
     missing = [name for name in slices if name.strip() not in by_name]
-    if missing:
-        raise ValueError(f"no transcript named {', '.join(repr(m) for m in missing)} under {where}. "
-                         f"Names found: {', '.join(sorted(by_name)) or 'none'}.")
-    for name in slices:
+    untimed = [name for name in planned if name.strip() not in by_name]
+    if missing or (len(untimed) == len(planned) and not slices):
+        # The names found are CUT, the missing ones never: a session holds every agent of the
+        # build, and a wave runner reads this line whole.
+        named = missing or untimed
+        raise ValueError(f"no transcript named {', '.join(repr(m) for m in named)} under {where}. "
+                         f"Names found: {shown(sorted(by_name), 12) or 'none'}.")
+    timed = [*slices, *(name for name in planned if name.strip() in by_name)]
+    for name in timed:
         if len(seen.get(name.strip(), [])) > 1:
             print(f"note: {name.strip()!r} has {len(seen[name.strip()])} transcripts "
                   f"({', '.join(seen[name.strip()])}); the latest was recorded", file=sys.stderr)
-    return [f"{by_name[name.strip()]:.1f}" for name in slices]
+    return AgentMinutes(slices=timed, minutes=[f"{by_name[name.strip()]:.1f}" for name in timed],
+                        untimed=untimed, where=where)
 
 
 def cmd_order(args: argparse.Namespace) -> int:
@@ -387,13 +446,13 @@ def cmd_order(args: argparse.Namespace) -> int:
                                     if not asked or r.slice in asked],
                           "unrecorded": unrecorded}, indent=2))
         return 0
-    shown = [r for r in ranked if not asked or r.slice in asked]
-    if not shown:
+    listed = [r for r in ranked if not asked or r.slice in asked]
+    if not listed:
         print(f"no timings recorded for phase '{phase}' yet — order by the pre-index this build, "
               f"and record what the barrier takes so the next one does not have to guess.")
     else:
         print(f"phase '{phase}' — longest first, from the last build that recorded each slice:")
-        for r in shown:
+        for r in listed:
             extra = f"  ({r.items} items)" if r.items is not None else ""
             print(f"  {r.minutes:6.1f} min  {r.slice}{extra}")
     # NAME THE SLICE TO SPLIT. Ordering is worth seconds — the whole dispatch stagger is 12.6 s for
@@ -401,8 +460,8 @@ def cmd_order(args: argparse.Namespace) -> int:
     # lever is SIZING, and this record is the only place that knows which slice is oversized. A list
     # sorted longest-first invites the reader to reorder; saying which one to CUT is the actionable
     # half, and it costs one line.
-    if len(shown) >= 3:
-        longest, runner_up = shown[0], shown[1]
+    if len(listed) >= 3:
+        longest, runner_up = listed[0], listed[1]
         # AGAINST THE SECOND-LONGEST, not the median. A barrier closes when the LAST agent finishes,
         # so the time the longest slice holds it alone is the gap to its nearest sibling. Measured
         # against a median, slices of 10/9/1/1 min reported 9 minutes of waste where the real figure
@@ -453,6 +512,7 @@ rather than by the method's folklore about which slice is heaviest.
   record --phase <phase> --slice "<name>" --minutes <m> [--items <n>] ...
   record --phase <phase> --lines-from <file|->
   record --phase <phase> --from-agents [<subagents dir>] --slice "<name>" ...
+  record --phase skeptic --from-agents [<subagents dir>] --plan <wave-plan.json>
       Append what one fan-out's slices took. `--slice` and `--minutes` REPEAT and pair by
       position — one process, one write. A count mismatch is refused, not paired off.
       `--lines-from` reads `<slice> <minutes> [items]` per line instead, which is the shape
@@ -464,7 +524,10 @@ rather than by the method's folklore about which slice is heaviest.
       (first record to last), so the straggler is recorded at what it took: one of 12 hand-read
       timings on one build understated its batch's straggler by 14 minutes. Name each slice as
       its brief was sent (the pointer prompt's first word). With no value, the directory is this
-      session's own transcripts.
+      session's own transcripts. `--plan` (repeatable) takes every voter a wave plan names as a
+      slice, so a wave is recorded without typing its ids; it needs `--from-agents`. A voter with
+      no transcript is left out and named in a warning, one per line; a `--slice` with none still
+      refuses the whole record, and so does a plan none of whose voters has one.
 
   order --phase <phase> [--slice "<name>" ...] [--json]
       Print that phase's slices longest-first, from the last build that recorded each. With
@@ -498,6 +561,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--items", action="append", type=int)
     rec.add_argument("--lines-from")
     rec.add_argument("--from-agents", nargs="?", const="", default=None)
+    rec.add_argument("--plan", action="append")
     rec.add_argument("--commit")
     rec.set_defaults(func=cmd_record)
 

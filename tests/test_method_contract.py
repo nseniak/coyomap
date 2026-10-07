@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coyomap import balance_lib
+from coyomap.buildstate import PHASES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOOLS = REPO_ROOT / "tools" / "coyomap"
@@ -81,6 +82,7 @@ COMMAND_MODULE: dict[str, str] = {
     # `provenance stamp` was given `--mode` / `--update-header` in the closing-sequence block, both
     # were reported against `assemble` — a failure naming the wrong command and the wrong module.
     "provenance": "provenance",
+    "state": "buildstate", "findings": "findings",
 }
 
 #: The extras headings some tool actually READS (the escape tokens that silence an advisory).
@@ -1585,7 +1587,8 @@ def test_every_populated_map_section_reaches_the_rendered_view():
 # map nine times (the rule was in `method/dispatch.md`, which only the LEAD reads).
 
 _AGENT_CONTRACTS = ("harvest-contract.md", "trace-contract.md", "rules-contract.md",
-                    "skeptic-contract.md", "gapfill-contract.md", "tests-contract.md")
+                    "skeptic-contract.md", "gapfill-contract.md", "tests-contract.md",
+                    "wave-contract.md")
 
 
 def _contract_agent_half(name: str) -> str:
@@ -1764,3 +1767,159 @@ def test_the_skeptic_contracts_worked_example_is_not_a_live_repos_code():
     assert "A guard's truth lives at its CALLERS" in text
     for real in ("allow_in_cloud", "settings.mode", "DevStubOAuthProvider"):
         assert real not in text, real
+
+
+# --- the build state survives a summary (round 1 of the context work, 2026-10-07) -------------------
+# A long build's lead had its context replaced by a summary that kept the operator's rules and the
+# pending steps and dropped the `--map` of `record`; the first record after it was lost. The tools
+# now keep the build's memory in `.coyomap/build-state.log`, and the method has to send the lead
+# there: at the start of every phase, and first of all after a summary.
+
+def test_every_phase_the_state_knows_is_marked_where_it_starts():
+    """`coyomap state phase <name> --repo <repo>` is only run if the method says so where the phase
+    begins, and `state show` names the method lines from the same anchors, so a marker away from its
+    anchor sends the lead to read one section and start another. The marker names `--repo` as
+    dispatch.md's rule does: without it the state is looked for in the shell's folder, and a lead
+    whose shell is in the clone gets NO BUILD STATE in the middle of a build."""
+    text = (REPO_ROOT / "method.md").read_text(encoding="utf-8")
+    bad: list[str] = []
+    for p in PHASES:
+        marker = f"**Start: `coyomap state phase {p.name} --repo <repo>`.**"
+        end = text.index(p.start) + len(p.start)
+        at = text.find(marker, end)
+        if text.count(marker) != 1:
+            bad.append(f"{p.name}: the marker is in method.md {text.count(marker)} time(s)")
+        elif at - end > 300:
+            bad.append(f"{p.name}: the marker is {at - end} characters after `{p.start}`")
+    bare = re.findall(r"`coyomap state phase [a-z]+`", text)
+    assert not bad, "phase markers missing or misplaced:\n  " + "\n  ".join(bad)
+    assert not bare, f"markers with no --repo: {bare}"
+
+
+def test_every_state_and_findings_command_the_method_names_carries_repo():
+    """`state` and `findings` read the repo from `--repo`, else from the shell's folder. From the
+    wrong folder `state phase` stops with NO BUILD STATE, and `findings collect` finds no findings
+    folder and prints that none were filed: a wrong answer with no error. So every such command the
+    method names carries `--repo`; `state --phases` reads only the clone and needs none."""
+    span = re.compile(r"`([^`]*\bcoyomap (?:state|findings)\b[^`]*)`")
+    bare: list[str] = []
+    for doc in METHOD_DOCS:
+        text = doc.read_text(encoding="utf-8")
+        for m in span.finditer(text):
+            command = " ".join(m.group(1).split())
+            if "--repo" not in command and not command.endswith("coyomap state --phases"):
+                line = text.count("\n", 0, m.start()) + 1
+                bare.append(f"{doc.relative_to(REPO_ROOT).as_posix()}:{line}: {command}")
+    assert not bare, "state/findings commands with no --repo:\n  " + "\n  ".join(bare)
+
+
+def test_dispatch_tells_the_lead_what_to_do_after_a_summary():
+    """The skill's first paragraph says to run `state show` after a summary; dispatch.md is where
+    the build learns to open the state, to mark each phase and to write each decision."""
+    text = (REPO_ROOT / "method" / "dispatch.md").read_text(encoding="utf-8")
+    build = text[text.index("### No baseline → Build"):text.index("### Baseline exists")]
+    assert "**Open the build state first:**" in build, "Step 2's Build branch opens no state"
+    assert "coyomap state start --repo <repo>" in build
+    section = text[text.index("## The build state — what survives a summary"):]
+    section = section[:section.index("\n## ")]
+    after = section[section.index("**After a summary, before anything else:**"):]
+    after = after[:after.index("\n- ")]
+    for needed in ("coyomap state show --repo <repo>", "re-read the method", "--help"):
+        assert needed in after, f"the after-a-summary rule lost {needed!r}: {after}"
+    for needed in ("coyomap state phase <name> --repo <repo>", "coyomap state add decision"):
+        assert needed in section, f"the build-state section lost {needed!r}"
+    assert text.index("## The build state") < text.index("## Waiting at a barrier")
+
+
+def test_the_pin_chosen_at_step_0_is_written_right_after_the_state_starts():
+    """Step 0 asks for the pin before any state exists, and `state add` refuses without one. "Write
+    each decision the moment it is given" sent the pin to a command that could only fail there, so
+    Step 2 writes it right after `state start`, as the build's first decision."""
+    text = (REPO_ROOT / "method" / "dispatch.md").read_text(encoding="utf-8")
+    opening = next(" ".join(p.split()) for p in text.split("\n\n")
+                   if p.startswith("**Open the build state first:**"))
+    start = opening.find("coyomap state start --repo <repo>")
+    pin = opening.find("first decision to write is the pin you chose at Step 0")
+    add = opening.find("coyomap state add decision", pin)
+    assert 0 <= start < pin < add, (
+        f"Step 2 does not write the Step 0 pin right after `state start`: {opening}")
+    section = text[text.index("## The build state — what survives a summary"):]
+    rule = next(" ".join(b.split()) for b in section.split("\n- ")
+                if b.startswith("**Write each operator decision or rule the moment it is given:**"))
+    assert "right after `state start`" in rule, f"the decision rule sends the pin to Step 0: {rule}"
+
+
+# --- the wave runner, and the way back when it cannot run (round 1, 2026-10-07) ----------------------
+# A fact-check wave is forty to seventy skeptics, and every report and launch receipt lands in the
+# context of whoever started them: on one build the first wave added 172,726 tokens to the lead. One
+# runner per wave holds them instead, when the lead's agent can start subagents from a subagent.
+
+def test_the_method_keeps_the_wave_fallback():
+    """A runner is only possible where an agent can nest. The method must keep the old way, say when
+    to take it, and the runner must be able to say it cannot run, in the same words the lead reads."""
+    text = (REPO_ROOT / "method.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    assert ("**If your agent cannot start subagents from a subagent, run the wave yourself as "
+            "below**") in flat, "method.md lost the fallback"
+    assert "`CANNOT START SUBAGENTS`" in flat, "method.md no longer names the runner's refusal"
+    assert "CANNOT START SUBAGENTS" in _contract_agent_half("wave-contract.md"), (
+        "the runner's brief no longer tells it how to say it cannot start agents")
+    runner = flat.index("**Run each wave from ONE runner")
+    fallback = flat.index("**If your agent cannot start subagents from a subagent")
+    verb = flat.index("**Get every brief with the verb, never by reading and retyping:**")
+    assert runner < fallback < verb, "the runner, then the fallback, then the way the wave runs"
+
+
+def test_the_runner_is_the_named_exception_to_one_agent_fanouts():
+    """"Never fan out to ONE agent" is a standing rule, and a wave runner is one agent sent alone. A
+    lead reading the rule would run the wave itself, which is the cost the runner removes."""
+    text = (REPO_ROOT / "method.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    rule = flat[flat.index("**Never fan out to ONE agent.**"):]
+    rule = rule[:rule.index(" - **Exactly one agent owns T5")]
+    assert "(The Phase-4 wave runner is not this case: it holds a whole fan-out.)" in rule, rule[-300:]
+    assert ("It is the one agent this method sends alone on purpose: it holds a fan-out, it is not "
+            "one.") in flat
+
+
+def test_a_wave_handed_back_incomplete_gets_its_one_closer_from_the_lead():
+    """A closer started over a wave with a FAILED skeptic judges only part of its refutations, and
+    the skeptic the lead re-sends then needs a second closer. So the runner starts the closer only
+    on an OK lint; with a FAILED id it hands the wave back INCOMPLETE, and the lead re-sends the
+    FAILED skeptics, lints the whole wave with its plan and runs the ONE closer itself, in that
+    order."""
+    flat = " ".join((REPO_ROOT / "method.md").read_text(encoding="utf-8").split())
+    runner = flat[flat.index("**Run each wave from ONE runner"):]
+    runner = runner[:runner.index("**If your agent cannot start subagents from a subagent")]
+    steps = ("**The runner starts the closer only when its last lint is OK.**",
+             "it skips the closer and hands back `WAVE <id> INCOMPLETE` with the FAILED ids",
+             "re-send each FAILED skeptic yourself (its pointer is in the plan)",
+             "lint the wave with `coyomap grounding lint --plan <briefs>/wave-plan.json`",
+             "run the ONE closer yourself: `coyomap contract closer --from-verdicts "
+             ".coyomap/verify --prefix")
+    at = [runner.find(s) for s in steps]
+    missing = [s for s, i in zip(steps, at) if i < 0]
+    assert not missing, f"the runner paragraph lost {missing}: {runner}"
+    assert at == sorted(at), f"the lead's steps after an INCOMPLETE wave are out of order: {runner}"
+
+
+def test_the_method_says_which_steps_of_a_wave_the_runner_runs():
+    """A runner briefs the skeptics, keeps them running, lints their verdicts and starts the closer;
+    it runs no free pass, writes no record or note, and never runs `ship`. "With a runner, steps 2
+    to 4 are ONE brief" handed it step 4's `ship` without a note, the prepare step whose report the
+    lead writes the new note from, and "it is also what the runner does inside" handed it all of
+    Phase 4 that follows, the free pass and the record included."""
+    flat = " ".join((REPO_ROOT / "method.md").read_text(encoding="utf-8").split())
+    fallback = flat[flat.index("**If your agent cannot start subagents from a subagent"):]
+    fallback = fallback[:fallback.index("**Get every brief with the verb")]
+    assert "it is also what the runner does inside" not in fallback, fallback
+    for needed in ("Inside, a runner does only the dispatch part of it",
+                   "The free pass before the dispatch (the GATE below), the record, the note and "
+                   "the cut of a second wave stay yours."):
+        assert needed in fallback, f"the fallback lost {needed!r}: {fallback}"
+    wave = flat[flat.index("**The claims added since the pin get a SECOND WAVE, and only one.**"):]
+    intro = wave[:wave.index(" 1. `coyomap audit <map> --batches")]
+    assert "steps 2 to 4" not in intro, intro
+    for needed in ("runs steps 2 and 3 and the closer in step 4",
+                   "the `ship` without a note in step 4 (the prepare step) and step 5 stay yours"):
+        assert needed in intro, f"the second wave's runner sentence lost {needed!r}: {intro}"

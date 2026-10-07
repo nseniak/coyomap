@@ -35,7 +35,9 @@ read it.
 - The repository: `«REPO»`
 - Your batch of claims: read them from the claims file named at the end of this contract. They are NOT pasted here.
 
-You may read any file in the repository. You may run read-only commands. Change nothing.
+You may read any file in the repository. You may run read-only commands, and the findings command
+below. Change nothing in the code or the map: you write your verdicts file and scratch files of
+your own, and the findings command writes your findings file for you.
 
 **Do NOT read the map file whole.** It is tens of thousands of tokens and your claims already carry
 their anchors; a map held in your context is also the build's own story leaking into a pass that

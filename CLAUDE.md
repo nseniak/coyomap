@@ -345,6 +345,15 @@ design principles these come from)
 - **subagent** — an agent the lead starts for one job (harvest a slice, trace a use case,
   check a batch of claims, review the refutations). It works in its own context and reports
   back to the lead once. Anthropic's spelling, one word; older text here says "sub-agent".
+- **build state** — the build's short memory: one file, `.coyomap/build-state.log`, where the
+  tools write a line for each thing they do and the lead writes the operator's decisions. The
+  lead reads it (`coyomap state show`) after a summary replaces its context. Never committed.
+- **findings file** — the file each subagent writes the product problems it notices into, a
+  bug, a risk, a gap or a contradiction, one line each. `coyomap findings collect` gathers
+  every agent's file into one list for the lead. Never committed.
+- **wave runner** — the one subagent the lead starts for a whole fact-check wave: it starts
+  the fact-checkers, checks that each wrote its verdicts, runs the closer, and hands the lead
+  six fixed lines instead of every fact-checker's report.
 
 **Working on coyomap**
 

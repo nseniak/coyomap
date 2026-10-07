@@ -576,12 +576,13 @@ def bash_commands(turns: Sequence[Turn]) -> tuple[tuple[int, str], ...]:
 _COYOMAP_SUBCOMMANDS = frozenset({
     "anchor-drift", "archive", "arrows", "assemble", "audit", "balance", "bless", "changes", "claims",
     "compare", "credentials", "impact", "reanchor",
-    "contract", "cost", "diff", "dump", "field-score", "finalize", "fix", "grounding", "hash", "judge",
+    "contract", "cost", "diff", "dump", "field-score", "finalize", "findings", "fix", "grounding",
+    "hash", "judge",
     "ledger", "lint-fragment", "live-numbers",
     "mutate", "preindex",
     "process", "protocol", "provenance", "reconcile", "record", "render", "retro-precheck", "walk-score",
-    "context", "export", "run", "score", "scope", "serve", "url", "ship", "timings", "transcript",
-    "validate",
+    "context", "export", "run", "score", "scope", "serve", "url", "ship", "state", "timings",
+    "transcript", "validate",
 })
 
 #: Sub-verbs worth reporting separately: `grounding write` and `grounding report` are different
@@ -603,8 +604,13 @@ _COYOMAP_SUBVERBS = frozenset({
     "row", "rows", "step-notes",
     # grounding
     "write", "report", "lint",
-    # provenance
+    # provenance (and `state show`)
     "stamp", "show",
+    # state: a retro counts each verb, because a summary is followed by `state show` and a phase
+    # start by `state phase`
+    "start", "phase",
+    # findings
+    "add", "collect",
 })
 
 #: `coyomap <subcommand>` anywhere in a shell command, including behind `;`, `&&` or a `$CX` alias.

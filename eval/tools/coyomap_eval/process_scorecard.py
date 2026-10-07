@@ -34,9 +34,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from coyomap_eval.cost import Compaction, compactions_in
-from coyomap_eval.transcript import (ToolCall, Turn, bash_commands, grouping_is_consistent,
-                                     read_turns, results_by_tool_use_id,
+from coyomap_eval.cost import Compaction, compactions_in, subagent_dir
+from coyomap_eval.transcript import (USER, ToolCall, Turn, bash_commands,
+                                     grouping_is_consistent, read_turns, results_by_tool_use_id,
                                      errored_tool_use_ids)
 
 EvidenceValue = str | int | float | bool
@@ -637,7 +637,8 @@ def assert_2_preindex_not_hand_parsed(turns: Sequence[Turn]) -> Assertion:
                      tuple(bad or good))
 
 
-def assert_3_fanout_is_one_message(turns: Sequence[Turn]) -> Assertion:
+def assert_3_fanout_is_one_message(turns: Sequence[Turn],
+                                   ctx: "ScoreContext | None" = None) -> Assertion:
     """3 — at least one fan-out turn contains >=2 agent calls in ONE assistant turn.
 
     THE HEADLINE. `method.md` requires a fan-out to be emitted as one message; the study that
@@ -653,19 +654,33 @@ def assert_3_fanout_is_one_message(turns: Sequence[Turn]) -> Assertion:
     two, so it scored as a failed fan-out with nothing to fix. Two consecutive measured builds lost
     a sixth and a ninth of this line to a single such turn. A one-agent turn is now neither
     numerator nor denominator, and `n/a` means the run held no fan-out at all — which is the honest
-    reading, not a pass."""
-    dispatches = [(t.index, len(t.agent_calls)) for t in turns if t.agent_calls]
+    reading, not a pass.
+
+    **A wave runner's launch is left out too.** The method sends each fact-check wave to ONE agent
+    on purpose: it holds a fan-out, it is not one. Counted, two waves' runners read as a serialised
+    fan-out wherever no other dispatch sat between them, and cost the build a share of this line
+    for doing what the method says. So a turn whose every agent is a wave runner that started agents
+    of its own (`ScoreContext.runner_launches`) is no dispatch here, and the note counts it. ONLY a
+    runner: any other agent that started helpers of its own still counts as the lead's dispatch."""
+    ctx = ctx or ScoreContext()
+    holders = {launch.parent for launch in ctx.runner_launches}
+    held = {t.index for t in turns
+            if t.agent_calls and all(c.id in holders for c in t.agent_calls)}
+    dispatches = [(t.index, len(t.agent_calls)) for t in turns
+                  if t.agent_calls and t.index not in held]
     evidence = tuple(Evidence(idx, {"agents": n}) for idx, n in dispatches)
     batched = [n for _idx, n in dispatches if n >= 2]
     # A serialised fan-out is N consecutive one-agent turns, and that is what this line exists to
     # catch — so a lone dispatch counts against the build only when another one sits beside it.
     serialised = _serialised_dispatch_turns(dispatches)
     of = len(batched) + len(serialised)
+    left_out = (f"{len(held)} wave-runner launch(es) left out: each holds a fan-out of its own"
+                if held else "")
     if not of:
         return Assertion(3, "fan-out emitted as one message", 0, 0, evidence,
                          "no fan-out in this run — every dispatch was a single agent for a "
-                         "single job, which cannot be batched")
-    return Assertion(3, "fan-out emitted as one message", len(batched), of, evidence)
+                         "single job, which cannot be batched" + (f"; {left_out}" if held else ""))
+    return Assertion(3, "fan-out emitted as one message", len(batched), of, evidence, left_out)
 
 
 def _serialised_dispatch_turns(dispatches: "Sequence[tuple[int, int]]") -> "list[int]":
@@ -740,25 +755,54 @@ def assert_4_shape_only_anchor_drift(turns: Sequence[Turn]) -> Assertion:
     return Assertion(4, "shape-only anchor-drift run", observed, of, tuple(hits), note)
 
 
-def assert_5_skeptics_fanned_out(turns: Sequence[Turn]) -> Assertion:
+def assert_5_skeptics_fanned_out(turns: Sequence[Turn],
+                                 ctx: "ScoreContext | None" = None) -> Assertion:
     """5 — Phase-4 skeptics are launched at all, and in >=1 batched fan-out.
 
     A live small-repo build finished and told the user it had no fresh-context skeptics — the exact
     blind spot Phase 4 exists to break. `of` is 1 (the target is one batched skeptic fan-out), so a
-    build that launches no skeptics scores 0.0 rather than falling into 'not applicable'."""
+    build that launches no skeptics scores 0.0 rather than falling into 'not applicable'.
+
+    **A WAVE RUNNER STARTS THE SKEPTICS, NOT THE LEAD.** The method sends each fact-check wave to ONE
+    agent that keeps a pool of skeptics running, so a build that does it right holds one `Agent`
+    call per wave in the lead's transcript and none for the skeptics. Read off the lead alone, that
+    build scored 0/1, the score of a build that ran no skeptic at all. So the skeptics a WAVE
+    RUNNER the lead launched started count too: the children whose meta names that runner as
+    `parentAgentId`, batched by the runner's own turns (`ScoreContext.runner_launches`). The
+    runner's own launch is never counted as a skeptic, whatever its brief is called. Only a runner's
+    children: on the 2026-09-01 argus session a "Refuter B" and a report reader each started two
+    helpers, and crediting those read two waves of skeptics into a build that ran none of its own."""
+    ctx = ctx or ScoreContext()
+    turn_of = {c.id: t.index for t in turns for c in t.agent_calls if c.id}
+    nested = [(launch, [c for c in launch.calls if _is_skeptic(c)])
+              for launch in ctx.runner_launches if launch.parent in turn_of]
+    runners = {launch.parent for launch, skeptics in nested if skeptics}
     total = 0
     batched: list[Evidence] = []
     launched: list[Evidence] = []
     for turn in turns:
-        skeptics = [c for c in turn.agent_calls if _is_skeptic(c)]
+        skeptics = [c for c in turn.agent_calls if c.id not in runners and _is_skeptic(c)]
         if not skeptics:
             continue
         total += len(skeptics)
         launched.append(Evidence(turn.index, {"skeptics": len(skeptics)}))
         if len(skeptics) >= 2:
             batched.append(Evidence(turn.index, {"skeptics": len(skeptics)}))
+    by_runners = 0
+    for launch, skeptics in nested:
+        if not skeptics:
+            continue
+        total += len(skeptics)
+        by_runners += len(skeptics)
+        found = Evidence(turn_of[launch.parent], {"skeptics": len(skeptics),
+                                                  "runner_turn": launch.turn})
+        launched.append(found)
+        if len(skeptics) >= 2:
+            batched.append(found)
     observed, of = _at_least_once(len(batched))
     note = f"{total} skeptic agent(s) across {len(launched)} turn(s)"
+    if by_runners:
+        note += f", {by_runners} of them started by {len(runners)} wave runner(s) the lead launched"
     return Assertion(5, "Phase-4 skeptics fanned out", observed, of, tuple(launched), note)
 
 
@@ -1836,6 +1880,19 @@ def assert_17_a_drift_exception_cites_a_file_that_was_read(turns: Sequence[Turn]
 
 
 @dataclass(frozen=True)
+class RunnerLaunch:
+    """One turn in which a WAVE RUNNER the lead launched started agents of its own: the fact-check
+    skeptics of its wave. The lead's transcript holds one `Agent` call for the runner and none for
+    the skeptics, so only the per-agent files show these (`read_runner_launches`)."""
+    #: The id of the lead's `Agent` call that started the agent — its meta's `toolUseId`.
+    parent: str
+    #: The turn index in that agent's OWN transcript.
+    turn: int
+    #: Its `Agent` calls in that turn that started an agent: a child's meta names each one.
+    calls: tuple[ToolCall, ...]
+
+
+@dataclass(frozen=True)
 class ScoreContext:
     """What an assertion can know BEYOND the transcript.
 
@@ -1866,6 +1923,11 @@ class ScoreContext:
     #: Assertion 16 needs this: the lead's transcript CANNOT time an async dispatch, and the three
     #: bugs that came from pretending otherwise are written up in that assertion.
     agent_durations: Mapping[str, float] = field(default_factory=dict)
+    #: Every turn in which a wave runner the lead launched started agents of its own
+    #: (`RunnerLaunch`). A runner starts a wave's skeptics, so assertion 5 counts them from here and
+    #: assertion 3 leaves the runner's own launch out of its fan-outs. Empty when
+    #: `<session>/subagents/` is absent.
+    runner_launches: tuple[RunnerLaunch, ...] = ()
     #: The map's ACCESS SURFACE — `access: true` business rules, which the T7 fold made the single
     #: home for auth. Read from the model rather than matched out of advisory prose, so these two
     #: assertions do not break when an advisory is reworded. None when no map was given.
@@ -1926,6 +1988,83 @@ def read_agent_durations(session: Path) -> dict[str, float]:
                       role=classify(str(description or "")), turns=turns)
         out[call_id] = actor.duration
     return out
+
+
+#: The sentence a wave runner's brief opens with: the first words of the agent half of
+#: `method/templates/wave-contract.md`. It is what tells a wave runner from any other agent that
+#: starts agents of its own.
+WAVE_RUNNER_OPENING = "You are a wave runner."
+
+
+def _own_brief(turns: Sequence[Turn]) -> str:
+    """What an agent was briefed with, from its own transcript: its prompt (the first words its
+    transcript says to it), and every file that prompt points at, as the agent's own reads of those
+    files returned them. A pointer prompt names the brief and the brief holds the words, so both are
+    read; a file the agent read that its prompt does not name is no part of its brief."""
+    prompt = next((t.text for t in turns if t.role == USER and t.text), "")
+    pointed = set(_BRIEF_POINTER.findall(prompt))
+    reads = {c.id for t in turns for c in t.tool_calls
+             if c.id and any(path in c.text() for path in pointed)}
+    return "\n".join([prompt, *(r.content for t in turns for r in t.tool_results
+                                if r.tool_use_id in reads)])
+
+
+def is_wave_runner(turns: Sequence[Turn]) -> bool:
+    """Whether an agent's own transcript shows a wave runner's brief: one carrying the wave
+    contract's opening sentence (`WAVE_RUNNER_OPENING`).
+
+    Starting agents of its own is not enough. The 2026-09-01 argus session holds a "Refuter B" and
+    a report reader that each started two helpers, and no wave: counted as runners, their four
+    helpers were credited to assertion 5 as runner-started skeptics, and their two launches left
+    assertion 3's fan-outs."""
+    return WAVE_RUNNER_OPENING in _own_brief(turns)
+
+
+def read_runner_launches(session: Path) -> tuple[RunnerLaunch, ...]:
+    """Every turn in which a wave runner the LEAD launched started agents of its own, from the
+    per-agent files: a child's `<agent>.meta.json` names its parent (`parentAgentId`, the parent
+    file's name without `agent-`) and the parent's `Agent` call that started it (`toolUseId`), and
+    the parent's own transcript shows whether its brief is a wave runner's (`is_wave_runner`).
+
+    Only calls that really started an agent count, so a start the harness refused (too many agents
+    running) is no launch. They are grouped by the parent's OWN turns, so a pool started in one
+    message reads as one batch. A nested agent's file lands in the same flat folder as the lead's
+    agents, which is why one folder answers both. Empty when `<session>/subagents/` is absent."""
+    d = subagent_dir(session)
+    if not d.is_dir():
+        return ()
+    metas: dict[str, dict[str, object]] = {}
+    for path in sorted(d.glob("agent-*.meta.json")):
+        try:
+            meta: object = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict):
+            metas[path.name[len("agent-"):-len(".meta.json")]] = {str(k): v
+                                                                  for k, v in meta.items()}
+    started: dict[str, set[str]] = {}
+    for meta in metas.values():
+        parent, call = meta.get("parentAgentId"), meta.get("toolUseId")
+        if isinstance(parent, str) and parent and isinstance(call, str) and call:
+            started.setdefault(parent, set()).add(call)
+    out: list[RunnerLaunch] = []
+    for agent_id, calls in sorted(started.items()):
+        meta = metas.get(agent_id, {})
+        lead_call = meta.get("toolUseId")
+        # The LEAD's own agents only: an agent with a parent of its own was not launched by it.
+        if not isinstance(lead_call, str) or not lead_call or meta.get("parentAgentId"):
+            continue
+        try:
+            parent_turns = read_turns(d / f"agent-{agent_id}.jsonl", include_sidechains=True)
+        except OSError:
+            continue
+        if not is_wave_runner(parent_turns):
+            continue
+        for turn in parent_turns:
+            hits = tuple(c for c in turn.agent_calls if c.id in calls)
+            if hits:
+                out.append(RunnerLaunch(parent=lead_call, turn=turn.index, calls=hits))
+    return tuple(out)
 
 
 def read_agent_lint_calls(session: Path) -> tuple[tuple[str, str], ...]:
@@ -3608,7 +3747,9 @@ def score_turns(turns: Sequence[Turn], *, transcript: str = "", label: str = "",
     # context. Passing it to every assertion would invite the rest to reach for the repo, and a
     # scorecard that needs the repo cannot score an archived corpus transcript.
     # The context-taking assertions: their subject is the committed MAP, not the run.
-    _needs_ctx = {assert_6_grounding_recorded, assert_16_longest_slice_dispatched_first,
+    # Assertions 3 and 5 read it for the agents a wave runner started (`runner_launches`).
+    _needs_ctx = {assert_3_fanout_is_one_message, assert_5_skeptics_fanned_out,
+                  assert_6_grounding_recorded, assert_16_longest_slice_dispatched_first,
                   assert_23_the_build_saw_the_whole_gate,
                   assert_24_no_inert_recorded_exception,
                   assert_32_every_access_rule_states_its_risk,
@@ -3645,7 +3786,8 @@ def score_transcript(path: Path | str, *, label: str = "",
     # here rather than inside `read_score_context`.
     ctx = replace(ctx, compactions=compactions_in(p, every, from_turn=from_turn, to_turn=to_turn),
                   agent_lint_calls=read_agent_lint_calls(p),
-                  agent_durations=read_agent_durations(p))
+                  agent_durations=read_agent_durations(p),
+                  runner_launches=read_runner_launches(p))
     return score_turns(turns, transcript=str(p), label=label or p.stem,
                        grouping_consistent=grouping_is_consistent(p), ctx=ctx)
 

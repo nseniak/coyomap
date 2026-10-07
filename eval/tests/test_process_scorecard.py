@@ -29,6 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from coyomap import contract
 from coyomap_eval import cost
 from coyomap_eval import process_scorecard as P
 from coyomap_eval.transcript import ToolCall, Turn, read_turns
@@ -3498,3 +3499,131 @@ def test_a41_a_compaction_after_the_last_build_turn_is_not_the_builds():
         card = P.score_transcript(make_compacting_transcript(Path(td)), to_turn=3)
         a41 = next(a for a in card.assertions if a.id == 41)
         assert (a41.observed, a41.of) == (1, 1)
+
+
+# --- a wave runner starts the skeptics (context round 1, B3) -----------------------------------
+# The method sends each fact-check wave to ONE runner agent, which starts the skeptics itself: the
+# lead's transcript holds one `Agent` call per wave and none for the skeptics. Their meta files name
+# the runner as `parentAgentId`, in the same flat `subagents/` folder as the lead's own agents. A
+# launch is a runner only when its brief opens the way the wave contract opens.
+
+#: The brief a wave runner reads, as its own Read of the pointed-at file returns it.
+RUNNER_BRIEF = ("     1\tYou are a wave runner. You run ONE fact-check wave of a coyomap build from "
+                "start to end, and you\n     2\tread no code yourself.")
+#: The brief of an agent that starts agents of its own and runs no wave: the 2026-09-01 argus
+#: session's "Refuter B", which fanned its checks out to two helpers whose prompts say "refute".
+REFUTER_BRIEF = ("**Your job is to REFUTE these claims, not confirm them.** Change nothing on disk. "
+                 "Split the claims between two helpers.")
+
+
+def make_agent_block(call_id: str, description: str, prompt: str) -> dict[str, object]:
+    return {"type": "tool_use", "id": call_id, "name": "Agent",
+            "input": {"description": description, "prompt": prompt}}
+
+
+def make_runner_session(tmp: Path, waves: int = 1, skeptics: int = 3, refused: int = 0,
+                        brief: str = RUNNER_BRIEF, inline: bool = False) -> Path:
+    """A lead transcript launching one agent per wave, alone and turns apart, and each agent's own
+    transcript: its pointer prompt, its Read of the brief file the pointer names (returning
+    `brief`), then `skeptics` skeptics started in ONE message, plus `refused` starts the harness
+    turned away (no agent, so no meta file). With `inline` the brief rides in the prompt itself
+    and is never read from a file. The brief folder is named `skeptic-briefs-…`, so a runner launch
+    read as a skeptic would show in the count."""
+    sub = cost.subagent_dir(tmp / "transcript.jsonl")      # where `make_transcript_file` writes
+    sub.mkdir(parents=True)
+    lead: list[str] = []
+    for w in range(1, waves + 1):
+        runner_call, runner = f"toolu_runner{w}", f"arunner{w}"
+        brief_path = f"/abs/skeptic-briefs-w{w}/wave-{w}.md"
+        prompt = brief if inline else f"wave-{w}\n{brief_path}\nRead it COMPLETELY."
+        lead += [make_record("assistant", message_id=f"lead-{w}", blocks=[make_agent_block(
+                     runner_call, f"Wave runner w{w}", prompt)]),
+                 make_record("user", blocks=[{"type": "tool_result", "tool_use_id": runner_call,
+                                              "content": "launched"}]),
+                 make_record("assistant", message_id=f"lead-wait-{w}",
+                             blocks=[{"type": "text", "text": "waiting for the runner"}])]
+        (sub / f"agent-{runner}.meta.json").write_text(json.dumps(
+            {"description": f"Wave runner w{w}", "toolUseId": runner_call, "spawnDepth": 1}),
+            encoding="utf-8")
+        records = [make_record("user", blocks=[{"type": "text", "text": prompt}])]
+        if not inline:
+            records += [make_record("assistant", message_id=f"runner-read-{w}", blocks=[
+                            {"type": "tool_use", "id": f"toolu_read{w}", "name": "Read",
+                             "input": {"file_path": brief_path}}]),
+                        make_record("user", blocks=[{"type": "tool_result",
+                                                     "tool_use_id": f"toolu_read{w}",
+                                                     "content": brief}])]
+        for k in range(skeptics + refused):
+            call = f"toolu_s{w}_{k}"
+            records.append(make_record("assistant", message_id=f"runner-{w}", blocks=[
+                make_agent_block(call, f"Skeptic security-{k}",
+                                 f"security-{k}\n/abs/skeptic-briefs-w{w}/skeptic-security-{k}.md")]))
+            records.append(make_record("user", blocks=[{"type": "tool_result", "tool_use_id": call,
+                                                        "content": "launched"}]))
+            if k < skeptics:
+                (sub / f"agent-as{w}x{k}.meta.json").write_text(json.dumps(
+                    {"description": f"Skeptic security-{k}", "toolUseId": call,
+                     "parentAgentId": runner, "spawnDepth": 2}), encoding="utf-8")
+        (sub / f"agent-{runner}.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
+    return make_transcript_file(tmp, lead)
+
+
+def test_assertion_5_credits_the_skeptics_a_runner_started():
+    """Read off the lead alone, a build that ran its wave the way the method asks scored 0/1 — the
+    score of a build that ran no skeptic at all. A start the harness refused started nobody."""
+    with tempfile.TemporaryDirectory() as td:
+        a = P.score_transcript(make_runner_session(Path(td), refused=1)).by_id()[5]
+    assert (a.observed, a.of) == (1, 1), a
+    assert "3 skeptic agent(s) across 1 turn(s), 3 of them started by 1 wave runner(s) the lead " \
+           "launched" in a.note, a.note
+    assert a.evidence[0].detail == {"skeptics": 3, "runner_turn": 3}, a.evidence
+
+
+def test_assertion_3_leaves_a_lone_runner_launch_out_of_its_fanouts():
+    """It holds a fan-out, it is not one: two waves' runners, with no dispatch between them, read
+    as a serialised fan-out and scored 0 of 2."""
+    with tempfile.TemporaryDirectory() as td:
+        a = P.score_transcript(make_runner_session(Path(td), waves=2)).by_id()[3]
+    assert (a.observed, a.of) == (0, 0), a
+    assert "2 wave-runner launch(es) left out" in a.note, a.note
+
+
+def test_an_agent_that_starts_agents_is_no_wave_runner_unless_its_brief_says_so():
+    """The 2026-09-01 argus session holds a "Refuter B" and a report reader that each started two
+    helpers, and none of the four was a skeptic of a wave. Read as runners, two waves of skeptics
+    were credited to assertion 5, and the two launches left assertion 3's fan-outs. A runner's
+    brief opens with the wave contract's own first sentence; theirs did not."""
+    with tempfile.TemporaryDirectory() as td:
+        session = make_runner_session(Path(td), waves=2, skeptics=2, brief=REFUTER_BRIEF)
+        card = P.score_transcript(session).by_id()
+        launches = P.read_runner_launches(session)
+    assert launches == (), launches
+    assert (card[5].observed, card[5].of) == (0, 1), card[5]
+    assert "started by" not in card[5].note, card[5].note
+    assert (card[3].observed, card[3].of) == (0, 2), card[3]
+    assert "left out" not in card[3].note, card[3].note
+
+
+def test_a_runner_briefed_inline_is_still_a_runner():
+    with tempfile.TemporaryDirectory() as td:
+        session = make_runner_session(Path(td), brief=RUNNER_BRIEF.split("\t", 1)[1], inline=True)
+        a = P.score_transcript(session).by_id()[5]
+    assert (a.observed, a.of) == (1, 1), a
+
+
+def test_the_runner_test_is_the_wave_contracts_own_opening():
+    """The scorecard keys on one sentence of a template it does not own: if the contract's opening
+    is reworded, every real runner stops reading as one and assertion 5 drops to 0/1."""
+    assert contract.render("wave").startswith(P.WAVE_RUNNER_OPENING)
+
+
+def test_a_runner_launched_beside_other_agents_still_counts_in_that_message():
+    """Only a turn whose EVERY agent holds a fan-out is left out; a message that also starts other
+    agents is still a fan-out of the lead's."""
+    calls = (ToolCall(name="Agent", input={"description": "Wave runner"}, id="r1"),
+             ToolCall(name="Agent", input={"description": "Harvest"}, id="h1"))
+    ctx = P.ScoreContext(runner_launches=(P.RunnerLaunch(parent="r1", turn=0, calls=(
+        ToolCall(name="Agent", input={"prompt": "skeptic-a"}, id="s1"),
+        ToolCall(name="Agent", input={"prompt": "skeptic-b"}, id="s2"))),))
+    a = P.score_turns((make_turn(0, *calls),), ctx=ctx).by_id()[3]
+    assert (a.observed, a.of) == (1, 1), a

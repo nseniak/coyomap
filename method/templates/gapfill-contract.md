@@ -40,7 +40,8 @@ already cost a re-run.
 > every component that owns a file; never search the map with a script of your own.
 >
 > Read the code these gaps run through, then produce ONLY the rows your jobs name. The one file you
-> may write is your own fragment. **Do this work yourself — do NOT spawn sub-agents, and do NOT write
+> may write yourself is your own fragment; the findings command below writes your findings file for
+> you. **Do this work yourself — do NOT spawn sub-agents, and do NOT write
 > a program that writes your fragment.** A sub-agent's output is silently dropped, and an agent that
 > delegates returns prose instead of a fragment, which means the whole slice is re-run.
 >

@@ -103,6 +103,12 @@ Create it. Read `method.md` (+ `method/model.md`, `method/domain-cards.md`, and
 leaf-only map, and it was missing from this list, so a whole build never opened it): agents return
 structured rows and `coyomap assemble` writes the model + views.
 
+**Open the build state first:** once the mode is Build and any old map is archived, run
+`<COYOMAP_HOME>/.venv/bin/coyomap state start --repo <repo>` (see "The build state" below). The
+first decision to write is the pin you chose at Step 0, right after `state start`:
+`<COYOMAP_HOME>/.venv/bin/coyomap state add decision "<the pin answer, in the operator's words>"
+--repo <repo>`. Step 0 comes before any state exists, so the pin cannot be written there.
+
 **`method.md` is thousands of lines and cannot be read in one tool call.** A `cat` and a `sed -n
 '1,400p'` both overflow the tool-result cap and spill into a persisted-output file that nobody then
 opens; one build burned a turn finding that out. Read it in windows — `Read` with `offset`/`limit`,
@@ -233,6 +239,24 @@ separate ID space, so cross-references can't resolve, bidirectional links and sh
 viewer can't drill across it, and Analyze/Accept/change-impact only ever track this one baseline. Child
 maps are **not supported**.
 
+## The build state — what survives a summary
+
+A long build can outgrow your context, and what replaces it is a summary that keeps the gist and
+drops the flags. So the tools keep the build's memory in one short file, `.coyomap/build-state.log`:
+one line per event — each record with its command, each brief and budget, each barrier, assemble
+and finalize result, where the findings are, the phase, the next step, the operator's decisions.
+
+- **Start every phase with `coyomap state phase <name> --repo <repo>`.** It records the phase and
+  prints the state: the method section to re-read, the next step, every decision, the last
+  records. Read what it prints before the phase's first step.
+- **Write each operator decision or rule the moment it is given:** `coyomap state add decision
+  "<the decision, in the operator's words>" --repo <repo>`. The first is the pin of Step 0, which
+  is given before the state exists: write it right after `state start` (Step 2). Before a long
+  wait, write what you will do when it ends: `coyomap state add next "<step>" --repo <repo>`.
+- **After a summary, before anything else:** `coyomap state show --repo <repo>`; re-read the method
+  section it names; read the `--help` of the next coyomap command before you run it.
+- Never edit the file by hand. `coyomap state --phases` lists the phase names.
+
 ## Waiting at a barrier (every fan-out, every phase)
 
 This is here, in the file the skill points at, because the rules it governs otherwise live inside a
@@ -251,6 +275,9 @@ It applies to **every** fan-out: harvest, trace, and the Phase-4 skeptics.
 - If you genuinely must block on a condition, use the **`Monitor` tool with an until-condition** —
   and `Monitor`'s command must not itself be an `ls`/`sleep` poll. (`Monitor` is deferred: run
   `ToolSearch select:Monitor` once before the first call.) **One barrier means ONE `Monitor`.**
+- **When the agents are back, collect what they found:** `coyomap findings collect --repo <repo>`.
+  It prints one line; open the report it names when its `risk` count grew, and tell the operator
+  about each new `risk` then. The rest go in your closing report.
 
 The measured cost of ignoring this has run to **32 % of a build's tool calls** — one poll every 7
 seconds through a 9-minute barrier, with `Monitor` never called. **L3 assertion 10 is the

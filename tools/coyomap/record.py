@@ -79,15 +79,18 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import shlex
 import sys
 from pathlib import Path
 
-from coyomap import prose, records
+from coyomap import buildstate, prose, records
 from coyomap.access_surface import baseline_beside, held, load_claims
 from coyomap.anchor_drift import DRIFT_EXCEPTIONS_HEADING
 from coyomap.assemble import dump_preserving, load_map_or_fragment
 from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
 from coyomap.model import ExtraSection, ProjectModel, load_model_path
+from coyomap.reporting import clip
+from coyomap.subverb_args import undecodable
 from coyomap.validate_model import validate_model
 
 #: `__doc__` is `str | None` to a type checker, and this is the only `USAGE` in the package that is
@@ -111,6 +114,11 @@ _VALUE_FLAGS: tuple[str, ...] = ("--map", "--heading", "--line", "--lines-from",
 _REPEATED_FLAGS: tuple[str, ...] = ("--line", "--remove")
 #: The flags that take no value.
 _BARE_FLAGS: tuple[str, ...] = ("--headings", "--no-reassemble", "-h", "--help")
+
+#: The flags whose value is a record's own text. The fragment holds the text, so the build state
+#: keeps the start of each, enough to say which line it was, and never a second copy of it.
+_TEXT_FLAGS: tuple[str, ...] = ("--line", "--remove", "--replace")
+_TEXT_KEPT = 40
 
 #: How to correct SEVERAL records, which `--replace` cannot do. Both of its batch refusals stated the
 #: rule and stopped there, and a build found this way out by trying.
@@ -359,6 +367,38 @@ def _argument_errors(argv: list[str]) -> list[str]:
     return errors
 
 
+def _undecodable_refused(values: list[str]) -> bool:
+    """One error for each value holding a byte that is not UTF-8; True when there was any."""
+    for value in values:
+        print(f"ERROR: {value!r} holds a byte that is not UTF-8, which no fragment can hold. Type it "
+              f"again in UTF-8; nothing was written.", file=sys.stderr)
+    return bool(values)
+
+
+def state_text(argv: list[str], written: Path, heading: str, change: str) -> str:
+    """The build-state line of one write: what changed, under which heading, in which file (`written`,
+    relative to the repo), and the command as typed, with each record's text cut to its first
+    `_TEXT_KEPT` characters. Quoted by `shlex`, so the command reads back as the same words.
+
+    The FILE is the point. A lead whose context was replaced by a summary recorded into the
+    assembled map instead of the fragment, because the summary had kept the command's gist and
+    dropped its `--map`; this line is where that flag survives."""
+    words = ["coyomap", "record"]
+    cut_next = False
+    for arg in argv:
+        words.append(clip(arg, _TEXT_KEPT - 1) if cut_next else arg)
+        cut_next = arg in _TEXT_FLAGS
+    return f'{change} under "{heading}" → {written} · {shlex.join(words)}'
+
+
+def _write_event(argv: list[str], path: Path, heading: str, change: str) -> None:
+    """One `record` line in the build state of the repo `path` belongs to, if it has one open."""
+    repo = buildstate.repo_of(path)
+    if repo is not None:
+        written = path.resolve().relative_to(repo)
+        buildstate.append(repo, "record", state_text(argv, written, heading, change))
+
+
 def _print_headings() -> int:
     """Which headings read a comma list, and which key on free text.
 
@@ -475,12 +515,19 @@ def main(argv: list[str] | None = None) -> int:
         src = Path("/dev/stdin") if from_file == "-" else Path(from_file)
         try:
             text = sys.stdin.read() if from_file == "-" else src.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             print(f"ERROR: cannot read --lines-from {from_file}: {exc}", file=sys.stderr)
             return 2
         # Blank lines and `#` comments dropped, so the file a lead pastes together can be annotated.
         lines += [ln.strip() for ln in text.splitlines()
                   if ln.strip() and not ln.lstrip().startswith("#")]
+    # A BYTE THE SHELL COULD NOT DECODE, in text bound for the fragment, is refused before anything
+    # is written: the fragment's write opens the file, which empties it, and only then fails to
+    # encode the line. One such `--line` emptied a fragment, every record it held with it, and
+    # ended in a traceback.
+    if _undecodable_refused([t for t in (heading, *lines, *removes, replace)
+                             if t and undecodable(t)]):
+        return 2
     if remove:
         if lines or from_file or replace:
             print("ERROR: --remove deletes records and takes no --line / --lines-from / "
@@ -590,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     # line failed, and would rewrite the fragment N times for N records.
     print("\n".join(said))
     path.write_text(dump_preserving(m, present), encoding="utf-8")
+    _write_event(argv, path, canonical, f"-{len(removes)}" if remove else f"+{len(appended)}")
     if fragments is None:
         # A fragment, or a map with no fragments to rebuild it from: the edit is where it lands.
         print(f"wrote {path}")

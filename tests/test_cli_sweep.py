@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from coyomap import findings
 from test_cli_contract import COMMAND_MODULE, UNPROBEABLE
 
 REPO = Path(__file__).resolve().parent.parent
@@ -201,7 +202,29 @@ RECIPES: dict[str, tuple] = {
                                     "--claims", str(_claims(t, m)), "--out", str(t / "b.md")], OK),
     # Reads the files under a folder; writes nothing.
     "credentials":   (lambda t, m: ["credentials", str(m.parent)], OK),
+    # Opens a build state in a scratch repo of its own: `start` is the one verb that creates the
+    # file, and it reads the repo's pin and the clone's commit on the way.
+    "state":         (lambda t, m: ["state", "start", "--repo", str(_state_repo(t))], OK),
+    # Collects what one agent filed in a scratch repo of its own, and writes the whole list there.
+    "findings":      (lambda t, m: ["findings", "collect", "--repo", str(_findings_repo(t))], OK),
 }
+
+
+def _findings_repo(tmp: Path) -> Path:
+    """A repo with one source file and one finding filed against it, as an agent files one."""
+    repo = tmp / "findingsrepo"
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / ".coyomap").mkdir(exist_ok=True)
+    (repo / "src" / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    findings.add(repo, "sweep", "risk", ["src/app.py:1"], "run() returns a constant the caller trusts")
+    return repo
+
+
+def _state_repo(tmp: Path) -> Path:
+    """A folder for `state start` to open its `.coyomap/build-state.log` in."""
+    repo = tmp / "staterepo"
+    repo.mkdir(parents=True, exist_ok=True)
+    return repo
 
 
 def _claims(tmp: Path, map_path: Path) -> Path:

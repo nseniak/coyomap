@@ -20,7 +20,11 @@ NOT A SHAPE, on measurement: an address carrying a password (`scheme://user:pass
 so as a blocking shape it would stop honest maps. Also out of reach: a value split across two lines,
 and a file that is not UTF-8. The scan is a net over the files coyomap itself writes, not a proof.
 
-Stdlib-only (the cli.py firewall).
+A FILE NO COMMIT TAKES only warns. The build state, the findings and their report stay on this
+machine (`uncommitted.never_committed`), so a value there names its file and asks for the line to
+go, and stops nothing. `finalize` reads the same answer, so the two never disagree about a file.
+
+Stdlib-only (the cli.py firewall). It imports only `uncommitted`, which imports nothing from coyomap.
 """
 from __future__ import annotations
 
@@ -28,6 +32,8 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from coyomap.uncommitted import never_committed
 
 #: What may stand before a shape: nothing that could be part of a token. `\b` missed a value right
 #: after an `_`, and after a JSON `\n` or `\t` escape, whose letter is a word character; the files
@@ -130,6 +136,21 @@ def scan(paths: list[Path]) -> list[Hit]:
     return [h for f in files for h in scan_file(f)]
 
 
+def places(hits: list[Hit]) -> dict[Path, list[str]]:
+    """Each file's hits as `line <n> (<shape>)`, files and lines in the order found."""
+    by_file: dict[Path, list[str]] = {}
+    for h in hits:
+        by_file.setdefault(h.path, []).append(f"line {h.line} ({h.shape})")
+    return by_file
+
+
+#: What to do about a value in a file no commit takes (`never_committed`). `finalize` and this verb
+#: both say it after naming the file.
+UNCOMMITTED_REMEDY = ("Remove that line from the file: it is the build's own record, kept on this "
+                      "machine. If the value is real it is also in the transcript of the agent that "
+                      "wrote it: tell the operator, who decides whether to rotate it.")
+
+
 #: The folder under a map folder that holds archived maps: a map committed long ago, not this one.
 ARCHIVE = "dev-rebuilds"
 
@@ -137,7 +158,8 @@ ARCHIVE = "dev-rebuilds"
 def map_folder_files(folder: Path) -> list[Path]:
     """Every file under a map folder, archived maps aside: what a build's commit line force-adds
     (the map, `verify/`, `build-fragments/`) and what an update commits with a plain `git add`
-    (`changes/` too), plus `.ignore`, which the scan used to skip."""
+    (`changes/` too), plus `.ignore`, which the scan used to skip, and the files no commit takes
+    (`never_committed`), where a hit only warns."""
     return sorted(f for f in folder.rglob("*")
                   if f.is_file() and ARCHIVE not in f.relative_to(folder).parts)
 
@@ -146,8 +168,10 @@ USAGE = """usage: coyomap credentials [<map folder>]
 
 Scan every file under the map folder (default .coyomap), archived maps under dev-rebuilds/ aside,
 for credential-shaped values: vendor key prefixes, key blocks, web tokens. Prints each hit's file,
-line and shape, never the value, and exits 1 on any. `finalize` runs the same scan for a build; an
-update's close runs this before its commit, since it runs no finalize."""
+line and shape, never the value, and exits 1 on any in a file a commit takes. A hit in a file no
+commit takes (the build state, the findings folder, the findings report) is a WARNING naming the
+file: remove the line; it does not fail. `finalize` runs the same scan for a build; an update's
+close runs this before its commit, since it runs no finalize."""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -161,13 +185,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     files = map_folder_files(folder)
     hits = scan(files)
-    for h in hits:
+    local = [h for h in hits if never_committed(folder, h.path)]
+    taken = [h for h in hits if not never_committed(folder, h.path)]
+    for h in taken:
         print(f"{h.path}:{h.line}: {h.shape}")
-    if hits:
-        print(f"CREDENTIALS FOUND: {len(hits)} credential-shaped value(s) in "
-              f"{len({h.path for h in hits})} file(s) under {folder}. Rewrite each line without the "
-              f"value before you commit; if a value is real, tell the operator, who decides whether "
-              f"to rotate it.", file=sys.stderr)
+    kept = places(local)
+    for path, where in kept.items():
+        print(f"WARNING: {path}: {', '.join(where)} — a credential-shaped value in a file no "
+              f"commit takes, so it stops no commit. {UNCOMMITTED_REMEDY}", file=sys.stderr)
+    if taken:
+        print(f"CREDENTIALS FOUND: {len(taken)} credential-shaped value(s) in "
+              f"{len({h.path for h in taken})} file(s) under {folder} that a commit takes. Rewrite "
+              f"each line without the value before you commit; if a value is real, tell the "
+              f"operator, who decides whether to rotate it.", file=sys.stderr)
         return 1
-    print(f"credentials: {len(files)} file(s) under {folder} scanned, 0 credential-shaped values")
+    print(f"credentials: {len(files)} file(s) under {folder} scanned, 0 credential-shaped values"
+          + (f" in the files a commit takes; {len(local)} in {len(kept)} file(s) no commit takes, "
+             f"each named in a WARNING line" if local else ""))
     return 0

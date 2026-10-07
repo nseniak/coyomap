@@ -11,11 +11,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
+from coyomap import buildstate, findings  # noqa: E402
 from coyomap import grounding as G  # noqa: E402
 from coyomap import audit_model  # noqa: E402
 from coyomap.audit_model import WorkItem, l2_worklist_model, rule_site_claim  # noqa: E402
 from coyomap.grounding import build_record, main  # noqa: E402
 from coyomap.model import BusinessRule, ProjectModel, RuleSite, load_model  # noqa: E402
+from coyomap.waveplan import PlanAgent, WavePlan, write_plan  # noqa: E402
 
 
 def make_worklist(*claims: str) -> list[str]:
@@ -819,6 +821,184 @@ def test_lint_expect_refuses_when_a_named_batch_has_no_verdicts_file(tmp_path, c
     assert "grounding write" in err, "it must name what not to run yet"
 
 
+# --- a wave plan names every voter (round 1: one runner per fact-check wave) ----------------------
+# A wave is forty to seventy skeptics, and its runner must never type their ids: `contract skeptic
+# --from-batches` writes a plan naming each voter and its verdicts file, and the lint reads it.
+
+def make_wave(td: Path, ids: list[str], landed: list[str]) -> tuple[Path, Path]:
+    """A repo whose wave plan names `ids`, with a verdicts file for each id in `landed`.
+    Returns (repo, plan)."""
+    repo = td / "repo"
+    verify = repo / ".coyomap" / "verify"
+    briefs = repo / ".coyomap" / "briefs" / "wave-1"
+    verify.mkdir(parents=True)
+    briefs.mkdir(parents=True)
+    agents = tuple(PlanAgent(id=vid, claims=verify / f"claims-{vid}.json", theme="backbone",
+                             brief=briefs / f"skeptic-{vid}.md",
+                             verdicts=verify / f"verdicts-{vid}.json",
+                             pointer=f"{vid}\n{briefs / f'skeptic-{vid}.md'}\nRead it.")
+                   for vid in ids)
+    for n, vid in enumerate(landed, 1):
+        (verify / f"verdicts-{vid}.json").write_text(json.dumps({"grounding": [
+            {"claim": f"C{n} calls C9", "grounded": True, "evidence": "a.py:1", "skeptic": vid}]}),
+            encoding="utf-8")
+    plan = briefs / "wave-plan.json"
+    write_plan(plan, WavePlan(verify=verify, prefix="", votes={}, agents=agents))
+    return repo, plan
+
+
+WAVE = ["backbone-1", "backbone-2", "security-1-a"]
+
+
+def test_lint_with_a_plan_names_every_voter_with_no_file():
+    with tempfile.TemporaryDirectory() as td:
+        _repo, plan = make_wave(Path(td) / "half", WAVE, landed=["backbone-1"])
+        code, lines = run_lint(["--plan", str(plan)])
+        _repo, fresh = make_wave(Path(td) / "fresh", WAVE, landed=[])
+        fresh_code, fresh_lines = run_lint(["--plan", str(fresh)])
+    assert code == 1, lines
+    assert lines[0] == "VERDICTS INCOMPLETE — 2 of 3 expected batch(es) have no verdicts file:", lines
+    assert lines[1:3] == ["  - backbone-2", "  - security-1-a"], lines
+    # a fresh wave has no verdicts file at all, and that is a list to start, not a usage error
+    assert fresh_code == 1, fresh_lines
+    assert fresh_lines[0].startswith("VERDICTS INCOMPLETE — 3 of 3"), fresh_lines
+    assert fresh_lines[1:4] == [f"  - {vid}" for vid in WAVE], fresh_lines
+
+
+def test_lint_with_a_plan_passes_when_all_landed():
+    with tempfile.TemporaryDirectory() as td:
+        _repo, plan = make_wave(Path(td), WAVE, landed=WAVE)
+        code, lines = run_lint(["--plan", str(plan)])
+        not_a_plan = Path(td) / "notes.json"
+        not_a_plan.write_text("[]", encoding="utf-8")
+        bad_code, bad_lines = run_lint(["--plan", str(not_a_plan)])
+    assert code == 0, lines
+    assert lines[0].startswith("VERDICTS OK — 3 file(s) well-formed, 3 verdict row(s)"), lines
+    assert bad_code == 2 and str(not_a_plan) in bad_lines[0], bad_lines
+
+
+def test_a_lint_appends_a_barrier_line():
+    with tempfile.TemporaryDirectory() as td:
+        repo, plan = make_wave(Path(td), WAVE, landed=["backbone-1"])
+        buildstate.start(repo)
+        assert run_lint(["--plan", str(plan)])[0] == 1
+        for vid in WAVE[1:]:
+            (repo / ".coyomap" / "verify" / f"verdicts-{vid}.json").write_text(json.dumps(
+                {"grounding": [{"claim": f"{vid} claim", "grounded": True, "evidence": "a.py:1",
+                                "skeptic": vid}]}), encoding="utf-8")
+        assert run_lint(["--plan", str(plan)])[0] == 0
+        state = buildstate.read_state(repo)
+    assert state is not None
+    barriers = [e.text for e in state.of("barrier")]
+    assert len(barriers) == 2, barriers
+    assert barriers[0].startswith("VERDICTS INCOMPLETE — 2 of 3 expected batch(es) have no "
+                                  "verdicts file: backbone-2, security-1-a"), barriers[0]
+    assert barriers[1].startswith("VERDICTS OK — 3 file(s), 3 row(s), every one of 3 expected "
+                                  "batch(es) landed"), barriers[1]
+    assert all(f"plan {plan}" in b for b in barriers), barriers
+
+
+def make_faulty_wave(td: Path) -> tuple[Path, Path]:
+    """A wave whose three voters all landed: `backbone-1` clean, `backbone-2` with a row citing no
+    line, `security-1-a` with a quoted boolean and a row citing no line. Returns (verify, plan)."""
+    repo, plan = make_wave(td, WAVE, landed=WAVE)
+    verify = repo / ".coyomap" / "verify"
+    (verify / "verdicts-backbone-2.json").write_text(json.dumps({"grounding": [
+        {"claim": "C2 calls C9", "grounded": True, "evidence": "", "skeptic": "backbone-2"}]}),
+        encoding="utf-8")
+    (verify / "verdicts-security-1-a.json").write_text(json.dumps({"grounding": [
+        {"claim": "C3 calls C9", "grounded": "true", "evidence": "a.py:1", "skeptic": "security-1-a"},
+        {"claim": "C4 calls C9", "grounded": True, "evidence": "", "skeptic": "security-1-a"}]}),
+        encoding="utf-8")
+    return verify, plan
+
+
+def lines_under(lines: list[str], headline: str) -> list[str]:
+    """The lines a lint prints under one of its problems: from that problem's bullet to the next."""
+    start = next(k for k, line in enumerate(lines) if line.startswith("  - ") and headline in line)
+    end = next((k for k in range(start + 1, len(lines)) if lines[k].startswith("  - ")
+                or not lines[k].startswith("    ")), len(lines))
+    return lines[start + 1:end]
+
+
+def test_a_failed_lint_names_the_file_and_the_voter_of_every_problem():
+    """The runner retries "each id it still names". A problem counted over the pooled rows of every
+    file named no file and no voter, so a runner holding a FAILED lint had nothing to retry."""
+    with tempfile.TemporaryDirectory() as td:
+        verify, plan = make_faulty_wave(Path(td))
+        code, lines = run_lint(["--plan", str(plan)])
+    assert code == 1 and lines[0] == "VERDICTS FAILED — 2 problem(s)", lines
+    quoted = lines_under(lines, "unrecognised `grounded` value(s)")
+    assert quoted == ["    Found in 1 verdicts file(s):",
+                      f"      - voter security-1-a — {verify / 'verdicts-security-1-a.json'} "
+                      f"(1 row(s))"], lines
+    unlined = lines_under(lines, "row(s) have no `evidence`")
+    assert unlined == ["    Found in 2 verdicts file(s):",
+                       f"      - voter backbone-2 — {verify / 'verdicts-backbone-2.json'} (1 row(s))",
+                       f"      - voter security-1-a — {verify / 'verdicts-security-1-a.json'} "
+                       f"(1 row(s))"], lines
+    assert not [line for line in lines if "backbone-1" in line], "the clean voter is named nowhere"
+
+
+def test_without_a_plan_a_problem_still_names_its_file():
+    with tempfile.TemporaryDirectory() as td:
+        verify, _plan = make_faulty_wave(Path(td))
+        code, lines = run_lint(["--verdicts", str(verify / "verdicts-backbone-1.json"),
+                                str(verify / "verdicts-backbone-2.json")])
+    assert code == 1, lines
+    assert lines_under(lines, "row(s) have no `evidence`") == [
+        "    Found in 1 verdicts file(s):",
+        f"      - {verify / 'verdicts-backbone-2.json'} (1 row(s))"], lines
+
+
+def test_a_half_written_verdicts_file_is_a_problem_named_by_its_voter():
+    """A skeptic that stops mid-write leaves a file that is no JSON. The lint stopped on it with a
+    path and nothing else, so the files after it were never linted and no voter was named."""
+    with tempfile.TemporaryDirectory() as td:
+        verify, plan = make_faulty_wave(Path(td))
+        (verify / "verdicts-backbone-2.json").write_text('{"grounding": [{"claim": "C2 ca',
+                                                         encoding="utf-8")
+        code, lines = run_lint(["--plan", str(plan)])
+    assert code == 1 and lines[0] == "VERDICTS FAILED — 3 problem(s)", lines
+    broken = lines_under(lines, "file(s) cannot be read as a verdicts file")
+    assert len(broken) == 1 and broken[0].startswith(
+        f"      - voter backbone-2 — {verify / 'verdicts-backbone-2.json'}: "), lines
+    assert "voter security-1-a" in "\n".join(lines_under(lines, "row(s) have no `evidence`"))
+
+
+def test_a_failed_lint_names_the_voters_to_retry_in_its_barrier_line():
+    with tempfile.TemporaryDirectory() as td:
+        verify, plan = make_faulty_wave(Path(td))
+        repo = verify.parent.parent
+        buildstate.start(repo)
+        assert run_lint(["--plan", str(plan)])[0] == 1
+        state = buildstate.read_state(repo)
+    assert state is not None
+    barrier = state.last("barrier")
+    assert barrier is not None and "voters to retry: backbone-2, security-1-a" in barrier.text, \
+        state.events
+
+
+def test_a_written_record_appends_its_counts_and_a_refused_one_nothing():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_findings_repo(Path(td))
+        wl, vd = make_report_inputs(repo / ".coyomap" / "verify")
+        out = repo / ".coyomap" / "build-fragments" / "grounding.json"
+        buildstate.start(repo)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            refused = main(["write", "--worklist", str(wl), "--verdicts", str(vd),
+                            "--out", str(out), "--note", "Twenty skeptics read it."], env={})
+            written = main(["write", "--worklist", str(wl), "--verdicts", str(vd),
+                            "--out", str(out), "--note", "One skeptic read it."], env={})
+        state = buildstate.read_state(repo)
+    assert (refused, written) == (1, 0)
+    assert state is not None
+    lines = [e.text for e in state.of("grounding")]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith(f"wrote {out}: 1 of 1 claim(s) challenged — 1 confirmed, 0 refuted, "
+                               "0 unverifiable"), lines
+
+
 def test_report_lists_the_claims_added_since_the_pin(tmp_path):
     """`write` printed how MANY were added after the pin and nothing could say WHICH.
 
@@ -1207,9 +1387,9 @@ def test_no_skeptic_saw_them_is_a_quantifier_not_a_count():
 # --- an adverse note reached nothing (retro 2026-09-13 reminderrepo, T8) -------------------------
 # Two channels carry what an agent tells the LEAD and no verdict carries. A `grounded: true` row's
 # note reaches no section of the report, because confirmed reads as "nothing to do". And a harvest,
-# trace, gap-fill or test agent writes no verdict file at all, so its ONLY channel is the closing
-# message — where the 2026-09-13 build's unguarded-route finding sat, naming three anchors that
-# appear zero times in the shipped map.
+# trace, gap-fill or test agent writes no verdict file at all: it files what it notices with
+# `coyomap findings add`, and the report counts those. It used to read them out of each agent's
+# closing message, and on the 2026-10-07 mcpolis build that reader saw 0 of 126 hand-backs.
 
 def make_agent_transcript(dir_path: Path, stem: str, task: str, final: str) -> Path:
     """One agent transcript in the shape the harness writes, plus the `.meta.json` beside it."""
@@ -1223,42 +1403,76 @@ def make_agent_transcript(dir_path: Path, stem: str, task: str, final: str) -> P
     return path
 
 
-ROUTE_FINDING = """## [1] Outcome
-
-Done. Fragment written.
-
-## Findings the lead should know
-
-- **Three paths are declared twice, with different guard sets.** `reminder-groups-list` and
-  `reminder-page-invitations-list` appear as a tab child and as a top-level route.
-- **One top-level route carries no guard at all.** `app-routing.module.ts:17`.
-"""
+def make_findings_repo(td: Path) -> Path:
+    """A mapped repo with one source file for a finding to point at, and its `.coyomap/verify/`."""
+    repo = td / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "a.py").write_text("def route():\n    return 'admin'\n", encoding="utf-8")
+    (repo / ".coyomap" / "verify").mkdir(parents=True)
+    return repo
 
 
-def test_the_report_collects_the_closing_section_an_agent_wrote_to_the_lead(tmp_path):
-    agents = tmp_path / "subagents"
-    make_agent_transcript(agents, "agent-aaa", "Harvest Angular pages and routes", ROUTE_FINDING)
-    make_agent_transcript(agents, "agent-bbb", "Harvest deps", "## [1] Outcome\n\nDone.\n")
-    text = G.format_report(["c1"], [{"claim": "c1", "grounded": True, "evidence": "a.py:1"}],
-                           agent_dir=agents)
-    assert "FINDINGS THE AGENTS SENT UP" in text, text
-    assert "Harvest Angular pages and routes" in text, text
-    assert "app-routing.module.ts:17" in text, text
-    assert "Harvest deps" not in text, "an agent with no such section must not be listed:\n" + text
-    # Its own coverage, in `grounding lint`'s shape — this is a heading match over prose.
-    assert "2 agent transcript(s)" in text, text
+def make_report_inputs(verify: Path) -> tuple[Path, Path]:
+    """A pinned worklist of one claim and a verdicts file upholding it, under `verify`."""
+    wl = verify / "worklist.json"
+    wl.write_text(json.dumps({"worklist": [{"claim": "c1"}]}), encoding="utf-8")
+    vd = verify / "verdicts-backbone-1.json"
+    vd.write_text(json.dumps({"grounding": [
+        {"claim": "c1", "grounded": True, "evidence": "a.py:1", "skeptic": "backbone-1"}]}),
+        encoding="utf-8")
+    return wl, vd
 
 
-def test_a_missing_transcript_directory_reads_as_NOT_READ_and_never_as_zero(tmp_path):
-    rows = [{"claim": "c1", "grounded": True, "evidence": "a.py:1"}]
-    unread = G.format_report(["c1"], rows)
-    assert "AGENT FINDINGS NOT READ" in unread.splitlines()[0], unread.splitlines()[0]
-    assert "AGENT FINDINGS NOT READ" in unread.split("\n\n")[-1], unread
-    agents = tmp_path / "subagents"
-    make_agent_transcript(agents, "agent-aaa", "Harvest deps", "## [1] Outcome\n\nDone.\n")
-    read = G.format_report(["c1"], rows, agent_dir=agents)
-    assert "0 finding(s) sent up by agents" in read, read
-    assert "NOT READ" not in read, read
+def run_report(argv: list[str]) -> tuple[int, str, str]:
+    """`grounding report` with no session: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(["report", *argv], env={})
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_the_report_counts_the_findings_the_agents_filed():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_findings_repo(Path(td))
+        findings.add(repo, "harvest-1", "risk", ["src/a.py:2"], "the admin route has no guard")
+        findings.add(repo, "trace-2", "gap", ["src/a.py:1"], "no test reaches the route")
+        wl, vd = make_report_inputs(repo / ".coyomap" / "verify")
+        code, out, err = run_report(["--worklist", str(wl), "--verdicts", str(vd)])
+        _code, as_json, _err = run_report(["--worklist", str(wl), "--verdicts", str(vd), "--json"])
+        wrote_list = (repo / ".coyomap" / "findings-report.md").exists()
+        # inputs that name no repo cannot say whose findings to read, and must not say "none"
+        elsewhere = Path(td) / "elsewhere"
+        elsewhere.mkdir()
+        bare_wl, bare_vd = make_report_inputs(elsewhere)
+        _code, unknown, _err = run_report(["--worklist", str(bare_wl), "--verdicts", str(bare_vd)])
+    assert code == 0, err
+    lines = out.splitlines()
+    assert ", 2 finding(s) filed by agents" in lines[0], lines[0]
+    assert ("FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1 · bug 0 · gap 1 · "
+            "contradiction 0 · 0 malformed") in lines, out
+    assert any(ln.startswith("TO THE LEAD:") and "2 finding(s) filed by agents" in ln
+               for ln in lines), out
+    assert "NOT READ" not in out and "SENT UP" not in out, out
+    assert not wrote_list, "a report READS the findings; `findings collect` writes the list"
+    filed = json.loads(as_json)["filed_findings"]
+    assert [(f["agent"], f["kind"]) for f in filed] == [("harvest-1", "risk"), ("trace-2", "gap")]
+    assert "filed findings unknown" in unknown.splitlines()[0], unknown.splitlines()[0]
+    assert "FINDINGS FILED BY AGENTS — unknown" in unknown, unknown
+
+
+def test_report_takes_no_agent_transcripts_flag():
+    """The report read the agents' closing messages through this flag, and now counts what they
+    filed. Accepting the flag would read as a channel it still opens."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_findings_repo(Path(td))
+        wl, vd = make_report_inputs(repo / ".coyomap" / "verify")
+        agents = Path(td) / "subagents"
+        make_agent_transcript(agents, "agent-aaa", "Harvest deps", "## Outcome\n\nDone.\n")
+        code, out, err = run_report(["--worklist", str(wl), "--verdicts", str(vd),
+                                     "--agent-transcripts", str(agents)])
+    assert code == 2, out
+    assert "unknown option(s): --agent-transcripts" in err, err
+    assert "coyomap findings add" in err, err
 
 
 def test_an_upheld_row_whose_note_speaks_to_the_lead_is_listed():
@@ -1277,16 +1491,17 @@ def test_an_upheld_row_whose_note_speaks_to_the_lead_is_listed():
     assert "Phrase match over 2 of 2 upheld row(s)" in text, text
 
 
-def test_both_lead_channels_survive_a_head_and_a_tail(tmp_path):
+def test_both_lead_channels_survive_a_head_and_a_tail():
     """The report runs hundreds of lines and is read through a pipe; two opposite narrowings have
     already hidden two ends of one section on a real build."""
-    agents = tmp_path / "subagents"
-    make_agent_transcript(agents, "agent-aaa", "Trace groups", ROUTE_FINDING)
-    rows = [{"claim": "c1", "grounded": True, "evidence": "a.py:1", "skeptic": "s",
-             "note": "Holds. Worth flagging: the second route has no guard."}]
-    text = G.format_report(["c1"], rows, agent_dir=agents)
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_findings_repo(Path(td))
+        findings.add(repo, "trace-2", "risk", ["src/a.py:2"], "the second route has no guard")
+        rows = [{"claim": "c1", "grounded": True, "evidence": "a.py:1", "skeptic": "s",
+                 "note": "Holds. Worth flagging: the second route has no guard."}]
+        text = G.format_report(["c1"], rows, filed=findings.load(repo))
     head, tail = text.splitlines()[0], text.splitlines()[-3:]
-    assert "1 upheld with a note to the lead" in head and "1 finding(s) sent up" in head, head
+    assert "1 upheld with a note to the lead" in head and "1 finding(s) filed by agents" in head, head
     assert any("TO THE LEAD:" in ln for ln in tail), tail
 
 
@@ -1423,9 +1638,9 @@ def test_the_agent_transcripts_are_the_MAPS_repos_not_the_working_directorys(tmp
     sid = "sid-1"
     from coyomap.provenance import project_slug
     theirs = home / ".claude" / "projects" / project_slug(mapped) / sid / "subagents"
-    make_agent_transcript(theirs, "agent-right", "Trace groups", ROUTE_FINDING)
+    make_agent_transcript(theirs, "agent-right", "Trace groups", "## Outcome\n\nDone.\n")
     wrong = home / ".claude" / "projects" / project_slug(elsewhere) / sid / "subagents"
-    make_agent_transcript(wrong, "agent-wrong", "Fix the linter", ROUTE_FINDING)
+    make_agent_transcript(wrong, "agent-wrong", "Fix the linter", "## Outcome\n\nDone.\n")
     monkeypatch.chdir(elsewhere)            # the clone the command is typed in
     env = {"CLAUDE_CODE_SESSION_ID": sid}
     the_map = mapped / ".coyomap" / "project-map.json"
@@ -1433,10 +1648,11 @@ def test_the_agent_transcripts_are_the_MAPS_repos_not_the_working_directorys(tmp
     verdicts = mapped / ".coyomap" / "verify" / "verdicts-rule-1.json"
     # EVERY input these verbs take names the repo, so none of them has to guess from the cwd.
     for named in (the_map, worklist, verdicts):
-        assert G._repo_of(str(named)) == mapped, named
-        assert G._resolve_agent_dir(None, env, G._repo_of(str(named)), home=home) == str(theirs)
+        assert buildstate.repo_of(str(named)) == mapped, named
+        assert G._resolve_agent_dir(None, env, buildstate.repo_of(str(named)),
+                                    home=home) == str(theirs)
     # ...and the cwd answer, which is what it used to give, is the OTHER product's agents
-    assert G._repo_of(None) is None
+    assert buildstate.repo_of(None) is None
     assert G._resolve_agent_dir(None, env, None, home=home) == str(wrong)
 
 

@@ -18,7 +18,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coyomap import finalize, grounding
+from coyomap import buildstate, finalize, findings, grounding
 from coyomap.audit_model import role_inclusion_claim, rule_site_claim
 from coyomap.model import FORMAT
 
@@ -1728,6 +1728,49 @@ def test_a_key_shaped_value_in_a_fragment_blocks_and_withholds_the_commit_line()
     assert "NO commit line" in said and "git add -f" not in said, said
 
 
+def test_a_key_in_a_file_no_commit_takes_is_an_advisory_and_the_commit_line_stands() -> None:
+    """The findings, the build state and the findings report never reach a commit: the map folder's
+    `.gitignore` keeps them out and the `git add -f` line names none of them. A key-shaped value
+    there names its file and asks for the line to go; it does not withhold the commit line. The
+    value is built from filler at run time."""
+    root, p = make_repo()
+    value = "gh" + "p_" + "z" * 40
+    out_dir = root / ".coyomap"
+    (out_dir / "findings").mkdir()
+    local = [out_dir / "findings" / "harvest-1.jsonl", out_dir / buildstate.STATE_NAME,
+             out_dir / buildstate.PREV_NAME, out_dir / "findings-report.md"]
+    for f in local:
+        f.write_text(f"a line holding {value}\n", encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        code = finalize.main([str(p), "--repo", str(root), "--no-write"])
+    leg = next(l for l in finalize.build_report(p, root, []).legs if l.name == "credential scan")
+    said = out.getvalue()
+    assert code == 0, said
+    assert leg.blocking == [], leg.blocking
+    named = sorted(row.split(": line 1 (GitHub token) — ", 1)[0] for row in leg.advisory)
+    assert named == sorted(str(f) for f in local), leg.advisory
+    assert all("Remove that line from the file" in row for row in leg.advisory), leg.advisory
+    assert "git add -f" in said and "NO commit line" not in said, said
+    assert value not in said, "the scan printed the value it found"
+
+
+def test_a_key_in_a_committed_file_beside_one_no_commit_takes_still_blocks() -> None:
+    root, p = make_repo()
+    value = "gh" + "p_" + "z" * 40
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    (verify / "verdicts-backbone-1.json").write_text(json.dumps({"grounding": [
+        {"claim": "c", "grounded": True, "evidence": "src/a.py:1", "note": value}]}),
+        encoding="utf-8")
+    (root / ".coyomap" / "findings").mkdir()
+    (root / ".coyomap" / "findings" / "harvest-1.jsonl").write_text(value, encoding="utf-8")
+    leg = next(l for l in finalize.build_report(p, root, []).legs if l.name == "credential scan")
+    assert [row.split(":", 1)[0] for row in leg.blocking] == [str(verify / "verdicts-backbone-1.json")]
+    assert [row.split(":", 1)[0] for row in leg.advisory] == [
+        str(root / ".coyomap" / "findings" / "harvest-1.jsonl")], leg.advisory
+
+
 def test_a_clean_map_keeps_its_commit_line() -> None:
     import contextlib
     import io
@@ -2234,3 +2277,77 @@ def test_a_second_map_path_is_refused_with_every_extra_path_counted():
     assert code == 2
     assert "got 6 (map-1.json, map-2.json, map-3.json, map-4.json, +2 more)" in err.getvalue(), (
         err.getvalue())
+
+
+# --- what the agents filed about the product, and the build state (round 1) -----------------------
+# The agents file product findings with `coyomap findings add`; finalize counts them in a leg that
+# never moves the verdict, and writes its own verdict line to an open build state.
+
+def run_finalize(p: Path, root: Path, *extra: str) -> int:
+    """`finalize` on one map, its printed output dropped: the report files are what is read."""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return finalize.main([str(p), "--repo", str(root), *extra])
+
+
+def make_finalized(filed: list[tuple[str, str]]) -> tuple[dict, str]:
+    """A clean map finalized after its agents filed `(agent, kind)` findings: (report, its .md)."""
+    root, p = make_repo()
+    for agent, kind in filed:
+        findings.add(root, agent, kind, ["src/a.py:1"], f"{kind} seen by {agent}")
+    assert run_finalize(p, root) == 0
+    report = json.loads((root / ".coyomap" / "finalize-report.json").read_text(encoding="utf-8"))
+    return report, (root / ".coyomap" / "finalize-report.md").read_text(encoding="utf-8")
+
+
+def test_finalize_names_the_filed_findings_in_an_informational_leg():
+    report, md = make_finalized([("harvest-1", "risk"), ("trace-2", "gap")])
+    quiet, _quiet_md = make_finalized([])
+    leg = next(l for l in report["legs"] if l["name"] == "agent findings (informational)")
+    assert leg["status"] == "ran" and leg["blocking"] == [] and leg["advisory"] == [], leg
+    assert leg["note"].startswith("FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1 · bug 0 · "
+                                  "gap 1 · contradiction 0 · 0 malformed"), leg["note"]
+    assert "FINDINGS FILED BY AGENTS — 2 from 2 agent(s)" in md, md
+    # a finding never moves the verdict: the same map with nothing filed reads the same
+    assert ((report["verdict"], report["blocking_total"], report["advisory_total"])
+            == (quiet["verdict"], quiet["blocking_total"], quiet["advisory_total"])), (report, quiet)
+    none = next(l for l in quiet["legs"] if l["name"] == "agent findings (informational)")
+    assert none["note"].startswith("FINDINGS FILED BY AGENTS — none filed"), none["note"]
+
+
+def test_finalize_appends_its_verdict_to_an_open_state():
+    root, p = make_repo()
+    buildstate.start(root)
+    assert run_finalize(p, root, "--no-write") == 0
+    state = buildstate.read_state(root)
+    assert state is not None and state.last("finalize") is None, "a --no-write read wrote a line"
+    assert run_finalize(p, root) == 0
+    report = json.loads((root / ".coyomap" / "finalize-report.json").read_text(encoding="utf-8"))
+    state = buildstate.read_state(root)
+    assert state is not None
+    line = state.last("finalize")
+    assert line is not None, state.events
+    assert line.text.startswith(f"{report['verdict']} — {report['blocking_total']} blocking, "
+                                f"{report['advisory_total']} advisory"), line.text
+    assert line.text.endswith("finalize-report.md"), line.text
+
+
+def test_an_archived_maps_findings_are_the_ones_its_report_counts():
+    """An archive moves a build's `findings/` with its map; a retrospective reading that map must
+    count those, not the findings of whatever build runs now."""
+    root, live = make_repo()
+    findings.add(root, "harvest-1", "risk", ["src/a.py:1"], "today's build saw this")
+    findings.add(root, "harvest-2", "bug", ["src/a.py:1"], "and this")
+    archive = root / ".coyomap" / "dev-rebuilds" / "0001"
+    (archive / "findings").mkdir(parents=True)
+    archived = archive / "project-map.json"
+    archived.write_text(live.read_text(encoding="utf-8"), encoding="utf-8")
+    (archive / "findings" / "trace-9.jsonl").write_text(json.dumps(
+        {"agent": "trace-9", "kind": "gap", "where": ["src/a.py:1"], "text": "the old build saw this",
+         "at": "2026-09-01 10:00"}) + "\n", encoding="utf-8")
+    def note_of(p: Path) -> str:
+        legs = finalize.build_report(p, root, []).legs
+        return next(l.note or "" for l in legs if l.name == "agent findings (informational)")
+    assert note_of(archived).startswith("FINDINGS FILED BY AGENTS — 1 from 1 agent(s): risk 0 · "
+                                        "bug 0 · gap 1"), note_of(archived)
+    assert note_of(live).startswith("FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1 · bug 1"), (
+        note_of(live))

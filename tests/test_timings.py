@@ -13,14 +13,18 @@ Run either way (needs an editable install: `make deps`):
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from coyomap import buildstate
 from coyomap.contract import CONTRACTS
 from coyomap.timings import PHASES, VERSION, Run, latest_by_slice, load_runs, main, record_path
+from coyomap.waveplan import PlanAgent, WavePlan, write_plan
 
 
 def make_repo(tmp: str) -> str:
@@ -307,8 +311,9 @@ def test_the_tests_contract_name_records_the_test_completeness_phase() -> None:
 
 def test_every_fan_out_contract_name_is_a_phase_name() -> None:
     """A contract's name is what the lead types at dispatch, and the same word comes back at the
-    barrier. The closer is one agent, not a fan-out, and `harvest-t5` rides on a harvest brief."""
-    for name in sorted(set(CONTRACTS) - {"closer", "harvest-t5"}):
+    barrier. The closer and the wave runner are one agent each, not a fan-out (the runner's
+    skeptics are timed as `skeptic`), and `harvest-t5` rides on a harvest brief."""
+    for name in sorted(set(CONTRACTS) - {"closer", "harvest-t5", "wave"}):
         with tempfile.TemporaryDirectory() as tmp:
             assert main(["record", "--repo", make_repo(tmp), "--phase", name,
                          "--slice", "s", "--minutes", "1.0"]) == 0, name
@@ -438,3 +443,129 @@ def test_a_name_dispatched_twice_records_the_latest_transcript_and_says_so(capsy
         err = capsys.readouterr().err
         assert code == 0 and "'h-a' has 2 transcripts" in err, err
         assert [(r["slice"], r["minutes"]) for r in read_record(tmp)] == [("h-a", 4.0)]
+
+
+# --- a wave plan's voters are the slices (round 1: one runner per fact-check wave) ---------------
+# The runner of a 69-skeptic wave must not type 69 ids, and has no barrier to read minutes off.
+
+def make_wave_plan(tmp: str, ids: list[str]) -> Path:
+    """A wave plan naming `ids` as its voters, written where a runner's plan would be."""
+    verify = Path(tmp) / ".coyomap" / "verify"
+    briefs = Path(tmp) / ".coyomap" / "briefs"
+    agents = tuple(PlanAgent(id=vid, claims=verify / f"claims-{vid}.json", theme="security",
+                             brief=briefs / f"skeptic-{vid}.md",
+                             verdicts=verify / f"verdicts-{vid}.json", pointer=f"{vid}\nbrief\n")
+                   for vid in ids)
+    plan = briefs / "wave-plan.json"
+    write_plan(plan, WavePlan(verify=verify, prefix="", votes={"security": 2}, agents=agents))
+    return plan
+
+
+def run_timings(argv: list[str]) -> tuple[int, str, str]:
+    """`coyomap timings …` in-process: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_record_with_a_plan_records_every_voter() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "subagents"
+        d.mkdir()
+        make_agent_transcript(d, "a1", "sec-1-a", "2026-09-08T22:00:00.000Z",
+                              "2026-09-08T22:06:00.000Z", pointer_shape=True)
+        make_agent_transcript(d, "a2", "sec-1-b", "2026-09-08T22:00:05.000Z",
+                              "2026-09-08T22:02:05.000Z", pointer_shape=True)
+        plan = make_wave_plan(tmp, ["sec-1-a", "sec-1-b"])
+        code, out, err = run_timings(["record", "--repo", make_repo(tmp), "--phase", "skeptic",
+                                      "--from-agents", str(d), "--plan", str(plan)])
+        assert code == 0, err
+        rows = read_record(tmp)
+    assert [(r["phase"], r["slice"], r["minutes"]) for r in rows] == [
+        ("skeptic", "sec-1-a", 6.0), ("skeptic", "sec-1-b", 2.0)], rows
+    assert "recorded 2 slice(s) for phase 'skeptic'" in out, out
+
+
+def test_a_plan_without_from_agents_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        plan = make_wave_plan(tmp, ["sec-1-a"])
+        code, _out, err = run_timings(["record", "--repo", make_repo(tmp), "--phase", "skeptic",
+                                       "--plan", str(plan)])
+        assert code == 2 and "pass --from-agents" in err, err
+        assert not record_path(tmp).exists(), "a refused record wrote the file"
+
+
+def test_a_record_appends_a_timings_line_to_an_open_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp)
+        buildstate.start(Path(repo))
+        code, _out, err = run_timings(["record", "--repo", repo, "--phase", "harvest",
+                                       "--slice", "deps", "--minutes", "3.2",
+                                       "--slice", "T5 model", "--minutes", "12.4"])
+        state = buildstate.read_state(Path(repo))
+    assert code == 0, err
+    assert state is not None
+    line = state.last("timings")
+    assert line is not None, state.events
+    assert line.text.startswith("harvest: 2 slice(s), longest T5 model 12.4 min, deps 3.2 min"), line
+
+
+def test_a_plan_records_the_voters_that_have_a_transcript_and_names_the_rest() -> None:
+    """One voter with no transcript (a start the agent refused, a folder that lost one) made the
+    record refuse the whole wave, so the runner's wave recorded nothing. The voters that have a
+    transcript are recorded; the rest are named, one warning line and then each on its own."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "subagents"
+        d.mkdir()
+        make_agent_transcript(d, "a1", "sec-1-b", "2026-09-08T22:00:00.000Z",
+                              "2026-09-08T22:06:00.000Z", pointer_shape=True)
+        plan = make_wave_plan(tmp, ["sec-1-a", "sec-1-b", "sec-1-c"])
+        repo = make_repo(tmp)
+        buildstate.start(Path(repo))
+        code, out, err = run_timings(["record", "--repo", repo, "--phase", "skeptic",
+                                      "--from-agents", str(d), "--plan", str(plan)])
+        rows = read_record(tmp)
+        state = buildstate.read_state(Path(repo))
+    assert code == 0, err
+    assert [(r["slice"], r["minutes"]) for r in rows] == [("sec-1-b", 6.0)], rows
+    assert "recorded 1 slice(s) for phase 'skeptic'" in out, out
+    lines = err.splitlines()
+    warned = [k for k, line in enumerate(lines) if line.startswith("WARNING")]
+    assert len(warned) == 1, lines
+    assert lines[warned[0]] == (f"WARNING: 2 of 3 voter(s) the plan names have no transcript under "
+                                f"{d}, so they are not recorded:"), lines
+    assert lines[warned[0] + 1:warned[0] + 3] == ["  - sec-1-a", "  - sec-1-c"], lines
+    assert state is not None
+    line = state.last("timings")
+    assert line is not None and "2 voter(s) with no transcript: sec-1-a, sec-1-c" in line.text, line
+
+
+def test_a_plan_none_of_whose_voters_has_a_transcript_records_nothing_and_says_so() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "subagents"
+        d.mkdir()
+        make_agent_transcript(d, "a1", "h-a", "2026-09-08T22:00:00.000Z", "2026-09-08T22:06:00.000Z")
+        plan = make_wave_plan(tmp, ["sec-1-a", "sec-1-b"])
+        code, _out, err = run_timings(["record", "--repo", make_repo(tmp), "--phase", "skeptic",
+                                       "--from-agents", str(d), "--plan", str(plan)])
+        written = record_path(tmp).exists()
+    assert code == 2 and "'sec-1-a', 'sec-1-b'" in err and "h-a" in err, err
+    assert not written
+
+
+def test_a_named_slice_with_no_transcript_still_refuses_beside_a_plan() -> None:
+    """Only the plan's voters may be missing: a `--slice` is a name the lead typed, and a typo there
+    is still refused before anything is written."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "subagents"
+        d.mkdir()
+        make_agent_transcript(d, "a1", "sec-1-a", "2026-09-08T22:00:00.000Z",
+                              "2026-09-08T22:06:00.000Z", pointer_shape=True)
+        plan = make_wave_plan(tmp, ["sec-1-a"])
+        code, _out, err = run_timings(["record", "--repo", make_repo(tmp), "--phase", "skeptic",
+                                       "--from-agents", str(d), "--plan", str(plan),
+                                       "--slice", "closer-w1"])
+        written = record_path(tmp).exists()
+    assert code == 2 and "'closer-w1'" in err, err
+    assert not written

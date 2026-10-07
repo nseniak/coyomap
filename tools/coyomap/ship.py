@@ -19,16 +19,18 @@ So this command runs the mechanical tail and stops where judgement is needed:
 
 A failed step STOPS the run and names itself — a skipped step must never read as a clean one.
 Every step is the ordinary subcommand with its documented flags, invoked in-process; `ship` adds
-no check and writes nothing of its own.
+no check, and writes nothing of its own but its outcome, one or two lines in the build state.
 """
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from coyomap import buildstate
 from coyomap.access_surface import newest_archived_map
 from coyomap.audit_model import l2_worklist_model
 from coyomap.model import load_model, resolve_map_path
@@ -38,7 +40,6 @@ USAGE = """usage: coyomap ship <repo> [--note-file <path>] [--partial] [--keep-n
                     [--access-baseline <map-or-surface.json>]
                     [--worklist <audit.json>] [--reconcile <file>]
                     [--verdicts <raw.json>]... [--fragments <dir>]
-                    [--agent-transcripts <dir>]
 
 The closing sequence of a build (method.md's numbered list) as one command.
 Defaults, all under <repo>/.coyomap/: the map at project-map.json, fragments at
@@ -49,10 +50,8 @@ verify/closer-*.json, the gate block written to verify/gate-block.md.
 A closer file is a verdicts file in shape and an APPEAL in meaning: it never votes, and a
 refutation it REJECTS stops blocking the refutation gate. See `grounding.is_closer_row`.
 
---agent-transcripts forwards to `grounding report`, which reads the closing message every build
-agent wrote to the lead. Inside the build's own session it is found without the flag; a
-RETROSPECTIVE is a different session, so without it that whole channel reads NOT READ — and the
-retrospective is the reader who most needs it.
+Each run writes its outcome to the build state, when one is open: prepared and the next step,
+stopped at a step and the re-run, or complete, which ends the state.
 
 Two phases, split where the ONE judgement input sits:
   no --note-file : anchor-drift, apply-drift --to-reconcile, assemble, grounding report —
@@ -97,9 +96,6 @@ class ShipInputs:
     #: hand-run the remaining seven steps — the failure `run_plan`'s "NOT RUN:" line exists to stop.
     note_cites_other_runs: bool
     access_baseline: Path | None
-    #: Forwarded to `grounding report`, whose findings-from-the-agents section needs it whenever
-    #: the run is not the build's own session — which is every retrospective.
-    agent_transcripts: Path | None = None
     #: The pinned worklist's tier, read off its items. Step 2's `anchor-drift` counts coverage at
     #: that tier, so the gate block's `challenged N of M` and its audit line count ONE surface.
     behavioural: bool = False
@@ -114,8 +110,7 @@ def derive_inputs(repo: Path,
                   worklist: Path | None = None,
                   reconcile: Path | None = None,
                   verdicts: tuple[Path, ...] | None = None,
-                  fragments_dir: Path | None = None,
-                  agent_transcripts: Path | None = None) -> ShipInputs | str:
+                  fragments_dir: Path | None = None) -> ShipInputs | str:
     """Resolve every path the sequence needs, or return an error string saying what is missing.
 
     Globs are sorted, matching the shell's lexicographic `*.json` — fragment ARGUMENT ORDER decides
@@ -163,8 +158,7 @@ def derive_inputs(repo: Path,
         gate_block=out / "verify" / "gate-block.md",
         note_file=note_file, partial=partial, keep_note=keep_note,
         note_cites_other_runs=note_cites_other_runs,
-        access_baseline=access_baseline, agent_transcripts=agent_transcripts,
-        behavioural=behavioural)
+        access_baseline=access_baseline, behavioural=behavioural)
 
 
 def _assemble_step(s: ShipInputs, title: str, carry_record: bool = False) -> Step:
@@ -295,8 +289,6 @@ def build_plan(s: ShipInputs) -> list[Step]:
         _assemble_step(s, "assemble (step 4 — last structural assemble)"),
         Step("grounding report (step 5 — what the note is written from)",
              ("grounding", "report", "--worklist", str(s.worklist), *_verdict_flags(s),
-              *(("--agent-transcripts", str(s.agent_transcripts))
-                if s.agent_transcripts is not None else ()),
               "--map", str(s.map_path))),
     ]
     if s.note_file is None:
@@ -380,7 +372,16 @@ def default_runner(argv: list[str]) -> int:
     return 2
 
 
-def run_plan(steps: list[Step], runner: Runner) -> int:
+@dataclass(frozen=True)
+class PlanRun:
+    """How a run of the plan ended: the exit code, and the step it stopped at when one failed."""
+
+    rc: int
+    stopped: int | None = None       # 1-based, as `SHIP STOPPED at [k/n]` names it
+    title: str = ""                  # that step's title
+
+
+def run_plan(steps: list[Step], runner: Runner) -> PlanRun:
     """Run the steps in order; STOP at the first non-zero exit, naming the step.
 
     A skipped step must never read as a clean one, so the failure line says which steps did NOT
@@ -398,11 +399,35 @@ def run_plan(steps: list[Step], runner: Runner) -> int:
                 print("NOT RUN: " + " · ".join(remaining), file=sys.stderr)
             print("Fix the step's own report, then re-run ship — every step is safe to repeat.",
                   file=sys.stderr)
-            return rc
-    return 0
+            return PlanRun(rc=rc, stopped=i + 1, title=step.title)
+    return PlanRun(rc=0)
 
 
-def main(argv: list[str] | None = None) -> int:
+#: The options whose value is a path, which `main` reads from the folder the command ran in.
+_PATH_OPTIONS = ("--note-file", "--access-baseline", "--worklist", "--reconcile", "--fragments",
+                 "--verdicts")
+
+
+def _rerun(args: list[str], repo: Path) -> str:
+    """This very `ship` command, with the repo and every path spelled absolute: the build state is
+    read after a summary, from whatever folder the shell has drifted to by then, and a relative
+    `--note-file` would name a file there. `args` is the command `main` accepted, read the way it
+    reads them: the one positional is the repo, and each path option takes the next word."""
+    again: list[str] = []
+    it = iter(args)
+    for a in it:
+        if a in _PATH_OPTIONS:
+            value = next(it, "")
+            again += [a, str(Path(value).resolve()) if value else value]
+        elif a.startswith("-"):
+            again.append(a)
+        else:
+            again.append(str(repo))
+    return shlex.join(["coyomap", "ship", *again])
+
+
+def main(argv: list[str] | None = None, *, runner: Runner = default_runner) -> int:
+    """`runner` runs one step; the default is each subcommand's own `main`, in this process."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(USAGE)
@@ -414,7 +439,6 @@ def main(argv: list[str] | None = None) -> int:
     worklist: Path | None = None
     reconcile: Path | None = None
     fragments_dir: Path | None = None
-    agent_transcripts: Path | None = None
     verdicts: list[Path] = []
     it = iter(args)
     for a in it:
@@ -434,8 +458,6 @@ def main(argv: list[str] | None = None) -> int:
             reconcile = Path(next(it, ""))
         elif a == "--fragments":
             fragments_dir = Path(next(it, ""))
-        elif a == "--agent-transcripts":
-            agent_transcripts = Path(next(it, ""))
         elif a == "--verdicts":
             verdicts.append(Path(next(it, "")))
         elif a.startswith("-"):
@@ -459,8 +481,7 @@ def main(argv: list[str] | None = None) -> int:
                            access_baseline=access_baseline, worklist=worklist,
                            reconcile=reconcile,
                            verdicts=tuple(verdicts) if verdicts else None,
-                           fragments_dir=fragments_dir,
-                           agent_transcripts=agent_transcripts)
+                           fragments_dir=fragments_dir)
     if isinstance(inputs, str):
         print(f"ship: {inputs}", file=sys.stderr)
         return 2
@@ -495,19 +516,36 @@ def main(argv: list[str] | None = None) -> int:
         print("ship: STOPPED before step 1 — an appeal nobody can read must not reach a step that "
               "counts it.", file=sys.stderr)
         return 2
-    rc = run_plan(build_plan(inputs), default_runner)
-    if rc != 0:
-        return rc
+    plan = build_plan(inputs)
+    run = run_plan(plan, runner)
+    # THE OUTCOME, IN THE BUILD STATE, because the closing sequence is where a long build is most
+    # likely to have been summarized: what ran, where it stopped, and the exact next command.
+    state_repo = inputs.repo.resolve()
+    if run.rc != 0:
+        at = f"[{run.stopped}/{len(plan)}] {run.title}"
+        buildstate.append(state_repo, "ship", f"stopped at {at} (exit {run.rc})")
+        buildstate.append(state_repo, "next", f"fix what {at} reported, then re-run: "
+                                              f"{_rerun(args, state_repo)}")
+        return run.rc
     if inputs.note_file is None:
         print("\nSHIP PREPARED — the grounding report above is the reconcile worklist. Read it "
               "whole, then write the grounding note to a file.\n"
               f"  Next: coyomap ship {inputs.repo} --note-file <path> [--partial]")
+        buildstate.append(state_repo, "ship", f"prepared — {len(plan)} step(s) ran, ending on the "
+                                              f"grounding report the note is written from")
+        buildstate.append(state_repo, "next", f"write the grounding note from that report, then "
+                                              f"run: coyomap ship {shlex.quote(str(state_repo))} "
+                                              f"--note-file <the note file> [--partial]")
     else:
         print("\nSHIP COMPLETE — quote finalize's verdict line in the commit message "
               f"(gate block at {inputs.gate_block}), then commit the map, the .md, the pre-index "
               "and provenance. finalize printed the exact `git add -f` line ABOVE, in this output — "
               "the report file does not carry it."
               + _coverage_line(inputs))
+        buildstate.append(state_repo, "ship", f"complete — {len(plan)} step(s) ran through "
+                                              f"finalize · gate block {inputs.gate_block}")
+        buildstate.append(state_repo, "end", "ship complete · next: commit with the `git add -f` "
+                                             "line ship printed")
     return 0
 
 

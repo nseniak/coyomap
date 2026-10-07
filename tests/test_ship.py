@@ -11,11 +11,14 @@ suites, and `tests/test_cli_sweep.py` drives `ship` end-to-end against the commi
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import tempfile
 from pathlib import Path
 
-from coyomap import ship
+from coyomap import buildstate, ship
 
 
 # --- builders -------------------------------------------------------------------
@@ -166,24 +169,29 @@ def test_without_a_reconcile_file_no_assemble_carries_the_flag():
 
 # --- running --------------------------------------------------------------------
 
-def test_run_stops_at_the_first_failing_step_and_names_the_rest(capsys):
+def test_run_stops_at_the_first_failing_step_and_names_the_rest():
     with tempfile.TemporaryDirectory() as td:
         steps = ship.build_plan(make_inputs(make_repo(td)))
         calls, runner = make_recording_runner(fail_on="fix", code=3)
-        rc = ship.run_plan(steps, runner)
-        assert rc == 3, "the failing step's own exit code must propagate"
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            run = ship.run_plan(steps, runner)
+        assert run.rc == 3, "the failing step's own exit code must propagate"
+        assert run.stopped == 2 and run.title == steps[1].title, run
         assert [c[0] for c in calls] == ["anchor-drift", "fix"], (
             "a step after the failure ran — a skipped step must never happen silently, and a run "
             "one must never happen at all")
-        err = capsys.readouterr().err
-        assert "SHIP STOPPED" in err and "NOT RUN" in err and "assemble" in err
+        said = err.getvalue()
+        assert "SHIP STOPPED" in said and "NOT RUN" in said and "assemble" in said
 
 
 def test_a_clean_run_calls_every_step_once():
     with tempfile.TemporaryDirectory() as td:
         steps = ship.build_plan(make_inputs(make_repo(td)))
         calls, runner = make_recording_runner()
-        assert ship.run_plan(steps, runner) == 0
+        with contextlib.redirect_stdout(io.StringIO()):
+            run = ship.run_plan(steps, runner)
+        assert run.rc == 0 and run.stopped is None, run
         assert len(calls) == len(steps)
 
 
@@ -419,32 +427,6 @@ def test_ship_refuses_a_closer_file_with_no_skeptics_beside_it(tmp_path):
     assert isinstance(problem, str) and "appeal against nothing" in problem, problem
 
 
-def test_agent_transcripts_reach_the_report_step_and_only_that_step():
-    """Inside the build's own session the directory is found without the flag. A RETROSPECTIVE is a
-    different session, so without it the whole findings-from-the-agents channel reads NOT READ —
-    and the retrospective is the reader who most needs it."""
-    with tempfile.TemporaryDirectory() as td:
-        repo = make_repo(td)
-        note = repo / "note.txt"
-        note.write_text("319 of 1608 challenged")
-        agents = repo / "subagents"
-        agents.mkdir()
-        prepare = ship.build_plan(make_inputs(repo, agent_transcripts=agents))
-        report = prepare[-1].argv
-        assert report[:2] == ("grounding", "report"), report
-        assert "--agent-transcripts" in report and str(agents) in report, report
-        # ...and nothing else is given a flag it does not take
-        full = ship.build_plan(make_inputs(repo, note_file=note, partial=True,
-                                           agent_transcripts=agents))
-        assert [st.title for st in full if "--agent-transcripts" in st.argv] == []
-
-
-def test_without_the_flag_the_report_step_is_unchanged():
-    with tempfile.TemporaryDirectory() as td:
-        steps = ship.build_plan(make_inputs(make_repo(td)))
-        assert "--agent-transcripts" not in steps[-1].argv, steps[-1].argv
-
-
 def test_a_second_waves_verdict_file_reaches_grounding_write():
     """Retro 2026-09-30, finding 4: `grounding write --map` folds a verdict on a claim the map
     makes and the pin never held into the pin. Filtering on the pin alone handed the second wave's
@@ -467,3 +449,130 @@ def test_a_second_waves_verdict_file_reaches_grounding_write():
     write = " ".join(next(a for t, a in argvs.items() if t.startswith("grounding write")))
     assert "verdicts-added-backbone-1.json" in write, write
     assert "verdicts-stale.json" not in write, write
+
+
+# --- ship writes its outcome to the build state (round 1) -----------------------------------------
+# The closing sequence is where a long build is most likely to have been summarized, so the state
+# says what ran, where it stopped, and the exact next command.
+
+def run_ship(argv: list[str], runner: ship.Runner) -> int:
+    """`ship` in-process with an injected step runner, its output dropped."""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return ship.main(argv, runner=runner)
+
+
+def make_state_events(repo: Path) -> list[tuple[str, str]]:
+    """`(kind, text)` of every event in the repo's build state."""
+    state = buildstate.read_state(repo)
+    assert state is not None, "no build state"
+    return [(e.kind, e.text) for e in state.events]
+
+
+def make_long_dir(base: Path, length: int) -> Path:
+    """A new folder under `base` whose path is `length` characters, as a worktree's or a session
+    scratchpad's is."""
+    folder = base / ("p" * (length - len(str(base)) - 1))
+    folder.mkdir(parents=True)
+    return folder
+
+
+def run_ship_from(cwd: Path, argv: list[str], runner: ship.Runner) -> int:
+    """`run_ship` from `cwd`, the paths as a lead types them there. The folder is always restored."""
+    here = Path.cwd()
+    try:
+        os.chdir(cwd)
+        return run_ship(argv, runner)
+    finally:
+        os.chdir(here)
+
+
+def test_a_prepared_ship_writes_its_next_step():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        buildstate.start(repo)
+        _calls, runner = make_recording_runner()
+        assert run_ship([str(repo)], runner) == 0
+        events = make_state_events(repo)[1:]
+    assert [k for k, _t in events] == ["ship", "next"], events
+    assert events[0][1].startswith("prepared — 4 step(s) ran"), events
+    assert (f"coyomap ship {repo.resolve()} --note-file <the note file>") in events[1][1], events
+
+
+def test_a_stopped_ship_names_the_step_and_the_rerun():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        buildstate.start(repo)
+        _calls, runner = make_recording_runner(fail_on="fix", code=3)
+        assert run_ship([str(repo), "--partial"], runner) == 3
+        events = make_state_events(repo)[1:]
+    assert [k for k, _t in events] == ["ship", "next"], events
+    assert events[0][1].startswith("stopped at [2/4] fix apply-drift") and "(exit 3)" in events[0][1]
+    assert events[1][1].endswith(f"then re-run: coyomap ship {repo.resolve()} --partial"), events
+
+
+def test_a_stopped_ship_keeps_its_whole_rerun_at_a_real_builds_path_lengths():
+    """The paths of the 2026-10-07 build: an 87-character worktree repo, a 177-character note file
+    in the session's scratchpad. At the first line cap the re-run lost the end of the note path and
+    its `--partial`."""
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td).resolve()
+        repo = make_repo(str(make_long_dir(base / "w", 87 - len("/repo"))))
+        note = make_long_dir(base / "s", 177 - len("/grounding-note.md")) / "grounding-note.md"
+        note.write_text("319 of 1608 challenged")
+        buildstate.start(repo)
+        _calls, runner = make_recording_runner(fail_on="grounding")
+        assert run_ship([str(repo), "--note-file", str(note), "--partial"], runner) == 1
+        log = buildstate.state_path(repo).read_text(encoding="utf-8")
+        longest = max(len(line) for line in log.splitlines())
+        events = make_state_events(repo)[1:]
+    assert (len(str(repo)), len(str(note))) == (87, 177)
+    assert [k for k, _t in events] == ["ship", "next"], events
+    assert events[0][1].startswith("stopped at [4/13] grounding write"), events
+    assert events[1][1].endswith(f"then re-run: coyomap ship {repo} --note-file {note} --partial"), (
+        events)
+    assert longest > 300, "the paths no longer reach past the first cap, so this tests nothing"
+
+
+def test_the_rerun_spells_every_path_absolute():
+    """The re-run is read after a summary, from whatever folder the shell has drifted to by then,
+    so a path typed relative to the repo is written as the absolute path ship read."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td).resolve()
+        (repo / "note.md").write_text("a note")
+        buildstate.start(repo)
+        _calls, runner = make_recording_runner(fail_on="grounding")
+        code = run_ship_from(repo, [".", "--note-file", "note.md", "--worklist",
+                                    ".coyomap/verify/worklist.json", "--keep-note"], runner)
+        events = make_state_events(repo)[1:]
+    assert code == 1
+    assert events[1][1].endswith(
+        f"then re-run: coyomap ship {repo} --note-file {repo / 'note.md'} --worklist "
+        f"{repo / '.coyomap' / 'verify' / 'worklist.json'} --keep-note"), events
+
+
+def test_a_prepared_ships_next_step_quotes_a_repo_path_with_a_space():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(str(Path(td) / "my projects")).resolve()
+        buildstate.start(repo)
+        _calls, runner = make_recording_runner()
+        assert run_ship([str(repo)], runner) == 0
+        events = make_state_events(repo)[1:]
+    assert f"then run: coyomap ship '{repo}' --note-file <the note file>" in events[1][1], events
+
+
+def test_a_complete_ship_ends_the_state():
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        note = repo / "note.txt"
+        note.write_text("a note")
+        buildstate.start(repo)
+        calls, runner = make_recording_runner()
+        assert run_ship([str(repo), "--note-file", str(note)], runner) == 0
+        state = buildstate.read_state(repo)
+        events = make_state_events(repo)[1:]
+    assert calls[-1][0] == "finalize", calls[-1]
+    assert [k for k, _t in events] == ["ship", "end"], events
+    assert events[0][1].startswith(f"complete — {len(calls)} step(s) ran through finalize"), events
+    assert events[1][1] == "ship complete · next: commit with the `git add -f` line ship printed"
+    assert state is not None and not state.is_open, "a completed ship leaves the state open"
+

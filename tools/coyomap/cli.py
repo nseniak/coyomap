@@ -77,6 +77,14 @@ Commands:
   record     Append (or --replace) one `<id>: <why>` line under a recorded-exception extras
              heading — the one writer for an advisory an operator judged acceptable, so a
              record is never a hand-rolled string append into the wrong heading.
+  state      The build's short memory, written by the tools as they run: each record with its
+             command, each brief and budget, each barrier, assemble and finalize result, the
+             phase, the next step, the operator's decisions, how each wave ended. `start` opens
+             it, `phase <name>` marks a phase and prints it, `add decision|next|wave` writes a
+             line, `show` prints it.
+  findings   Product findings the agents file as they work (`add`: one line, into the agent's own
+             file) and the lead collects (`collect`: one verdict line, the whole list in
+             .coyomap/findings-report.md).
   diff       What changed between two maps, ROW BY ROW — added / dropped / changed, with the
              fields that moved. Two assembles of the SAME work (old map vs new, before vs after a
              `fix`), never two independent builds: those agree on neither numbering nor wording.
@@ -102,8 +110,9 @@ Commands:
              for what validate/audit already block on, or when a check did not run.
   credentials Scan the map folder for credential-shaped values (vendor key prefixes, key
              blocks, web tokens), archived maps aside: each hit's file, line and shape, never the
-             value, and exit 1 on any. finalize runs it for a build; an update runs it before its
-             commit.
+             value, and exit 1 on any in a file a commit takes. A hit in the build state or the
+             findings, which no commit takes, is a warning. finalize runs it for a build; an update
+             runs it before its commit.
   scope      The up-front briefing, before any work: which files will be analyzed
              (git decides — .gitignore is out), what `.coyomap/.ignore` removed, and
              which commit the map will be pinned to, warning when uncommitted code
@@ -245,6 +254,12 @@ def _dispatch(cmd: str, rest: list[str]) -> int:
     if cmd == "record":
         from coyomap import record  # stdlib-only; the one writer for a recorded exception
         return record.main(rest)
+    if cmd == "state":
+        from coyomap import buildstate  # stdlib-only; the build's memory, beside the map
+        return buildstate.main(rest)
+    if cmd == "findings":
+        from coyomap import findings  # stdlib-only; what the agents filed about the product
+        return findings.main(rest)
     if cmd == "credentials":
         from coyomap import credentials  # stdlib-only; the scan finalize runs, for an update's close
         return credentials.main(rest)

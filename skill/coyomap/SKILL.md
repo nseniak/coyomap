@@ -15,6 +15,11 @@ description: >
 
 # coyomap
 
+**Continuing from a summary?** If your context was summarized while you worked, do this before any
+other step: run `__COYOMAP_HOME__/.venv/bin/coyomap state show --repo <the repo you are mapping>`,
+re-read the method section it names, and read the `--help` of the next coyomap command before you
+run it. A summary keeps the gist and drops the flags; the build-state file keeps both.
+
 coyomap is a method (prompts) + tools for a drillable map of a codebase.
 
 **The repo is the source of truth — this skill is only a pointer into it, and is deliberately

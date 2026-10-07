@@ -25,7 +25,7 @@ from dataclasses import MISSING, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
-from coyomap import grammar
+from coyomap import buildstate, grammar, uncommitted
 from coyomap.model import (
     FORMAT,
     ID_ARRAYS,
@@ -1141,8 +1141,13 @@ def _merge_duplicate_components(m: ProjectModel) -> int:
 # `fanout-timings.json` is build telemetry that `timings` keeps beside the map for the NEXT
 # build's dispatch order — cross-build input, never map content, so it stays local like the
 # archive does.
+# The build state (`coyomap state`) and the findings the agents file (`coyomap findings`) are the
+# build's own working memory: the state is archived with its map and the findings reach the
+# operator through the reports, so neither is ever committed. Their names come from `uncommitted`,
+# the list `finalize` and `coyomap credentials` read to tell a file no commit takes.
 _GITIGNORE_KEEP: tuple[str, ...] = ("build-fragments/", "finalize-report.json",
-                                   "finalize-report.md", "dev-rebuilds/", "fanout-timings.json")
+                                   "finalize-report.md", "dev-rebuilds/", "fanout-timings.json",
+                                   *uncommitted.IGNORE_LINES)
 # `preindex.json` is a COMMITTED artifact (the viewer's symbol search reads it, pinned to the map's
 # commit), so it must NOT be ignored. Strip any stray ignore line (an older build, a hand edit) so it
 # can't drift back out of version control. Match the plain name and a root-anchored form.
@@ -1367,7 +1372,10 @@ def main(argv: list[str] | None = None) -> int:
           f"(+ generated markdown view)")
     # WS-T2: a self-describing one-line digest of WHAT this assemble did, so a transcript audit (builds
     # alias the CLI) can see the auto-clean + reconcile effects without reverse-engineering a script.
-    print(f"  {_assemble_digest(model, stats, rec_stats)}")
+    digest = _assemble_digest(model, stats, rec_stats)
+    print(f"  {digest}")
+    buildstate.append(buildstate.repo_of(out_dir), "assemble",
+                      state_text(frags, len(parts), out_dir, reconcile_path, digest))
     print(f"Next: coyomap validate {out_dir / 'project-map.json'} --check-sources")
     # AND, once the skeptics have voted, the verb that runs the whole close. A build follows these
     # `Next:` lines literally; the close was hand-typed over 57 turns on a build where `ship` was
@@ -1466,6 +1474,17 @@ def _assemble_digest(model: ProjectModel, stats: dict[str, int], rec_stats: dict
     parts.append("ops: " + ("; ".join(ops) if ops else "none"))
     return " | ".join(parts)
 
+
+
+def state_text(frags: list[Path], count: int, out_dir: Path, reconcile_path: Path | None,
+               digest: str) -> str:
+    """The build-state line of one assemble: what it read, where it wrote, whether it reconciled,
+    and its digest. After a summary, `--reconcile` is the flag a re-assemble most easily loses, and
+    an assemble without it silently reverts every assignment the reconcile file holds."""
+    folders = sorted({str(p.parent) for p in expand_directories(frags, [])})
+    read = _shown([f"{folder}/*.json" for folder in folders], 3)
+    rec = f"--reconcile {reconcile_path}" if reconcile_path is not None else "no --reconcile"
+    return f"{count} fragments ({read}) --out {out_dir} {rec} · {digest}"
 
 
 def _stamp_tool_build(model: ProjectModel) -> None:

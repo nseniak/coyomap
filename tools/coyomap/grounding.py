@@ -29,11 +29,11 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from coyomap import subverb_help
+from coyomap import buildstate, findings, subverb_help
 from coyomap.anchor_drift import load_verdicts
 from coyomap.audit_model import (
     WALK_AND_INTERFACE_KINDS,
@@ -54,18 +54,30 @@ from coyomap.audit_model import (
 from coyomap.credentials import redact
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
-from coyomap.reporting import item_lines, shown
+from coyomap.reporting import clip, item_lines, shown
+from coyomap.waveplan import WavePlan, load_plan
 
-USAGE = """usage: coyomap grounding lint   --verdicts <raw.json>... [--agent-transcripts <dir>] [--expect <batch,…>]
+USAGE = """usage: coyomap grounding lint   --verdicts <raw.json>... [--plan <wave-plan.json>]...
+                               [--agent-transcripts <dir>] [--expect <batch,…>]
        coyomap grounding lint   --tests <x-tests.json> [--agent-transcripts <dir>]
        coyomap grounding write  --worklist <audit.json> --verdicts <raw.json>... \\
                                [--out <fragment.json>] [--json] [--partial]
                                [--note <text> | --note-file <path> | --keep-note]
                                [--note-cites-other-runs] [--map <project-map.json>]
        coyomap grounding report --worklist <audit.json> --verdicts <raw.json>... [--map <map>]
-                               [--agent-transcripts <dir>] [--json]
+                               [--json]
        coyomap grounding by-element --worklist <audit.json> --verdicts <raw.json>... \\
                                --map <project-map.json> [--kind <kind>] [--json]
+
+`lint --plan <wave-plan.json>` (repeatable) reads the plan `contract skeptic --from-batches` wrote
+for one wave. Every voter it names must have its verdicts file, as with `--expect`, and the files
+that exist are linted as with `--verdicts`, so a plan needs no `--verdicts` at all: on a fresh wave
+it names every voter as missing, and those are the ones to start.
+
+Every problem `lint` counts names the verdicts files it was found in, one per line under it, each
+after its voter when a plan names the file, and a FAILED lint then lists those voters: they are the
+ones to send again. A file that is not a readable verdicts file is a problem of its own, and the
+other files are still linted.
 
 `lint --tests` checks a tests fragment against the agents' transcripts: every test it cites at a
 line must have had its BODY printed by some tool call, not only its name. Exit 1 names the rest.
@@ -87,16 +99,14 @@ acted on. It also lists the elements whose stated confidence the votes do not su
 `unverifiable`: the first needs a human decision, the second is a skeptic saying the code cannot
 answer, and the counts cannot tell them apart.
 
-It also collects the two channels in which an agent tells the LEAD something no verdict carries,
-because a claim it upheld is still a claim it had a reservation about:
+It also names the two places an agent tells the LEAD something no verdict carries:
   NOTES TO THE LEAD ON UPHELD CLAIMS  a `grounded: true` row whose note speaks to you. Confirmed
                                       reads as "nothing to do", so the row reaches nothing else.
-  FINDINGS THE AGENTS SENT UP         the closing section of each agent's final message
-                                      (`--agent-transcripts`, or this session's own, as `lint`
-                                      finds them). A harvest or trace agent files no verdict, so
-                                      this is its only channel.
-Both are PHRASE MATCHES over prose and both print their own coverage. Without
-`--agent-transcripts` and outside a session, the second says NOT READ rather than zero.
+                                      A PHRASE MATCH over prose, printed with its own coverage.
+  FINDINGS FILED BY AGENTS            what the agents filed about the product with `coyomap
+                                      findings add`, counted from <repo>/.coyomap/findings/ (the
+                                      repo the inputs name) and counted again on the first line.
+                                      `coyomap findings collect` writes the whole list.
 
 `report` ends on the `NOTE FACTS` block, the numbers the closing note must quote — the same block
 `write` prints. It used to be printed only by `write`, which is the run that REFUSES a wrong note,
@@ -939,121 +949,14 @@ def lead_notes(rows: list[dict]) -> tuple[list[LeadNote], int, int]:
     return out, len(with_note), len(upheld)
 
 
-#: A markdown heading in an agent's closing message: `## Findings the lead should know`, and the
-#: numbered form this codebase's own house style produces, `## [4] Things the lead should know`.
-_SECTION_HEADING = re.compile(
-    r"^(?P<hashes>\#{1,6})[ \t]+(?:\[[\w.]+\][ \t]*)?(?P<title>[^\n]*?)[ \t]*$", re.M)
-
-#: Which of those headings is ADDRESSED TO THE LEAD. Read off the real convention: across the 70
-#: agents of the 2026-09-13 reminderrepo build the closing sections were spelled "Findings the lead
-#: should know", "Findings worth the lead's attention", "Other findings worth passing on", "Notes
-#: worth passing on", "Other findings worth keeping", "Things the lead should know", "Three caveats
-#: the lead should weigh", "One caveat for you", "Two defects worth a second look" — nine wordings
-#: for one thing. A HEURISTIC over prose, and the output says so beside its own numbers.
-_LEAD_SECTION_TITLE = re.compile(
-    r"\blead\b|\bcaveats?\b"
-    r"|worth\s+(?:passing\s+on|keeping|reporting|noting|flagging|knowing|a\s+second\s+look"
-    r"|your\s+\w+)", re.I)
-
-_BULLET = re.compile(r"^[ \t]*(?:[-*•]|\d+[.)])[ \t]+(?P<text>.+?)[ \t]*$", re.M)
-
-
-@dataclass(frozen=True)
-class AgentFinding:
-    """One section of one build agent's closing message, addressed to the lead."""
-    agent: str          # the transcript's file stem, so the reader can open it
-    task: str           # the agent's own job description, from its sibling `.meta.json`
-    heading: str
-    items: tuple[str, ...]
-
-
-def _final_message(path: Path) -> str:
-    """The text of the LAST assistant message in one agent transcript — what the agent handed up."""
-    last = ""
-    for rec in _records(path):
-        msg = rec.get("message")
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
-            continue
-        blocks = msg.get("content")
-        if not isinstance(blocks, list):
-            continue
-        text = "\n".join(str(b.get("text") or "") for b in blocks
-                         if isinstance(b, dict) and b.get("type") == "text")
-        if text.strip():
-            last = text
-    return last
-
-
-def _agent_task(path: Path) -> str:
-    """What this agent was sent to do, from the `<stem>.meta.json` the harness writes beside it.
-
-    Without it every row reads `agent-a5626735a73ea9b47`, which tells a reader nothing about whose
-    finding it is — "Harvest Angular pages and routes" does."""
-    meta = path.with_suffix(".meta.json")
-    try:
-        doc = json.loads(meta.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    return str(doc.get("description") or "") if isinstance(doc, dict) else ""
-
-
-def _section_body(text: str, heading: "re.Match[str]") -> str:
-    """The lines under one heading, down to the next heading at the same level or shallower."""
-    depth = len(heading.group("hashes"))
-    for nxt in _SECTION_HEADING.finditer(text, heading.end()):
-        if len(nxt.group("hashes")) <= depth:
-            return text[heading.end():nxt.start()]
-    return text[heading.end():]
-
-
-def agent_findings(agent_dir: Path) -> tuple[list[AgentFinding], int, int]:
-    """(sections agents addressed to the lead, agents with a final message, transcripts read).
-
-    THE CHANNEL NOTHING READS. A build agent hands up a fragment and, when it is a skeptic, a
-    verdict file. Anything it noticed that fits in neither goes into the closing message it writes
-    to the lead — and that message is read once, by a lead 400 turns from the end, and then never
-    again. On the 2026-09-13 reminderrepo build 20 of 70 agents ended with such a section, 21
-    sections in all (a hand sweep of the same files found 13, reading fewer of the nine wordings). The
-    strongest of them came from a harvest agent, which has no verdict file at all: three Angular
-    paths declared twice with different guard sets, and a top-level route carrying no guard. The
-    three anchors it named appear ZERO times in the shipped map.
-
-    Collecting from the verdict rows alone would have seen 3 of those 13 — the skeptics — which is
-    why this reads the transcripts and `lead_notes` reads the rows. Two populations, both reported,
-    neither a superset of the other.
-
-    The second and third numbers are the DENOMINATORS the caller must print: this is a heading match
-    over prose, so the only honest thing to say is how much of the pile it read."""
-    files = _agent_transcript_files(agent_dir)
-    out: list[AgentFinding] = []
-    with_final = 0
-    for f in files:
-        final = _final_message(f)
-        if not final.strip():
-            continue
-        with_final += 1
-        task = _agent_task(f)
-        for m in _SECTION_HEADING.finditer(final):
-            title = m.group("title")
-            if not title or not _LEAD_SECTION_TITLE.search(title):
-                continue
-            body = _section_body(final, m)
-            items = tuple(b.group("text") for b in _BULLET.finditer(body))
-            if not items:
-                # A section written as a paragraph or a TABLE still counts — its lines ARE the
-                # finding, and dropping it because nobody typed a dash would lose the whole section
-                # silently. A table's `|---|---|` rule carries nothing and is dropped.
-                items = tuple(ln.strip() for ln in body.splitlines()
-                              if ln.strip() and set(ln.strip()) - set("|-: "))
-            if items:
-                out.append(AgentFinding(agent=f.stem, task=task, heading=title, items=items))
-    return out, with_final, len(files)
-
-
 def format_report(worklist_claims: list[str], grounding_rows: list[dict],
                   as_json: bool = False, live_claims: list[str] | None = None,
-                  agent_dir: Path | None = None) -> str:
+                  filed: findings.Filed | None = None) -> str:
     """WHICH claims landed in each bucket — the half `write` computes and then throws away.
+
+    `filed` is what the agents filed about the product (read beside the map, or in the repo the
+    inputs name), or None when no input names one, which the report says rather than reading as
+    "none filed".
 
     `write` resolves every claim to confirmed / refuted / unverifiable and emits only the four
     counts, so a build that needs the actual worklist (every refutation has to be reconciled, and a
@@ -1145,16 +1048,19 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
     to_lead, lead_denominator, upheld_total = lead_notes(grounding_rows)
     buckets["lead_notes"] = [{"claim": n.claim, "skeptic": n.skeptic, "evidence": n.evidence,
                               "note": n.note, "said": n.said} for n in to_lead]
-    # THE OTHER HALF OF THE SAME CHANNEL, and the bigger one: only a SKEPTIC writes a verdict row,
-    # so the rows above cannot carry a word from a harvest, trace, gap-fill or test agent. Those
-    # speak only in their closing message. Omitted, not emptied, when no transcript directory was
-    # given: "nothing found" and "nobody looked" must not read alike.
-    from_agents: list[AgentFinding] = []
-    agents_read = agents_total = 0
-    if agent_dir is not None:
-        from_agents, agents_read, agents_total = agent_findings(agent_dir)
-        buckets["agent_findings"] = [{"agent": f.agent, "task": f.task, "heading": f.heading,
-                                      "items": list(f.items)} for f in from_agents]
+    # WHAT THE AGENTS FILED ABOUT THE PRODUCT, the bigger channel: only a SKEPTIC writes a verdict
+    # row, so the rows above cannot carry a word from a harvest, trace, gap-fill or test agent. Each
+    # agent files what it notices into its own file with `coyomap findings add`, the moment it sees
+    # it. This report counts them and writes nothing: `findings collect` is the one writer of the
+    # list. They were read off each agent's closing message until the 2026-10-07 mcpolis build,
+    # where every hand-back arrived as a tool call and that reader saw 0 of 126.
+    # Omitted, not emptied, when no input names a repo: "nothing filed" and "nobody looked" must
+    # not read alike.
+    filed_n = len(filed.findings) if filed is not None else 0
+    if filed is not None:
+        buckets["filed_findings"] = [{"agent": f.agent, "kind": f.kind, "where": list(f.where),
+                                      "text": f.text, "at": f.at} for f in filed.findings]
+        buckets["filed_findings_malformed"] = [{"line": m} for m in filed.malformed]
     if as_json:
         return redact(json.dumps(buckets, indent=2, ensure_ascii=False))
     out: list[str] = []
@@ -1174,10 +1080,10 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
         # upheld rows happened at all, and a silent zero reads the same as a check nobody ran.
         + (f", {len(closer_rows)} closed on appeal" if closer_rows else "")
         + f", {len(to_lead)} upheld with a note to the lead"
-        + (f", {len(from_agents)} finding(s) sent up by agents" if agent_dir is not None
-           # NOT a zero. Nobody looked, which is a different answer from "nobody found anything",
-           # and this report is read through a `head`.
-           else ", AGENT FINDINGS NOT READ (no --agent-transcripts)")
+        + (f", {filed_n} finding(s) filed by agents" if filed is not None
+           # NOT a zero. Nobody could look, which is a different answer from "nobody filed
+           # anything", and this report is read through a `head`.
+           else ", filed findings unknown (no input under a <repo>/.coyomap/)")
         + (f" · {still_live_n} REFUTED CLAIM(S) STILL IN THE MAP" if still_live_n else ""))
     if live is not None:
         sup = buckets["superseded"]
@@ -1319,44 +1225,27 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
                        + (f"  {n.evidence}" if n.evidence else ""))
             said = n.said if len(n.said) <= 320 else n.said[:320] + " …"
             out.append(f"      {'' if n.said == n.note else '…'}{said}")
-    # WHAT THE OTHER AGENTS SENT UP. A harvest, trace, gap-fill or test agent writes no verdict
-    # file, so nothing above can carry a word of theirs; their closing message is the only channel
-    # they have, and it is read once by a lead hundreds of turns from the end.
-    if agent_dir is not None:
-        senders = len({f.agent for f in from_agents})
-        out.append(f"\nFINDINGS THE AGENTS SENT UP ({len(from_agents)} section(s) from {senders} "
-                   f"agent(s)) — the closing message each build agent wrote to you. A harvest or "
-                   f"trace agent files no verdict, so this is its ONLY channel; on the build this "
-                   f"check was written for, the strongest finding in it was an unguarded route "
-                   f"named nowhere in the shipped map.")
-        out.append(f"  Heading match over {agents_read} of {agents_total} agent transcript(s) in "
-                   f"{agent_dir} — the ones with a closing message — looking for a heading that "
-                   f"names the lead, a caveat, or something worth passing on. An agent that says it "
-                   f"under no heading is NOT below.")
-        for f in from_agents:
-            out.append(f"  * {f.task or f.agent}   [{f.agent}]  \"{f.heading}\"")
-            for item in f.items:
-                out.append(f"      - {item if len(item) <= 300 else item[:300] + ' …'}")
+    # WHAT THE AGENTS FILED. One line, the same counts `findings collect` prints, and always there:
+    # "none filed" is an answer, and so is "unknown" when no input names a repo. The list stays in
+    # the agents' files; this report is what the note is written from, and the note needs the count.
+    out.append("\n" + findings.reader_line(filed))
+    if filed is not None and (filed.findings or filed.malformed):
+        out.append("  " + findings.READER_GUIDANCE)
     out.append(f"\nconfirmed: {len(buckets['confirmed'])} of {len(worklist_claims)} claim(s)")
     # The trailer half of the both-ends rule above: a `| tail -N` reader gets this even when the
     # section itself scrolled off the top. Only printed when it is non-zero, so a clean run does
     # not end on a scary-looking line.
     # The trailer half of the both-ends rule, for the notes to the lead as well: a `| tail -N`
     # reader gets the count even when the section scrolled off the top.
-    if to_lead or from_agents:
+    if to_lead or filed_n:
         out.append(
             "\nTO THE LEAD: "
             + " · ".join(
                 ([f"{len(to_lead)} upheld claim(s) carry a note written for you (NOTES TO THE LEAD "
-                  f"ON UPHELD CLAIMS above)"] if to_lead else [])
-                + ([f"{len(from_agents)} closing section(s) from build agents (FINDINGS THE AGENTS "
-                    f"SENT UP above)"] if from_agents else []))
-            + ". Neither is a refutation and nothing blocks on them; nothing else collects them "
-              "either.")
-    if agent_dir is None:
-        out.append("\nAGENT FINDINGS NOT READ — no --agent-transcripts directory, so the closing "
-                   "message every build agent wrote to you was not opened. That is not a clean "
-                   "result; it is an unread channel.")
+                  f"ON UPHELD CLAIMS above), which nothing else collects"] if to_lead else [])
+                + ([f"{filed_n} finding(s) filed by agents (FINDINGS FILED BY AGENTS above), each "
+                    f"`risk` for the operator"] if filed_n else []))
+            + ". Neither is a refutation and nothing blocks on them.")
     if still_live_n:
         kept_n = len(buckets["kept_on_appeal"])
         out.append(f"\nSTILL IN THE MAP: {still_live_n} refuted claim(s) the map carries verbatim "
@@ -2019,9 +1908,64 @@ class VerdictLint:
     reason `assemble.FragmentLoad` exists."""
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: Every row of every file the lint could read, pooled: what its verdict line counts.
+    rows: list[dict] = field(default_factory=list)
+    #: The voters a wave plan names for the files a problem was found in, in the order found: the
+    #: ids a runner retries. Empty without a plan.
+    voters: list[str] = field(default_factory=list)
 
 
-def _closer_file_faults(paths: list[str]) -> list[str]:
+@dataclass(frozen=True)
+class _VerdictFile:
+    """One verdicts file as the lint reads it: its path as given, the voter a wave plan names for
+    it ("" without a plan), and its rows."""
+    path: str
+    voter: str
+    rows: tuple[dict, ...]
+
+
+def _file_label(path: str, voter: str) -> str:
+    """How a lint problem names a file: its path, after the voter a wave plan gave it, so a runner
+    retries that voter by the id it starts it with."""
+    return f"voter {voter} — {path}" if voter else path
+
+
+def _found_in(files: Sequence[_VerdictFile], hit: Callable[[dict], bool],
+              lint: VerdictLint) -> str:
+    """The files a problem was found in, ONE PER LINE under it, each with how many of its rows the
+    problem covers; each file's voter joins `lint.voters`.
+
+    The runner retries "each id the lint still names", and a problem counted over the pooled rows
+    of every file named no file and no voter: a runner holding a FAILED lint had nothing to retry."""
+    hits = [(f, n) for f in files if (n := sum(1 for r in f.rows if hit(r)))]
+    for f, _n in hits:
+        if f.voter and f.voter not in lint.voters:
+            lint.voters.append(f.voter)
+    if not hits:
+        return ""
+    return (f"\nFound in {len(hits)} verdicts file(s):\n"
+            + item_lines([f"{_file_label(f.path, f.voter)} ({n} row(s))" for f, n in hits], None))
+
+
+def _lacks(key: str) -> Callable[[dict], bool]:
+    """Whether a row has no `key`, or only whitespace there."""
+    return lambda row: not str(row.get(key) or "").strip()
+
+
+def _legal_grounded(row: dict) -> bool:
+    """`grounded` in the vocabulary every verdicts file uses: a JSON boolean, or "unverifiable"."""
+    value = row.get("grounded")
+    return value is True or value is False or (isinstance(value, str)
+                                               and value.lower() == "unverifiable")
+
+
+def _exit_reason(exc: SystemExit, path: str) -> str:
+    """What `load_verdicts` said when it refused one file, without the prefix naming that file."""
+    said = str(exc.code) if exc.code is not None else ""
+    return said.removeprefix("ERROR: ").removeprefix(f"--verdicts {path}").strip(" :") or said
+
+
+def _closer_file_faults(files: Sequence[_VerdictFile], lint: VerdictLint) -> list[str]:
     """Is each file the KIND of file its name says it is?
 
     ONE DIRECTION ONLY, now that `closer_faults` reads the rows: an appeal word inside a
@@ -2030,21 +1974,21 @@ def _closer_file_faults(paths: list[str]) -> list[str]:
     direction, a `closer-*.json` whose rows carry no readable word, is a row fault and is caught by
     `closer_faults` wherever the file is called `closer.json`, `appeals-a.json` or anything else."""
     faults: list[str] = []
-    for path in paths:
-        if not Path(path).name.startswith("verdicts-"):
+    for f in files:
+        if not Path(f.path).name.startswith("verdicts-"):
             continue
-        rows, _notes = load_verdicts([path])
-        appeals = [r for r in rows if is_closer_row(r)]
+        appeals = [r for r in f.rows if is_closer_row(r)]
         if appeals:
             faults.append(
-                f"{Path(path).name}: {len(appeals)} of {len(rows)} row(s) carry a `verdict` field "
-                f"inside a skeptics file, so they are read as APPEALS and drop out of the vote "
-                f"tally. A closer writes its own `verify/closer-<agent>.json`; move them there, or "
-                f"drop the field.")
+                f"{len(appeals)} of {len(f.rows)} row(s) carry a `verdict` field inside a skeptics "
+                f"file, so they are read as APPEALS and drop out of the vote tally. A closer writes "
+                f"its own `verify/closer-<agent>.json`; move them there, or drop the field."
+                + _found_in([f], is_closer_row, lint))
     return faults
 
 
-def lint_verdicts(paths: list[str], agent_dir: Path | None = None) -> VerdictLint:
+def lint_verdicts(paths: list[str], agent_dir: Path | None = None,
+                  voters: Mapping[str, str] | None = None) -> VerdictLint:
     """Shape check over raw verdict files, WITHOUT needing a worklist or a map.
 
     `grounding write` already refuses a malformed record — but it runs at the very end of a build,
@@ -2068,44 +2012,83 @@ def lint_verdicts(paths: list[str], agent_dir: Path | None = None) -> VerdictLin
     pass this as a note. Its tell was 40 claims in 95 seconds off one grep — a RATE, not a missing
     path — and a rate is not something this command can see. Do not treat `VERDICTS OK` as evidence
     that a pass was honest.
+
+    EVERY PROBLEM NAMES THE FILES IT WAS FOUND IN, one per line under it, each after its voter when
+    `voters` (a file's resolved path → the voter a wave plan names for it) knows the file. The
+    problems are counted over the rows of every file pooled, and a count names nobody: a wave
+    runner retries the ids the lint names, and a FAILED lint left it none. A file that is no
+    verdicts file at all (a skeptic stopped mid-write) is one more problem, and the rest are still
+    linted: `load_verdicts` exits on the first such file, which hid every other file's problems.
     """
     out = VerdictLint()
-    rows, load_notes = load_verdicts(paths)
-    out.notes += load_notes
+    named = voters or {}
+    # The voters in the order their files were given (a plan's: its dispatch order), which is the
+    # order `out.voters` is told in, whichever problem found each one first.
+    given = [named.get(str(Path(p).resolve()), "") for p in paths]
+    files: list[_VerdictFile] = []
+    unreadable: list[str] = []
+    for p, voter in zip(paths, given):
+        try:
+            file_rows, _notes = load_verdicts([p])
+        except SystemExit as exc:
+            unreadable.append(f"{_file_label(p, voter)}: {_exit_reason(exc, p)}")
+            if voter and voter not in out.voters:
+                out.voters.append(voter)
+            continue
+        files.append(_VerdictFile(p, voter, tuple(file_rows)))
+    if unreadable:
+        out.problems.append(f"{len(unreadable)} file(s) cannot be read as a verdicts file, so "
+                            f"their rows count nowhere (a skeptic stopped mid-write leaves one):\n"
+                            + item_lines(unreadable, None))
+    if files:
+        out.rows, load_notes = load_verdicts([f.path for f in files])
+        out.notes += load_notes
+    rows = out.rows
     if not rows:
-        out.problems.append("no verdict rows found in " + ", ".join(paths))
-        return out
-    out.problems += closer_faults(rows) + _closer_file_faults(paths)
+        if files:
+            out.problems.append(f"no verdict rows found in {len(files)} file(s):\n"
+                                + item_lines([_file_label(f.path, f.voter) for f in files], None))
+        return _in_given_order(out, given)
+    out.problems += [fault + _found_in(files, lambda r: is_closer_row(r) and not closer_word(r),
+                                       out)
+                     for fault in closer_faults(rows)]
+    out.problems += _closer_file_faults(files, out)
 
-    bad = sorted({f"{r.get('grounded')!r}" for r in rows
-                  if not (r.get("grounded") is True or r.get("grounded") is False
-                          or (isinstance(r.get("grounded"), str)
-                              and r.get("grounded", "").lower() == "unverifiable"))})
+    bad = sorted({f"{r.get('grounded')!r}" for r in rows if not _legal_grounded(r)})
     if bad:
         out.problems.append(
             f"{len(bad)} unrecognised `grounded` value(s): {', '.join(bad)}. The vocabulary is the "
             f"JSON booleans true / false, or the string \"unverifiable\" — `\"true\"` quoted is the "
             f"one that has actually shipped, and a skeptic's own self-check cannot see it because "
-            f"printing str(value) renders 'true' either way.")
+            f"printing str(value) renders 'true' either way."
+            + _found_in(files, lambda r: not _legal_grounded(r), out))
 
-    for field in ("claim", "evidence", "skeptic"):
-        missing = sum(1 for r in rows if not str(r.get(field) or "").strip())
+    for key in ("claim", "evidence", "skeptic"):
+        missing = sum(1 for r in rows if _lacks(key)(r))
         if missing:
-            out.problems.append(f"{missing} row(s) have no `{field}` — "
-                            + {"claim": "the record pairs rows to claims by that exact string",
-                               "evidence": "a verdict with no line is an opinion",
-                               "skeptic": "it is what tells two independent votes from one file "
-                                          "passed in twice"}[field])
+            out.problems.append(f"{missing} row(s) have no `{key}` — "
+                                + {"claim": "the record pairs rows to claims by that exact string",
+                                   "evidence": "a verdict with no line is an opinion",
+                                   "skeptic": "it is what tells two independent votes from one "
+                                              "file passed in twice"}[key]
+                                + _found_in(files, _lacks(key), out))
 
     if agent_dir is not None:
-        evidence = _fabricated_evidence(rows, agent_dir)
+        evidence = _fabricated_evidence(rows, agent_dir, files, out)
         # The weak half says of itself that it is not proof, so it rides as a NOTE. A signal that
         # fails the lint is a signal an agent must clear, and the only way to clear this one is to
         # re-read files it may have read already — which teaches the next agent to route its reading
         # around the check rather than to look again.
         out.problems += evidence.problems
         out.notes += evidence.notes
-    return out
+    return _in_given_order(out, given)
+
+
+def _in_given_order(lint: VerdictLint, given: Sequence[str]) -> VerdictLint:
+    """`lint` with its voters in the order their files were given."""
+    found = set(lint.voters)
+    lint.voters = [v for v in dict.fromkeys(given) if v and v in found]
+    return lint
 
 
 #: A note asserting the skeptic opened something — the claim this check tests against the record of
@@ -2466,16 +2449,20 @@ def _resolves(claimed: str, pool: set[str]) -> bool:
     return len(same_name) == 1
 
 
-def _fabricated_evidence(rows: list[dict], agent_dir: Path) -> VerdictLint:
+def _fabricated_evidence(rows: list[dict], agent_dir: Path, files: Sequence[_VerdictFile],
+                         lint: VerdictLint) -> VerdictLint:
     """What the transcript says about files a row CITES but the agent never opened.
 
     A `VerdictLint`, not a `(list, list)` pair, for the reason that class already exists: both slots
     are empty on the happy path, so a swapped return reads as correct behaviour and no test can tell
-    the difference. `tests/test_cli_contract` refuses the positional shape by name."""
-    files = _agent_transcript_files(agent_dir)
-    opened = _opened_files(files)
-    mentioned = _mentioned_files(files)
-    if not files:
+    the difference. `tests/test_cli_contract` refuses the positional shape by name.
+
+    `files` are the verdicts files the rows came from: the ghost-citation problem names each one
+    that holds such a row (`_found_in`), and its voter joins `lint.voters`."""
+    transcripts = _agent_transcript_files(agent_dir)
+    opened = _opened_files(transcripts)
+    mentioned = _mentioned_files(transcripts)
+    if not transcripts:
         # Name the directory that DOES work. The lead is handed
         # `<session>/tasks/<id>.output` at dispatch and has to guess that the readable copies live
         # in `<session>/subagents/`; "holds no .jsonl" told it neither.
@@ -2501,13 +2488,15 @@ def _fabricated_evidence(rows: list[dict], agent_dir: Path) -> VerdictLint:
     # second-look note ended on its count, at the end of one 912-character line, and a
     # `tail -30 | cut -c1-300` cut it off on the 2026-10-07 mcpolis build.
     if ghosts:
+        ghost_set = set(ghosts)
         found.problems.append(
             f"{sum(claimed[g] for g in ghosts)} row(s) rest on {len(ghosts)} file(s) cited as "
-            f"evidence that appear NOWHERE in the {len(files)} transcript(s) given:\n"
+            f"evidence that appear NOWHERE in the {len(transcripts)} transcript(s) given:\n"
             + item_lines([f"{g} ({claimed[g]} row(s))" for g in ghosts], 8, unit="file(s)")
             + "\nA cited anchor is a statement about your own work. Pass the transcripts of EVERY "
               "skeptic in the pass — rows are pooled across all of them, so a missing transcript "
-              "reads exactly like a fabricated citation.")
+              "reads exactly like a fabricated citation."
+            + _found_in(files, lambda r: bool(_claimed_files(r) & ghost_set), lint))
     if unopened:
         found.notes.append(
             f"{sum(claimed[u] for u in unopened)} row(s) are worth a second look: they cite "
@@ -2520,22 +2509,6 @@ def _fabricated_evidence(rows: list[dict], agent_dir: Path) -> VerdictLint:
     return found
 
 
-def _repo_of(*paths: str | None) -> Path | None:
-    """The repo a `<repo>/.coyomap/...` path belongs to — the first of `paths` that names one.
-
-    Every input these verbs take lives under `.coyomap/`: the map, the pinned worklist, the verdict
-    files. So the project is always knowable from an argument, and never has to be guessed from the
-    working directory — which is a different project whenever a coyomap clone is driving the build.
-    None when no argument names one, and then the caller falls back to cwd as before."""
-    for path in paths:
-        if not path:
-            continue
-        parts = Path(path).resolve().parts
-        if ".coyomap" in parts:
-            return Path(*parts[:parts.index(".coyomap")])
-    return None
-
-
 def _resolve_agent_dir(agent_dir: str | None, env: Mapping[str, str] | None,
                        repo: Path | None = None, home: Path | None = None) -> str | None:
     """`--agent-transcripts`, or this session's own sub-agent directory when it can be found.
@@ -2546,11 +2519,11 @@ def _resolve_agent_dir(agent_dir: str | None, env: Mapping[str, str] | None,
 
     `repo` is WHICH PROJECT'S transcripts, and it must be the repo the work is about rather than
     wherever the command was typed. Run from a coyomap clone against another repo's map, the cwd
-    default read the CLONE's session — 26 transcripts of coyomap's own development. In `report`
-    that printed coyomap's own components inside a report about a different product; in `lint` it
-    exits 1 with `28 file(s) are cited as evidence but appear NOWHERE in the 59 transcript(s)
-    given`, accusing 28 real files of fabricated citations. BOTH verbs pass it now, derived from
-    the map, the worklist or the verdict files — every one of which lives under `<repo>/.coyomap/`."""
+    default read the CLONE's session — 26 transcripts of coyomap's own development. In `lint` it
+    exited 1 with `28 file(s) are cited as evidence but appear NOWHERE in the 59 transcript(s)
+    given`, accusing 28 real files of fabricated citations. So it is derived from the map, the
+    worklist, the verdict files or the plan (`buildstate.repo_of`) — each lives under
+    `<repo>/.coyomap/`."""
     if agent_dir is not None:
         return agent_dir
     sid = (os.environ if env is None else env).get(SESSION_ENV)
@@ -2566,7 +2539,7 @@ def _resolve_agent_dir(agent_dir: str | None, env: Mapping[str, str] | None,
 def _lint_tests(tests_path: Path, agent_dir: str | None,
                env: Mapping[str, str] | None) -> int:
     """`grounding lint --tests <fragment>`: the test citations no agent read the body of."""
-    repo = _repo_of(str(tests_path))
+    repo = buildstate.repo_of(tests_path)
     found = _resolve_agent_dir(agent_dir, env, repo)
     if found is None or repo is None:
         print("ERROR: grounding lint --tests needs the agents' transcripts (--agent-transcripts "
@@ -2585,9 +2558,14 @@ def _lint_tests(tests_path: Path, agent_dir: str | None,
               + item_lines(unread, 12, unit="citation(s)")
               + "\nRead each test before citing it (the tests contract): its name says what the "
                 "author meant, its body what it checks.", file=sys.stderr)
+        buildstate.append(repo, "barrier",
+                          f"TESTS FAILED — {len(unread)} of {checked} test citation(s) in "
+                          f"{tests_path.name} rest on the name alone: {shown(unread, 4)}")
         return 1
     print(f"TESTS OK — {checked} of {len(cites)} test citation(s) checked; every one had its "
           f"body printed by a tool call")
+    buildstate.append(repo, "barrier", f"TESTS OK — {checked} of {len(cites)} test citation(s) in "
+                                       f"{tests_path.name} checked, every body printed")
     return 0
 
 
@@ -2615,6 +2593,7 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
     tests_path: str | None = None
     expect: list[str] = []
     verdicts: list[str] = []
+    plan_paths: list[str] = []
     note = ""
     note_file: str | None = None
     keep_note = False
@@ -2625,12 +2604,26 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
     i = 0
     while i < len(rest):
         a = rest[i]
+        if a in ("--agent-transcripts", "--plan") and verb != "lint":
+            # LINT'S OWN FLAGS. `report` read the agents' transcripts for findings too, until the
+            # agents filed them with `coyomap findings add`; accepting the flag there now would read
+            # as a channel this verb still opens.
+            return subverb_help.usage_error(
+                USAGE, verb, f"unknown option(s): {a} — only `grounding lint` takes it"
+                + ("; `report` counts what the agents filed with `coyomap findings add`"
+                   if a == "--agent-transcripts" and verb == "report" else ""))
         if a == "--agent-transcripts":
             i += 1
             if i >= len(rest):
                 print("ERROR: --agent-transcripts needs a directory", file=sys.stderr)
                 return 2
             agent_dir = rest[i]
+        elif a == "--plan":
+            i += 1
+            if i >= len(rest):
+                print("ERROR: --plan needs a wave plan file", file=sys.stderr)
+                return 2
+            plan_paths.append(rest[i])
         elif a == "--json":
             as_json = True
         elif a == "--partial":
@@ -2676,57 +2669,99 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         else:
             return subverb_help.usage_error(USAGE, verb, f"unknown option(s): {a}")
         i += 1
-    if verb == "lint" and tests_path and not verdicts:
+    if verb == "lint" and tests_path and not verdicts and not plan_paths:
         return _lint_tests(Path(tests_path), agent_dir, env)
     if verb == "lint":
+        # A WAVE PLAN NAMES EVERY VOTER AND ITS FILE, so a runner never types an id list. Each
+        # voter joins `--expect`, and each file that exists joins `--verdicts`; zero files is
+        # allowed, because on a fresh wave the missing list IS the list of skeptics to start.
+        plans: list[WavePlan] = []
+        for plan_path in plan_paths:
+            try:
+                plans.append(load_plan(Path(plan_path)))
+            except ValueError as exc:
+                print(f"ERROR: --plan: {exc}", file=sys.stderr)
+                return 2
+        planned = [a for plan in plans for a in plan.agents]
+        listed = {Path(v).resolve() for v in verdicts}
+        for agent in planned:
+            if agent.verdicts.is_file() and agent.verdicts.resolve() not in listed:
+                listed.add(agent.verdicts.resolve())
+                verdicts.append(str(agent.verdicts))
         # LINT NEEDS ONLY THE VERDICTS. Requiring a worklist and a map here would put it at the end
         # of the build again, which is the whole thing it exists to move earlier.
-        if not verdicts:
-            print("ERROR: grounding lint needs at least one --verdicts <file> (or --tests "
-                  "<tests fragment>)", file=sys.stderr)
+        if not verdicts and not plans:
+            print("ERROR: grounding lint needs at least one --verdicts <file> (or --plan <wave "
+                  "plan>, or --tests <tests fragment>)", file=sys.stderr)
             return 2
+        repo = buildstate.repo_of(map_path, worklist_path, *verdicts, *plan_paths,
+                                  *(plan.verify for plan in plans))
+        from_plan = f" · plan {', '.join(plan_paths)}" if plan_paths else ""
         # `--expect` NAMES THE BATCHES THAT MUST HAVE LANDED. Without it this command lints the
         # files that happen to exist and cannot see a batch that produced none, so a fan-out whose
         # last skeptic was still writing linted clean: one live run printed
         # `VERDICTS OK — 18 file(s) well-formed` while a nineteenth was seconds from landing, and
         # five verdict-consuming commands then ran against the incomplete set and were redone.
         # A missing file is the one failure a reader cannot spot by eye, because nothing is there.
-        if expect:
+        expected = list(dict.fromkeys([*(x.strip() for x in expect if x.strip()),
+                                       *(a.id for a in planned)]))
+        if expected:
             # A CLOSER FILE IS NAMED BY ITS AGENT, NOT BY A BATCH. `--expect` names the skeptic
             # batches that must have landed, and `closer-<agent id>.json` matches none of them —
             # harmless, until someone writes `--expect closer` and reads the silence as a pass. Both
             # prefixes are stripped, so a closer file can be expected by the name it actually has.
-            have = {Path(v).stem.replace("verdicts-", "", 1).replace("closer-", "", 1)
-                    for v in verdicts}
-            missing = [b for b in (x.strip() for x in expect) if b and b not in have]
+            # A planned voter is answered by the file its plan names, whatever that file is called.
+            have = ({Path(v).stem.replace("verdicts-", "", 1).replace("closer-", "", 1)
+                     for v in verdicts}
+                    | {a.id for a in planned if a.verdicts.is_file()})
+            missing = [b for b in expected if b not in have]
             if missing:
-                print(f"VERDICTS INCOMPLETE — {len(missing)} expected batch(es) have no verdicts "
-                      f"file: {', '.join(missing)}", file=sys.stderr)
+                # ONE ID PER LINE, the whole list: a runner starts exactly these, so a `+N more`
+                # here would be N skeptics nobody starts.
+                print(f"VERDICTS INCOMPLETE — {len(missing)} of {len(expected)} expected batch(es) "
+                      f"have no verdicts file:\n" + item_lines(missing, None), file=sys.stderr)
                 print("The fan-out has not finished, or an agent returned without writing. Do NOT "
                       "run anchor-drift, apply-drift or grounding write yet: each consumes the "
                       "verdict set and would have to be redone.", file=sys.stderr)
+                buildstate.append(repo, "barrier",
+                                  f"VERDICTS INCOMPLETE — {len(missing)} of {len(expected)} "
+                                  f"expected batch(es) have no verdicts file: "
+                                  f"{shown(missing, 8)}{from_plan}")
                 return 1
-        agent_dir = _resolve_agent_dir(agent_dir, env,
-                                       _repo_of(map_path, worklist_path, *verdicts))
-        lint = lint_verdicts(verdicts, Path(agent_dir) if agent_dir else None)
+        agent_dir = _resolve_agent_dir(agent_dir, env, repo)
+        # Each problem names the files it was found in, and each planned file its voter: the ids a
+        # runner retries.
+        voters = {str(a.verdicts.resolve()): a.id for a in planned}
+        lint = lint_verdicts(verdicts, Path(agent_dir) if agent_dir else None, voters)
         problems = lint.problems
         for n in lint.notes:
             print(n, file=sys.stderr)
+        lint_rows = lint.rows
         if problems:
             print(f"VERDICTS FAILED — {len(problems)} problem(s)", file=sys.stderr)
             for pr in problems:
                 # A problem's own list sits on lines of its own, indented under its bullet.
                 print("  - " + pr.replace("\n", "\n    "), file=sys.stderr)
+            if lint.voters:
+                print(f"{len(lint.voters)} voter(s) these problems were found in:\n"
+                      + item_lines(lint.voters, None), file=sys.stderr)
             print("Fix these before `grounding write`; it refuses the same shapes at the END of "
                   "the build, where the skeptic that produced them is a hundred turns gone.",
                   file=sys.stderr)
+            buildstate.append(repo, "barrier",
+                              f"VERDICTS FAILED — {len(problems)} problem(s) over {len(verdicts)} "
+                              f"file(s), {len(lint_rows)} row(s): "
+                              + shown([clip(pr.splitlines()[0], 90) for pr in problems], 2,
+                                      sep=" · ")
+                              + (f" · voters to retry: {shown(lint.voters, 12)}"
+                                 if lint.voters else "")
+                              + from_plan)
             return 1
         # SAY WHAT WAS CHECKED, not just that nothing failed. With `--agent-transcripts` this
         # printed the same "well-formed" line as without it, so a run that tested 16 of 949 rows
         # and a run that tested none were indistinguishable — and the operator read the silence as
         # a clean bill of health on the whole pass. The evidence check can only speak about a note
         # that NAMES a file it read; that number belongs on screen beside the verdict.
-        lint_rows, _ = load_verdicts(verdicts)
         rows_total, rows_testable = _read_claim_coverage(lint_rows)
         # SAY WHEN APPEALS ARE IN THE PILE. A closer row loads like any other and is counted by
         # nothing as a vote, so a run over 38 skeptic files and a run over 38 plus two closer files
@@ -2741,6 +2776,12 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
                  f"; evidence check covered {rows_testable} of {rows_total} row(s) — every row "
                  f"citing a file, in `evidence` or in a `read <file>` note. A row anchored on a "
                  f"SYMBOL, or on a filename this does not recognise, cannot be tested this way"))
+        buildstate.append(repo, "barrier",
+                          f"VERDICTS OK — {len(verdicts)} file(s), {rows_total} row(s)"
+                          + (f", {len(closer_rows)} closer appeal row(s)" if closer_rows else "")
+                          + (f", every one of {len(expected)} expected batch(es) landed"
+                             if expected else ", no --expect or --plan: a missing file is unseen")
+                          + from_plan)
         return 0
 
     if verb == "refutations":
@@ -2887,17 +2928,17 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
                                     only_kind=only_kind))
         return 0
     if verb == "report":
-        # THE AGENTS' OWN CLOSING MESSAGES, read with the same discovery `lint` uses — so the
-        # channel is read by default on a build, and by name (`--agent-transcripts`) afterwards.
-        # Keyed on the MAP'S OWN REPO, the way `finalize` derives it, and not on the directory the
-        # command was typed in: those differ whenever a coyomap clone is driving another repo's
-        # build, and the cwd answer is another product's agents.
-        report_agent_dir = _resolve_agent_dir(
-            agent_dir, env, _repo_of(map_path, worklist_path, *verdicts))
+        # WHAT THE AGENTS FILED, read beside the MAP, the way `finalize` reads it (an archived
+        # map's findings moved with it), or else in the repo the inputs name — and never in the
+        # directory the command was typed in: those differ whenever a coyomap clone is driving
+        # another repo's build, and the cwd answer is another product's.
+        repo = buildstate.repo_of(worklist_path, *verdicts)
+        filed = (findings.load_folder(findings.beside_map(Path(map_path))) if map_path
+                 else findings.load(repo) if repo is not None else None)
         for fault in closer_faults(rows):
             print(f"WARNING: {fault}", file=sys.stderr)
         print(format_report(claims, rows, as_json=as_json, live_claims=live_claims,
-                            agent_dir=Path(report_agent_dir) if report_agent_dir else None))
+                            filed=filed))
         # NAME THE NEXT VERB, HERE. This report is what the closing note is written FROM, so a lead
         # reading it is standing exactly at the start of the close — and `ship` runs that whole
         # close in one command. It was reached for ZERO times on the 2026-09-02 build, which then
@@ -2980,12 +3021,17 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(text + "\n", encoding="utf-8")
-        print(f"wrote {out_path}: {record['claims_challenged']} of {record['claims_total']} claim(s) "
-              f"challenged — {record['claims_confirmed']} confirmed, {record['claims_refuted']} "
-              f"refuted, {record['claims_unverifiable']} unverifiable"
-              + (f" · vs the live map: {record['claims_superseded']} superseded, "
-                 f"{record['claims_added_since']} added since the pin" if live_claims is not None
-                 else " · no --map, so the record does not state how the live map differs"))
+        written = (f"wrote {out_path}: {record['claims_challenged']} of {record['claims_total']} "
+                   f"claim(s) challenged — {record['claims_confirmed']} confirmed, "
+                   f"{record['claims_refuted']} refuted, {record['claims_unverifiable']} unverifiable"
+                   + (f" · vs the live map: {record['claims_superseded']} superseded, "
+                      f"{record['claims_added_since']} added since the pin"
+                      if live_claims is not None
+                      else " · no --map, so the record does not state how the live map differs"))
+        print(written)
+        # A RECORD WRITTEN, never one refused or printed: the state says what the map carries.
+        buildstate.append(buildstate.repo_of(out_path, map_path, worklist_path, *verdicts),
+                          "grounding", written)
         # SAY IT AT THE MOMENT IT HAPPENS. The line above is the pinned pass and reads as complete
         # even when the shipped map is not; a build that saw only that line wrote "All 209 claims
         # were challenged" into a permanent note. `anchor-drift` had already said 199 of 209 ten

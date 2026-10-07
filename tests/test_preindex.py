@@ -19,7 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coyomap import preindex, preindex_lib, validate_analysis  # tool #4: compression-coverage check
+from coyomap import buildstate, preindex, preindex_lib, validate_analysis  # tool #4: compression-coverage check
 from coyomap.ignorefile import bad_line_disclosure
 from coyomap.validate_analysis import _REF_INLINE, _REF_LINK, strip_anchor
 
@@ -550,3 +550,24 @@ def test_gr1_reads_the_scanned_root_not_the_out_path():
     root = make_repo_with_fragments("behavioral.json")
     elsewhere = Path(tempfile.mkdtemp()) / "scratch" / "preindex.json"
     assert "GR1 met" in _gr1_status(root, elsewhere)
+
+
+# ── the build state keeps E (round 1 of the context work, 2026-10-07) ────────────────────────────
+
+def test_preindex_appends_E_and_its_band():
+    """After a summary the number the lead read off this run is gone; `state show` sums the harvest
+    briefs' budgets against the E this line keeps."""
+    root = make_temp_repo({"a.py": "x = 1\n", "sub/b.py": "y = 2\n"}, git=False)
+    buildstate.start(root)
+    code, out = run_preindex(["--root", str(root)])
+    gran = json.loads((root / ".coyomap" / "preindex.json").read_text())["granularity"]
+    log = buildstate.state_path(root).read_text(encoding="utf-8").splitlines()
+    state = buildstate.read_state(root)
+    assert code == 0, out
+    budget = [line for line in log if " budget   " in line]
+    assert len(budget) == 1, log
+    assert budget[0].endswith(f"E {gran['expected_components']} · band {gran['band'][0]}-"
+                              f"{gran['band'][1]} · bound by {gran['bound_by']}"), budget[0]
+    assert state is not None
+    view = "\n".join(buildstate.show_lines(state, root, root))
+    assert f"preindex E {gran['expected_components']} · band" in view, view

@@ -631,3 +631,18 @@ and code docstrings under `tools/coyomap/` — so this file is not the only copy
 - **Where**: `method.md`
 - **Anchor**: `family the tooling mints rather than an agent authoring it, and it is order-independent but NOT add-stable`
 - **Evidence**: Entry-point ids were first numbered in fragment-argument order, so swapping two fragments re-pointed a use case at a different front door: measured, `POST /orders` and `DELETE /admin/wipe-database` traded ids, the use case claimed the wrong one, `validate` resolved it happily and the warning count did not move. Sorting by content key removed the order dependence; the ADD dependence is deliberately still there, which is what the rule in the method now warns about.
+
+### R117 — The summary that kept the rules and dropped a flag
+- **Where**: `method/dispatch.md`
+- **Anchor**: `what replaces it is a summary that keeps the gist and drops the flags`
+- **Evidence**: On one live build the lead's context reached 966,568 tokens at turn 745, before the closing sequence, and the harness replaced it with a summary at turn 747. It was a good summary of 1,407 words: it kept the security finding, the operator's rules and the pending steps. It dropped the `--map` of `record`, so the first record after it was lost, and the closing report then said that record existed. The lead re-read the method 0 times after the summary. It was the second compaction of a lead in three builds of the same project, so a summary is a normal event of a long build, not an accident; the build state keeps the flags outside the lead.
+
+### R118 — The wave that filled the lead with receipts
+- **Where**: `method.md`
+- **Anchor**: `every report and launch receipt they send lands in the context of whoever started them`
+- **Evidence**: On one live build the first fact-check wave added 172,726 tokens to the lead's context over its records 1,849 to 2,966. About 60 % came from the skeptics' reports and launch receipts, and 36 % from a queue file the lead kept by hand to run a rolling pool under the harness's 20-agent cap: 31 of its 33 shell calls in that stretch only kept the queue, the queue drifted, and the harness refused one launch. Across the whole build, helper reports, notifications and launch receipts were 41 % of the lead's growth, about 357,000 tokens, and the lead's context reached 966,568 tokens before the closing sequence. A runner holds a wave's receipts in its own context and hands the lead six lines.
+
+### R119 — The findings reader that saw none of the hand-backs
+- **Where**: `method/dispatch.md`
+- **Anchor**: `open the report it names when its `risk` count grew, and tell the operator about each new `risk` then`
+- **Evidence**: On one live build every hand-back, 126 of 126, came through a tool call, as did 119 of 119 on the build before, and the findings reader in `grounding report` read only an agent's text: it printed 0 findings while the lead hand-collected 57 findings from 27 agents into a file of its own. The build's most important product finding, an access escalation, went through that improvised file, and a second one never reached the operator. The reader was deleted rather than fixed: it read one harness's transcripts, it read text where the hand-backs arrive as a call, and kept, it would be a second channel beside the findings file. A finding filed the moment it is seen, into the agent's own file, does not depend on a hand-back arriving or being read.

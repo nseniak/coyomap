@@ -49,6 +49,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from coyomap.buildstate import STATE_NAME, read_state
+
 #: The container for every archived map. NESTED, so `.coyomap/` holds one entry instead of the dozen
 #: sibling dot-directories the flat `.old-ignore*` convention accumulated.
 ARCHIVE_DIR = "dev-rebuilds"
@@ -87,8 +89,15 @@ def next_archive_dir(coyomap: Path) -> Path:
 
 
 def movable_entries(coyomap: Path) -> list[Path]:
-    """Everything that should be archived, sorted for a stable report."""
-    return sorted((p for p in coyomap.iterdir() if p.name not in KEEP), key=lambda p: p.name)
+    """Everything that should be archived, sorted for a stable report.
+
+    An OPEN build state stays too: it belongs to the build that is starting, not to the map being
+    moved aside. The method opens the state once the old map is archived, but a lead that opens it
+    first would otherwise lose it here, and every later event of that build would be dropped in
+    silence, because only `state start` creates the file. An ENDED state moves with its map."""
+    state = read_state(coyomap.parent)
+    keep = KEEP | ({STATE_NAME} if state is not None and state.is_open else set())
+    return sorted((p for p in coyomap.iterdir() if p.name not in keep), key=lambda p: p.name)
 
 
 def archive(root: Path, dry_run: bool = False) -> tuple[Path | None, list[Path]]:

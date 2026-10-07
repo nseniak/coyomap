@@ -53,7 +53,7 @@ from coyomap.challenge import (
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from coyomap import balance_lib, records
+from coyomap import balance_lib, buildstate, findings, records
 from coyomap.reporting import item_lines, shown
 
 if TYPE_CHECKING:
@@ -61,12 +61,14 @@ if TYPE_CHECKING:
 
 from coyomap.access_surface import AccessClaim, held, load_claims, lost_files
 from coyomap.audit_model import l2_worklist_model
-from coyomap.credentials import map_folder_files, redact, scan as scan_credentials
+from coyomap.credentials import (UNCOMMITTED_REMEDY, map_folder_files, places, redact,
+                                 scan as scan_credentials)
 from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
 from coyomap.contract import BUDGETS_FILE
 from coyomap.model import ModelError, access_rules, load_model, load_model_path, resolve_map_path
 from coyomap.preindex_lib import expected_components, granularity_band
 from coyomap.provenance import session_transcript
+from coyomap.uncommitted import never_committed
 
 #: The extras heading the access-baseline advisory offers as its escape, and READS. Named the way
 #: `AUDIT_EXCEPTIONS_HEADING` and `DRIFT_EXCEPTIONS_HEADING` are, so the method contract's scan for
@@ -860,6 +862,27 @@ def _balance_leg(map_path: Path) -> Leg:
                     + " (informational: grouping is a view-only choice, method.md)")
 
 
+def _findings_leg(map_path: Path) -> Leg:
+    """What the agents filed about the PRODUCT, counted, so the record of the run says it.
+
+    INFORMATIONAL, never advisory and never blocking, like the balance leg. A finding is an agent's
+    own words about the code, which no tool checked; it is the operator's to hear, and a map whose
+    agents noticed a risk in the product is not a wrong map. The leg exists so the finalize report
+    and the commit's gate block carry the count, read from the map's own folder: the findings
+    files themselves never ship.
+
+    Read, never collected: `coyomap findings collect` is the one writer of the list, and a run that
+    wrote it here would move the "since the last collect" count the lead reads at its barriers.
+    Read BESIDE THE MAP, as the budget leg reads its `verify/`: an archived map's findings moved
+    with it, and a retrospective's `--no-write` read of that map counts those, not today's."""
+    filed = findings.load_folder(findings.beside_map(map_path))
+    return Leg("agent findings (informational)", RAN,
+               note=findings.reader_line(filed)
+                    + (" (informational: a finding never blocks the map; tell the operator about "
+                       "each `risk`, and `coyomap findings collect` lists them all)"
+                       if filed.findings else " (informational: a finding never blocks the map)"))
+
+
 def _access_baseline_leg(map_path: Path, baseline: Path,
                          lead_transcript: Path | None = None) -> Leg:
     """Files that held ACCESS enforcement in a previous map and are named by no access rule now.
@@ -1104,6 +1127,7 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         *([leg for leg in (_undispatched_claims_leg(map_path),) if leg is not None]),
         _credential_leg(map_path),
         _balance_leg(map_path),
+        _findings_leg(map_path),
     ]
     blocking = sum(len(l.blocking) for l in legs)
     advisory = sum(len(l.advisory) for l in legs)
@@ -1415,12 +1439,21 @@ def disposition_line(map_path: Path, report: FinalizeReport) -> str:
     `finalize: ADVISORIES\\|Advisory disposition`, matched only the count line (14 advisories before
     and after the fixes), and concluded "both mine are answered" while the report beside it said
     `UNSURE: 1`. The counts are one line; the verdict line was already on stdout."""
-    disp = advisory_disposition(map_path, report)
+    return disposition_sentence(advisory_disposition(map_path, report))
+
+
+def disposition_counts(disp: list[tuple[str, str, str]]) -> str:
+    """`UNSURE: 1 · disclosure: 9`, worst first: the counts alone, for a line that has no room for
+    the sentence around them (the build state's `finalize` line)."""
+    counts = {k: sum(1 for d, _, _ in disp if d == k) for k in _DISPOSITION_ORDER}
+    return " · ".join(f"{k}: {n}" for k, n in counts.items() if n)
+
+
+def disposition_sentence(disp: list[tuple[str, str, str]]) -> str:
+    """`disposition_line`'s sentence from rows already worked out, or "" when there are none."""
     if not disp:
         return ""
-    counts = {k: sum(1 for d, _, _ in disp if d == k) for k in _DISPOSITION_ORDER}
-    return ("Advisory disposition: "
-            + " · ".join(f"{k}: {n}" for k, n in counts.items() if n)
+    return ("Advisory disposition: " + disposition_counts(disp)
             + ". An UNANSWERED or UNRECORDED row is an escape nobody took, not a carried one.")
 
 
@@ -1624,32 +1657,42 @@ def force_added(map_path: Path) -> ForceAdded:
 
 
 def _credential_leg(map_path: Path) -> Leg:
-    """Credential-shaped values in the files the commit line force-adds. BLOCKING.
+    """Credential-shaped values in the files of the map folder. BLOCKING in a file the commit takes.
 
     The commit line takes the agents' own files — every verdict, every fragment — and nothing read
     them. On the 2026-09-30 mcpolis build a skeptic's glob printed the production API key into its
     transcript; it reached no committed file, and nothing would have said so if it had. No recorded
     escape, and none is needed: the remedy is to rewrite one sentence without the value, which costs
-    nothing and is always possible. The value itself is never printed (`credentials`)."""
+    nothing and is always possible. The value itself is never printed (`credentials`).
+
+    A value in a file NO commit takes (`never_committed`: the findings, the build state) is an
+    ADVISORY that names the file and says to remove the line. Blocking there withheld the commit
+    line over a value the commit would never have carried. `coyomap credentials` reads the same
+    answer, so an update's close and a build's finalize never disagree about a file."""
     # THE WHOLE MAP FOLDER, archived maps aside: everything the commit line force-adds, and
     # `.ignore` and `changes/`, which it takes too and the first version of this leg never read.
     # Not this command's own report, which this run rewrites from masked strings: counting it made
     # two identical runs report different numbers.
     own = {f"{REPORT_STEM}.json", f"{REPORT_STEM}.md"}
-    files = [f for f in map_folder_files(map_path.parent) if f.name not in own]
+    folder = map_path.parent
+    files = [f for f in map_folder_files(folder) if f.name not in own]
     hits = scan_credentials(files)
-    by_file: dict[Path, list[str]] = {}
-    for h in hits:
-        by_file.setdefault(h.path, []).append(f"line {h.line} ({h.shape})")
+    by_file = places(hits)
+    kept = {path for path in by_file if never_committed(folder, path)}
     blocking = [f"{path}: {', '.join(where)} — a credential-shaped value in a file of the map "
                 f"folder, which the commit takes. Rewrite that text without the value (name the "
                 f"setting, never its value) and re-run finalize; the commit line is withheld until "
                 f"then. If the value is real it is also in the transcript of the agent that wrote "
                 f"it: tell the operator, who decides whether to rotate it."
-                for path, where in by_file.items()]
-    return Leg("credential scan", RAN, blocking=blocking,
+                for path, where in by_file.items() if path not in kept]
+    advisory = [f"{path}: {', '.join(where)} — a credential-shaped value in a file no commit "
+                f"takes, so the commit line stands. {UNCOMMITTED_REMEDY}"
+                for path, where in by_file.items() if path in kept]
+    return Leg("credential scan", RAN, blocking=blocking, advisory=advisory,
                note=f"{len(files)} file(s) of the map folder scanned for credential shapes: "
-                    f"{len(hits)} hit(s)")
+                    f"{len(hits)} hit(s)"
+                    + (f", {sum(len(by_file[p]) for p in kept)} of them in {len(kept)} file(s) no "
+                       f"commit takes" if kept else ""))
 
 
 def _commit_hint(map_path: Path, withheld: bool = False) -> None:
@@ -1825,8 +1868,10 @@ def main(argv: list[str] | None = None) -> int:
     if lead_transcript is None:
         lead_transcript = session_transcript(repo)
     report = build_report(map_path, repo, verdicts, access_baseline, lead_transcript)
-    # ONCE. Both the gate block and the stdout line below say it, and working it out re-loads the map.
-    disposition = disposition_line(map_path, report)
+    # ONCE. The gate block, the stdout line and the build state below all say it, and working it out
+    # re-loads the map.
+    disposition_rows = advisory_disposition(map_path, report)
+    disposition = disposition_sentence(disposition_rows)
     json_path = map_path.parent / f"{REPORT_STEM}.json"
     md_path = map_path.parent / f"{REPORT_STEM}.md"
     if no_write:
@@ -1836,6 +1881,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         json_path.write_text(report.to_json(), encoding="utf-8")
         md_path.write_text(format_report(report), encoding="utf-8")
+        # THE RUN THAT WROTE THE RECORD, never a `--no-write` read: a retrospective reading a
+        # finished build's disposition must not add a line to that build's state.
+        unran_legs = [f"{l.name} ({l.status})" for l in report.legs if not l.ran]
+        counts = disposition_counts(disposition_rows)
+        buildstate.append(buildstate.repo_of(map_path), "finalize",
+                          f"{report.verdict} — {report.blocking_total} blocking, "
+                          f"{report.advisory_total} advisory"
+                          + (f" · disposition {counts}" if counts else "")
+                          + (f" · DID NOT RUN: {', '.join(unran_legs)}" if unran_legs else "")
+                          + f" → {md_path}")
     if gate_block_path is not None:
         import hashlib
         sha = hashlib.sha256(map_path.read_bytes()).hexdigest()

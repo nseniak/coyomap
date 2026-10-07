@@ -23,6 +23,20 @@ the rule is stated once and cannot drift between the briefs that carry it. It al
 files no agent reads and says to search named folders, never the repository root: a skeptic's
 recursive search once printed a production API key into its transcript.
 
+Every brief of an agent that reads the code also gets `method/templates/findings-rule.md`: a bug, a
+risk, a gap or a contradiction the agent sees goes into its OWN findings file with one command, and
+the lead collects them all with another. A finding carried in a report is one the report can lose:
+the reader that looked for them in the reports saw 0 of 126 hand-backs on one build, because they
+had started to arrive as a tool call. The rule's two agent slots are spelled the way each contract
+spells them (`FINDINGS_SLOTS`).
+
+**The wave runner (`wave`).** One agent runs a whole Phase-4 fact-check wave, so the forty to seventy
+skeptic reports and launch receipts land in ITS context and not the lead's: on one build the first
+wave alone added 172,726 tokens to the lead. Its `--fill` also writes the two slots files the runner
+hands to `--from-batches` and `--from-verdicts`, so the runner never types JSON, and `--from-batches`
+writes `wave-plan.json`, which names every voter, its files and its pointer for the tools that check
+the wave.
+
 **Filling, and why it is the same command.** Printing the agent half left the lead with two jobs the
 tool could do: replace the «angle-bracket» slots, and then compose the pointer prompt that sends the
 agent to the filled file. Both were done by hand, and both went wrong in the measured way:
@@ -63,14 +77,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from coyomap import buildstate
 from coyomap.anchor_drift import load_verdicts
 from coyomap.audit_model import RULE_SITE_CLAIM, resolve_claim
 from coyomap.dump import edges_of, record_of, resolve_id
 from coyomap.grounding import is_closer_row
+from coyomap.home import home
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 from coyomap.preindex_lib import granularity_files, iter_source_files
-from coyomap.provenance import SESSION_ENV
+from coyomap.provenance import COYOMAP_SUBDIR, SESSION_ENV
 from coyomap.reporting import shown
+from coyomap.waveplan import PLAN_FILE, PlanAgent, WavePlan, from_json, to_json, write_plan
 
 # Contract name → template file. The name is what a lead types, so it is the phase, not the filename.
 CONTRACTS: dict[str, str] = {
@@ -98,6 +115,11 @@ CONTRACTS: dict[str, str] = {
     # brief lost the no-delegation block once (2026-08-20) and was the batch straggler once
     # (2026-09-08, written and dispatched last).
     "tests": "tests-contract.md",
+    # The Phase-4 wave runner: ONE agent that runs a whole fact-check wave, from the skeptic briefs
+    # to the closer, and hands back six fixed lines. Every skeptic report and launch receipt of a
+    # wave lands in the context of whoever started the skeptics: on one build the first wave alone
+    # added 172,726 tokens to the lead.
+    "wave": "wave-contract.md",
 }
 
 # Which contracts author reader-facing prose, and therefore carry the writing rules. A skeptic
@@ -113,15 +135,24 @@ REPO_TEXT_RULE = "repo-text-rule.md"   # appended to EVERY brief (see the module
 #: confirmed door steps shipped at a line their skeptic had replaced (retro finding 25).
 DOOR_ANCHOR_RULE = "door-anchor-rule.md"
 DOOR_ANCHOR: frozenset[str] = frozenset({"doors", "trace", "skeptic"})
+#: Where an agent files what it sees about the PRODUCT (a bug, a risk, a gap, a contradiction): ONE
+#: rule, appended to every brief except those below, so a finding never rides in a report.
+FINDINGS_RULE = "findings-rule.md"
+#: The contracts whose brief does NOT carry the findings rule. The wave runner reads no code — it
+#: starts the agents that do, collects what they filed, and hands back six fixed lines, one of which
+#: is the collect line, so the rule's own last line would contradict its report. The T5 addendum is
+#: never a brief of its own: it rides a harvest brief, which carries the rule.
+NO_FINDINGS_RULE: frozenset[str] = frozenset({"wave", "harvest-t5"})
+#: How the findings rule's agent slots are spelled in the contracts that spell them otherwise. The
+#: rule is written with «REPO» and «AGENT_ID»; a harvest brief names the repo «REPO_ABS» and its
+#: agent «agent-id», and a skeptic's own id is its «BATCH». Rewritten before composing, so a brief
+#: gains no slot its own contract does not already fill.
+FINDINGS_SLOTS: dict[str, dict[str, str]] = {
+    "harvest": {"REPO": "REPO_ABS", "AGENT_ID": "agent-id"},
+    "skeptic": {"AGENT_ID": "BATCH"},
+}
 _TEMPLATES = "method/templates"
 _DIVIDER = "---"
-
-
-def home() -> Path:
-    """Where the method and its templates live. `COYOMAP_HOME` wins, because that is the name every
-    command in the method already uses; otherwise the installed package's own clone."""
-    env = os.environ.get("COYOMAP_HOME", "").strip()
-    return Path(env).expanduser().resolve() if env else Path(__file__).resolve().parent.parent.parent
 
 
 def agent_half(text: str) -> str:
@@ -174,15 +205,28 @@ def _unquote(line: str) -> str:
 
 def _shared_rules(names: list[str], base: Path) -> list[str]:
     """The rule files a brief made of `names` carries, EACH ONCE: the repository-text rule always,
-    the door-anchor rule when any of them writes or reads a step at a door, the writing rules when
-    any of them authors prose a reader meets. Composed per brief, not per contract: under `--append`
-    a trace-plus-doors brief used to carry the repository-text rule twice."""
-    files = [REPO_TEXT_RULE]
+    the findings rule unless every one of them is in `NO_FINDINGS_RULE`, the door-anchor rule when
+    any of them writes or reads a step at a door, the writing rules when any of them authors prose a
+    reader meets. Composed per brief, not per contract: under `--append` a trace-plus-doors brief
+    used to carry the repository-text rule twice.
+
+    The door-anchor rule and the writing rules stay LAST, because the contracts that carry them say
+    they are "at the end of this brief"."""
+    rules = [_read_rule(base, REPO_TEXT_RULE)]
+    owner = next((n for n in names if n not in NO_FINDINGS_RULE), None)
+    if owner is not None:
+        spelled = FINDINGS_SLOTS.get(owner, {})
+        rules.append(SLOT.sub(lambda m: f"«{spelled.get(m.group(1).strip(), m.group(1).strip())}»",
+                              _read_rule(base, FINDINGS_RULE)))
     if any(n in DOOR_ANCHOR for n in names):
-        files.append(DOOR_ANCHOR_RULE)
+        rules.append(_read_rule(base, DOOR_ANCHOR_RULE))
     if any(n in AUTHORING for n in names):
-        files.append(WRITING_RULES)
-    return [(base / f).read_text(encoding="utf-8").strip("\n") for f in files]
+        rules.append(_read_rule(base, WRITING_RULES))
+    return rules
+
+
+def _read_rule(base: Path, name: str) -> str:
+    return (base / name).read_text(encoding="utf-8").strip("\n")
 
 
 def render(name: str, root: Path | None = None) -> str:
@@ -421,7 +465,85 @@ def _slot_content_faults(name: str, values: dict[str, str]) -> list[str]:
     # WORSE: writing `0` puts "Expect roughly 0 components" in front of a slice that really has
     # seven. The retro's own reader called this half unimplementable before it was written, and was
     # right: catching it needs an ENUM of slice kinds, which the contract does not have.
+    if name == "wave":
+        faults += _wave_slot_faults(values)
     return faults
+
+
+#: A wave's file prefix, when it is not the empty one: one shell word ending in `-`, the shape
+#: `audit` names a second wave's batches with (`added-`) and an update's (`<from>-<to>-`).
+_WAVE_PREFIX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*-")
+#: The empty prefix, as one shell word: a first wave's.
+_EMPTY_PREFIXES = ("''", '""')
+
+
+def wave_values(values: dict[str, str]) -> dict[str, str]:
+    """A wave runner's slot values as EVERY step of its fill uses them: stripped.
+
+    `_wave_slot_faults` checks each value stripped, so the brief, the two slots files and the
+    build-state line must use that same value. They used it as typed: a «BRIEFS» of ` /abs/w1 `
+    passed the absolute-path check, and then its slots files went to a RELATIVE folder of that name
+    under the working directory, where no runner looks."""
+    return {k: v.strip() if isinstance(v, str) else v for k, v in values.items()}
+
+
+def _wave_slot_faults(values: dict[str, str]) -> list[str]:
+    """What a wave runner's slots were filled WITH. Each value lands inside a command the runner
+    runs, far from the lead, so a wrong one fails a whole wave that nobody is watching: a relative
+    folder is read from another working directory, a prefix that is no shell word breaks the
+    command line, an even vote can tie, and a pool of no skeptic runs no wave.
+
+    **«POOL» has a floor and no ceiling.** How many agents may run at once is the agent's own cap,
+    and it differs from one agent to the next: a ceiling here would refuse a pool another agent
+    runs, and write one agent's number into the method. The contract keeps the rule in words
+    instead: «POOL» + 1 stays under your agent's cap on running subagents."""
+    values = wave_values(values)
+    faults: list[str] = []
+    briefs = values.get("BRIEFS") or ""
+    if briefs and not Path(briefs).is_absolute():
+        faults.append(f"«BRIEFS» is not an absolute path: {briefs[:80]!r}. The runner and every "
+                      f"agent it starts read their briefs from it, and none of them shares your "
+                      f"working directory")
+    prefix = values.get("PREFIX") or ""
+    if prefix and prefix not in _EMPTY_PREFIXES and not _WAVE_PREFIX.fullmatch(prefix):
+        faults.append(f"«PREFIX» is {prefix[:40]!r}: it is the wave's file prefix as one shell "
+                      f"word, `''` for a build's first wave or a prefix ending in `-` for a later "
+                      f"one (`added-`)")
+    votes = values.get("VOTES") or ""
+    theme, _, count = votes.partition("=")
+    if votes and (not theme or not count.isdigit()):
+        faults.append(f"«VOTES» is {votes[:40]!r}, not `<theme>=<count>` (`security=3`)")
+    elif votes and (int(count) < 3 or int(count) % 2 == 0):
+        faults.append(f"«VOTES» gives {theme} {count} voter(s): a majority needs an odd count of 3 "
+                      f"or more (`security=3`), or a split vote can tie")
+    pool = values.get("POOL") or ""
+    if pool and not (pool.isdigit() and int(pool) >= 1):
+        faults.append(f"«POOL» is {pool[:20]!r}: it is how many skeptics run at once, a whole "
+                      f"number of 1 or more. Keep «POOL» + 1 under your agent's cap on running "
+                      f"subagents: the cap, minus 1 for the runner, minus every other agent still "
+                      f"running")
+    return faults
+
+
+def briefs_in_the_tree(values: dict[str, str]) -> str | None:
+    """Why a wave's «BRIEFS» folder sits in the mapped project's own tree, or None when it does not.
+
+    The folder holds the wave's briefs, its two slots files and its plan. Every coyomap walk of the
+    project skips `<repo>/.coyomap/`, and a folder outside the repo is no part of it; anywhere else
+    inside the repo those files read as the project's own, to the walks and to its status, where a
+    commit can take them. A warning and not a refusal: the lead may have put the folder there on
+    purpose, and the wave runs the same."""
+    values = wave_values(values)
+    briefs, repo = values.get("BRIEFS") or "", values.get("REPO") or ""
+    if not briefs or not repo or not Path(briefs).is_absolute() or not Path(repo).is_absolute():
+        return None
+    folder, root = Path(briefs).resolve(), Path(repo).resolve()
+    if not folder.is_relative_to(root) or folder.is_relative_to(root / COYOMAP_SUBDIR):
+        return None
+    return (f"«BRIEFS» {briefs} is inside the repo {repo} but outside its {COYOMAP_SUBDIR}/: the "
+            f"wave's briefs, slots files and plan would read as the project's own files, to every "
+            f"coyomap walk of it and to its status, where a commit can take them. A folder under "
+            f"{root / COYOMAP_SUBDIR} or outside the repo keeps them apart.")
 
 
 #: A key the skeleton prints to EXPLAIN a slot, never to fill one. `--fill` skips it, so the file
@@ -456,6 +578,9 @@ def fill(name: str, values: dict[str, str], root: Path | None = None,
     text = _compose(names, root)
     present = union_slots(names, root)
     values = {k: v for k, v in values.items() if not k.startswith(_COMMENT_KEY)}
+    if "wave" in names:
+        # A wave brief carries the values its checks read, which are stripped (`wave_values`).
+        values = wave_values(values)
     faults: list[str] = []
 
     unknown = sorted(set(values) - set(present))
@@ -510,6 +635,37 @@ def brief(agent_id: str, path: Path) -> str:
     return text
 
 
+#: The two slots files a wave `--fill` writes into «BRIEFS», one per brief generator the runner
+#: runs: `contract skeptic --from-batches` and `contract closer --from-verdicts`.
+WAVE_SKEPTIC_SLOTS = "skeptic-slots.json"
+WAVE_CLOSER_SLOTS = "closer-slots.json"
+
+
+def wave_slots_files(values: dict[str, str], root: Path | None = None) -> list[tuple[Path, str]]:
+    """The slots files a wave runner hands to the two brief generators, as `(path, text)`: each the
+    `--slots` skeleton of its contract with the wave's own values filled in, and the slots its
+    generator fills itself (the skeptic's «BATCH» and «CLAIMS», the closer's «CLAIMS») left empty,
+    as the skeleton prints them.
+
+    Written by the wave's `--fill`, so the runner never writes JSON: a slots file an agent types is
+    one more place for a path to go relative or a key to be misspelt, and the generator would refuse
+    it at the start of a wave the lead is no longer watching. Each value is the one the fill checked
+    (`wave_values`)."""
+    values = wave_values(values)
+    briefs = Path(values["BRIEFS"])
+    filled = ((WAVE_SKEPTIC_SLOTS, "skeptic", {"COYOMAP_HOME": values["COYOMAP_HOME"],
+                                               "MAP": values["MAP"], "REPO": values["REPO"]}),
+              (WAVE_CLOSER_SLOTS, "closer", {"COYOMAP_HOME": values["COYOMAP_HOME"],
+                                             "REPO": values["REPO"],
+                                             "AGENT_ID": values["CLOSER_ID"]}))
+    out: list[tuple[Path, str]] = []
+    for file_name, name, given in filled:
+        doc = skeleton([name], root)
+        doc.update(given)
+        out.append((briefs / file_name, json.dumps(doc, indent=2, ensure_ascii=False) + "\n"))
+    return out
+
+
 _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--append <name>]...\n"
           "       coyomap contract <name> --fill <slots.json|-> --out <file> [--brief <agent-id>]\n"
           "                                                        [--append <name>]... [--force]\n"
@@ -518,7 +674,9 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "                                [--votes <theme>=N]... [--prefix <from>-<to>-]\n"
           "       coyomap contract closer --from-verdicts <dir> --map <map> --fill <slots.json>\n"
           "                               --out <file> [--exclude <id>]... [--settled <file>]...\n"
-          "                               [--prefix <from>-<to>-]\n\n"
+          "                               [--prefix <from>-<to>-]\n"
+          "       coyomap contract wave --fill <slots.json> --out <file> --brief <runner-id>\n"
+          "                             [--force]\n\n"
           "Print exactly the text one fan-out agent should receive: the contract's agent half,\n"
           "with the writing rules appended for the phases whose agents author map prose\n"
           "(" + ", ".join(sorted(AUTHORING)) + ").\n\n"
@@ -526,6 +684,16 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "            from the file names, --votes <theme>=N writing N voters (-a, -b, -c) over one\n"
           "            claims file. An existing brief is SKIPPED, never rewritten; the pointer\n"
           "            prompts to send are printed. Every build hand-wrote this loop with --force.\n"
+          f"            It also writes <out-dir>/{PLAN_FILE}, named on its first line: every\n"
+          "            voter, written or skipped, with its claims file, brief, verdicts file and\n"
+          "            pointer, most dangerous theme first (the order of <dir>/worklist.json).\n"
+          "            `grounding lint --plan` and `timings record --plan` read it.\n"
+          "  wave      the Phase-4 wave runner: ONE agent runs a whole fact-check wave and hands\n"
+          f"            back six lines. Its --fill also writes «BRIEFS»/{WAVE_SKEPTIC_SLOTS} and\n"
+          f"            «BRIEFS»/{WAVE_CLOSER_SLOTS}, the slots files the runner hands to\n"
+          "            --from-batches and --from-verdicts; an existing one is REFUSED like an\n"
+          "            existing --out. A «BRIEFS» inside the repo but outside its .coyomap/ is\n"
+          "            warned about: its files would read as the project's own.\n"
           "  --prefix  only the files of one wave: an update's `changes challenge` names its\n"
           "            batches `claims-<from>-<to>-…` (and `-w2-` for a second wave) beside the\n"
           "            build's, and prints the prefix to pass; without it every build batch gets a\n"
@@ -569,9 +737,10 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "  coyomap contract harvest --from-slots /abs/slots --out-dir /abs/briefs\n"
           "  coyomap contract trace   --from-slots /abs/tslots --out-dir /abs/tbriefs \\\n"
           "                           --append doors\n\n"
-          "A harvest --fill / --from-slots also writes <repo>/.coyomap/verify/budgets.json, the\n"
-          "one file this verb writes outside --out: `finalize` sums the budgets the briefs were\n"
-          "dispatched with. A batch that would drop another build's agents from it is REFUSED.\n\n"
+          "A harvest --fill / --from-slots also writes <repo>/.coyomap/verify/budgets.json:\n"
+          "`finalize` sums the budgets the briefs were dispatched with. A batch that would drop\n"
+          "another build's agents from it is REFUSED. Every fill also adds one line to the repo's\n"
+          "build state (`coyomap state show`) when the repo has an open one.\n\n"
           "Without --fill it writes the UNFILLED agent half to stdout, and says on stderr that it\n"
           "is unfilled. Read it that way; do not redirect it into a brief, and never append it to\n"
           "one with `>>` — `--fill` and `--append` are what put a filled contract in a file.\n\n"
@@ -848,6 +1017,7 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
     plan: list[tuple[str, Path, str]] = []
     faults: list[str] = []
     budgets: list[tuple[str, Path, str, str]] = []
+    repos: set[str] = set()
     for f in files:
         try:
             values = _read_values(str(f))
@@ -859,6 +1029,7 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
         except ValueError as exc:
             faults.append(f"{f.name}: {exc}")
             continue
+        repos.add(_repo_slot(values))
         # Same three slots the single `--fill` reads, so a batch fan-out records the budgets
         # `finalize` sums instead of silently shipping a `budgets.json` with a hole in it.
         if name == "harvest" and values.get("agent-id") and values.get("EXPECTED_COMPONENTS"):
@@ -874,9 +1045,17 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
         _warn_unslotted(files)
     written = write_briefs(plan)
     done = {stem for stem, _p, state in written if state == "written"}
+    recorded: list[int] = []
     for stem, repo_slot, agent_id, expected in budgets:
         if stem in done:
             record_budget(repo_slot, agent_id, expected, session=session)
+            n = budget_of(expected)
+            recorded += [n] if n is not None else []
+    line = (f"{' + '.join([name, *(append or [])])} {len(written)} brief(s): {len(done)} written, "
+            f"{len(written) - len(done)} skipped → {out_dir}"
+            + (f" · budget {sum(recorded)}" if name == "harvest" and recorded else ""))
+    for repo in sorted(r for r in repos if r):
+        _state(repo, "brief", line)
     return written
 
 
@@ -976,14 +1155,56 @@ def _budget_reset_faults(budgets: list[tuple[str, Path, str, str]],
     return faults
 
 
+#: The pinned worklist `audit --json` wrote beside the claims files; its `themes` list is the order
+#: a wave's voters are planned in.
+WORKLIST_FILE = "worklist.json"
+
+
+def pinned_themes(verify: Path) -> list[str]:
+    """The pinned worklist's `themes`, most dangerous first. Empty when it is missing or unreadable,
+    and the voters then keep the claims files' name order."""
+    try:
+        doc = json.loads((verify / WORKLIST_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    themes = doc.get("themes") if isinstance(doc, dict) else None
+    return [str(t) for t in themes] if isinstance(themes, list) else []
+
+
+@dataclass(frozen=True)
+class SkepticWave:
+    """What `--from-batches` did: each brief with its state (`written` or `skipped`), the wave plan
+    it wrote beside them, where, and how many claims files the briefs cover."""
+    briefs: list[tuple[str, Path, str]]
+    plan: WavePlan
+    plan_path: Path
+    claims_files: int
+
+    @property
+    def written(self) -> int:
+        return sum(1 for _id, _path, state in self.briefs if state == "written")
+
+    def headline(self) -> str:
+        """The first line `--from-batches` prints, ahead of its one line per brief."""
+        return (f"WAVE PLAN — {len(self.briefs)} brief(s) over {self.claims_files} claims file(s): "
+                f"{self.written} written, {len(self.briefs) - self.written} skipped → "
+                f"{self.plan_path}")
+
+
 def fill_from_batches(values: dict[str, str], batches_dir: Path, out_dir: Path,
                       votes: dict[str, int], root: Path | None = None,
-                      prefix: str = "") -> list[tuple[str, Path, str]]:
+                      prefix: str = "") -> SkepticWave:
     """One skeptic brief per batch file (`votes` per theme: `{"security": 3}` writes `-a`, `-b`,
-    `-c` voters over one claims file). Returns `(batch id, path, state)` with state `written` or
-    `skipped`: an existing brief is NEVER rewritten, because under pointer dispatch it may be an
-    agent's running instructions — the loop every build hand-wrote passed `--force` on all 38.
-    `BATCH` and `CLAIMS` are this verb's to fill; a slots file naming them is refused."""
+    `-c` voters over one claims file), and `<out-dir>/wave-plan.json` beside them. An existing brief
+    is NEVER rewritten, because under pointer dispatch it may be an agent's running instructions —
+    the loop every build hand-wrote passed `--force` on all 38. `BATCH` and `CLAIMS` are this verb's
+    to fill; a slots file naming them is refused.
+
+    **The plan names EVERY voter, written or skipped**: its claims file, theme, brief, verdicts file
+    and pointer, so a wave runner starts what `grounding lint --plan` names missing and never types
+    an id list or composes a pointer. A skipped brief is still a voter whose verdicts the wave needs.
+    Voters run in the pinned worklist's theme order, most dangerous first, so the riskiest batches
+    start first; without a worklist they keep the claims files' name order."""
     # An EMPTY value for either is what `--slots` prints, so it is tolerated; a filled one would be
     # silently overwritten, so it is refused.
     filled = [k for k in ("BATCH", "CLAIMS") if (values.get(k) or "").strip()]
@@ -999,14 +1220,39 @@ def fill_from_batches(values: dict[str, str], batches_dir: Path, out_dir: Path,
         raise ValueError(f"no claims-{prefix}*.json under {batches_dir} — run `coyomap audit <map> "
                          f"--batches {batches_dir}` first (or `changes challenge` for an update); "
                          f"nothing to write a brief for")
-    plan: list[tuple[str, Path, str]] = []
-    for bid, theme in batches:
+    verify = batches_dir.resolve()
+    themes = pinned_themes(verify)
+    briefs: list[tuple[str, Path, str]] = []
+    agents: list[PlanAgent] = []
+    # A STABLE sort on the theme alone, so the claims files of one theme keep their name order.
+    for bid, theme in sorted(batches, key=lambda b: themes.index(b[1]) if b[1] in themes
+                             else len(themes)):
         n = votes.get(theme, 1)
         voters = [bid] if n <= 1 else [f"{bid}-{chr(ord('a') + k)}" for k in range(n)]
         for voter in voters:
-            plan.append((voter, out_dir / f"skeptic-{voter}.md",
-                         fill("skeptic", {**values, "BATCH": voter, "CLAIMS": bid}, root)))
-    return write_briefs(plan)
+            target = out_dir / f"skeptic-{voter}.md"
+            briefs.append((voter, target,
+                           fill("skeptic", {**values, "BATCH": voter, "CLAIMS": bid}, root)))
+            agents.append(PlanAgent(id=voter, claims=verify / f"claims-{bid}.json", theme=theme,
+                                    brief=target.resolve(),
+                                    verdicts=verify / f"verdicts-{voter}.json",
+                                    pointer=brief(voter, target.resolve())))
+    plan = WavePlan(verify=verify, prefix=prefix,
+                    votes={t: max(1, n) for t, n in votes.items()}, agents=tuple(agents))
+    plan_path = out_dir.resolve() / PLAN_FILE
+    # Asked BEFORE any brief is written, as every refusal of this verb is: the writer refuses what
+    # the reader would.
+    from_json(to_json(plan), str(plan_path))
+    wave = SkepticWave(write_briefs(briefs), plan, plan_path, len(batches))
+    write_plan(plan_path, plan)
+    # A `brief` line and never a `next` one. `next` is the LEAD's line, written before a long wait
+    # and read back by `state show` after a summary — and a wave runner runs this verb, so a `next`
+    # here replaced the lead's "wait for the runner" with the wave's own lint.
+    repo = buildstate.repo_of(verify) or _repo_slot(values)
+    _state(repo, "brief", f"skeptic {len(wave.briefs)} voter(s) over {wave.claims_files} claims "
+                          f"file(s), prefix {prefix or _EMPTY_PREFIXES[0]}: {wave.written} written, "
+                          f"{len(wave.briefs) - wave.written} skipped → {plan_path}")
+    return wave
 
 
 # ── the closer's claims block, built from the skeptics' own verdict files ─────────────────────────
@@ -1593,6 +1839,22 @@ def _read_values(source: str) -> dict[str, str]:
     return data
 
 
+def _repo_slot(values: dict[str, str]) -> str:
+    """The repo a brief's slots name: «REPO», or a harvest brief's «REPO_ABS» / «repo»."""
+    for key in ("REPO", "REPO_ABS", "repo"):
+        value = values.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _state(repo: Path | str | None, kind: str, text: str) -> None:
+    """One event in the repo's build state. `buildstate.append` writes nothing when the repo has no
+    open state (no build, or a fill outside one), and never fails the fill that wrote the brief."""
+    if repo:
+        buildstate.append(Path(repo), kind, text)
+
+
 def _print_batch(results: list[tuple[str, Path, str]]) -> None:
     """What a batch run prints: one line per brief, the tally, then one pointer prompt per brief it
     actually wrote. Shared by `--from-batches` and `--from-slots` so the two fan-out forms cannot
@@ -1700,18 +1962,25 @@ def main(argv: list[str] | None = None) -> int:
                   "--out-dir <dir> [--votes <theme>=N]`", file=sys.stderr)
             return 2
         try:
-            results = fill_from_batches(_read_values(fill_from), Path(from_batches), Path(out_dir), votes,
-                                        prefix=prefix)
-        except ValueError as e:
+            wave = fill_from_batches(_read_values(fill_from), Path(from_batches), Path(out_dir),
+                                     votes, prefix=prefix)
+        except (ValueError, OSError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
-        _print_batch(results)
+        print(wave.headline())
+        _print_batch(wave.briefs)
         return 0
     if from_slots is not None:
         if not out_dir or fill_from:
             print("ERROR: --from-slots is `contract <name> --from-slots <dir> --out-dir <dir> "
                   "[--append <name>]`; the slot values come from the directory, not from --fill",
                   file=sys.stderr)
+            return 2
+        if name == "wave":
+            # A batch would write the runners' briefs and not the slots files each runner reads.
+            print("ERROR: a wave runner is filled one at a time — `contract wave --fill <slots.json> "
+                  "--out <file> --brief <runner id>`, which also writes the two slots files the "
+                  "runner hands to the brief generators", file=sys.stderr)
             return 2
         try:
             results = fill_from_slots(name, Path(from_slots), Path(out_dir), None, append,
@@ -1734,7 +2003,8 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
         try:
-            files, kept = fill_from_verdicts(_read_values(fill_from), Path(from_verdicts),
+            closer_values = _read_values(fill_from)
+            files, kept = fill_from_verdicts(closer_values, Path(from_verdicts),
                                              Path(map_path), exclude, [Path(s) for s in settled],
                                              target, prefix=prefix)
             # Composed BEFORE anything is written, inside the refusals: a relative --out raised out
@@ -1767,6 +2037,10 @@ def main(argv: list[str] | None = None) -> int:
                   f"send it the one pointer to {target.name}.", file=sys.stderr)
             for path, text in files[1:]:
                 print(f"  {path}  {len(text):,} characters", file=sys.stderr)
+        _state(buildstate.repo_of(from_verdicts, map_path) or _repo_slot(closer_values), "brief",
+               f"closer {brief_id or target.stem} {len(kept)} refuted claim(s), {dissent} outvoted "
+               f"dissent → {target}"
+               + (f" ({len(files) - 1} part files)" if len(files) > 1 else ""))
         if brief_id is not None:
             sys.stdout.write(pointer)
         return 0
@@ -1783,6 +2057,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if fill_from is not None and out_path is not None:
             values = _read_values(fill_from)
+            if name == "wave":
+                # Every step below uses the values the fill checks (`wave_values`).
+                values = wave_values(values)
             text = fill(name, values, None, append)
             target = Path(out_path)
             # REFUSE an existing file. Under pointer dispatch a filled contract IS an agent's whole
@@ -1822,13 +2099,44 @@ def main(argv: list[str] | None = None) -> int:
                     if conflict:
                         print(f"ERROR: {conflict}", file=sys.stderr)
                         return 2
+            # A WAVE BRIEF'S OTHER TWO WRITES, refused like the brief itself and for the same
+            # reason: the runner and the generators it runs read them whenever they get round to it.
+            runner_files = wave_slots_files(values) if name == "wave" else []
+            taken = [str(p) for p, _text in runner_files if p.exists()]
+            if taken and not force:
+                print(f"ERROR: {', '.join(taken)} already exist(s). A wave runner hands these to "
+                      f"the brief generators, so rewriting one rewrites what a running wave reads. "
+                      f"Give the wave a new «BRIEFS» folder, or pass --force if you know no runner "
+                      f"is using it.", file=sys.stderr)
+                return 2
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
             if budget is not None:
                 # Recorded where `finalize` sums them, after the brief it describes exists.
                 record_budget(*budget, session=os.environ.get(SESSION_ENV))
+            for path, body in runner_files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body, encoding="utf-8")
             print(f"filled {' + '.join([name, *append])} contract "
                   f"({len(union_slots([name, *append]))} slot(s)) -> {target}", file=sys.stderr)
+            for path, _body in runner_files:
+                print(f"  and the runner's slots file -> {path}", file=sys.stderr)
+            in_tree = briefs_in_the_tree(values) if name == "wave" else None
+            if in_tree:
+                print(f"WARNING: {in_tree}", file=sys.stderr)
+            who = brief_id or target.stem
+            if name == "wave":
+                # `<runner id> · pool <N> · prefix <p> · plan <file>`: `state show` reads each
+                # runner's LAST line and counts its wave's verdict files from that plan, so a lead
+                # back from a summary sees a runner is out before starting any skeptic itself.
+                _state(_repo_slot(values), "wave",
+                       f"{values['AGENT_ID']} · pool {values['POOL']} · prefix {values['PREFIX']} "
+                       f"· plan {Path(values['BRIEFS']) / PLAN_FILE}")
+            else:
+                n = budget_of(budget[2]) if budget is not None else None
+                _state(_repo_slot(values), "brief", f"{' + '.join([name, *append])} {who} → "
+                                                    f"{target}" + (f" · budget {n}" if n is not None
+                                                                   else ""))
             if brief_id is not None:
                 sys.stdout.write(pointer)
             return 0

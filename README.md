@@ -79,6 +79,15 @@ claude
 
 The map is created in your project's `.coyomap/` subdirectory. Commit it with your code if you want to share it.
 
+#### Long builds in Claude Code
+
+A large build can fill the main session's context. Each tool, connector and plugin a session loads is described in that context, and each helper agent pays for the same descriptions on every turn. Two optional steps cut that cost; neither changes the map.
+
+- **Start the build session with only what a build uses:** the file and shell tools and the agent tool. `claude --strict-mcp-config` starts with no MCP servers; `claude plugin details <name>` shows what a plugin costs, and `claude plugin disable <name>` turns it off.
+- **Give the helpers only file and shell tools:** define an agent such as `.claude/agents/coyomap-helper.md` with `tools: Read, Write, Edit, Bash, Grep, Glob`, and tell the build when you start it to run its helpers as that agent. The fact-check wave runner is the exception: it starts the fact-checkers, so it also needs `Agent`.
+
+**Not measured yet:** whether a helper limited by `tools:` really starts with a smaller context. It is expected and has not been shown; if you try it, compare the fixed base per agent turn that `coyomap-eval cost` prints.
+
 ### Explore the map
 
 Open the map in your browser with the coyomap viewer. It runs on your machine and shows every map you have opened.

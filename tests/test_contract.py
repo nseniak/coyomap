@@ -18,11 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from coyomap import contract
+from coyomap import buildstate, contract
 from coyomap.audit_model import description_claim
 from coyomap.dump import edges_of
 from coyomap.model import ProjectModel, load_model
 from coyomap.preindex_lib import granularity_files
+from coyomap.waveplan import load_plan
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -144,7 +145,8 @@ def test_the_verb_prints_the_contract_to_stdout() -> None:
 
 #: Slots whose CONTENT is checked, not only its presence — `_slot_content_faults`. A uniform
 #: placeholder cannot satisfy those, so the builder gives each one a value of the right shape.
-_CONTENTFUL_SLOTS = {"SERVES": "UC7 rename a page, R1 the owner"}
+_CONTENTFUL_SLOTS = {"SERVES": "UC7 rename a page, R1 the owner", "BRIEFS": "/abs/briefs/wave-1",
+                     "PREFIX": "''", "VOTES": "security=3", "POOL": "8"}
 
 
 def make_slot_values(name: str, value: str = "filled") -> dict[str, str]:
@@ -376,6 +378,8 @@ def test_a_prose_slot_key_is_refused_with_the_key_it_objects_to(tmp_path):
         "lead half\n\n> agent half with «FINE» and «a whole sentence nobody types».\n",
         encoding="utf-8")
     (home / "method" / "templates" / "repo-text-rule.md").write_text("the shared rule\n", encoding="utf-8")
+    (home / "method" / "templates" / "findings-rule.md").write_text("the findings rule\n",
+                                                                    encoding="utf-8")
     contract.CONTRACTS["toy"] = "toy-contract.md"
     try:
         with pytest.raises(ValueError, match=re.escape("a whole sentence nobody types")):
@@ -657,6 +661,8 @@ def test_a_slot_with_no_spec_is_refused_and_named(tmp_path: Path) -> None:
         "lead half\n\n- **«DESCRIBED»** — what this one holds.\n\n"
         "> agent half with «DESCRIBED» and «UNDESCRIBED».\n", encoding="utf-8")
     (home / "method" / "templates" / "repo-text-rule.md").write_text("the shared rule\n", encoding="utf-8")
+    (home / "method" / "templates" / "findings-rule.md").write_text("the findings rule\n",
+                                                                    encoding="utf-8")
     contract.CONTRACTS["toy"] = "toy-contract.md"
     try:
         with pytest.raises(ValueError, match="UNDESCRIBED"):
@@ -881,9 +887,14 @@ def make_closer_inputs(tmp: Path, claims: list[str]) -> tuple[Path, Path, Path]:
     map_path = tmp / "project-map.json"
     map_path.write_text(_tiny_map(), encoding="utf-8")
     slots_file = tmp / "closer-slots.json"
-    slots_file.write_text(json.dumps({"REPO": str(tmp), "AGENT_ID": "closer1", "CLAIMS": ""}),
-                          encoding="utf-8")
+    slots_file.write_text(json.dumps(make_closer_slot_values(tmp)), encoding="utf-8")
     return verify, map_path, slots_file
+
+
+def make_closer_slot_values(tmp: Path, agent_id: str = "closer1") -> dict[str, str]:
+    """A closer's slots file as `--from-verdicts` reads it: «CLAIMS» empty, because the verb builds
+    it, and «COYOMAP_HOME» for the findings command the brief carries."""
+    return {"REPO": str(tmp), "AGENT_ID": agent_id, "CLAIMS": "", "COYOMAP_HOME": "/abs/coyomap"}
 
 
 def _from_verdicts(tmp: Path, extra: list[str] | None = None) -> tuple[int, str, Path]:
@@ -989,7 +1000,7 @@ def test_a_slots_file_that_fills_CLAIMS_itself_is_refused(tmp_path: Path) -> Non
     """The same rule `--from-batches` has: a value this verb composes would be silently overwritten."""
     make_closer_inputs(tmp_path, _FOUR_KINDS)
     (tmp_path / "closer-slots.json").write_text(
-        json.dumps({"REPO": str(tmp_path), "AGENT_ID": "c1", "CLAIMS": "typed by hand"}),
+        json.dumps({**make_closer_slot_values(tmp_path, "c1"), "CLAIMS": "typed by hand"}),
         encoding="utf-8")
     rc, out, _ = _from_verdicts(tmp_path)
     assert rc == 2 and "builds «CLAIMS» itself" in out, out
@@ -1024,7 +1035,8 @@ def test_the_closer_file_is_a_verdicts_file_the_existing_reader_can_load() -> No
 
 
 def test_the_closer_carries_an_agent_id_so_two_waves_never_collide() -> None:
-    assert set(contract.slots("closer")) == {"REPO", "CLAIMS", "AGENT_ID"}
+    """«COYOMAP_HOME» is the findings rule's: the closer files what it sees like every agent."""
+    assert set(contract.slots("closer")) == {"REPO", "CLAIMS", "AGENT_ID", "COYOMAP_HOME"}
 
 
 # --- review round: the four findings the adversarial pass returned --------------------------------
@@ -1251,8 +1263,8 @@ def make_split_votes(tmp: Path) -> None:
     (verify / "verdicts-a.json").write_text(json.dumps({"grounding": rows_a}), encoding="utf-8")
     (verify / "verdicts-b.json").write_text(json.dumps({"grounding": rows_b}), encoding="utf-8")
     (tmp / "project-map.json").write_text(_tiny_map(), encoding="utf-8")
-    (tmp / "closer-slots.json").write_text(
-        json.dumps({"REPO": str(tmp), "AGENT_ID": "closer1", "CLAIMS": ""}), encoding="utf-8")
+    (tmp / "closer-slots.json").write_text(json.dumps(make_closer_slot_values(tmp)),
+                                           encoding="utf-8")
 
 
 def test_a_claim_two_skeptics_refuted_reaches_the_closer_once_with_both_votes() -> None:
@@ -1514,8 +1526,8 @@ def make_wide_closer_inputs(tmp: Path, parts: int = 40) -> list[str]:
         (verify / f"verdicts-{batch}.json").write_text(json.dumps({"grounding": rows}),
                                                        encoding="utf-8")
     (tmp / "project-map.json").write_text(doc, encoding="utf-8")
-    (tmp / "closer-slots.json").write_text(
-        json.dumps({"REPO": str(tmp), "AGENT_ID": "closer1", "CLAIMS": ""}), encoding="utf-8")
+    (tmp / "closer-slots.json").write_text(json.dumps(make_closer_slot_values(tmp)),
+                                           encoding="utf-8")
     return described + called + stepped + [dissent]
 
 
@@ -1593,7 +1605,8 @@ def test_one_claim_longer_than_a_file_continues_in_the_next_and_no_file_is_over(
         votes=(contract.Vote(id="description-1#1", grounded=False, evidence="src/part1.py:1",
                              skeptic="description-1", note="it calls more parts than that"),))
     budget = len(contract.render("closer")) + 4_000
-    files = contract.closer_files(m, [claim], {"REPO": "/abs/repo", "AGENT_ID": "closer1"},
+    files = contract.closer_files(m, [claim], {"REPO": "/abs/repo", "AGENT_ID": "closer1",
+                                               "COYOMAP_HOME": "/abs/coyomap"},
                                   Path("/abs/scratch/closer.md"), budget=budget)
     assert len(files) >= 3, [p.name for p, _text in files]
     assert all(len(text) <= budget for _p, text in files), [len(t) for _p, t in files]
@@ -1784,3 +1797,503 @@ def test_the_unslotted_source_warning_never_stops_a_brief() -> None:
     assert rc == 0, said
     assert "WARNING: 1 source file(s)" in said and "    eslint.config.js" in said.splitlines(), said
     assert briefs == ["h-core.md", "h-t5.md"], briefs
+
+
+# --- every brief files its findings with a tool (context round 1, B2) -----------------------------
+# A finding an agent carried in its report reached the lead only if the report did, and the reader
+# that looked for findings in the reports saw 0 of 126 hand-backs on one build: they now arrive as a
+# tool call. So each brief tells its agent to file a finding into its own file, with one command.
+
+_FINDINGS_HEAD = "**A finding about the product goes in your findings file, the moment you see it.**"
+
+
+def test_every_dispatched_contract_carries_the_findings_rule_once() -> None:
+    """Once per BRIEF, under `--append` too. The wave runner reads no code and hands back six fixed
+    lines, one of them the collect line; the T5 addendum rides a harvest brief that carries it."""
+    assert contract.NO_FINDINGS_RULE == {"wave", "harvest-t5"}
+    for name in contract.CONTRACTS:
+        assert render(name).count(_FINDINGS_HEAD) == (0 if name in contract.NO_FINDINGS_RULE
+                                                      else 1), name
+    for names in (["trace", "doors"], ["harvest", "harvest-t5"]):
+        assert contract._compose(names).count(_FINDINGS_HEAD) == 1, names
+    assert "End your report with `findings: <the number you filed>`." in " ".join(
+        render("rules").split())
+
+
+def test_each_brief_files_findings_under_its_own_agent_id() -> None:
+    """The rule is written with «REPO» and «AGENT_ID». A harvest brief names them «REPO_ABS» and
+    «agent-id», and a skeptic's id is its «BATCH»: kept as written, the rule would add two slots
+    its lead never fills, and three voters on one claims file would file under one name."""
+    for name, repo, agent in (("harvest", "REPO_ABS", "agent-id"), ("skeptic", "REPO", "BATCH"),
+                              ("trace", "REPO", "AGENT_ID"), ("closer", "REPO", "AGENT_ID")):
+        assert f"findings add --repo «{repo}» --agent «{agent}»" in render(name), name
+    assert not {"REPO", "AGENT_ID"} & set(contract.slots("harvest"))
+    assert "AGENT_ID" not in contract.slots("skeptic")
+    values = make_slot_values("skeptic")
+    values.update({"REPO": "/abs/repo", "BATCH": "security-1-b", "CLAIMS": "security-1"})
+    assert "findings add --repo /abs/repo --agent security-1-b" in contract.fill("skeptic", values)
+
+
+# --- one runner runs each fact-check wave (context round 1, B3) -----------------------------------
+# A wave is forty to seventy skeptics, and every report and launch receipt they send lands in the
+# context of whoever started them: on one build the first wave alone added 172,726 tokens to the
+# lead. One agent runs the wave and hands back six lines.
+
+def make_wave_values(briefs: Path, **over: str) -> dict[str, str]:
+    """Every slot of a wave runner's brief, filled the way a lead fills it for a first wave."""
+    values = {"COYOMAP_HOME": "/abs/coyomap", "REPO": "/abs/repo",
+              "MAP": "/abs/repo/.coyomap/project-map.json", "AGENT_ID": "wave-1",
+              "BRIEFS": str(briefs), "PREFIX": "''", "VOTES": "security=3", "POOL": "8",
+              "CLOSER_ID": "closer-w1"}
+    values.update(over)
+    return values
+
+
+def make_claims_files(verify: Path, batches: dict[str, str]) -> Path:
+    """`claims-<batch id>.json` files as `audit --batches` writes them, `{batch id: theme}`."""
+    verify.mkdir(parents=True, exist_ok=True)
+    for bid, theme in batches.items():
+        (verify / f"claims-{bid}.json").write_text(json.dumps({"theme": theme, "claims": []}),
+                                                   encoding="utf-8")
+    return verify
+
+
+def run_contract(argv: list[str]) -> tuple[int, str, str]:
+    """`coyomap contract …` in process: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = contract.main(argv)
+    return rc, out.getvalue(), err.getvalue()
+
+
+def run_wave_fill(tmp: Path, values: dict[str, str], out: str = "wave-1.md",
+                  extra: list[str] | None = None) -> tuple[int, str, str]:
+    slots_file = tmp / "wave-slots.json"
+    slots_file.write_text(json.dumps(values), encoding="utf-8")
+    return run_contract(["wave", "--fill", str(slots_file), "--out", str(tmp / out),
+                         "--brief", values.get("AGENT_ID") or "wave-1", *(extra or [])])
+
+
+def test_the_wave_contract_ships_names_its_slots_and_opens_with_you_are() -> None:
+    assert contract.CONTRACTS["wave"] == "wave-contract.md"
+    assert set(contract.slots("wave")) == {"COYOMAP_HOME", "REPO", "MAP", "AGENT_ID", "BRIEFS",
+                                           "PREFIX", "VOTES", "POOL", "CLOSER_ID"}
+    text = render("wave")
+    assert text.startswith("You are a wave runner. You run ONE fact-check wave of a coyomap build")
+    words = " ".join(text.split())
+    for phrase in ("**If none of your tools can start another agent, stop now**",
+                   "`CANNOT START SUBAGENTS — run the wave yourself`",
+                   "Keep «POOL» running.",
+                   "A start refused because too many agents are running is not a failure",
+                   "Each id it still names gets ONE retry", "An id that fails twice is FAILED.",
+                   "NEVER `cd` into the coyomap clone", "**Do not open a previous map.**",
+                   "do not pipe it through", "plan: «BRIEFS»/wave-plan.json"):
+        assert phrase in words, phrase
+    assert "One idea per sentence" not in text and "door is anchored" not in text
+
+
+def test_the_wave_runner_waits_inside_its_run_and_keeps_the_group_fallback() -> None:
+    """Tested 2026-10-07: a subagent gets each result of a background child while it stays in its
+    run, and a subagent that ENDS its turn to wait ends its run. "While you wait, emit no command
+    at all" would end the wave at its first wait."""
+    words = " ".join(render("wave").split())
+    assert ("**Never end your run to wait for a subagent: that ends the wave.** Wait inside your "
+            "run, for example by checking which of your subagents are still running.") in words
+    assert "If it cannot, start the next «POOL» in one message once the whole group is back." in words
+    assert "emit no command at all" not in words
+
+
+def test_a_wave_fill_writes_both_slots_files_and_refuses_existing_ones() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        briefs = tmp / "briefs-w1"
+        rc, out, err = run_wave_fill(tmp, make_wave_values(briefs))
+        skeptic = json.loads((briefs / "skeptic-slots.json").read_text(encoding="utf-8"))
+        closer = json.loads((briefs / "closer-slots.json").read_text(encoding="utf-8"))
+        (briefs / "skeptic-slots.json").write_text("A RUNNER IS READING THIS", encoding="utf-8")
+        refused, _out, said = run_wave_fill(tmp, make_wave_values(briefs, AGENT_ID="wave-2"),
+                                            out="wave-2.md")
+        kept = (briefs / "skeptic-slots.json").read_text(encoding="utf-8")
+        second_brief = (tmp / "wave-2.md").exists()
+        forced, _out, _err = run_wave_fill(tmp, make_wave_values(briefs, AGENT_ID="wave-2"),
+                                           out="wave-2.md", extra=["--force"])
+        rewritten = (briefs / "skeptic-slots.json").read_text(encoding="utf-8")
+    assert rc == 0, err
+    assert out.splitlines() == ["wave-1", str(tmp / "wave-1.md"), contract.BRIEF_SENTENCE]
+    assert {k: v for k, v in skeptic.items() if not k.startswith("//")} == {
+        "COYOMAP_HOME": "/abs/coyomap", "MAP": "/abs/repo/.coyomap/project-map.json",
+        "REPO": "/abs/repo", "BATCH": "", "CLAIMS": ""}
+    assert {k: v for k, v in closer.items() if not k.startswith("//")} == {
+        "REPO": "/abs/repo", "CLAIMS": "", "AGENT_ID": "closer-w1", "COYOMAP_HOME": "/abs/coyomap"}
+    assert all(f"//{k}" in skeptic for k in ("MAP", "BATCH")), "the skeleton's specs ride along"
+    assert refused == 2 and "skeptic-slots.json" in said and "already exist" in said, said
+    assert kept == "A RUNNER IS READING THIS" and not second_brief
+    assert forced == 0 and rewritten != kept
+
+
+def test_the_slots_files_a_wave_writes_are_what_its_two_generators_read() -> None:
+    """The runner hands them on unchanged, so a file either generator refused would stop a wave the
+    lead is not watching."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_claims_files(tmp / "verify", {"security": "security", "backbone": "backbone"})
+        make_closer_inputs(tmp, _FOUR_KINDS)
+        briefs = tmp / "briefs-w1"
+        values = make_wave_values(briefs, REPO=str(tmp), MAP=str(tmp / "project-map.json"))
+        filled, _out, err = run_wave_fill(tmp, values)
+        skeptics = run_contract(["skeptic", "--from-batches", str(tmp / "verify"), "--fill",
+                                 str(briefs / "skeptic-slots.json"), "--out-dir", str(briefs),
+                                 "--votes", "security=3", "--prefix", ""])
+        closer = run_contract(["closer", "--from-verdicts", str(tmp / "verify"), "--map",
+                               str(tmp / "project-map.json"), "--fill",
+                               str(briefs / "closer-slots.json"), "--out",
+                               str(briefs / "closer-w1.md"), "--brief", "closer-w1"])
+        voter = (briefs / "skeptic-security-b.md").read_text(encoding="utf-8")
+        closer_brief = (briefs / "closer-w1.md").read_text(encoding="utf-8")
+    assert filled == 0, err
+    assert skeptics[0] == 0, skeptics[2]
+    assert closer[0] == 0, closer[2]
+    assert "«" not in voter and "--agent security-b" in voter and str(tmp) in voter
+    assert "«" not in closer_brief and "--agent closer-w1" in closer_brief
+
+
+def test_a_wave_fill_reports_every_bad_slot_at_once() -> None:
+    """Each value lands inside a command the runner runs far from the lead: a relative folder is
+    read from another working directory, a prefix that is no shell word breaks the command, an even
+    vote can tie, and a pool of no skeptic runs no wave."""
+    with pytest.raises(ValueError) as exc:
+        contract.fill("wave", make_wave_values(Path("briefs-w1"), PREFIX="added", VOTES="security=2",
+                                               POOL="0"))
+    message = str(exc.value)
+    assert all(slot in message for slot in ("«BRIEFS»", "«PREFIX»", "«VOTES»", "«POOL»")), message
+    for over in ({"VOTES": "security=1"}, {"VOTES": "security"}, {"POOL": "0"}, {"POOL": "x"},
+                 {"POOL": "-3"}, {"PREFIX": "added-*"}, {"PREFIX": "a b-"}):
+        with pytest.raises(ValueError):
+            contract.fill("wave", make_wave_values(Path("/abs/briefs"), **over))
+    for over in ({"PREFIX": '""'}, {"PREFIX": "added-"}, {"PREFIX": "a1b2c3-d4e5f6-"},
+                 {"VOTES": "security=5"}, {"POOL": "1"}, {"POOL": "19"}):
+        assert "«" not in contract.fill("wave", make_wave_values(Path("/abs/briefs"), **over))
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        rc, _out, err = run_wave_fill(tmp, make_wave_values(tmp / "briefs-w1", POOL="none"))
+        written = sorted(p.name for p in tmp.rglob("*") if p.name != "wave-slots.json")
+    assert rc == 2 and "«POOL»" in err, err
+    assert written == [], written
+
+
+def test_the_tool_sets_no_upper_bound_on_the_pool() -> None:
+    """The cap on running subagents is the agent's, and it differs from agent to agent: a bound in
+    the tool would refuse a pool another agent runs, and name one agent's number as the method's.
+    The brief keeps the rule in words: «POOL» + 1 stays under your agent's cap."""
+    for pool in ("20", "40", "250"):
+        assert "«" not in contract.fill("wave", make_wave_values(Path("/abs/briefs"), POOL=pool))
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        rc, _out, err = run_wave_fill(tmp, make_wave_values(tmp / "briefs-w1", POOL="40"))
+    assert rc == 0, err
+    assert not hasattr(contract, "POOL_MAX")
+    lead = " ".join(contract.lead_half((REPO_ROOT / "method" / "templates" / "wave-contract.md")
+                                       .read_text(encoding="utf-8")).split())
+    assert "keep «POOL» + 1 under your agent's cap on running subagents" in lead, lead
+
+
+def test_a_wave_runner_is_filled_one_at_a_time() -> None:
+    """A batch fill would write runners' briefs and not the slots files each runner reads."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "slots").mkdir()
+        (tmp / "slots" / "wave-1.json").write_text(json.dumps(make_wave_values(tmp / "b")),
+                                                    encoding="utf-8")
+        rc, _out, err = run_contract(["wave", "--from-slots", str(tmp / "slots"), "--out-dir",
+                                      str(tmp / "briefs")])
+        wrote = (tmp / "briefs").exists()
+    assert rc == 2 and "one at a time" in err and not wrote, err
+
+
+def make_skeptic_slots(path: Path) -> Path:
+    """The slots file `--from-batches` reads: every skeptic slot but the two it fills itself."""
+    path.write_text(json.dumps({k: "x" for k in contract.slots("skeptic")
+                                if k not in ("BATCH", "CLAIMS")}), encoding="utf-8")
+    return path
+
+
+def run_from_batches(tmp: Path, *extra: str) -> tuple[int, str, str]:
+    return run_contract(["skeptic", "--from-batches", str(tmp / "verify"), "--fill",
+                         str(make_skeptic_slots(tmp / "slots.json")), "--out-dir",
+                         str(tmp / "briefs"), *extra])
+
+
+def test_from_batches_writes_a_plan_naming_every_voter_written_or_skipped() -> None:
+    """A skipped brief is a voter still: the wave needs its verdicts, and a runner started fresh
+    after a crash starts every id the plan's lint names missing, skipped or not."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_claims_files(tmp / "verify", {"security": "security", "backbone": "backbone",
+                                           "small": "mixed"})
+        (tmp / "briefs").mkdir()
+        (tmp / "briefs" / "skeptic-backbone.md").write_text("AN AGENT IS READING THIS",
+                                                             encoding="utf-8")
+        rc, out, err = run_from_batches(tmp, "--votes", "security=3")
+        plan = load_plan(tmp / "briefs" / "wave-plan.json")
+        verify, briefs = (tmp / "verify").resolve(), (tmp / "briefs").resolve()
+    assert rc == 0, err
+    assert sorted(a.id for a in plan.agents) == ["backbone", "security-a", "security-b",
+                                                 "security-c", "small"]
+    assert (plan.verify, plan.prefix, plan.votes) == (verify, "", {"security": 3})
+    agent = {a.id: a for a in plan.agents}
+    skipped = agent["backbone"]
+    assert "skipped  backbone" in out, out
+    assert (skipped.claims, skipped.theme, skipped.brief, skipped.verdicts) == (
+        verify / "claims-backbone.json", "backbone", briefs / "skeptic-backbone.md",
+        verify / "verdicts-backbone.json")
+    assert skipped.pointer == contract.brief("backbone", briefs / "skeptic-backbone.md")
+    voter = agent["security-b"]
+    assert (voter.claims.name, voter.verdicts.name) == ("claims-security.json",
+                                                        "verdicts-security-b.json")
+
+
+def test_the_plan_orders_voters_by_the_worklists_themes() -> None:
+    """Most dangerous first, so the riskiest batches start first; by file name without a pinned
+    worklist."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_claims_files(tmp / "verify", {"backbone": "backbone", "rule-1": "rule",
+                                           "security": "security", "small": "mixed"})
+        first = run_from_batches(tmp, "--votes", "security=3")
+        by_name = [a.id for a in load_plan(tmp / "briefs" / "wave-plan.json").agents]
+        (tmp / "verify" / "worklist.json").write_text(
+            json.dumps({"themes": ["security", "rule", "dep-usage", "backbone"], "worklist": []}),
+            encoding="utf-8")
+        second = run_from_batches(tmp, "--votes", "security=3")
+        by_risk = [a.id for a in load_plan(tmp / "briefs" / "wave-plan.json").agents]
+    assert first[0] == 0 and second[0] == 0, (first[2], second[2])
+    assert by_name == ["backbone", "rule-1", "security-a", "security-b", "security-c", "small"]
+    assert by_risk == ["security-a", "security-b", "security-c", "rule-1", "backbone", "small"]
+    assert "0 written, 6 skipped" in second[1], "the second run still plans every voter"
+
+
+def test_from_batches_names_its_plan_on_the_first_line() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_claims_files(tmp / "verify", {"security": "security", "backbone": "backbone",
+                                           "small": "mixed"})
+        rc, out, err = run_from_batches(tmp, "--votes", "security=3")
+        plan = (tmp / "briefs" / "wave-plan.json").resolve()
+    assert rc == 0, err
+    assert out.splitlines()[0] == (f"WAVE PLAN — 5 brief(s) over 3 claims file(s): 5 written, "
+                                   f"0 skipped → {plan}"), out
+
+
+def test_a_fill_and_a_wave_append_their_lines_to_an_open_state() -> None:
+    """The build's short memory: after a summary, `state show` names each brief and where it went
+    (with the harvest budget), and each runner with its pool, its prefix and the plan it counts the
+    wave's verdict files from. The runner's own steps write no `next`: that line is the lead's."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        verify = make_claims_files(repo / ".coyomap" / "verify",
+                                   {"security": "security", "backbone": "backbone"})
+        buildstate.start(repo)
+        harvest = tmp / "h1.json"
+        harvest.write_text(json.dumps(_harvest_values(REPO_ABS=str(repo), EXPECTED_COMPONENTS="6",
+                                                      **{"agent-id": "h1"})), encoding="utf-8")
+        filled = run_contract(["harvest", "--fill", str(harvest), "--out", str(tmp / "h1.md"),
+                               "--brief", "h1"])
+        briefs = tmp / "briefs-w1"
+        wave = run_wave_fill(tmp, make_wave_values(briefs, REPO=str(repo)))
+        skeptics = run_contract(["skeptic", "--from-batches", str(verify), "--fill",
+                                 str(briefs / "skeptic-slots.json"), "--out-dir", str(briefs),
+                                 "--votes", "security=3", "--prefix", ""])
+        state = buildstate.read_state(repo)
+        plan = (briefs / "wave-plan.json").resolve()
+    assert (filled[0], wave[0], skeptics[0]) == (0, 0, 0), (filled[2], wave[2], skeptics[2])
+    assert state is not None
+    assert [e.text for e in state.of("brief")] == [
+        f"harvest h1 → {tmp / 'h1.md'} · budget 6",
+        f"skeptic 4 voter(s) over 2 claims file(s), prefix '': 4 written, 0 skipped → {plan}"]
+    assert [e.text for e in state.of("wave")] == [
+        f"wave-1 · pool 8 · prefix '' · plan {briefs / 'wave-plan.json'}"]
+    assert state.of("next") == [], state.of("next")
+
+
+def test_the_skeptic_briefs_leave_the_leads_next_step_alone() -> None:
+    """The lead writes `next` before a long wait, and `state show` reads it back after a summary.
+    A wave runner runs `--from-batches`, so a `next` written there replaced the lead's "wait for the
+    runner's six lines" with the wave's lint, which is the runner's job and not the lead's."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        verify = make_claims_files(repo / ".coyomap" / "verify", {"backbone": "backbone"})
+        buildstate.start(repo)
+        buildstate.append(repo, "next", "wait for runner wave-1's six lines")
+        rc, _out, err = run_contract(["skeptic", "--from-batches", str(verify), "--fill",
+                                      str(make_skeptic_slots(tmp / "slots.json")), "--out-dir",
+                                      str(tmp / "briefs")])
+        state = buildstate.read_state(repo)
+    assert rc == 0, err
+    assert state is not None
+    assert [e.text for e in state.of("next")] == ["wait for runner wave-1's six lines"]
+    assert len(state.of("brief")) == 1, state.events
+
+
+def test_a_batch_fill_and_a_closer_fill_append_their_lines_to_an_open_state() -> None:
+    """The other two fill paths: a batch of harvest briefs with the sum of its budgets, and a
+    closer brief with its refutations."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        make_closer_inputs(repo / ".coyomap", _FOUR_KINDS)
+        buildstate.start(repo)
+        make_harvest_slots(tmp / "slots", ["h1", "h2"], repo, budget="6")
+        batch = run_contract(["harvest", "--from-slots", str(tmp / "slots"), "--out-dir",
+                              str(tmp / "briefs")])
+        closer = run_contract(["closer", "--from-verdicts", str(repo / ".coyomap" / "verify"),
+                               "--map", str(repo / ".coyomap" / "project-map.json"), "--fill",
+                               str(repo / ".coyomap" / "closer-slots.json"), "--out",
+                               str(tmp / "closer-w1.md"), "--brief", "closer-w1"])
+        state = buildstate.read_state(repo)
+    assert (batch[0], closer[0]) == (0, 0), (batch[2], closer[2])
+    assert state is not None
+    assert [e.text for e in state.of("brief")] == [
+        f"harvest 2 brief(s): 2 written, 0 skipped → {tmp / 'briefs'} · budget 12",
+        f"closer closer-w1 4 refuted claim(s), 0 outvoted dissent → {tmp / 'closer-w1.md'}"]
+
+
+# --- review 2 of round 1: the wave, the contracts ---------------------------------------------------
+
+def make_wave_lead_half() -> str:
+    """The wave contract's LEAD half, whitespace folded: what the lead reads beside the slots."""
+    text = (REPO_ROOT / "method" / "templates" / "wave-contract.md").read_text(encoding="utf-8")
+    return " ".join(contract.lead_half(text).split())
+
+
+def test_the_runner_starts_its_closer_only_on_an_ok_lint() -> None:
+    """A closer started over a wave with a FAILED skeptic judges only part of its refutations, and
+    the skeptic the lead re-sends then needs a second closer. So the runner starts its ONE closer
+    only when its last lint is OK. With a FAILED id it skips the closer and hands the wave back
+    INCOMPLETE, and the lead re-sends, lints the whole wave and runs the closer itself, in that
+    order."""
+    words = " ".join(render("wave").split())
+    gate = words.index("**Start the closer only when your last lint is OK.**")
+    assert gate < words.index("$CX contract closer --from-verdicts"), words
+    assert ("With a FAILED id, skip the closer and go on to step 7: your report reads `WAVE "
+            "«AGENT_ID» INCOMPLETE` and names the FAILED ids.") in words, words
+    lead = make_wave_lead_half()
+    steps = ("**A wave handed back INCOMPLETE has no closer yet.**",
+             "it skips the closer and hands back `WAVE <id> INCOMPLETE` with the FAILED ids",
+             "re-send each FAILED skeptic yourself (its pointer is in the plan)",
+             "lint the wave with `coyomap grounding lint --plan «BRIEFS»/wave-plan.json`",
+             "run the ONE closer yourself: `coyomap contract closer --from-verdicts")
+    at = [lead.find(s) for s in steps]
+    assert -1 not in at and at == sorted(at), (at, lead)
+
+
+def test_no_brief_forbids_the_findings_command_it_carries() -> None:
+    """Each brief with the findings rule tells its agent to run `coyomap findings add`, which writes
+    the agent's own file under `.coyomap/findings/`. A brief that also said "the one file you write
+    is your own verdicts file", or "do NOT read `.coyomap/`" with no word about that file, left the
+    agent to pick which of its rules to break."""
+    forbidding = ("the one file you write is your own verdicts file",
+                  "the only file you may write is your own fragment file",
+                  "The one file you may write is your own fragment.",
+                  "You may run read-only commands. Change nothing.")
+    for name in sorted(set(contract.CONTRACTS) - contract.NO_FINDINGS_RULE):
+        words = " ".join(render(name).split())
+        assert "coyomap findings add" in words, name
+        found = [phrase for phrase in forbidding if phrase in words]
+        assert not found, (name, found)
+        assert "never open or edit that folder yourself" in words, name
+    closer = " ".join(render("closer").split())
+    assert ("Two files of yours land in that folder all the same, and neither needs a read: your "
+            "verdicts file (below), and your findings file, which the findings command below "
+            "writes for you.") in closer, closer
+    assert ("you write your own verdicts file, the findings command writes your own findings "
+            "file, and the lead applies what you uphold") in closer, closer
+
+
+def test_the_closer_brief_says_what_goes_in_all_four_of_its_slots() -> None:
+    """«COYOMAP_HOME» came with the findings rule, and the lead half that lists the closer's slots
+    still named three: the fourth was explained only by a table the template's reader never sees."""
+    assert set(contract.template_specs("closer")) == {"REPO", "AGENT_ID", "CLAIMS", "COYOMAP_HOME"}
+    assert set(contract.template_specs("closer")) == set(contract.slots("closer"))
+
+
+def test_a_wave_fill_writes_where_the_briefs_folder_it_checked_points() -> None:
+    """The fill checked «BRIEFS» stripped and wrote with it as typed: a folder given as ` /abs/w1 `
+    passed the absolute-path check, then its slots files went to a RELATIVE folder of that name
+    under the working directory, where no runner looks, and its brief named the folder with spaces
+    inside its commands."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        briefs = tmp / "briefs-w1"
+        padded = make_wave_values(briefs, BRIEFS=f"  {briefs} ")
+        files = [path for path, _text in contract.wave_slots_files(padded)]
+        text = contract.fill("wave", padded)
+        here = Path.cwd()
+        os.chdir(tmp)
+        try:
+            rc, _out, err = run_wave_fill(tmp, padded)
+        finally:
+            os.chdir(here)
+        written = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob("*.json"))
+    assert files == [briefs / "skeptic-slots.json", briefs / "closer-slots.json"], files
+    assert f"--fill {briefs}/skeptic-slots.json --out-dir {briefs} --votes" in text, text
+    assert rc == 0, err
+    assert written == ["briefs-w1/closer-slots.json", "briefs-w1/skeptic-slots.json",
+                       "wave-slots.json"], written
+
+
+def test_a_briefs_folder_in_the_projects_own_tree_is_warned_about() -> None:
+    """«BRIEFS» holds the wave's briefs, slots files and plan. Inside the repo but outside its
+    `.coyomap/` they sit in the project's own tree, where its status lists them and a commit can
+    take them. One warning line, and the fill still runs; under `.coyomap/` or outside the repo,
+    nothing is said."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        (repo / ".coyomap").mkdir(parents=True)
+        said: dict[str, tuple[int, list[str]]] = {}
+        for where, folder in (("tree", repo / "briefs-w1"),
+                              ("map", repo / ".coyomap" / "briefs-w1"),
+                              ("outside", tmp / "briefs-w1")):
+            rc, _out, err = run_wave_fill(tmp, make_wave_values(folder, REPO=str(repo),
+                                                                AGENT_ID=f"wave-{where}"),
+                                          out=f"wave-{where}.md")
+            said[where] = (rc, [ln for ln in err.splitlines() if ln.startswith("WARNING")])
+    assert said["tree"][0] == 0 and len(said["tree"][1]) == 1, said
+    assert "«BRIEFS»" in said["tree"][1][0] and str(repo / "briefs-w1") in said["tree"][1][0], said
+    assert said["map"] == (0, []) and said["outside"] == (0, []), said
+
+
+def test_the_runner_writes_how_its_wave_ended_in_a_line_the_state_reads_back() -> None:
+    """`state show` said a runner was out until every verdict file was in, also after the runner had
+    handed its wave back INCOMPLETE and left its FAILED skeptics to the lead. Just before its report,
+    the runner now writes how the wave ended, with a command its own brief carries whole, and the
+    state's view reads that line back."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        repo.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert buildstate.main(["start", "--repo", str(repo)]) == 0
+        filled, _out, err = run_wave_fill(tmp, make_wave_values(tmp / "briefs-w1", REPO=str(repo)))
+        brief = " ".join((tmp / "wave-1.md").read_text(encoding="utf-8").split())
+        commands = re.findall(r'`\$CX state add wave "([^"]+)" --repo ([^`\s]+)`', brief)
+        views: list[str] = []
+        for text, at in commands:
+            said = io.StringIO()
+            with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
+                code = buildstate.main(["add", "wave", text.replace("<the FAILED ids>",
+                                                                    "backbone-2 security-1-a"),
+                                        "--repo", at])
+            assert code == 0, said.getvalue()
+            state = buildstate.read_state(repo)
+            assert state is not None
+            views.append(buildstate.show_lines(state, repo, REPO_ROOT)[1])
+    assert filled == 0, err
+    assert [text for text, _at in commands] == ["wave-1 DONE", "wave-1 INCOMPLETE <the FAILED ids>"]
+    assert brief.index("$CX findings collect") < brief.index("$CX state add wave") < brief.index(
+        "Hand back these lines and nothing else"), brief
+    assert views == ["wave wave-1: handed back DONE",
+                     "wave wave-1: handed back INCOMPLETE · re-send its FAILED voters yourself: "
+                     "backbone-2, security-1-a"], views

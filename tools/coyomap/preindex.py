@@ -28,6 +28,7 @@ import json
 import sys
 from pathlib import Path
 
+from coyomap import buildstate
 from coyomap.ignorefile import bad_line_disclosure, ignore_report
 from coyomap.preindex_lib import (
     GRANULARITY_BAND_PCT,
@@ -268,6 +269,14 @@ def build_granularity(root: Path) -> dict:
                  "code tree alone (docs/config/tests excluded); reconcile like any pre-index signal "
                  "(GR2), the checkers re-measure it independently (GR4)."),
     }
+
+
+def budget_text(granularity: dict[str, object]) -> str:
+    """The build-state line of one pre-index: E, its band, and which cap bound it."""
+    band = granularity.get("band")
+    lo, hi = band if isinstance(band, list) and len(band) == 2 else ("?", "?")
+    return (f"E {granularity.get('expected_components')} · band {lo}-{hi} · "
+            f"bound by {granularity.get('bound_by')}")
 
 
 # --------------------------------------------------------------------------------------
@@ -609,6 +618,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(doc, indent=2))
+    # The build state keeps E: the harvest briefs' budgets are summed against it after a summary,
+    # when the number the lead read off this run is gone.
+    buildstate.append(root, "budget", budget_text(granularity))
 
     # one-line human summary to stderr (GR1 reminder + GR3 coverage at a glance)
     top = weight["children"][:5]
