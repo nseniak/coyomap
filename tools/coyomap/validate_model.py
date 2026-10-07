@@ -49,6 +49,7 @@ from coyomap.model import (
     resolve_map_path,
     BusinessRule,
     access_rules,
+    Component,
     Dep,
     Entity,
     EntryPoint,
@@ -1405,13 +1406,18 @@ class RuleStepLink:
     phrase: str = ""          # the step's own action text — display only
 
 
-def component_file_owners(m: ProjectModel) -> dict[str, list[str]]:
-    """repo path -> EVERY component id whose `files` claims it, sorted.
+def component_files(c: Component) -> list[str]:
+    """The repo files a component HOLDS, each once, in the order `files` lists them. THE one answer
+    to "which files does this component hold": `component_file_owners` inverts it for the rule
+    layer, `coyomap dump --owners` answers a tracer from it, and the viewer's file switcher pages
+    through it after the component's own `source`. Three readers used to answer it three ways, and
+    `dump` named an owner that `validate` never derives.
 
-    `Component.files` carries no line ranges and is not required to be disjoint, so this is a
-    one-to-many index by construction. Deliberately built from `files` ALONE: a component's
-    `source` is where it LIVES (often a directory), and letting a directory prefix claim a site
-    would manufacture an owner for a file nobody listed — exactly the "component's home passed off
+    Built from `files` ALONE. A component's `source` is where it LIVES: often a directory, and
+    sometimes one line of a file another component holds (C24 "MCP door guards" on the 2026-10-07
+    mcpolis map lives at `app.py:354`, in the file C23 "Backend assembly" lists). Counting it would
+    hand the component every site in a file nobody listed for it, and letting a directory prefix
+    claim a site would manufacture an owner the same way — exactly the "component's home passed off
     as evidence" failure. A map whose components declare no `files` therefore derives nothing, which
     `validate` BLOCKS rather than rendering bare (`check_rules_model`).
 
@@ -1419,15 +1425,26 @@ def component_file_owners(m: ProjectModel) -> dict[str, list[str]]:
     be matched by the shape-legal site anchor `src:12`, manufacturing the very owner the paragraph
     above forbids. A line suffix IS stripped — `files: ["src/v.py:1"]` names one file, and keying it
     verbatim would lose the owner of every site in it."""
+    held: list[str] = []
+    for f in c.files:
+        raw = (f or "").strip()
+        if not raw or raw.endswith("/"):
+            continue                       # a directory holds no one file (see above)
+        path = strip_anchor(raw)
+        if path and path not in held:
+            held.append(path)
+    return held
+
+
+def component_file_owners(m: ProjectModel) -> dict[str, list[str]]:
+    """repo path -> EVERY component id holding it (`component_files`), sorted.
+
+    `Component.files` carries no line ranges and is not required to be disjoint, so this is a
+    one-to-many index by construction."""
     out: dict[str, list[str]] = {}
     for c in m.components:
-        for f in c.files:
-            raw = (f or "").strip()
-            if not raw or raw.endswith("/"):
-                continue                       # a directory claims no site (see above)
-            path = strip_anchor(raw)
-            if path:
-                out.setdefault(path, []).append(c.id)
+        for path in component_files(c):
+            out.setdefault(path, []).append(c.id)
     return {path: sorted(set(ids), key=element_sort_key) for path, ids in out.items()}
 
 
@@ -1924,7 +1941,10 @@ def check_rules_model(m: ProjectModel,
             "--fragments .coyomap/build-fragments --from <file>`, one {\"UC5:3\": \"<condition>\"} "
             "per step, or record '<path:line>: <why>' under a 'Condition exceptions' extras "
             "heading. A map built before this rule lists every deciding step; its next build or "
-            "update writes the conditions")
+            "update writes the conditions: in an update, an entry of the change log edits each "
+            "note: `{\"id\": \"flow:UC5\", \"key\": \"steps[n=3].note\", \"was\": \"\", \"now\": "
+            "\"<condition>\"}` (a sub-flow's step: `\"id\": \"SF2\"`), since an update never reads "
+            "the fragments")
 
     return problems, warnings
 
@@ -1942,6 +1962,17 @@ def rule_identity(r: BusinessRule) -> tuple[str, tuple[str, ...]]:
 def triggered_entry_point_ids(m: ProjectModel) -> set[str]:
     """Entry-point ids named by some use case's `entry_points` — the TRIGGER arm of claiming."""
     return {e.strip() for u in m.use_cases for e in u.entry_points if e.strip()}
+
+
+def _live_owner(ep: EntryPoint, comp_ids: set[str]) -> str:
+    """The way in's owning component id when it names a component this map defines, else "".
+
+    ONE test for the four readers that ask whether a way in has a live owner: both unclaimed lists,
+    the coverage counts and the coverage line's ownerless remainder. A row with no owner, or a
+    dangling one, is no business of theirs: each has its own check (the ownerless advisory, the
+    blocking reference check). Written out four times, the test was four places to drift apart."""
+    comp = ep.component.strip()
+    return comp if comp in comp_ids else ""
 
 
 def _trigger_arm_exceptions(m: ProjectModel) -> str:
@@ -2006,7 +2037,7 @@ def unclaimed_external_entry_points(m: ProjectModel) -> list[EntryPoint]:
     claimed = flow_endpoint_ids(m)
     comp_ids = {c.id for c in m.components}
     return [ep for ep in external_entry_points(m)
-            if (comp := ep.component.strip()) and comp in comp_ids and comp not in claimed
+            if (comp := _live_owner(ep, comp_ids)) and comp not in claimed
             and not (ep.id and ep.id in triggered)]
 
 
@@ -2028,7 +2059,7 @@ def unclaimed_self_entry_points(m: ProjectModel) -> list[EntryPoint]:
     comp_ids = {c.id for c in m.components}
     return [ep for ep in m.entry_points
             if grammar.effective_activation(ep.activation, ep.kind) == "self"
-            and (comp := ep.component.strip()) and comp in comp_ids and comp not in claimed
+            and (comp := _live_owner(ep, comp_ids)) and comp not in claimed
             and not (ep.id and ep.id in triggered)]
 
 
@@ -2229,7 +2260,7 @@ def completeness_counts(m: ProjectModel) -> dict[str, int]:
     comp_ids = {c.id for c in m.components}
     named = [ep for ep in ext if ep.id and ep.id in triggered]
     reached = [ep for ep in ext
-               if (comp := ep.component.strip()) and comp in comp_ids and comp in touched
+               if (comp := _live_owner(ep, comp_ids)) and comp in touched
                and not (ep.id and ep.id in triggered)]
     run = [ep for ep in reached if ep.id in stepped]
     loose = [ep for ep in reached if ep.id not in stepped]
@@ -2777,6 +2808,16 @@ def _external_ways_in(m: ProjectModel) -> list[EntryPoint]:
     return [ep for ep in external_entry_points(m) if ep.kind not in _PLUMBING_EP_KINDS]
 
 
+def undecided_interface_pointers(m: ProjectModel) -> list[Dep]:
+    """The deps whose harvest pointer (`grammar.is_interface_pointer`) names no surface yet: the
+    decisions synthesis still owes. ONE list for both readers: `assemble` names them after a
+    `--reconcile`, and `_check_interfaces` refuses a map that still carries one, because the pointer
+    otherwise passes as the reason the dep is none. Two deps of the 2026-10-07 mcpolis map shipped
+    "Not decided here" as theirs."""
+    return [d for d in m.deps
+            if not d.interfaces and grammar.is_interface_pointer(d.not_an_interface)]
+
+
 def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
     """The product's outside edge: shape errors, then the advisories that keep it honest.
 
@@ -3057,6 +3098,25 @@ def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
             problems.append(f"{d.id} ({d.name}) is an external system that neither names an "
                             f"interface nor says why it is none. Write one: without it there is no "
                             f"way to tell a deliberate exclusion from nobody having looked")
+    # THE HARVEST POINTER NOBODY ANSWERED. It fills `not_an_interface`, so the check above reads it
+    # as a reason, and the 2026-10-07 mcpolis map shipped "Not decided here" as the answer for nginx
+    # and Caddy. Blocking, like the two dep problems before it: an undecided dep is the state they
+    # refuse. It waits behind the "no interfaces recorded" return, as the check above does, because
+    # synthesis mints the surfaces: before it every pointer is undecided, and rightly so.
+    # BOTH WAYS TO DECIDE IT. A build edits its fragments; an update edits the map through its change
+    # log and never reads them, so naming only `fix row --fragments` sent the next update of that
+    # mcpolis map, which `changes lint` refuses until the two deps are decided, to a file it does
+    # not read. The update's way is written in method/change-impact.md's edit syntax.
+    for d in undecided_interface_pointers(m):
+        problems.append(f"{d.id} ({d.name}) still gives the harvest pointer ('Not decided here …') "
+                        f"as the reason it is no interface, so nobody has decided it. Decide it: "
+                        f"name the surface it belongs to in `interfaces`, or replace the pointer "
+                        f"with the reason it is none. In a build: `coyomap fix row --fragments "
+                        f".coyomap/build-fragments --id {d.id} --set-not-an-interface \"<why>\"`. "
+                        f"In an update: an entry of the change log that names {d.id} and makes the "
+                        f"edit `{{\"id\": \"{d.id}\", \"key\": \"not_an_interface\", \"was\": \"<the "
+                        f"pointer>\", \"now\": \"<why>\"}}`, its `was` the pointer exactly as "
+                        f"`coyomap dump --record {d.id}` prints it")
 
     external = _external_ways_in(m)
     excused = [ep for ep in external if ep.id not in claimed_by and ep.id in recorded]
@@ -3172,7 +3232,7 @@ def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
         warnings.append(
             f"{len(owed_openings)} flow(s) name a way in that belongs to a surface, but no step of "
             f"theirs touches that surface — the story never goes through its door "
-            f"({', '.join(owed_openings[:6])}{', …' if len(owed_openings) > 6 else ''}). Open each "
+            f"({_shown(owed_openings, 6)}). Open each "
             f"flow at its door (`Rn → In`, then `In → Cn`), or record 'UCn/opening: <why>' under an "
             f"'{INTERFACE_EXCEPTIONS_HEADING}' extras heading — a bare 'UCn' there excuses this "
             f"gate AND the crossing and migration gates, so prefer the scoped form")
@@ -3182,7 +3242,7 @@ def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
             f"{len(owed_crossings)} step(s) across {ucs} flow(s)/sub-flow(s) cross between an "
             f"actor and the product without going through a door — the step names a person at one "
             f"end and code at the other, and no surface between them "
-            f"({', '.join(owed_crossings[:6])}{', …' if len(owed_crossings) > 6 else ''}). Put the "
+            f"({_shown(owed_crossings, 6)}). Put the "
             f"surface in: `Rn → In` then `In → Cn` coming in, `Cn → In` then `In → Rn` going out. "
             f"EVERY crossing takes a door, not only the story's two ends, and the door is drawn even "
             f"when it is the same surface the story opened at. Record 'UCn/doors: <why>' (or the "
@@ -3193,7 +3253,7 @@ def _check_interfaces(m: ProjectModel) -> tuple[list[str], list[str]]:
         warnings.append(
             f"{len(owed_migrations)} flow step(s) point at a dependency that stands on a surface — "
             f"name the SURFACE instead, and let the dependency be derived "
-            f"({', '.join(owed_migrations[:6])}{', …' if len(owed_migrations) > 6 else ''}). A step "
+            f"({_shown(owed_migrations, 6)}). A step "
             f"at the dep names the pipe; a step at the surface names the far side. Record the "
             f"'UCn/migration: <why>' (or the SUB-FLOW id) under an '{INTERFACE_EXCEPTIONS_HEADING}' "
             f"extras heading if a step really means the dependency itself — a bare 'UCn' there "
@@ -3419,8 +3479,8 @@ def _orphan_embedded_warnings(m: ProjectModel) -> list[str]:
         if _reaches_a_saved_root(e.id, parents, by_id, supertypes):
             continue
         if holders:
-            named = ", ".join(f"{h.id} ({(h.store.mode if h.store else '') or 'unstated'})"
-                              for h in holders[:4])
+            named = _shown([f"{h.id} ({(h.store.mode if h.store else '') or 'unstated'})"
+                            for h in holders], 4)
             why = (f"no chain of holders from it reaches a record with a compartment of its "
                    f"own — it is held by {named}. A piece of a `projection` is a `projection`; a "
                    f"piece of a `transient` is `transient`; and a record naming ITSELF as its "
@@ -3830,16 +3890,72 @@ _KIND_COVERAGE_LINE = re.compile(
     re.IGNORECASE)
 
 
-#: A COUNT of entry points stated inside a coverage record — "one signal-handler entry point",
-#: "4 http routes". Anchored on the noun so an unrelated number in the prose is not read as one.
-#: ADJACENT, with no words between. The `{0,2}` gap this used to allow swallowed the wrong number
-#: twice over: "sampled — 4 of 40 routes read" matched `4 of 40 routes` and compared 4 against the
-#: map, and "complete — enumerated from the 3 route files" read a count of the SOURCE FILES as a
-#: count of entry points. A hyphenated compound is still one token (`signal-handler entry points`).
-_COUNT_IN_COVERAGE = re.compile(
-    r"\b(\d+|no|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
-    r"(?:[\w-]+\s+)?(?:entry\s+points?|routes?|handlers?|commands?|hooks?|jobs?|listeners?)\b",
-    re.I)
+#: THE TOTAL A `complete` COVERAGE RECORD STATES, read by `_stated_total`. It is a number before
+#: the kind's word, in any spelling of the kind: "one signal-handler entry point", "38 ui-routes",
+#: "4 http routes", or one of the nouns `_COVERAGE_NOUN` lists ("2 commands"). Up to two words may
+#: describe the counted thing when it is named by the kind's own word or by its last word: "the
+#: two socket routes" and "the one stop-signal handler" on the shipped 2026-10-07 mcpolis map, "19
+#: addressable routes" on argus. A number is NOT the total when:
+#:   * the kind's word describes another noun, which the number counts: "the 3 route files", "five
+#:     route modules", "the one route table", "a route-level gate";
+#:   * it is one item of a list: "plus the two backend routes" (2 of the 2026-10-07 mcpolis map's 38
+#:     ui-routes; read as the total, it drew two objections and the lead deleted the true number to
+#:     silence them), "10 dashboard routes, 10 sign-in routes", "including the two layout-less
+#:     routes", "56 rows: 31 Admin MCP tools";
+#:   * the record says those are left out: "One implemented middleware is deliberately NOT installed";
+#:   * it is "no" before a describing word, which denies one part: "no named tools of its own".
+#: Only the record's FIRST number of that shape is read: a record that opens on a part lists parts.
+#: Measured over the 339 coverage lines of 33 real maps (review of 2026-10-07, F5): the reading
+#: before finding 21 of the 2026-10-07 retro took 37 numbers and objected 25 times; finding 21's,
+#: which allowed no word between the number and the noun, took 15, lost the three totals above and
+#: objected 11 times; this one takes 25 and objects 8 times.
+_COVERAGE_NUMBER = r"(\d+|no|one|two|three|four|five|six|seven|eight|nine|ten)"
+_COVERAGE_COUNT = r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+_COVERAGE_NOUN = r"(?:entry\s+points?|routes?|handlers?|commands?|hooks?|jobs?|listeners?)"
+#: The end of the counted word: no letter, digit or hyphen after it ("route-level" is one word).
+_COVERAGE_WORD_END = r"(?![\w-])"
+#: A noun after the kind's word that the number counts instead of the kind.
+_COUNTS_ANOTHER_NOUN = (r"\s+(?:files?|modules?|folders?|director(?:y|ies)|pages?|tables?|groups?|"
+                        r"famil(?:y|ies)|slices?|stacks?|classes?|factor(?:y|ies)|registrations?|"
+                        r"decorators?|packages?)\b")
+#: Words that never describe the counted thing, so none of them stands between a number and it.
+_NOT_DESCRIBING = ("of|in|on|at|by|for|from|to|into|with|without|and|or|but|plus|than|as|the|a|an|"
+                   "its|their|this|that|these|those|more|other|others|further|additional|extra|"
+                   "remaining|new|also|only|all|both|each|every|any|some|no|not|per|is|are|was|were|"
+                   "one|two|three|four|five|six|seven|eight|nine|ten")
+_DESCRIBING_WORD = rf"(?!(?:{_NOT_DESCRIBING}){_COVERAGE_WORD_END})[A-Za-z][\w-]*"
+_LIST_BEFORE = re.compile(r"(?:\b(?:plus|and|or|including|besides|also|except|excluding)|[,:])\s*"
+                          r"(?:(?:the|all|its|their|both|another)\s+)?$", re.I)
+_LIST_AFTER = re.compile(r"^\s*(?:plus\b|,\s*" + _COVERAGE_NUMBER + r"\b)", re.I)
+_LEFT_OUT_AFTER = re.compile(r"^\s*(?:\([^)]*\)\s*)?(?:is|are)\s+(?:[a-z]+ly\s+)?not\b", re.I)
+
+
+def _stated_total(line: str, *kinds: str) -> re.Match[str] | None:
+    """The total one kind's `complete` coverage line states, or None; the rules are above. `kinds`
+    are the spellings the line may use for the kind: its canonical kind and the token the line opens
+    with (`signal` records the `signal-handler` rows, so "one signal entry point" is a total too)."""
+    words = [w for w in ([part for part in re.split(r"[-\s]+", k) if part]
+                         for k in dict.fromkeys(k.strip() for k in kinds)) if w]
+    own = [r"[-\s]+".join(re.escape(part) for part in w) + r"s?" for w in words]
+    last = [re.escape(w[-1]) + r"s?" for w in words]
+    noun_after = r"(?:\s+" + _COVERAGE_NOUN + r")?"
+    end = _COVERAGE_WORD_END + r"(?!" + _COUNTS_ANOTHER_NOUN + r")"
+    direct = re.compile(r"\b" + _COVERAGE_NUMBER + r"\s+(?:"
+                        + "|".join([f"(?:{word}){noun_after}" for word in own] + [_COVERAGE_NOUN])
+                        + r")" + end, re.I)
+    described = re.compile(r"\b" + _COVERAGE_COUNT + rf"\s+(?:{_DESCRIBING_WORD}\s+){{0,2}}(?:"
+                           + "|".join(f"(?:{word}){noun_after}" for word in dict.fromkeys(own + last))
+                           + r")" + end, re.I)
+    found = [hit for hit in (direct.search(line), described.search(line)) if hit is not None]
+    if not found:
+        return None
+    first = min(found, key=lambda hit: (hit.start(), -hit.end()))
+    after = line[first.end():]
+    if (_LIST_BEFORE.search(line[:first.start()]) or _LIST_AFTER.search(after)
+            or _LEFT_OUT_AFTER.search(after)):
+        return None
+    return first
+
 
 _COVERAGE_WORD_NUMBERS = {"no": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
                           "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
@@ -3877,8 +3993,8 @@ def _kind_coverage_warnings(m: ProjectModel) -> list[str]:
     # signal-handler entry point" where the map carries four. Nothing compared the sentence with the
     # thing it describes, and the sentence is the map's only statement about whether an inventory is
     # complete — so a wrong count there understates exactly what the heading exists to declare.
-    # Only a SPELLED NUMBER or digit immediately before the kind's own word is read; a sentence
-    # naming no count is not second-guessed.
+    # Only the total `_stated_total` reads is compared; a sentence naming no total is not
+    # second-guessed.
     by_kind: dict[str, int] = {}
     for ep in m.entry_points:
         if (ep.kind or "").strip():
@@ -3897,7 +4013,7 @@ def _kind_coverage_warnings(m: ProjectModel) -> list[str]:
             if hit.group(2).lower() != "complete":
                 continue
             actual = by_kind.get(kind, 0)
-            stated = _COUNT_IN_COVERAGE.search(line)
+            stated = _stated_total(line, kind, hit.group(1))
             if stated is None:
                 continue
             raw = stated.group(1).lower()
@@ -5927,7 +6043,7 @@ def recorded_line_warnings(m: ProjectModel) -> list[str]:
                            f"{sum(n for n, _ in repeated)} of {len(lines)} line(s) restate "
                            f"{len(repeated)} reason(s), one of them {worst[0]} times — write each "
                            f"reason ONCE and name every element it answers on that line "
-                           f"({', '.join(worst[1][:3])}{', …' if worst[0] > 3 else ''}: <why>).")
+                           f"({_shown(worst[1], 3, unit='key(s)')}: <why>).")
         # A key that PARSES and answers nothing. `malformed_records` above catches only an
         # unreadable key; this is the readable one whose `/scope` word no check here honours —
         # `C1/article` under a heading whose only scope is `code-name`. It reads as answered, it
@@ -7697,9 +7813,19 @@ def _entry_point_coverage_line(m: ProjectModel) -> str:
     line = (f"Entry-point coverage — {total} external way(s) in: {named} named by a use case, "
             f"{run} run by a flow step at their own line, "
             f"{loose} reached only through the component a walk touches, {unclaimed} unclaimed")
-    # The remainder is the rows with no owning component or a dangling one. Each has its own check;
-    # naming the count here keeps the four numbers adding up, which is what makes the line readable.
-    return line + (f", {rest} with no owning component" if rest else "")
+    # The remainder is the rows with no owning component or a dangling one, each with its own check,
+    # and on a map not yet traced also every owned row: `unclaimed_external_entry_points` stays empty
+    # until a flow or a named way in exists, so before the trace the whole harvest lands here. Calling
+    # all of it "with no owning component" told a lead whose ways in all had an owner that 201 had
+    # none. Naming each count keeps the numbers adding up, which is what makes the line readable.
+    comp_ids = {c.id for c in m.components}
+    triggered = triggered_entry_point_ids(m)
+    ownerless = len([ep for ep in external_entry_points(m)
+                     if not (ep.id and ep.id in triggered)
+                     and not _live_owner(ep, comp_ids)])
+    untraced = rest - ownerless
+    return (line + (f", {ownerless} with no owning component" if ownerless else "")
+            + (f", {untraced} not yet traced" if untraced else ""))
 
 
 def _checked_summary(stats: dict[str, int], check_sources: bool, check_coverage: bool) -> str:

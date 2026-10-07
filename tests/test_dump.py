@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coyomap.dump import edges_of, main, members_of, record_of, resolve_id
+from coyomap.dump import edges_of, main, members_of, owners_of, record_of, resolve_id
 from coyomap.model import (
     Component,
     Edge,
@@ -21,9 +21,11 @@ from coyomap.model import (
     EntryPoint,
     Group,
     ProjectModel,
+    RuleSite,
     UseCase,
     to_canonical_json,
 )
+from coyomap.validate_model import component_file_owners, site_components
 
 CLI = [sys.executable, "-m", "coyomap.cli", "dump"]
 
@@ -338,3 +340,83 @@ def test_a_use_case_with_no_flow_yet_has_no_members():
     m = ProjectModel(use_cases=[UseCase(id="UC9", name="Not traced yet")])
     got = resolve_id(m, "UC9")
     assert got is not None and got["members"] == []
+
+
+# --- --owners: which component holds a file --------------------------------------------------
+# A tracer that reads a call in a file must name the component that owns the file. `dump` had no
+# slice for it, so on the 2026-10-07 mcpolis build 16 of the tracers' 44 hand-written map lookups
+# were a `python3 -c` walk of every component's `files` for exactly this question.
+
+
+def make_owned_files_model() -> ProjectModel:
+    m = ProjectModel(title="Demo", goal="A demo.")
+    m.components = [
+        Component(id="C1", name="Banner", source="frontend/src/components/StartupBanner.tsx:12",
+                  files=["frontend/src/components/StartupBanner.tsx"]),
+        Component(id="C2", name="App shell", source="backend/app.py:40",
+                  files=["backend/app.py", "backend/routes.py"]),
+        Component(id="C3", name="Web app", source="backend/webapp.py#L1",
+                  files=["backend/webapp.py", "backend/routes.py"]),
+        Component(id="C4", name="Settings", source="backend/settings.py:3"),
+        Component(id="C5", name="Ports", source="backend/ports/"),
+    ]
+    return m
+
+
+def test_owners_names_every_component_holding_a_file():
+    m = make_owned_files_model()
+    assert owners_of(m, "backend/routes.py") == [
+        {"id": "C2", "name": "App shell", "file": "backend/routes.py"},
+        {"id": "C3", "name": "Web app", "file": "backend/routes.py"}], "every owner, never a pick"
+    # A component's `source` is where it lives, not a file it holds, and a folder holds no one file.
+    assert owners_of(m, "backend/settings.py") == []
+    assert owners_of(m, "backend/ports/store.py") == []
+
+
+def make_mounted_guard_model() -> ProjectModel:
+    """mcpolis's C23 and C24 on the 2026-10-07 map: the guards live at a line of `app.py`, the file
+    the assembly lists, and list only their own files."""
+    m = ProjectModel(title="Demo", goal="A demo.")
+    m.components = [
+        Component(id="C1", name="Backend assembly", source="backend/app.py:1586",
+                  files=["backend/app.py", "backend/lifecycle.py"]),
+        Component(id="C2", name="MCP door guards", source="backend/app.py:354",
+                  files=["backend/guards.py", "backend/pin.py:12"]),
+    ]
+    return m
+
+
+def test_owners_never_names_an_owner_validate_refuses():
+    """`--owners` read `source` as well as `files`, so it named C24 the owner of all of mcpolis's
+    `app.py`, while `validate` gives every rule site in `app.py` to C23 alone. Both read
+    `validate_model.component_files` now, so the two answers are one."""
+    m = make_mounted_guard_model()
+    assert [r["id"] for r in owners_of(m, "backend/app.py")] == ["C1"]
+    assert [r["id"] for r in owners_of(m, "app.py")] == ["C1"]
+    for path, ids in component_file_owners(m).items():
+        assert [r["id"] for r in owners_of(m, path)] == ids, path
+        assert site_components(m, RuleSite(where=f"{path}:3")) == ids, path
+    # An entry `validate` cannot key a site to holds nothing here either: `#L3` is no line suffix.
+    m.components.append(Component(id="C3", name="Odd", files=["backend/odd.py#L3"]))
+    assert owners_of(m, "backend/odd.py") == []
+    assert site_components(m, RuleSite(where="backend/odd.py:3")) == []
+    # A file comes back spelled as `validate` keys it, `./` included.
+    m.components.append(Component(id="C4", name="Dotted", files=["./backend/dotted.py"]))
+    assert owners_of(m, "backend/dotted.py") == [
+        {"id": "C4", "name": "Dotted", "file": "./backend/dotted.py"}]
+    assert component_file_owners(m)["./backend/dotted.py"] == ["C4"]
+
+
+def test_owners_takes_the_path_the_way_a_tracer_has_it():
+    m = make_owned_files_model()
+    for asked in ("backend/app.py:57", "/home/me/repo/backend/app.py", "app.py", "./backend/app.py"):
+        assert owners_of(m, asked) == [{"id": "C2", "name": "App shell", "file": "backend/app.py"}], asked
+    # Paths are compared part by part, so a file name never matches inside a longer one.
+    assert owners_of(m, "pp.py") == [] and owners_of(m, "backend/missing.py") == []
+
+
+def test_cli_owners_slice_emits_json():
+    code, out, _ = run_dump(["--owners", "StartupBanner.tsx"], make_owned_files_model())
+    assert code == 0 and [r["id"] for r in json.loads(out)] == ["C1"]
+    code, _, err = run_dump(["--owners"])
+    assert code == 2 and "file path" in err

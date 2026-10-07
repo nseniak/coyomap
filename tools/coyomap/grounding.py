@@ -54,6 +54,7 @@ from coyomap.audit_model import (
 from coyomap.credentials import redact
 from coyomap.provenance import SESSION_ENV, session_agent_transcripts
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
+from coyomap.reporting import item_lines, shown
 
 USAGE = """usage: coyomap grounding lint   --verdicts <raw.json>... [--agent-transcripts <dir>] [--expect <batch,…>]
        coyomap grounding lint   --tests <x-tests.json> [--agent-transcripts <dir>]
@@ -281,6 +282,12 @@ def multi_vote_agreement(rows: list[dict]) -> tuple[int, int, int]:
       Harmless on its face and the reason to count it: it is the one signal that two readers who
       agree were not looking at the same thing.
 
+    ONE CLAIM, ONE OF THE TWO. A claim whose voters split on the verdict is a verdict disagreement
+    whatever lines they cited: readers who disagree are expected to cite different lines, so that
+    says nothing more. Counted in both, NOTE FACTS read 4 anchor disagreements on the 2026-10-07
+    mcpolis pass where this definition gives 2, and `_agreement_contradictions` explains the number
+    in this definition's words.
+
     Rows carrying no `evidence` are skipped for the anchor test rather than counted as agreeing —
     an absent citation is not a matching one.
 
@@ -310,6 +317,7 @@ def multi_vote_agreement(rows: list[dict]) -> tuple[int, int, int]:
         grounded = {str(r.get("grounded")).lower() for r in claim_rows}
         if len(grounded) > 1:
             verdict_disagree += 1
+            continue            # never ALSO an anchor disagreement: see the docstring
         anchors = {str(r.get("evidence", "")).strip() for r in claim_rows
                    if str(r.get("evidence", "")).strip()}
         if len(anchors) > 1:
@@ -451,9 +459,16 @@ def _count_of(text: str) -> int | None:
 #: pure reword that changed no number. The phrase is not merely EXEMPTED here: recognising it as
 #: the redundant count means a mis-quote of it ("128 row(s) that added no new claim" on a pass with
 #: 256) is now caught, where before nothing read it at all.
+#:
+#: The `that` is optional, and the verb may be `add`, `adds`, `added` or `adding`. The 2026-10-07
+#: mcpolis note wrote "434 rows added no new claim, usually a re-vote", which this missed, so the
+#: same refusal came back. What keeps a real "0 claims added" out is the SUBJECT: here a count of
+#: ROWS adds no claim, while a sentence about the post-pin claims ("no new claims were added", "the
+#: reconcile added no new claims") names no rows and still reaches `_ADDED_SINCE_IN_NOTE`.
 _REDUNDANT_IN_NOTE = re.compile(
     rf"({_NUMBER})\s+(?:redundant\s+rows?"
-    rf"|(?:verdict\s+)?rows?(?:\(s\))?\s+that\s+added\s+no\s+new\s+claims?)", re.I)
+    rf"|(?:verdict\s+)?rows?(?:\(s\))?\s+(?:that\s+|which\s+)?add(?:ed|s|ing)?\s+no\s+new\s+"
+    rf"claims?)", re.I)
 
 #: The note stating how many claims arrived AFTER the worklist was pinned. Third arithmetic shape,
 #: same failure as the other two: the 2026-09-02 mcpolis note said "9 post-pin claims" where its own
@@ -1054,6 +1069,7 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
     # bucketed, and printed in a section of their own below.
     split = split_closer_rows(grounding_rows)
     grounding_rows, closer_rows = split.skeptics, split.closer
+    closed = closer_ruling(closer_rows)
     votes: dict[str, list[dict]] = {}
     for r in grounding_rows:
         claim = r.get("claim")
@@ -1071,7 +1087,7 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
     worklist_claims = pin_claims + waved
     buckets: dict[str, list[dict[str, object]]] = {
         "refuted": [], "unverifiable": [], "tied": [], "unvoted": [], "confirmed": [],
-        "superseded": [], "refuted_not_superseded": []}
+        "superseded": [], "refuted_not_superseded": [], "kept_on_appeal": []}
     # SUPERSEDED — pinned claims the reconcile rewrote or removed, so the shipped map no longer
     # carries them. The record states how MANY; until now nothing could say WHICH, and the whole
     # design rests on those being the refuted ones. A superseded claim that was CONFIRMED is the
@@ -1109,8 +1125,13 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
         # A refutation whose claim TEXT did not change is invisible to `claims_superseded` and to
         # the digest. Bucketed here rather than derived in the text renderer, so `--json` — which
         # this codebase tells readers to prefer over parsing the lines — carries it too.
+        # KEPT ON APPEAL is its own bucket: a closer that REJECTED the refutation found the skeptic
+        # misread the code, so the map keeps the claim on purpose and the refutation gate lets it by
+        # (`surviving_refutations`). Counted with the rest, the 2026-10-07 mcpolis report asked to
+        # "fix the map" for 3 claims its own CLOSED ON APPEAL section said to keep.
         if live is not None and bucket == "refuted" and claim in live:
-            buckets["refuted_not_superseded"].append(row)
+            buckets["kept_on_appeal" if closed.get(claim) == "reject"
+                    else "refuted_not_superseded"].append(row)
     # NOT keyed on the worklist: a note to the lead is a fact about a ROW, and the row may sit on a
     # claim that was reworded after the pin. Walking `grounding_rows` keeps it visible either way.
     # THE APPEALS, as their own bucket: `uphold`/`reject`/`unsure` on a refutation the skeptics
@@ -1206,6 +1227,18 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
                        f"hand), or it has not been applied:")
             for row in still_live:
                 out.append(f"  * {row['claim']}")
+        kept = buckets["kept_on_appeal"]
+        if kept:
+            n = len(kept)
+            out.append(f"\nKEPT ON APPEAL ({n}) — refuted and still in the map verbatim because a "
+                       f"closer REJECTED the refutation, so the refutation gate lets "
+                       f"{'it' if n == 1 else 'them'} by (CLOSED ON APPEAL below has each closer's "
+                       f"note):")
+            for row in kept:
+                out.append(f"  * {row['claim']}")
+    # The skeptics' buckets never move for an appeal; a claim kept on appeal is MARKED in its list,
+    # so "reconcile each" does not read as an order to rewrite it.
+    kept_claims = {str(r["claim"]) for r in buckets["kept_on_appeal"]}
     for name, label in (("refuted", "REFUTED — reconcile each into the map"),
                         ("tied", "TIED — the skeptics split; adjudicate against the code"),
                         ("unverifiable", "UNVERIFIABLE — a skeptic said the code cannot answer"),
@@ -1214,15 +1247,19 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
             continue
         out.append(f"\n{label} ({len(buckets[name])}):")
         for row in buckets[name]:
-            out.append(f"  * {row['claim']}")
+            out.append(f"  * {row['claim']}"
+                       + ("   <- KEPT ON APPEAL" if str(row["claim"]) in kept_claims else ""))
             raw_skeptics = row.get("skeptics")
             skeptics = [str(s) for s in raw_skeptics] if isinstance(raw_skeptics, list) else []
             if row.get("votes"):
                 out.append(f"      {row['for']} for / {row['against']} against"
                            + (f"  [{', '.join(skeptics)}]" if skeptics else ""))
+            # Two notes, then how many more: a claim three skeptics voted on dropped its third
+            # note with nothing said.
             raw_notes = row.get("notes")
-            for n in (raw_notes if isinstance(raw_notes, list) else [])[:2]:
-                out.append(f"      {str(n)[:160]}")
+            notes = [str(n)[:160] for n in raw_notes] if isinstance(raw_notes, list) else []
+            if notes:
+                out.append("      " + shown(notes, 2, sep="\n      ", unit="note(s)"))
     # ADDED SINCE THE PIN — the claims the SHIPPED map carries that the pinned worklist never
     # held. `write` prints how MANY ("37 added since the pin") and nothing could say WHICH, so a
     # build hand-diffed `audit --json` against the worklist in python, then hand-edited the pinned
@@ -1321,10 +1358,11 @@ def format_report(worklist_claims: list[str], grounding_rows: list[dict],
                    "message every build agent wrote to you was not opened. That is not a clean "
                    "result; it is an unread channel.")
     if still_live_n:
+        kept_n = len(buckets["kept_on_appeal"])
         out.append(f"\nSTILL IN THE MAP: {still_live_n} refuted claim(s) the map carries verbatim "
-                   f"— see REFUTED BUT NOT SUPERSEDED above, and fix the map before shipping it: "
-                   + ", ".join(str(r["claim"])[:60] for r in buckets["refuted_not_superseded"][:5])
-                   + (" …" if still_live_n > 5 else ""))
+                   + (f"(not counting {kept_n} KEPT ON APPEAL) " if kept_n else "")
+                   + "— see REFUTED BUT NOT SUPERSEDED above, and fix the map before shipping it: "
+                   + shown([str(r["claim"])[:60] for r in buckets["refuted_not_superseded"]], 5))
     return redact("\n".join(out).lstrip("\n"))
 
 
@@ -1552,10 +1590,7 @@ def format_element_checks(rows: list[ElementCheck], unresolved: list[str],
         lines.append("")
         lines.append(f"{len(unresolved)} pinned claim(s) name no single element in this map — the "
                      f"claim was rewritten after the worklist was pinned, or two elements make it:")
-        for c in unresolved[:20]:
-            lines.append(f"  - {c[:110]}")
-        if len(unresolved) > 20:
-            lines.append(f"  ... and {len(unresolved) - 20} more")
+        lines.append(item_lines([c[:110] for c in unresolved], 20, unit="claim(s)"))
     return "\n".join(lines)
 
 
@@ -1935,23 +1970,20 @@ def format_refutations(surviving: list[SurvivingRefutation],
         access_rows = [e for e in unseen if e.element_id in access]
         lines.append(f"{len(unseen)} element(s) no skeptic looked at — the pass never reached them "
                      f"(`coyomap grounding by-element` lists them in full):")
-        for e in unseen[:15]:
-            # The authored label is printed only when the element HAS one: an edge and a crossing
-            # carry no `confidence` field, and `says , pass says unchecked` is what printing it
-            # unconditionally produced.
-            said = f", author said {e.stated}" if e.stated else ""
-            lines.append(f"  - {e.element_id or '-':<7} {e.kind:<12} unchecked{said}"
-                         f" — {e.label[:44]}")
-        if len(unseen) > 15:
-            lines.append(f"  ... and {len(unseen) - 15} more")
+        # The authored label is printed only when the element HAS one: an edge and a crossing
+        # carry no `confidence` field, and `says , pass says unchecked` is what printing it
+        # unconditionally produced.
+        lines.append(item_lines([f"{e.element_id or '-':<7} {e.kind:<12} unchecked"
+                                 + (f", author said {e.stated}" if e.stated else "")
+                                 + f" — {e.label[:44]}" for e in unseen], 15, unit="element(s)"))
         if access_rows:
             lines.append(f"  {len(access_rows)} of those are ACCESS rules, which is what a reader "
-                         f"trusts a map for: {', '.join(e.element_id for e in access_rows[:8])}")
+                         f"trusts a map for: {shown([e.element_id for e in access_rows], 8)}")
             again = [e.element_id for e in access_rows if e.element_id in reworded]
             if again:
                 lines.append(f"  {len(again)} of those ACCESS rules were re-worded after the vote: "
                              f"the skeptics voted on an older wording at the same line(s): "
-                             f"{', '.join(again[:8])}")
+                             f"{shown(again, 8)}")
     return redact("\n".join(lines))
 
 
@@ -2465,23 +2497,26 @@ def _fabricated_evidence(rows: list[dict], agent_dir: Path) -> VerdictLint:
     unopened = sorted(f for f in claimed
                       if f not in ghosts and not _resolves(f, opened))
     found = VerdictLint()
+    # THE ROW COUNT FIRST, on a short line, and one file per line under it (`item_lines`). The
+    # second-look note ended on its count, at the end of one 912-character line, and a
+    # `tail -30 | cut -c1-300` cut it off on the 2026-10-07 mcpolis build.
     if ghosts:
         found.problems.append(
-            f"{len(ghosts)} file(s) are cited as evidence but appear NOWHERE in the "
-            f"{len(files)} transcript(s) given: {', '.join(ghosts[:8])}"
-            f"{' …' if len(ghosts) > 8 else ''}. A cited anchor is a statement about your own work; "
-            f"{sum(claimed[g] for g in ghosts)} row(s) rest on one. Pass the transcripts of EVERY "
-            f"skeptic in the pass — rows are pooled across all of them, so a missing transcript "
-            f"reads exactly like a fabricated citation.")
+            f"{sum(claimed[g] for g in ghosts)} row(s) rest on {len(ghosts)} file(s) cited as "
+            f"evidence that appear NOWHERE in the {len(files)} transcript(s) given:\n"
+            + item_lines([f"{g} ({claimed[g]} row(s))" for g in ghosts], 8, unit="file(s)")
+            + "\nA cited anchor is a statement about your own work. Pass the transcripts of EVERY "
+              "skeptic in the pass — rows are pooled across all of them, so a missing transcript "
+              "reads exactly like a fabricated citation.")
     if unopened:
         found.notes.append(
-            f"{len(unopened)} file(s) are cited as evidence and appear in the transcript only as "
-            f"TEXT — printed by a grep or a listing — never as a file this agent opened: "
-            f"{', '.join(unopened[:8])}{' …' if len(unopened) > 8 else ''}. Weaker than the line "
-            f"above and not proof of anything: a skeptic may read a range through a shell verb this "
-            f"cannot see. It is the shape the fabricating pass had — 40 claims settled in 95 seconds "
-            f"off one directory-wide grep — so {sum(claimed[u] for u in unopened)} row(s) are worth "
-            f"a second look.")
+            f"{sum(claimed[u] for u in unopened)} row(s) are worth a second look: they cite "
+            f"{len(unopened)} file(s) the transcripts show only as TEXT, never opened:\n"
+            + item_lines([f"{u} ({claimed[u]} row(s))" for u in unopened], 8, unit="file(s)")
+            + "\nEach was printed by a grep or a listing, never opened as a file. Weaker than a "
+              "file named NOWHERE, and not proof of anything: a skeptic may read a range through a "
+              "shell verb this cannot see. It is the shape the fabricating pass had — 40 claims "
+              "settled in 95 seconds off one directory-wide grep.")
     return found
 
 
@@ -2546,9 +2581,9 @@ def _lint_tests(tests_path: Path, agent_dir: str | None,
     unread, checked = unread_test_bodies(cites, _agent_transcript_files(Path(found)), repo)
     if unread:
         print(f"TESTS FAILED — {len(unread)} of {checked} test citation(s) rest on the name "
-              f"alone: no tool result printed the test's body. {', '.join(unread[:12])}"
-              + (f" … and {len(unread) - 12} more" if len(unread) > 12 else "")
-              + ". Read each test before citing it (the tests contract): its name says what the "
+              f"alone: no tool result printed the test's body:\n"
+              + item_lines(unread, 12, unit="citation(s)")
+              + "\nRead each test before citing it (the tests contract): its name says what the "
                 "author meant, its body what it checks.", file=sys.stderr)
         return 1
     print(f"TESTS OK — {checked} of {len(cites)} test citation(s) checked; every one had its "
@@ -2680,7 +2715,8 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         if problems:
             print(f"VERDICTS FAILED — {len(problems)} problem(s)", file=sys.stderr)
             for pr in problems:
-                print(f"  - {pr}", file=sys.stderr)
+                # A problem's own list sits on lines of its own, indented under its bullet.
+                print("  - " + pr.replace("\n", "\n    "), file=sys.stderr)
             print("Fix these before `grounding write`; it refuses the same shapes at the END of "
                   "the build, where the skeptic that produced them is a hundred turns gone.",
                   file=sys.stderr)

@@ -2027,3 +2027,210 @@ def test_a_note_on_the_recorded_lines_is_not_counted_as_a_drifted_anchor() -> No
                  encoding="utf-8")
     leg = finalize._drift_leg(p, root, [v])
     assert leg.note is not None and leg.note.startswith("no drifted anchors"), leg.note
+
+
+# --- a list survives `head`, `tail` and `cut` (retro 2026-10-07, finding 1) ------------------------
+# The access-baseline advisory was ONE line of 6,740 characters on the 2026-10-07 mcpolis build: a
+# `cut -c1-500` left 1 of its 20 lost files legible, and 6 previous access rules shipped lost.
+
+def make_lost_access_maps(lost: int) -> tuple[dict, dict]:
+    """A previous map whose access rules hold a site in each of `lost` files, each claim as long as a
+    real one, and a current map whose one access rule names none of those files."""
+    before = {"format": "coyomap-map", "title": "t", "goal": "g", "rules": [
+        {"id": f"BR{i}", "access": True, "risk": "a member of another team reads the record",
+         "statement": f"Only a member of the owning team may read record kind {i}, whatever "
+                      f"filter the caller passed",
+         "sites": [{"where": f"src/auth/guard_{i}.py:{10 + i}",
+                    "why": "refuses a caller outside the team before the read reaches the store"}]}
+        for i in range(1, lost + 1)]}
+    return before, _NO_AUTH
+
+
+def make_lead_transcript(td: Path, opened: list[str]) -> Path:
+    """A lead transcript whose only tool calls are `Read`s of `opened`."""
+    f = td / "lead.jsonl"
+    f.write_text("".join(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": str(td / p)}}]}}) + "\n"
+        for p in opened), encoding="utf-8")
+    return f
+
+
+def lines_naming(text: str, path: str) -> list[str]:
+    """The lines of `text` that hold `path`."""
+    return [ln for ln in text.splitlines() if path in ln]
+
+
+def test_the_access_list_puts_its_count_on_a_short_first_line_and_each_file_on_its_own():
+    before, after = make_lost_access_maps(3)
+    with tempfile.TemporaryDirectory() as td:
+        report = _finalize_with_baseline(Path(td), before, after)
+        rows = finalize.advisory_disposition(Path(td) / "after.json", report)
+    text = next(l for l in report.legs if l.name == "access baseline").advisory[0]
+    first = text.splitlines()[0]
+    assert first.startswith("3 of 3 file(s) that held ACCESS enforcement in "), first
+    assert len(first) < 200, f"{len(first)} characters: {first}"
+    for i in (1, 2, 3):
+        own = lines_naming(text, f"src/auth/guard_{i}.py")
+        assert len(own) == 1 and own[0].startswith(f"  - src/auth/guard_{i}.py held BR{i} "), (
+            i, text)
+    # The disposition table finds the advisory and its heading by substring, in the whole text.
+    assert [(d, h) for d, h, a in rows if a == text] == [
+        ("UNRECORDED", finalize.ACCESS_BASELINE_EXCEPTIONS_HEADING)], rows
+
+
+def test_the_excused_access_lists_put_each_file_on_its_own_line():
+    """The disclosure of the recorded files and the count of those nobody opened carry the same
+    list, so they take the same shape."""
+    before, after = make_lost_access_maps(3)
+    after = {**after, "extras": [{"heading": finalize.ACCESS_BASELINE_EXCEPTIONS_HEADING,
+                                  "body": "\n".join(f"src/auth/guard_{i}.py: the team check moved "
+                                                    f"into the query layer" for i in (1, 2, 3))}]}
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "before.json").write_text(json.dumps(before), encoding="utf-8")
+        (tmp / "after.json").write_text(json.dumps(after), encoding="utf-8")
+        report = finalize.build_report(tmp / "after.json", tmp, [], tmp / "before.json",
+                                       make_lead_transcript(tmp, ["src/auth/guard_2.py"]))
+    leg = next(l for l in report.legs if l.name == "access baseline")
+    disclosed = next(a for a in leg.advisory if a.startswith("DISCLOSURE"))
+    unread = next(a for a in leg.advisory if finalize.UNREAD_EXCUSES in a)
+    for text, count, paths in ((disclosed, "3 of 3", (1, 2, 3)), (unread, "2 of 3", (1, 3))):
+        first = text.splitlines()[0]
+        assert count in first and len(first) < 200, first
+        for i in paths:
+            own = lines_naming(text, f"src/auth/guard_{i}.py")
+            assert len(own) == 1 and own[0].startswith(f"  - src/auth/guard_{i}.py"), (i, text)
+    assert not lines_naming(unread, "src/auth/guard_2.py"), "the lead opened that one"
+
+
+def test_every_list_in_the_refutation_leg_puts_its_count_first_and_each_item_on_its_own_line():
+    """The same advisory shape five more times: a count, then the items run together on one line.
+    The closer-rejected disclosure was 1,011 characters on the 2026-10-07 mcpolis report."""
+    legs: list[finalize.Leg] = []
+    _root, p, verify = _map_with_a_refuted_claim(Path(tempfile.mkdtemp()))
+    legs.append(finalize._refutations_leg(p, [verify / "verdicts-desc-1.json",
+                                               verify / "closer-agent-1.json"]))
+    _root, p, files = make_refuted_step_repo(None)
+    legs.append(finalize._refutations_leg(p, files))
+    _root, p, files, _claim = make_access_dissent_repo("unsure")
+    legs.append(finalize._refutations_leg(p, files))
+    for elements in (["BR1"], ["BR9"]):
+        _root, p, v = make_reworded_rule_repo(elements, "src/a.py:2")
+        legs.append(finalize._refutations_leg(p, [v]))
+    advisories = [a for leg in legs for a in leg.advisory]
+    for head in ("refuted claim(s) are in this map because the CLOSER REJECTED",
+                 "refuted walk-step or interface claim(s) are still in the map",
+                 "the majority CONFIRMED over a dissent the closer could not settle",
+                 "ACCESS rule(s) were re-worded after the vote",
+                 "ACCESS rule(s) were never challenged"):
+        lines = next((a for a in advisories if head in a), "").splitlines()
+        assert lines and head in lines[0] and lines[0][:1].isdigit(), (head, lines)
+        assert len(lines[0]) < 200, (head, lines[0])
+        assert len(lines) >= 3 and lines[1].startswith("  - "), (head, lines)
+
+
+# --- one line answers the map's size (retro 2026-10-07, finding 6) --------------------------------
+# validate holds the component count to E and reads a `granularity:` line; the budget leg held the
+# same count to the summed budgets and read only `component-budget:`, a key the method never names.
+# The 2026-10-07 mcpolis build wrote the `granularity:` line, and the leg shipped UNRECORDED.
+
+def test_a_granularity_line_naming_both_counts_answers_the_budget_leg_and_validate():
+    root, p = make_budget_repo("granularity: 10 shipped of 5 budgeted, because the slices were "
+                               "cut before the adapters were counted")
+    report = finalize.build_report(p, root, [])
+    assert [d for d, _h, a in finalize.advisory_disposition(p, report)
+            if "shipped against" in a] == ["disclosure"]
+    validate = next(l for l in report.legs if l.name == "validate")
+    assert not [w for w in validate.advisory if w.startswith("Granularity:")], validate.advisory
+
+
+def test_a_granularity_line_naming_the_shipped_count_and_E_does_not_answer_the_budget_leg():
+    """The strictness stays: E is not the budget, and a line written against E says nothing about
+    why the map outgrew what the briefs were handed."""
+    root, p = make_budget_repo("granularity: 10 components against a code-derived 1, because the "
+                               "slices split their folders by job")
+    report = finalize.build_report(p, root, [])
+    assert [d for d, _h, a in finalize.advisory_disposition(p, report)
+            if "shipped against" in a] == ["UNRECORDED"]
+
+
+def test_the_budget_advisory_offers_the_one_line_that_answers_both():
+    root, p = make_budget_repo(None)
+    leg = _budget_leg_of(finalize.build_report(p, root, []))
+    assert leg is not None and leg.advisory, leg
+    assert "'granularity: 10 shipped of 5 budgeted, because" in leg.advisory[0], leg.advisory[0]
+
+
+# --- a disclosure says only what the tool knows (retro 2026-10-07, finding 23) --------------------
+# finalize's report said each recorded audit exception "was judged acceptable by an operator"; the
+# 2026-10-07 mcpolis lead wrote every one of them alone. The tool knows a line sits under the heading,
+# not who weighed it.
+
+def make_recorded_audit_repo(body: str) -> Path:
+    """A map with one `read-never-created` advisory (HP1 reads E1, nothing writes it) and `body`
+    under 'Audit exceptions'."""
+    root = Path(tempfile.mkdtemp())
+    (root / ".coyomap").mkdir()
+    doc = {"format": FORMAT, "title": "T", "goal": "G",
+           "roles": [{"id": "R1", "name": "A", "kind": "human", "wants": "x", "drives": "UC1"}],
+           "use_cases": [{"id": "UC1", "name": "Read it", "actors": ["R1"]}],
+           "happy_path": [{"id": "HP1", "uc": "UC1"}],
+           "components": [{"id": "C1", "name": "A", "purpose": "p"}],
+           "entities": [{"id": "E1", "name": "Thing", "source": "a.py:1"}],
+           "edges": [{"src": "C1", "verb": "reads", "dst": "E1", "why": "w", "where": "a.py:2"}],
+           "flows": [{"uc": "UC1", "title": "Read it", "steps": [
+               {"n": 1, "src": "R1", "dst": "C1", "phrase": "asks"},
+               {"n": 2, "src": "C1", "dst": "E1", "phrase": "reads the thing"}]}],
+           "extras": [{"heading": "Audit exceptions", "body": body}]}
+    p = root / ".coyomap" / "project-map.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    return p
+
+
+def test_the_audit_disclosure_names_no_operator_it_cannot_know():
+    p = make_recorded_audit_repo("read-never-created HP1: the settings come from the deployment\n"
+                                 "read-never-created HP99: an id the map no longer has")
+    leg = finalize._audit_leg(p)
+    said = [a for a in leg.advisory if a.startswith("recorded-exceptions")]
+    assert len(said) == 2, leg.advisory
+    assert not [a for a in said if "operator" in a], said
+    silenced = next(a for a in said if "suppressed by recorded exception" in a)
+    assert "by whoever ran the build" in silenced, silenced
+    assert finalize._DISCLOSURE.search(silenced), "it is still filed as a disclosure"
+
+
+# --- a cut list says how many it left out (merge 5.4, 2026-10-07) ---------------------------------
+# Three finalize messages cut a list and said nothing about what they cut: a bare `…`, or no tail
+# at all. They now go through `reporting.shown`, whose tail counts what it left out.
+
+def make_unnumbered_budgets(root: Path, unnumbered: int) -> None:
+    """budgets.json holding two numeric harvest briefs and `unnumbered` briefs whose budget is a
+    word rather than a number."""
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    harvest: dict[str, int | str] = {"t1": 3, "t2": 2}
+    harvest.update({f"u{i}": "about ten" for i in range(1, unnumbered + 1)})
+    (verify / "budgets.json").write_text(json.dumps({"harvest": harvest}), encoding="utf-8")
+
+
+def test_the_unasked_verdicts_leg_counts_the_verdict_files_it_does_not_name():
+    leg = finalize._unasked_verdicts_leg([Path(f"verdicts-{i}.json") for i in range(1, 6)])
+    said = leg.advisory[0]
+    assert "(verdicts-1.json, verdicts-2.json, verdicts-3.json, +2 more)" in said, said
+
+
+def test_the_budget_leg_counts_the_unnumbered_briefs_it_does_not_name():
+    root, p = make_repo(components=10)
+    make_unnumbered_budgets(root, 8)
+    leg = _budget_leg_of(finalize.build_report(p, root, []))
+    assert leg is not None and leg.note is not None, leg
+    assert "8 brief(s) with no numeric budget (u1, u2, u3, u4, u5, u6, +2 more)" in leg.note, leg.note
+
+
+def test_a_second_map_path_is_refused_with_every_extra_path_counted():
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = finalize.main([f"map-{i}.json" for i in range(1, 7)])
+    assert code == 2
+    assert "got 6 (map-1.json, map-2.json, map-3.json, map-4.json, +2 more)" in err.getvalue(), (
+        err.getvalue())

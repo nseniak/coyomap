@@ -60,9 +60,11 @@ USAGE = """usage: coyomap changes <verb> [options]
 
   lint <log> --map <map>
         is the log well formed against this map? Every id exists, every `was` matches, and the
-        whole apply runs on a copy through the loader and the validator's blocking checks; every
-        sentence the log changes or adds faces the readability check and the snapshot check (no
-        "now", "no longer", "since the…" in the map's own words), as a warning
+        whole apply runs on a copy through the loader and the validator's blocking checks (one the
+        map already failed before the log says "did not before this log either": the log must
+        still clear it, method/change-impact.md says how); every sentence the log changes or adds
+        faces the readability check and the snapshot check (no "now", "no longer", "since the…"
+        in the map's own words), as a warning
   render <log> --map <map> [--out <file.md>]
         the log as markdown for people: entries under Product / Under the hood, boxes by name
   apply <log> --map <map> [--out <map>] [--date <YYYY-MM-DD>]
@@ -615,10 +617,26 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             p.errors.append(f"the map would not load after apply: {exc}")
         if model is not None:
             problems, _warnings = validate_model(model, None, disclose_records=False)
+            had = _problems_before(doc) if problems else set()
             for problem in problems:
-                p.errors.append(f"the map would not validate after apply: {problem}")
+                came = ", and did not before this log either" if problem in had else ""
+                p.errors.append(f"the map would not validate after apply{came}: {problem}")
     p.warnings.extend(_prose_warnings(log, doc, model, prose))
     return p
+
+
+def _problems_before(doc: dict[str, Any]) -> set[str]:
+    """What `validate` refuses in the map BEFORE the log, so lint can say which of its refusals came
+    with the map. An update must leave a map that validates, so such a problem is still the log's to
+    clear, and lint still refuses it; but an updater who reads only "would not validate after apply"
+    looks for the mistake in their own entries. The shipped 2026-10-07 mcpolis map refused every
+    log, an empty one too, for two deps its build left undecided. Empty when that map does not load:
+    then nothing can be said about it."""
+    try:
+        problems, _warnings = validate_model(load_model(json.dumps(doc)), None, disclose_records=False)
+    except ModelError:
+        return set()
+    return set(problems)
 
 
 def _finding_line(f: Finding) -> str:

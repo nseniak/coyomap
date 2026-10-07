@@ -59,6 +59,21 @@ def shown(items: Sequence[str], limit: int, sep: str = ", ", unit: str = "") -> 
     return sep.join([*items[:limit], tail])
 
 
+def item_lines(items: Sequence[str], limit: int | None, unit: str = "") -> str:
+    """`items` one per line, each opening `  - `, to follow a message's count line: every one when
+    `limit` is None, else the first `limit` and a `+N more` line — unless whole-list mode is on.
+
+    ONE ITEM PER LINE, UNDER A SHORT LINE CARRYING THE COUNT. `head`, `tail` and `cut` all read
+    lines, so a list kept inside one line loses items, or the count after it, to each of them: the
+    access-baseline advisory of `finalize` was one line of 6,740 characters on the 2026-10-07 mcpolis
+    build, a `cut -c1-500` left 1 of its 20 lost files legible, and 6 previous access rules shipped
+    lost. `finalize` and `grounding lint` each grew a private copy of these lines that day; this is
+    the one both call. Empty for no items, so a caller can append it to its count line as it is."""
+    if not items:
+        return ""
+    return "  - " + shown(items, len(items) if limit is None else limit, sep="\n  - ", unit=unit)
+
+
 def capped(items: Sequence[tuple[int, str]], limit: int) -> tuple[Sequence[tuple[int, str]], int]:
     """`(kept, dropped)` for a check that emits ONE FINDING PER ITEM rather than one inline list.
 

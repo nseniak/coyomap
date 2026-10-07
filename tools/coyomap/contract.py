@@ -68,8 +68,9 @@ from coyomap.audit_model import RULE_SITE_CLAIM, resolve_claim
 from coyomap.dump import edges_of, record_of, resolve_id
 from coyomap.grounding import is_closer_row
 from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
-from coyomap.preindex_lib import iter_source_files
+from coyomap.preindex_lib import granularity_files, iter_source_files
 from coyomap.provenance import SESSION_ENV
+from coyomap.reporting import shown
 
 # Contract name → template file. The name is what a lead types, so it is the phase, not the filename.
 CONTRACTS: dict[str, str] = {
@@ -209,6 +210,13 @@ SLOT = re.compile(r"«([^«»]+)»")
 #: this only fires on a path long enough to be a mistake. The number exists so the method can name
 #: one, after a build typed 159,993 bytes of brief across six fan-outs.
 BRIEF_MAX_BYTES = 400
+
+#: The most characters one closer brief FILE holds. A closer reads its brief with the Read tool,
+#: which shows about 25,000 tokens of a file at a time; a longer file comes back as its first page
+#: and a notice to page on, and nothing makes the closer page. This brief is dense: its indented
+#: `dump` JSON measured 2.3 characters per token (142,697 characters were 62,130 tokens), so the
+#: window holds about 57,000 characters of it, and 40,000 keeps 30 % in hand for a denser page.
+CLOSER_BRIEF_BUDGET = 40_000
 
 #: The one sentence a pointer brief carries. Fixed text, so no build re-words it into a paragraph.
 BRIEF_SENTENCE = "Read it COMPLETELY and follow it — it is your entire brief."
@@ -532,6 +540,10 @@ _USAGE = ("usage: coyomap contract <" + " | ".join(CONTRACTS) + "> [--slots] [--
           "            it, for every claim kind. --exclude <id> drops one by refutation id\n"
           "            (`rule-1#12`) or element id (`BR205`); --settled <closer-verdicts.json> drops\n"
           "            everything a previous wave judged. An --exclude matching nothing is an ERROR.\n"
+          "            Each `dump` block is printed once. A brief over "
+          f"{CLOSER_BRIEF_BUDGET:,} characters (about\n"
+          "            what one Read shows an agent) puts the claims in <out>-part<N> files beside\n"
+          "            --out, each within that; --out lists them, and the one closer reads them all.\n"
           "  --append  compose a second contract's agent half into the SAME brief, filled from the\n"
           "            same slots file and checked against the UNION of both slot sets. This is how\n"
           "            the doors half rides a trace brief: `>>` walked around --fill and 9 of 10\n"
@@ -619,7 +631,7 @@ def budget_conflict(doc: dict[str, object], agent_id: str, session: str | None) 
             f"{other if other else '(no session id)'}, and this is build {session} — so this is "
             f"that build's slice being filled again, not a new harvest. Writing it would start the "
             f"file over and drop {len(dropped)} sibling slice(s) "
-            f"({', '.join(dropped[:6])}{f', +{len(dropped) - 6} more' if len(dropped) > 6 else ''}), "
+            f"({shown(dropped, 6)}), "
             f"leaving a file that still looks like a whole harvest — `finalize` sums `harvest` and "
             f"never reads `session`, so it would report the remainder against every component the "
             f"map ships. A real rebuild names its agents afresh and is not refused here. Delete "
@@ -749,6 +761,12 @@ def owned_paths(files_slot: str, repo: Path) -> list[str]:
     return out
 
 
+def _held(rel: str, owned: list[str]) -> bool:
+    """Whether a repo-relative file is one of `owned`, or inside one of its folders (`""` is the
+    whole repo)."""
+    return any(o == "" or rel == o or rel.startswith(o + "/") for o in owned)
+
+
 def scripts_in_no_slice(repo: Path, owned: list[str]) -> list[str]:
     """The in-scope scripts no harvest slice owns — repo-relative, sorted.
 
@@ -761,10 +779,42 @@ def scripts_in_no_slice(repo: Path, owned: list[str]) -> list[str]:
     out: list[str] = []
     for f in walk.files:
         rel = f.relative_to(walk.root).as_posix()
-        if any(o == "" or rel == o or rel.startswith(o + "/") for o in owned):
+        if _held(rel, owned):
             continue
         if is_script(f):
             out.append(rel)
+    return sorted(out)
+
+
+def sources_in_no_component_slice(repo: Path, owned: list[str]) -> list[str]:
+    """The source files no slice that writes components holds — repo-relative, sorted. `owned` is
+    the FILES of every slice whose component budget is not 0.
+
+    "Source" is what the component expectation E is counted from, `preindex_lib.granularity_files`:
+    code in a known language (docs and config text left out), outside the test, docs and asset
+    folders. It is E's own function, not a copy of its tests, so this check and the budgets the
+    slices were cut against cannot disagree on what a source file is. A slice with a budget of 0
+    (the entity cards, the dependency inventory) reads its files and makes no component of them, so
+    a file only it holds is in no component. The script check above could not see this: on the
+    2026-10-07 mcpolis build 41 of 307 product source files sat in no slice that writes components,
+    the rate-limit and signed-out-list adapters among them, and the run that cut those slices warned
+    about 6 scripts.
+
+    An empty file (`__init__.py`) holds nothing to map and is never named, although E counts it:
+    this check names files to give to a slice, and E sizes the tree. The scope's own walk decides
+    what is in scope, so a folder `.coyomap/.ignore` drops is never named here."""
+    root = repo.resolve()
+    out: list[str] = []
+    for f in granularity_files(root):
+        rel = f.relative_to(root).as_posix()
+        if _held(rel, owned):
+            continue
+        try:
+            if not f.read_text(encoding="utf-8", errors="ignore").strip():
+                continue
+        except OSError:
+            continue
+        out.append(rel)
     return sorted(out)
 
 
@@ -821,7 +871,7 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
         raise ValueError(f"{len(faults)} of {len(files)} slots file(s) are bad; NOTHING was "
                          f"written — " + " | ".join(faults))
     if name == "harvest":
-        _warn_scripts_in_no_slice(files)
+        _warn_unslotted(files)
     written = write_briefs(plan)
     done = {stem for stem, _p, state in written if state == "written"}
     for stem, repo_slot, agent_id, expected in budgets:
@@ -830,36 +880,70 @@ def fill_from_slots(name: str, slots_dir: Path, out_dir: Path, root: Path | None
     return written
 
 
-def _warn_scripts_in_no_slice(files: list[Path]) -> None:
-    """Name, on stderr, the scripts no harvest slice's FILES covers. A warning, not a refusal: a
-    script left out on purpose is the lead's call, and the method says to state it."""
+def _warn_unslotted(files: list[Path]) -> None:
+    """Name, on stderr, what this run's harvest slices leave unread: the scripts no slice's FILES
+    covers, and the source files no slice that WRITES COMPONENTS holds. Warnings, not refusals: a
+    file left out on purpose is the lead's call, and the method says what to do with each.
+
+    Both lists are about the slices of THIS run, which is why the second one is skipped when no
+    slice here writes components: a run of the entity-card slice alone would list the whole tree,
+    and none of it is that run's gap. A slice writes components unless the first number of its
+    budget is 0 (`budget_of`); a budget in words (`five`) has no number, and it is taken as writing
+    some rather than counted as none, which would name every file it holds."""
     owned: list[str] = []
+    components: list[str] = []
+    writes_components = False
     repos: set[str] = set()
     for f in files:
         values = _read_values(str(f))
         repo = str(values.get("REPO_ABS") or values.get("repo") or "")
-        if repo:
-            repos.add(repo)
-            owned += owned_paths(str(values.get("FILES") or ""), Path(repo))
+        if not repo:
+            continue
+        repos.add(repo)
+        held = owned_paths(str(values.get("FILES") or ""), Path(repo))
+        owned += held
+        if budget_of(str(values.get("EXPECTED_COMPONENTS") or "")) != 0:
+            writes_components = True
+            components += held
     if len(repos) != 1:
         return
-    missed = scripts_in_no_slice(Path(repos.pop()), owned)
-    if missed:
-        # EVERY script, and the folders first: the lead acts per folder, and a list cut at 12 hid 3
-        # of the 15 scripts on the 2026-09-30 mcpolis slots, so they could be neither given to a
-        # slice nor stated as out of scope.
-        folders: dict[str, int] = {}
-        for s in missed:
-            folder = s.rsplit("/", 1)[0] + "/" if "/" in s else "./"
-            folders[folder] = folders.get(folder, 0) + 1
-        print(f"WARNING: {len(missed)} script(s) a person runs a command from are in no harvest "
-              f"slice, so no agent reads them. By folder: "
-              + ", ".join(f"{d} ({n})" for d, n in sorted(folders.items()))
-              + f". Every one: {', '.join(missed)}. Give each to a slice (its folder, or the "
-                "file alone), or say on the 'Entry-point coverage' line for its kind why it is no "
-                "way in. Every brief was still written: delete the briefs of the slices you "
-                "change, then run this again, since it never rewrites a brief.",
-              file=sys.stderr)
+    repo_path = Path(repos.pop())
+    scripts = scripts_in_no_slice(repo_path, owned)
+    if scripts:
+        _print_unslotted(
+            f"{len(scripts)} script(s) a person runs a command from are in no harvest slice, so no "
+            f"agent reads them.", scripts,
+            "Give each to a slice (its folder, or the file alone), or say on the 'Entry-point "
+            "coverage' line for its kind why it is no way in.")
+    sources = sources_in_no_component_slice(repo_path, components) if writes_components else []
+    if sources:
+        _print_unslotted(
+            f"{len(sources)} source file(s) are in no slice that writes components, so no agent "
+            f"makes a component of them. These are files the component expectation E is counted "
+            f"from; a slice whose budget is 0 reads its files and writes no component.", sources,
+            "Give each to a slice with a component budget (its folder, or the file alone).")
+
+
+def _print_unslotted(headline: str, paths: list[str], remedy: str) -> None:
+    """One slot warning on stderr: the count first, then each folder and each path on a line of its
+    own, then what to do.
+
+    EVERY path, and the folders first: the lead acts per folder, and a list cut at 12 hid 3 of the
+    15 scripts on the 2026-09-30 mcpolis slots, so they could be neither given to a slice nor stated
+    as out of scope. ONE PER LINE, because a list on one line keeps only what a `cut` or a `head`
+    leaves of it: one gate line of 6,740 characters showed 1 of the 20 file names it held."""
+    folders: dict[str, int] = {}
+    for p in paths:
+        folder = p.rsplit("/", 1)[0] + "/" if "/" in p else "./"
+        folders[folder] = folders.get(folder, 0) + 1
+    print("\n".join([f"WARNING: {headline}",
+                     f"  By folder ({len(folders)}):",
+                     *(f"    {d} ({n})" for d, n in sorted(folders.items())),
+                     f"  Every one ({len(paths)}):",
+                     *(f"    {p}" for p in paths),
+                     f"  {remedy} Every brief was still written: delete the briefs of the slices "
+                     f"you change, then run this again, since it never rewrites a brief."]),
+          file=sys.stderr)
 
 
 def budgets_doc(repo: Path) -> dict[str, object]:
@@ -1179,39 +1263,108 @@ def _dump_blocks(m: ProjectModel, eid: str) -> MapRows:
 OUTVOTED_DISSENT = "Outvoted dissent"
 
 
-def _claim_entry(m: ProjectModel, c: DisputedClaim) -> list[str]:
-    """One claim's section: its id, the claim, EVERY vote on it, and the map rows it is about."""
+@dataclass(frozen=True)
+class _Entry:
+    """One claim's section of the closer brief, as the items it is printed from: its HEAD (the
+    heading, the claim, every vote, and the rowless instruction when it has no rows), then one ROW
+    item per `dump` block. Kept apart so a split can start a part between two blocks of one claim,
+    never inside its votes. `id` is the claim's heading id; empty for a section's own preface."""
+    id: str
+    head: tuple[str, ...]
+    rows: tuple[str, ...]
+
+    def items(self) -> list[str]:
+        return [*self.head, *self.rows, ""]
+
+
+def _once(block: str, claim_id: str, printed: dict[str, str]) -> str:
+    """A `dump` block the first time the brief carries it; after that, one line naming the claim it
+    is printed under.
+
+    Two claims about one element used to carry its rows twice, whole: 20 `dump` blocks in a
+    142,697-character brief were repeats, and that brief was too long for its closer to read.
+    A one-line block (an element missing from the map, a node with no edge) costs less than a
+    pointer to it, and stays."""
+    if "\n" not in block:
+        return block
+    first = printed.setdefault(block, claim_id)
+    if first == claim_id:
+        return block
+    label = block.split("\n", 1)[0].rstrip(":")
+    return f"{label}: the same rows as under {first}, where they are printed once."
+
+
+def _claim_entry(m: ProjectModel, c: DisputedClaim, printed: dict[str, str]) -> _Entry:
+    """One claim's section: its id, the claim, EVERY vote on it, and the map rows it is about —
+    each `dump` block printed once across the whole brief (`printed`, see `_once`)."""
     ids = dump_ids(m, c.claim)
     rows = [(eid, _dump_blocks(m, eid)) for eid in ids]
     grounded = [eid for eid, r in rows if r.found]
     tally = {w: sum(1 for v in c.votes if v.word() == w) for w in ("confirmed", "REFUTED",
                                                                    "unverifiable")}
-    out: list[str] = [f"### {c.id} — {', '.join(grounded) if grounded else 'NO MAP ROW FOUND'}",
-                      f"**claim (verbatim):** {c.claim}",
-                      "**votes:** " + ", ".join(f"{n} {w}" for w, n in tally.items() if n)
-                      + (f" (also refuted as {', '.join(c.refutation_ids[1:])})"
-                         if len(c.refutation_ids) > 1 else "")]
+    head: list[str] = [f"### {c.id} — {', '.join(grounded) if grounded else 'NO MAP ROW FOUND'}",
+                       f"**claim (verbatim):** {c.claim}",
+                       "**votes:** " + ", ".join(f"{n} {w}" for w, n in tally.items() if n)
+                       + (f" (also refuted as {', '.join(c.refutation_ids[1:])})"
+                          if len(c.refutation_ids) > 1 else "")]
     for v in c.votes:
-        out.append(f"- **{v.word()}** by `{v.skeptic}` · **evidence:** "
-                   f"`{v.evidence or '(none given)'}` · **note:** {v.note or '(none given)'}")
+        head.append(f"- **{v.word()}** by `{v.skeptic}` · **evidence:** "
+                    f"`{v.evidence or '(none given)'}` · **note:** {v.note or '(none given)'}")
     if not grounded:
         missing = f" The map holds no {', '.join(ids)}." if ids else ""
-        out.append("**The map rows for this claim could not be found** — nothing in the map "
-                   f"resolves it.{missing} Return `unsure` and say so, exactly as this contract "
-                   "tells you to when rows are missing. Do NOT settle it from the claim text "
-                   "and the skeptic's note alone: on the build this instruction was written "
-                   "after, four blocks arrived exactly like this one and all four came back "
-                   "`uphold`, with no `unsure` anywhere across two waves.")
-    for _eid, r in rows:
-        out.extend(r.blocks)
-    out.append("")
+        head.append("**The map rows for this claim could not be found** — nothing in the map "
+                    f"resolves it.{missing} Return `unsure` and say so, exactly as this contract "
+                    "tells you to when rows are missing. Do NOT settle it from the claim text "
+                    "and the skeptic's note alone: on the build this instruction was written "
+                    "after, four blocks arrived exactly like this one and all four came back "
+                    "`uphold`, with no `unsure` anywhere across two waves.")
+    blocks = tuple(_once(block, c.id, printed) for _eid, r in rows for block in r.blocks)
+    return _Entry(c.id, tuple(head), blocks)
+
+
+def _entries(m: ProjectModel, claims: list[DisputedClaim]) -> list[_Entry]:
+    """The «CLAIMS» value as entries, in the order the brief prints them; see `claims_block`."""
+    refuted = [c for c in claims if not c.outvoted]
+    dissent = [c for c in claims if c.outvoted]
+    printed: dict[str, str] = {}
+    out: list[_Entry] = []
+    # An empty section reads as lost content: the first closer given only dissent could not rule out
+    # that the entries had been dropped while the brief was put together.
+    if not refuted:
+        out.append(_Entry("", ("None this time: every claim in this brief is an outvoted dissent, "
+                               "below.",), ()))
+    out += [_claim_entry(m, c, printed) for c in refuted]
+    if dissent:
+        # NEUTRAL WORDS ONLY. The first version told the closer what happened to a dissent once
+        # before ("an access rule shipped `verified` against a counterexample"), and the closer
+        # that read it said the sentence pushed it toward `uphold` before it had read any code.
+        # That history is for the lead, in the contract's header. And `reject` is defined by the
+        # CLAIM, like `uphold`: "the majority read the code right" decided nothing when the
+        # majority had read the code right AND the claim was false as stated.
+        intro = (f"## {OUTVOTED_DISSENT} — the majority CONFIRMED these, and a skeptic refuted "
+                 f"them",
+                 "A split vote files the claim as confirmed, and the dissent then appears in no "
+                 "count. Judge each one by the same steps as every other entry (How to judge, "
+                 "below): **uphold** — the dissenting skeptic is right, and the code contradicts "
+                 "the claim as the map states it; **reject** — the dissent is wrong, and the "
+                 "claim holds as the map states it.",
+                 "")
+        first, *rest = [_claim_entry(m, c, printed) for c in dissent]
+        # The heading rides its first entry, so a split never leaves it alone at the foot of a file.
+        out.append(_Entry(first.id, (*intro, *first.head), first.rows))
+        out += rest
     return out
+
+
+def _joined(entries: list[_Entry]) -> str:
+    return "\n\n".join(item for e in entries for item in e.items()).strip("\n")
 
 
 def claims_block(m: ProjectModel, claims: list[DisputedClaim]) -> str:
     """The «CLAIMS» value: one section per refuted CLAIM, each carrying the claim, every vote cast
     on it (the ones that confirmed it too) and the map rows the claim is about; then the claims the
-    majority CONFIRMED over a refutation, under their own heading.
+    majority CONFIRMED over a refutation, under their own heading. A `dump` block two claims share
+    is printed under the first and named by the second (`_once`).
 
     **THE ROWLESS BLOCK CARRIES ITS OWN INSTRUCTION.** Whether the rows are missing because no id
     was found or because every id found is absent from the map, the closer is looking at the same
@@ -1224,41 +1377,162 @@ def claims_block(m: ProjectModel, claims: list[DisputedClaim]) -> str:
     its dissent is counted nowhere, so inside a list of refutations it reads as a stray minority row
     — and that is how two were dropped by hand on the 2026-09-30 mcpolis build, both on an access
     rule the code let a removed member past."""
+    return _joined(_entries(m, claims))
+
+
+@dataclass(frozen=True)
+class _Part:
+    """One part file of a split closer brief: where it goes, its text, and the claim ids it holds
+    in order (`<id> (continued)` for a claim that began in the part before)."""
+    path: Path
+    text: str
+    ids: tuple[str, ...]
+
+
+def _part_path(index: Path, k: int) -> Path:
+    return index.with_name(f"{index.stem}-part{k}{index.suffix}")
+
+
+def _part_header(index: Path, k: int) -> str:
+    return (f"# Closer brief, part {k}\n\nClaims only: the job, the rules and how to answer are in "
+            f"`{index}`, which lists every part. Read this file COMPLETELY.")
+
+
+#: A `dump` block as `_dump_blocks` prints it: its label line, then one fenced JSON body.
+_FENCED_BLOCK = re.compile(r"\A(`dump --[a-z]+ [^`]+`):\n```json\n(.*)\n```\Z", re.S)
+
+
+def _chunks(lines: list[str], room: int) -> list[str]:
+    """`lines` regrouped into consecutive chunks of at most `room` characters, cut between lines; a
+    single line longer than `room` is cut inside it."""
     out: list[str] = []
-    refuted = [c for c in claims if not c.outvoted]
-    dissent = [c for c in claims if c.outvoted]
-    # An empty section reads as lost content: the first closer given only dissent could not rule out
-    # that the entries had been dropped while the brief was put together.
-    if not refuted:
-        out.append("None this time: every claim in this brief is an outvoted dissent, below.")
-        out.append("")
-    for c in refuted:
-        out.extend(_claim_entry(m, c))
-    if dissent:
-        # NEUTRAL WORDS ONLY. The first version told the closer what happened to a dissent once
-        # before ("an access rule shipped `verified` against a counterexample"), and the closer
-        # that read it said the sentence pushed it toward `uphold` before it had read any code.
-        # That history is for the lead, in the contract's header. And `reject` is defined by the
-        # CLAIM, like `uphold`: "the majority read the code right" decided nothing when the
-        # majority had read the code right AND the claim was false as stated.
-        out.append(f"## {OUTVOTED_DISSENT} — the majority CONFIRMED these, and a skeptic refuted "
-                   f"them")
-        out.append("A split vote files the claim as confirmed, and the dissent then appears in no "
-                   "count. Judge each one by the same steps as every other entry (How to judge, "
-                   "below): **uphold** — the dissenting skeptic is right, and the code contradicts "
-                   "the claim as the map states it; **reject** — the dissent is wrong, and the "
-                   "claim holds as the map states it.")
-        out.append("")
-        for c in dissent:
-            out.extend(_claim_entry(m, c))
-    return "\n\n".join(out).strip("\n")
+    chunk: list[str] = []
+    size = 0
+    for line in lines:
+        for bit in [line[i:i + room] for i in range(0, len(line), room)] or [""]:
+            if chunk and size + 1 + len(bit) > room:
+                out.append("\n".join(chunk))
+                chunk, size = [], 0
+            size += len(bit) + (1 if chunk else 0)
+            chunk.append(bit)
+    if chunk:
+        out.append("\n".join(chunk))
+    return out
+
+
+def _cut(item: str, room: int) -> list[str]:
+    """`item` as consecutive pieces of at most `room` characters, cut between lines. A `dump` block
+    is fenced again around each piece and labelled with its place in the whole, so every piece reads
+    as a block of its own."""
+    if len(item) <= room:
+        return [item]
+    hit = _FENCED_BLOCK.match(item)
+    if not hit:
+        return _chunks(item.split("\n"), room)
+    label = hit.group(1)
+    frame = len(f"{label} (piece 9999 of 9999):\n```json\n\n```")
+    bodies = _chunks(hit.group(2).split("\n"), room - frame)
+    return [f"{label} (piece {k} of {len(bodies)}):\n```json\n{body}\n```"
+            for k, body in enumerate(bodies, start=1)]
+
+
+def _split(entries: list[_Entry], index: Path, budget: int) -> list[_Part]:
+    """The entries packed in order into part files of at most `budget` characters each.
+
+    A claim stays whole in one part whenever it fits in one, so its votes and its rows are read
+    together. One longer than a whole part on its own — a step claim carries its use case and both
+    endpoints, and one hub's `dump --edges` ran to 13,325 characters on a real map — starts a part
+    and continues in the next under `### <id> (continued)`, a block too long for any part cut
+    between its lines (`_cut`)."""
+    parts: list[_Part] = []
+    items: list[str] = []
+    ids: list[str] = []
+
+    def text(more: list[str]) -> str:
+        return ("\n\n".join([_part_header(index, len(parts) + 1), *items, *more]).rstrip("\n")
+                + "\n")
+
+    def close() -> None:
+        parts.append(_Part(_part_path(index, len(parts) + 1), text([]), tuple(ids)))
+        items.clear()
+        ids.clear()
+
+    for e in entries:
+        whole = e.items()
+        if items and len(text(whole)) > budget:
+            close()
+        if len(text(whole)) <= budget:
+            items.extend(whole)
+            ids.extend([e.id] if e.id else [])
+            continue
+        continued = f"### {e.id} (continued)"
+        # What one piece may hold so that an EMPTY part takes it: the header (with room for any part
+        # number), the continuation heading, and the blank lines between them.
+        room = budget - len(_part_header(index, 10 ** 6)) - len(continued) - 8
+        if room < 1_000:
+            raise ValueError(f"a closer brief file of {budget:,} characters has no room for a "
+                             f"claim's rows once its header is written")
+        ids.extend([e.id] if e.id else [])
+        for piece in (p for item in whole for p in _cut(item, room)):
+            if items and len(text([piece])) > budget:
+                close()
+                items.append(continued)
+                ids.append(continued.removeprefix("### "))
+            items.append(piece)
+    if items:
+        close()
+    return parts
+
+
+def _reading_list(parts: list[_Part], claims: list[DisputedClaim]) -> str:
+    """The «CLAIMS» value of a split brief: which file holds which claims, and the order to read
+    every one of them whole in, before any claim is judged."""
+    dissent = sum(1 for c in claims if c.outvoted)
+    out = [f"**The claims are in the {len(parts)} files below, not here.** Together they are too "
+           f"long for one Read, so each file holds a share of them and fits in one. Read EVERY one "
+           f"COMPLETELY, in this order, before you judge any claim; the job, the rules and how to "
+           f"answer stay in this file.", ""]
+    out += [f"{k}. `{p.path}` — {', '.join(p.ids)}" for k, p in enumerate(parts, start=1)]
+    out += ["", f"{len(claims)} claim(s) in all"
+            + (f", {dissent} of them under **{OUTVOTED_DISSENT}**" if dissent else "")
+            + ". If a Read of a part shows a truncation notice, that part is not yet read: page on "
+              "with its offset to its last line."]
+    return "\n".join(out)
+
+
+def closer_files(m: ProjectModel, claims: list[DisputedClaim], values: dict[str, str], out: Path,
+                 root: Path | None = None,
+                 budget: int = CLOSER_BRIEF_BUDGET) -> list[tuple[Path, str]]:
+    """Every file ONE closer reads, the brief at `out` first: the filled contract alone when it fits
+    in `budget` characters; otherwise the contract with a reading list for «CLAIMS», plus the part
+    files that list names, written beside `out` and each within `budget`.
+
+    The split is for the Read window, not a fan-out: the pointer still names `out`, and the one
+    closer the method dispatches reads every part. Built here and written by the caller, so a
+    refusal leaves no file behind."""
+    entries = _entries(m, claims)
+    whole = fill("closer", {**values, "CLAIMS": _joined(entries)}, root)
+    if len(whole) <= budget:
+        return [(out, whole)]
+    parts = _split(entries, out.resolve(), budget)
+    files = [(out, fill("closer", {**values, "CLAIMS": _reading_list(parts, claims)}, root)),
+             *((p.path, p.text) for p in parts)]
+    over = [f"{p.name} ({len(t):,} characters)" for p, t in files if len(t) > budget]
+    if over:
+        # Only the brief's own list of parts can get here, and only at a thousand claims or so.
+        raise ValueError(f"{', '.join(over)} over the {budget:,}-character read budget of a closer "
+                         f"brief file; judge the refutations in two closer waves, the second "
+                         f"with --settled <the first closer's verdicts file>")
+    return files
 
 
 def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Path,
-                       exclude: list[str], settled: list[Path],
-                       root: Path | None = None,
-                       prefix: str = "") -> tuple[str, list[DisputedClaim]]:
-    """The filled closer contract, with «CLAIMS» built from the skeptics' own verdict files.
+                       exclude: list[str], settled: list[Path], out: Path,
+                       root: Path | None = None, prefix: str = "",
+                       budget: int = CLOSER_BRIEF_BUDGET,
+                       ) -> tuple[list[tuple[Path, str]], list[DisputedClaim]]:
+    """The filled closer contract, with «CLAIMS» built from the skeptics' own verdict files: the
+    files to write (`closer_files`, the brief at `out` first) and the claims they carry.
 
     `exclude` takes a refutation id (`rule-1#12`) or an element id (`BR205`), and an exclusion that
     matches NOTHING is an ERROR: a filter that silently matched zero is the measured bug — a
@@ -1307,7 +1581,7 @@ def fill_from_verdicts(values: dict[str, str], verdicts_dir: Path, map_path: Pat
     if not kept:
         raise ValueError(f"every one of the {len(refs)} refuted claim(s) in {verdicts_dir} is "
                          f"already settled or excluded; there is nothing for a closer to judge")
-    return fill("closer", {**values, "CLAIMS": claims_block(m, kept)}, root), kept
+    return closer_files(m, kept, values, out, root, budget), kept
 
 
 def _read_values(source: str) -> dict[str, str]:
@@ -1460,15 +1734,25 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
         try:
-            text, kept = fill_from_verdicts(_read_values(fill_from), Path(from_verdicts),
-                                            Path(map_path), exclude, [Path(s) for s in settled],
-                                            prefix=prefix)
+            files, kept = fill_from_verdicts(_read_values(fill_from), Path(from_verdicts),
+                                             Path(map_path), exclude, [Path(s) for s in settled],
+                                             target, prefix=prefix)
+            # Composed BEFORE anything is written, inside the refusals: a relative --out raised out
+            # of this branch as a traceback, where every other path prints one ERROR line.
+            pointer = brief(brief_id, target) if brief_id is not None else ""
         except (ValueError, json.JSONDecodeError, OSError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
-        pointer = brief(brief_id, target) if brief_id is not None else ""
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        # A part file is as much the closer's brief as the file the pointer names.
+        taken = [str(p) for p, _text in files[1:] if p.exists()]
+        if taken and not force:
+            print(f"ERROR: {', '.join(taken)} already exist(s); a part file of a split closer brief "
+                  f"is part of an agent's brief. Pick another --out, or pass --force if you know "
+                  f"nothing is reading them.", file=sys.stderr)
+            return 2
+        for path, text in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
         dissent = sum(1 for c in kept if c.outvoted)
         print(f"filled closer contract with {len(kept)} refuted claim(s)"
               + (f", {dissent} of them an outvoted dissent" if dissent else "")
@@ -1476,6 +1760,13 @@ def main(argv: list[str] | None = None) -> int:
         for ref in kept:
             print(f"  {ref.id:22} {'[dissent] ' if ref.outvoted else ''}{ref.claim[:70]}",
                   file=sys.stderr)
+        if len(files) > 1:
+            print(f"The claims do not fit one closer brief file ({CLOSER_BRIEF_BUDGET:,} "
+                  f"characters, so that one Read shows it whole): they are in {len(files) - 1} "
+                  f"part files beside {target.name}, which lists them. ONE closer reads them all; "
+                  f"send it the one pointer to {target.name}.", file=sys.stderr)
+            for path, text in files[1:]:
+                print(f"  {path}  {len(text):,} characters", file=sys.stderr)
         if brief_id is not None:
             sys.stdout.write(pointer)
         return 0

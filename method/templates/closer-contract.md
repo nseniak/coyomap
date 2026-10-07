@@ -27,6 +27,12 @@ the second was a regex generator with no branch for a rule-site claim: 4 of 20 r
 the closer with no map row at all, and it answered `uphold` on all four instead of the `unsure` this
 contract asks for.
 
+**A brief too long for one Read is split, and it still goes to ONE closer.** A `dump` block two
+claims share is printed under the first claim only. A brief still over 40,000 characters puts its
+claims in part files beside `--out`, each within that, and the brief at `--out` lists them for the
+closer to read whole: an agent's Read shows about 25,000 tokens of a file at a time, and nothing
+makes it page on. Send the one pointer as usual.
+
 **A second wave excludes what the first one settled, BY ID.** `--settled <the first closer's
 verdicts file>` does it automatically; `--exclude rule-1#12` (a refutation id) or `--exclude BR205`
 (an element id) does it by hand, and an exclusion that matches nothing is an ERROR. The same build
@@ -80,6 +86,9 @@ lead; nothing above this line goes into an agent prompt.
 > - **every vote cast on it** — each skeptic's word (REFUTED, confirmed or unverifiable), its
 >   `evidence` (the `path:line` it read) and its `note` (its reasoning). The votes on THIS claim are
 >   yours to weigh; the rest of the map's confirmed claims are not in this brief, on purpose.
+>
+> When two claims are about the same element, its rows are printed under the first one, and the
+> second names that claim instead of repeating them: those rows are given, not missing.
 >
 > The entries under **Outvoted dissent** are claims the majority CONFIRMED while a skeptic refuted
 > them. Judge them by the same steps: **uphold** — the dissenting skeptic is right, and the code

@@ -25,6 +25,8 @@ from coyomap.preindex_lib import (
     GRANULARITY_LOC_CAP,
     expected_components,
     granularity_band,
+    granularity_files,
+    median_file_loc,
     slice_expectations,
 )
 from coyomap.validate_analysis import granularity_advisory
@@ -110,6 +112,24 @@ def test_e_excludes_vendored_docs_config_and_tests() -> None:
     })
     inflated = make_tree(inflated_files)
     assert expected_components(inflated).expected == expected_components(base).expected == 7
+
+
+def test_e_and_the_median_count_one_file_set() -> None:
+    """`granularity_files` is the one rule: E's file and LOC totals and the median file size are
+    all counted over exactly its files."""
+    root = make_tree({
+        "src/a.py": 10, "src/b.ts": 30, "lib/c.go": 50,       # code
+        "src/notes.md": 900, "src/conf.yaml": 900,            # docs and config text
+        "src/Makefile": 900,                                   # no known language
+        "src/assets/icon.ts": 900,                             # an asset folder
+        "lib/internal/y.py": 900,                              # a non-product folder below the top
+        "tests/test_a.py": 900, "node_modules/m.js": 900,      # a test tree, a vendored tree
+    })
+    counted = sorted(f.relative_to(root.resolve()).as_posix() for f in granularity_files(root))
+    assert counted == ["lib/c.go", "src/a.py", "src/b.ts"], counted
+    tree = expected_components(root)
+    assert (tree.files, tree.loc) == (3, 90), tree
+    assert median_file_loc(root) == 30
 
 
 def test_e_glue_only_subdir_is_not_a_leaf() -> None:

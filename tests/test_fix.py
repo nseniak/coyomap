@@ -7,6 +7,7 @@ Run either way (needs an editable install: `make deps`):
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import tempfile
@@ -1867,6 +1868,50 @@ def test_a_structured_value_in_set_is_sent_to_set_json(capsys) -> None:
         assert "goes in 'set_json'" in capsys.readouterr().err
 
 
+def run_fix(argv: list[str]) -> tuple[int, str, str]:
+    """`fix` in-process: its exit code, its stdout and its stderr."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = fix.main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_an_edge_two_fragments_declare_is_refused_with_the_way_to_each_copy() -> None:
+    """A fragment edge carries no id, so two trace agents that draw one call each declare it. The
+    refusal named both rows and no way to reach one: on the 2026-10-07 mcpolis build the lead
+    rewrote both copies by heredoc and erased one agent's text. Given one FILE, `--fragments`
+    reads that file alone, so it reaches each copy."""
+    with tempfile.TemporaryDirectory() as td:
+        d = make_frag_dir(td,
+                          e1={"components": [make_component("C1", "one"),
+                                             make_component("C2", "two")],
+                              "edges": [make_edge("C1", "calls", "C2", why="first text")]},
+                          t2={"edges": [make_edge("C1", "calls", "C2", why="second text")]})
+        code, _out, err = run_fix(["row", "--fragments", str(d), "--edge", "C1:calls:C2",
+                                   "--set-why", "one text"])
+        assert code == 2
+        assert "declared by 2 fragment rows" in err, err
+        assert f"--fragments {d / 'e1.json'}" in err and f"--fragments {d / 't2.json'}" in err, err
+        # The route it names reaches one copy and leaves the other as it was.
+        assert run_fix(["row", "--fragments", str(d / "t2.json"), "--edge", "C1:calls:C2",
+                        "--set-why", "one text"])[0] == 0
+        whys = [json.loads((d / f"{name}.json").read_text())["edges"][0]["why"]
+                for name in ("e1", "t2")]
+        assert whys == ["first text", "one text"]
+
+
+def test_an_id_two_fragments_declare_is_refused_without_the_one_file_route() -> None:
+    """An id is one row, and `assemble` refuses an id defined twice, so editing one copy through a
+    single file would only hide the conflict. The refusal says to remove or renumber one."""
+    with tempfile.TemporaryDirectory() as td:
+        d = make_frag_dir(td,
+                          r1={"rules": [make_rule("BR1", "A token is checked")]},
+                          r2={"rules": [make_rule("BR1", "A plan has a cap")]})
+        code, _out, err = run_fix(["row", "--fragments", str(d), "--id", "BR1", "--set-risk", "x"])
+        assert code == 2
+        assert "remove or renumber" in err and "--fragments" not in err, err
+
+
 def test_row_and_rows_reach_the_same_writer() -> None:
     """`row` is the one-element case, so a guard added for either is a guard for both."""
     with tempfile.TemporaryDirectory() as td:
@@ -1989,6 +2034,22 @@ def test_step_notes_writes_a_use_cases_step_and_a_sub_flows_step():
         shared = json.loads((d / "shared.json").read_text())
     assert trace["flows"][0]["steps"][0]["note"] == "refused once the plan's servers are used up"
     assert shared["subflows"][0]["steps"][0]["note"] == "only when the role allows the tool"
+
+
+def test_step_notes_names_the_fragments_that_both_write_one_step() -> None:
+    """A use case has one walk, so two fragments writing it is a defect to repair, never a copy to
+    pick. The refusal said "fix the fragments first" and not which fragments."""
+    with tempfile.TemporaryDirectory() as td:
+        d = make_walk_fragments(td)
+        (d / "t2.json").write_text(json.dumps({"flows": [{"uc": "UC5", "title": "Add a server",
+                                                          "steps": [{"n": 3, "src": "C1",
+                                                                     "dst": "C2",
+                                                                     "phrase": "checks the plan",
+                                                                     "where": "a.py:9"}]}]}))
+        code, _out, err = run_fix(["step-notes", "--fragments", str(d), "--step", "UC5:3",
+                                   "--note", "only when the plan allows it"])
+        assert code == 2
+        assert "t2.json" in err and "trace.json" in err, err
 
 
 def test_step_notes_writes_nothing_when_one_address_matches_no_step():

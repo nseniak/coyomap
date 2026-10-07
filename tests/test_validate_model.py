@@ -159,6 +159,57 @@ def test_entry_point_coverage_splits_the_two_arms_of_claiming():
     assert validate_model_mod._entry_point_coverage_line(ProjectModel(title="T", goal="G")) == ""
 
 
+def test_an_untraced_map_names_its_remainder_not_yet_traced():
+    """Before the trace, no flow exists and no use case names a way in, so `unclaimed` stays empty by
+    design and the whole harvest is the remainder. The line called all of it "with no owning
+    component": on the 2026-10-07 mcpolis build it printed "201 with no owning component" while
+    every way in of the map had an owner."""
+    m = ProjectModel(title="T", goal="G")
+    m.components = [Component(id="C1", name="Doors", purpose="p", source="a.py:1")]
+    m.entry_points = [EntryPoint(id=f"EP{i}", kind="http-route", activation="external",
+                                 component="C1", trigger=f"route {i}", source=f"a.py:{i}")
+                      for i in (1, 2)]
+    m.use_cases = [UseCase(id="UC1", name="Do it")]
+    line = validate_model_mod._entry_point_coverage_line(m)
+    assert line.endswith("0 unclaimed, 2 not yet traced"), line
+    # A row with no owner is still named for what it is, on an untraced map too.
+    m.entry_points.append(EntryPoint(id="EP3", kind="http-route", activation="external",
+                                     component="", trigger="ownerless", source="a.py:3"))
+    line = validate_model_mod._entry_point_coverage_line(m)
+    assert line.endswith("1 with no owning component, 2 not yet traced"), line
+
+
+def test_every_reader_of_a_way_ins_owner_asks_one_question():
+    """Four readers ask whether a way in has a LIVE owner: both unclaimed lists, the coverage counts
+    and the coverage line's remainder. An empty owner and one the map does not define are the same
+    answer to all four, and a padded id is read like the bare one."""
+    m = ProjectModel(title="T", goal="G")
+    m.components = [Component(id="C1", name="Doors", purpose="p", source="a.py:1"),
+                    Component(id="C2", name="Back office", purpose="p", source="b.py:1")]
+    m.entry_points = [
+        EntryPoint(id="EP1", kind="http-route", activation="external", component="",
+                   trigger="ownerless", source="a.py:1"),
+        EntryPoint(id="EP2", kind="http-route", activation="external", component="C9",
+                   trigger="dangling", source="a.py:2"),
+        EntryPoint(id="EP3", kind="job", activation="self", component=" C9 ",
+                   trigger="dangling timer", source="a.py:3"),
+        EntryPoint(id="EP4", kind="http-route", activation="external", component=" C2 ",
+                   trigger="nobody walks it", source="b.py:2"),
+        EntryPoint(id="EP5", kind="job", activation="self", component="C2",
+                   trigger="nobody walks it either", source="b.py:3"),
+        EntryPoint(id="EP6", kind="http-route", activation="external", component="C1",
+                   trigger="a walk touches its owner", source="a.py:4"),
+    ]
+    m.use_cases = [UseCase(id="UC1", name="Do it")]
+    m.flows = [Flow(uc="UC1", title="Do it",
+                    steps=[FlowStep(n=1, src="C1", dst="C1", phrase="does it")])]
+    assert [ep.id for ep in validate_model_mod.unclaimed_external_entry_points(m)] == ["EP4"]
+    assert [ep.id for ep in validate_model_mod.unclaimed_self_entry_points(m)] == ["EP5"]
+    assert validate_model_mod.completeness_counts(m)["entry_points_covered_by_component_only"] == 1
+    line = validate_model_mod._entry_point_coverage_line(m)
+    assert line.endswith("1 unclaimed, 2 with no owning component"), line
+
+
 def test_entry_point_coverage_counts_a_flow_step_at_the_way_ins_own_line():
     """The third bucket. The traversal arm is component-grain, so one flow through a component
     marks every way in it owns as covered — 87 of coyomap's own 97 the day this landed. A surface
@@ -410,6 +461,96 @@ def test_kind_coverage_still_ignores_prose_that_merely_mentions_a_kind() -> None
         "Not counted as separate addresses: the two wrapper routes that only mount a frame.\n"
         "The `ui-route` rows were the complete set at the time of writing."))]
     assert any("Entry-point coverage: no completeness" in w for w in warnings_of(m))
+
+
+# --- the count a `complete` coverage record states ------------------------------------------------
+
+def make_coverage_count_model(kind: str, rows: int, record: str) -> ProjectModel:
+    """`rows` ways in of one kind, and one line recorded under 'Entry-point coverage'."""
+    m = make_valid_model()
+    m.entry_points = [make_ep(kind=kind, trigger=f"way in {i}") for i in range(rows)]
+    m.extras = [ExtraSection(heading="Entry-point coverage", body=record)]
+    return m
+
+
+def stated_count_warnings(m: ProjectModel) -> list[str]:
+    return [w for w in warnings_of(m) if "record states" in w]
+
+
+def test_a_count_of_part_of_a_kind_is_not_read_as_its_total() -> None:
+    """A number that is one item of a list counts a PART of the kind. The 2026-10-07 mcpolis record
+    said "every Route in App.tsx plus the two backend routes", true of 2 of the map's 38 ui-routes;
+    the check read "two backend routes" as the total, objected twice, and the lead deleted the true
+    number to silence it. Every record below is a real one, shortened: a breakdown after a colon or
+    in a comma list, a number after "including", a count the record says is left out, and "no" with
+    a describing word, which denies one part ("no named tools of its own")."""
+    for kind, record in (
+            ("ui-route", "ui-route: complete — every Route in App.tsx plus the two backend routes"),
+            ("http-route", "http-route: complete — every route decorator was listed: 10 dashboard "
+                           "data routes, 10 sign-in routes, 8 admin routes, plus the catch-all"),
+            ("ui-route", "ui-route: complete — one row per path including the two layout-less "
+                         "routes and the catch-all"),
+            ("mcp-tool", "mcp-tool: complete — 56 rows: 31 Admin MCP tools, 4 operator tools"),
+            ("middleware", "middleware: complete — every middleware installed at construction time. "
+                           "One implemented middleware (rate limiting) is deliberately NOT installed"),
+            ("middleware", "middleware: complete — every add_middleware call plus the three "
+                           "middleware classes defined in middleware/"),
+            ("mcp-tool", "mcp-tool: complete — the gateway registers no named tools of its own")):
+        assert not stated_count_warnings(make_coverage_count_model(kind, 40, record)), record
+
+
+def test_a_count_of_what_holds_the_kind_is_not_its_total() -> None:
+    """The kind's word in front of another noun describes that noun, and the number counts IT: "the 3
+    route files", "five route modules" (the shipped argus map), "the one route table" (the shipped
+    coyodex-test-project map), "one route-level gate" and "the three route slices". The first two
+    are what finding 21 fixed; the other three were still read as totals after it."""
+    for kind, record in (
+            ("http-route", "http-route: complete — enumerated from the 3 route files"),
+            ("http-route", "http-route: complete — walked every route decorator and both mounts "
+                           "across the five route modules"),
+            ("http-route", "http-route: complete — every registration in the one route table was read"),
+            ("middleware", "middleware: complete — one route-level gate, the admin guard"),
+            ("http-route", "http-route: complete — the three route slices each walked their own "
+                           "registration decorators")):
+        assert not stated_count_warnings(make_coverage_count_model(kind, 40, record)), record
+
+
+def test_a_total_may_carry_describing_words_before_the_kinds_word() -> None:
+    """Up to two words may describe the counted thing. The shipped 2026-10-07 mcpolis map says "the
+    two socket routes" and "the one stop-signal handler", argus says "19 addressable routes", and
+    each is its record's total. Finding 21's fix read no word between the number and the noun, and
+    so lost all three (review of 2026-10-07, F5)."""
+    for kind, record, total in (
+            ("websocket-route", "websocket-route: complete — the two socket routes of the bundled "
+                                "demo MCP server", 2),
+            ("signal-handler", "signal-handler: complete — the one stop-signal handler in app.py", 1),
+            ("ui-route", "ui-route: complete — read every Route element declared in the router. 19 "
+                         "addressable routes recorded: 8 public, 3 dashboard, 6 admin, plus the "
+                         "catch-all", 19),
+            ("signal-handler", "signal-handler: complete — the one SIGTERM handler registered in "
+                               "the lifespan", 1),
+            ("worker-thread", "worker-thread: complete — the one thread the server starts per "
+                              "request", 1)):
+        hits = stated_count_warnings(make_coverage_count_model(kind, 4, record))
+        assert len(hits) == 1 and "carries 4 row(s)" in hits[0], (record, hits)
+        assert not stated_count_warnings(make_coverage_count_model(kind, total, record)), record
+
+
+def test_a_wrong_total_in_a_complete_record_is_still_caught() -> None:
+    """The number directly before the kind's own word, or before a noun such as "routes", is the
+    total, in any spelling of the kind. The 2026-09-02 mcpolis record said "one signal-handler entry
+    point" where the map carries four."""
+    for kind, record in (
+            ("signal-handler", "signal-handler: complete — one signal-handler entry point"),
+            ("http-route", "http-route: complete — 2 http routes"),
+            ("ui-route", "ui-route: complete — 3 ui-routes, every one read"),
+            ("cli", "cli: complete — 2 commands"),
+            ("signal-handler", "signal: complete — one signal entry point")):
+        hits = stated_count_warnings(make_coverage_count_model(kind, 4, record))
+        assert len(hits) == 1 and "carries 4 row(s)" in hits[0], (record, hits)
+    # The right total stays quiet.
+    assert not stated_count_warnings(
+        make_coverage_count_model("ui-route", 4, "ui-route: complete — 4 ui-routes, every one read"))
 
 
 # --- a recorded rationale the walk outgrew -----------------------------------------
@@ -2453,6 +2594,17 @@ def test_component_files_and_evidence_round_trip_clean():
     m.components[0].files = ["src/v.py", "src/helpers.py"]
     m.components[0].evidence = [EvidenceItem(file="src/v.py:12", why="the entry point")]
     assert problems_of(m) == []
+
+
+def test_a_component_holds_its_listed_files_and_never_its_source():
+    """THE one answer to "which files does a component hold", read by the rule layer, `dump --owners`
+    and the viewer. mcpolis's C24 lived at `app.py:354`, in the file C23 lists: `source` says where a
+    component lives, so it holds nothing. A folder holds no one file; a line suffix still names one."""
+    m = make_valid_model()
+    m.components[0].source = "src/app.py:354"
+    m.components[0].files = ["src/guards.py:12", " src/pin.py ", "src/middleware/", "", "src/guards.py"]
+    assert validate_model_mod.component_files(m.components[0]) == ["src/guards.py", "src/pin.py"]
+    assert validate_model_mod.component_file_owners(m) == {"src/guards.py": ["C1"], "src/pin.py": ["C1"]}
 
 
 def test_evidence_file_must_be_a_bare_path_line_anchor():
@@ -4775,6 +4927,66 @@ def test_the_dep_decision_stays_silent_on_a_map_that_records_no_interfaces():
     assert not [p for p in problems_of(m) if "neither names an interface" in p]
 
 
+# The harvest POINTER (retro 2026-10-07). A dependency agent that takes a dep for a surface writes
+# "Not decided here …" into `not_an_interface`, because synthesis mints the `In` ids. The check above
+# read it as a reason, so the 2026-10-07 mcpolis map shipped it as the answer for nginx and Caddy.
+
+#: The pointer the 2026-10-07 mcpolis dependency agent wrote for nginx, word for word.
+NGINX_POINTER = ("Not decided here. nginx fronts every web surface, and I do not know whether it "
+                 "counts as one. The id is minted at synthesis.")
+
+
+def test_a_dep_whose_reason_is_still_the_harvest_pointer_blocks():
+    m = make_interface_model()
+    m.deps[0].not_an_interface = NGINX_POINTER
+    hits = [p for p in problems_of(m) if "harvest pointer" in p]
+    assert len(hits) == 1 and hits[0].startswith("D1 (Postgres) "), hits
+    assert "`interfaces`" in hits[0] and "--id D1 --set-not-an-interface" in hits[0], hits[0]
+    m.deps[0].kind = "library"     # the pointer is no reason whatever the dep is
+    assert [p for p in problems_of(m) if "harvest pointer" in p] == hits
+
+
+def test_the_pointer_problem_names_the_way_to_decide_it_in_a_build_and_in_an_update():
+    """An update changes the map through its change log and never reads the build's fragments, so a
+    problem naming only `fix row --fragments` sent the next update of the shipped mcpolis map to a
+    file that update does not read (review of 2026-10-07, F1). It names both ways, the update's in
+    the edit syntax of method/change-impact.md."""
+    m = make_interface_model()
+    m.deps[0].not_an_interface = NGINX_POINTER
+    hit = next(p for p in problems_of(m) if "harvest pointer" in p)
+    assert ("In a build: `coyomap fix row --fragments .coyomap/build-fragments --id D1 "
+            "--set-not-an-interface") in hit, hit
+    assert ('In an update: an entry of the change log that names D1 and makes the edit '
+            '`{"id": "D1", "key": "not_an_interface", "was": ') in hit, hit
+    assert '"now": "<why>"}`' in hit and "`coyomap dump --record D1`" in hit, hit
+
+
+def test_the_pointer_is_known_however_it_is_quoted_or_cased():
+    for text in (NGINX_POINTER, f'"{NGINX_POINTER}"', "  not DECIDED here: a surface, I think"):
+        assert grammar.is_interface_pointer(text), text
+    assert not grammar.is_interface_pointer("Read back only. Not decided here is not the opening.")
+
+
+def test_a_decided_dep_never_reads_as_the_pointer():
+    m = make_interface_model()
+    assert not [p for p in problems_of(m) if "harvest pointer" in p], "a real reason decides it"
+    # A pointer beside a named surface was ANSWERED: `assemble` drops it, and a hand-edited map is
+    # told about the contradiction, not about an undecided dep.
+    m.deps[0].not_an_interface = NGINX_POINTER
+    m.deps[0].interfaces = ["I1"]
+    problems = problems_of(m)
+    assert not [p for p in problems if "harvest pointer" in p]
+    assert any("AND says why it is none" in p for p in problems)
+
+
+def test_the_pointer_waits_for_synthesis_to_record_the_surfaces():
+    # Synthesis mints the surfaces, so before it every pointer is undecided, and rightly so.
+    m = make_interface_model()
+    m.interfaces = []
+    m.deps[0].not_an_interface = NGINX_POINTER
+    assert not [p for p in problems_of(m) if "harvest pointer" in p]
+
+
 def test_unassigned_ways_in_are_ONE_aggregated_line_and_exclude_plumbing():
     # One line per row would print 88/94/249/486 lines against ~20 existing advisories. And the
     # plumbing kinds can never belong to a surface, so counting them makes zero unreachable.
@@ -6592,3 +6804,72 @@ def test_the_second_wave_advice_names_the_security_voters():
                   claims_live_challenged=10)
     found = validate_model_mod._grounding_live_coverage_findings(g)
     assert found and "--votes security=3" in found[0], found
+
+
+# --- a cut list says how many it left out (merge 5.4, 2026-10-07) ---------------------------------
+# Five advisories cut a list and said nothing about the cut: the three retrofit gates and the
+# repeated-reason advice ended on a bare `…`, and the embedded check named the first four holders
+# and stopped. They go through `reporting.shown` now, whose tail counts what it left out, and
+# `--json` gets the whole list, as it promises.
+
+def make_doorless_stories(n: int) -> ProjectModel:
+    """`n` stories that each come in through EP1, a way in of the surface I1, straight to code: no
+    step touches I1 (an opening owed), step 1 takes a person to code with no door between them (a
+    crossing owed), and step 2 points at D1, which stands on I1 (a migration owed)."""
+    m = make_interface_model()
+    m.deps[0].not_an_interface = ""
+    m.deps[0].interfaces = ["I1"]
+    m.use_cases = [UseCase(id=f"UC{i}", name=f"Story {i}", actors=["R1"], entry_points=["EP1"])
+                   for i in range(1, n + 1)]
+    m.flows = [Flow(uc=f"UC{i}", title=f"Story {i}",
+                    steps=[FlowStep(n=1, src="R1", dst="C1", phrase="asks"),
+                           FlowStep(n=2, src="C1", dst="D1", phrase="calls out", where="src/v.py:4")])
+               for i in range(1, n + 1)]
+    return m
+
+
+def make_record_held_by_projections(holders: int) -> ProjectModel:
+    """E1, kept `embedded`, held by `holders` records E2.. that are each a `projection`, so no chain
+    of holders reaches a saved record."""
+    m = ProjectModel(title="T", goal="G")
+    inner = Entity(id="E1", name="Row", meaning="one line of a page", source="a.py:1",
+                   store=Store(mode="embedded", container="the page"))
+    m.entities = [inner] + [
+        Entity(id=f"E{i}", name=f"Page {i}", meaning="what one screen returns", source=f"a.py:{10 * i}",
+               store=Store(mode="projection", container="the page"),
+               fields=[EntityField(name="rows", type="list[E1]")])
+        for i in range(2, holders + 2)]
+    return m
+
+
+def test_the_three_retrofit_gates_count_the_stories_they_do_not_name():
+    warnings = warnings_of(make_doorless_stories(8))
+    for head, tail in (("no step of theirs touches that surface",
+                        "(UC1, UC2, UC3, UC4, UC5, UC6, +2 more)"),
+                       ("without going through a door", "UC6 step 1 (R1 → C1), +2 more)"),
+                       ("stands on a surface", "UC6 step 2 → D1, +2 more)")):
+        said = next((w for w in warnings if head in w), "")
+        assert tail in said, (head, said)
+
+
+def test_the_three_retrofit_gates_name_every_story_in_json_mode():
+    try:
+        reporting.set_full_lists(True)
+        warnings = warnings_of(make_doorless_stories(8))
+    finally:
+        reporting.reset_full_lists()
+    said = next(w for w in warnings if "no step of theirs touches that surface" in w)
+    assert "(UC1, UC2, UC3, UC4, UC5, UC6, UC7, UC8)" in said, said
+
+
+def test_a_record_held_by_more_than_four_counts_the_holders_it_does_not_name():
+    fired = validate_model_mod._orphan_embedded_warnings(make_record_held_by_projections(6))
+    assert fired and "(projection), +2 more. A piece of a `projection`" in fired[0], fired
+
+
+def test_the_merge_advice_counts_the_keys_it_does_not_name():
+    m = make_valid_model()
+    m.extras = [ExtraSection(heading="Unclaimed surfaces",
+                             body="\n".join(f"C{i}: a dev-only surface" for i in range(1, 6)))]
+    said = next((w for w in warnings_of(m) if "repeats one reason" in w), "")
+    assert "(C1, C2, C3, +2 more key(s): <why>)" in said, said

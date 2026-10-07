@@ -13,9 +13,9 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from coyomap import grounding as G  # noqa: E402
 from coyomap import audit_model  # noqa: E402
-from coyomap.audit_model import WorkItem, l2_worklist_model  # noqa: E402
+from coyomap.audit_model import WorkItem, l2_worklist_model, rule_site_claim  # noqa: E402
 from coyomap.grounding import build_record, main  # noqa: E402
-from coyomap.model import load_model  # noqa: E402
+from coyomap.model import BusinessRule, ProjectModel, RuleSite, load_model  # noqa: E402
 
 
 def make_worklist(*claims: str) -> list[str]:
@@ -1811,3 +1811,214 @@ def test_a_first_pin_another_build_left_is_replaced() -> None:
                                             encoding="utf-8")
         G.repin_second_wave(wl, [WorkItem(claim="b", anchor=None, why_risky="r")])
         assert (Path(td) / G.FIRST_PIN).read_text(encoding="utf-8") == first
+
+
+# --- a list survives `head`, `tail` and `cut` (retro 2026-10-07, finding 1) ------------------------
+# The lint's "401 row(s) are worth a second look" was the END of one 912-character line, and a
+# `tail -30 | cut -c1-300` cut it off before its count.
+
+def make_cited_lint(tmp: Path, cited: list[str], printed: list[str]) -> tuple[Path, Path]:
+    """A verdict file with one row per entry of `cited` (a file cited twice is two rows), and an
+    agent transcript that opens nothing and PRINTS `printed` as text. Returns (verdicts, agents)."""
+    v = tmp / "v.json"
+    v.write_text(json.dumps({"grounding": [
+        {"claim": f"c{i}", "grounded": True, "evidence": f"{f}:{i}", "skeptic": "s"}
+        for i, f in enumerate(cited, 1)]}), encoding="utf-8")
+    agents = tmp / "agents"
+    agents.mkdir()
+    (agents / "agent-1.jsonl").write_text(json.dumps({"message": {"content": [
+        {"type": "text", "text": "grep printed " + " ".join(printed)}]}}) + "\n", encoding="utf-8")
+    return v, agents
+
+
+def run_lint(argv: list[str]) -> tuple[int, list[str]]:
+    """`grounding lint` with no session, and every line it printed."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        code = main(["lint", *argv], env={})
+    return code, out.getvalue().splitlines()
+
+
+def test_the_second_look_count_is_on_a_short_first_line_and_each_file_on_its_own():
+    files = [f"src/pkg/module_{i}.py" for i in (1, 2, 3)]
+    with tempfile.TemporaryDirectory() as td:
+        v, agents = make_cited_lint(Path(td), files + files[:1], printed=files)
+        code, lines = run_lint(["--verdicts", str(v), "--agent-transcripts", str(agents)])
+    assert code == 0, lines
+    first = next((ln for ln in lines if "worth a second look" in ln), "")
+    assert first.startswith("4 row(s) are worth a second look") and len(first) < 200, first
+    for f in files:
+        own = [ln for ln in lines if f in ln]
+        assert len(own) == 1 and own[0].lstrip().startswith(f"- {f}"), (f, lines)
+
+
+def test_a_ghost_citation_puts_its_row_count_first_and_each_file_on_its_own_line():
+    files = ["src/pkg/ghost_1.py", "src/pkg/ghost_2.py"]
+    with tempfile.TemporaryDirectory() as td:
+        v, agents = make_cited_lint(Path(td), files + files[:1], printed=[])
+        code, lines = run_lint(["--verdicts", str(v), "--agent-transcripts", str(agents)])
+    assert code == 1, lines
+    first = next((ln for ln in lines if "appear NOWHERE" in ln), "")
+    assert first.startswith("  - 3 row(s) rest on 2 file(s)") and len(first) < 200, first
+    for f in files:
+        own = [ln for ln in lines if f in ln]
+        assert len(own) == 1 and own[0].lstrip().startswith(f"- {f}"), (f, lines)
+
+
+def test_a_name_only_test_citation_sits_on_a_line_of_its_own():
+    with tempfile.TemporaryDirectory() as td:
+        frag, agents = make_tests_repo(Path(td), printed_body=False)
+        code, lines = run_lint(["--tests", str(frag), "--agent-transcripts", str(agents)])
+    assert code == 1, lines
+    assert lines[0].startswith("TESTS FAILED — 1 of 1 test citation(s)") and len(lines[0]) < 200
+    assert "  - tests/test_members.py:1" in lines, lines
+
+
+# --- the report and NOTE FACTS say what they mean (retro 2026-10-07, finding 23) -------------------
+# `grounding report` asked to fix 3 claims a closer had kept on appeal, against its own CLOSED ON
+# APPEAL section; NOTE FACTS counted 4 anchor disagreements where its own definition gives 2; and a
+# note saying "434 rows added no new claim, usually a re-vote" was refused as "0 claims added".
+
+def test_a_claim_kept_on_appeal_is_named_apart_and_not_asked_to_be_fixed():
+    claims = ["C1 calls C2", "C3 reads E1", "C5 writes E2"]
+    rows = [{"claim": "C1 calls C2", "grounded": True, "evidence": "a.py:1", "skeptic": "s1"},
+            {"claim": "C3 reads E1", "grounded": False, "evidence": "b.py:2", "skeptic": "s1"},
+            {"claim": "C5 writes E2", "grounded": False, "evidence": "c.py:3", "skeptic": "s1"},
+            make_closer_row("C5 writes E2", "reject", "line 3 writes it; the skeptic read line 9")]
+    out = G.format_report(claims, rows, live_claims=claims)
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert "1 REFUTED CLAIM(S) STILL IN THE MAP" in lines[0], lines[0]
+    assert lines[-1].startswith("STILL IN THE MAP: 1 refuted claim(s)"), lines[-1]
+    assert "C3 reads E1" in lines[-1] and "C5 writes E2" not in lines[-1], lines[-1]
+    assert "KEPT ON APPEAL (1)" in out, out
+    # the skeptics' REFUTED bucket keeps its count, and marks the claim kept on appeal
+    assert "REFUTED — reconcile each into the map (2)" in out, out
+    assert "  * C5 writes E2   <- KEPT ON APPEAL" in lines, out
+    buckets = json.loads(G.format_report(claims, rows, as_json=True, live_claims=claims))
+    assert [r["claim"] for r in buckets["refuted_not_superseded"]] == ["C3 reads E1"]
+    assert [r["claim"] for r in buckets["kept_on_appeal"]] == ["C5 writes E2"]
+    # ...and when every refuted claim still in the map was kept on appeal, nothing asks for a fix
+    kept = G.format_report(claims[2:], rows[2:], live_claims=claims[2:])
+    assert "STILL IN THE MAP" not in kept and "KEPT ON APPEAL (1)" in kept, kept
+
+
+def test_an_anchor_disagreement_is_one_where_the_voters_agreed_on_the_verdict():
+    rows = (_voted("split-both", [(True, "b.py:2"), (False, "b.py:7")])
+            + _voted("split-anchor", [(True, "c.py:3"), (True, "c.py:9")]))
+    assert G.multi_vote_agreement(rows) == (2, 1, 1)
+
+
+def test_a_note_quoting_the_note_facts_agreement_line_passes_write():
+    rows = (_voted("c1", [(True, "a.py:1"), (False, "a.py:7"), (True, "a.py:1")])
+            + _voted("c2", [(True, "b.py:2"), (True, "b.py:9"), (True, "b.py:2")]))
+    record, _errors = build_record(["c1", "c2"], rows)
+    facts = G.note_facts_block(["c1", "c2"], rows, record, None)
+    assert "verdict disagreements 1 · evidence-anchor disagreements 1" in facts, facts
+    note = "Multi-voted claims 2, with 1 verdict disagreements and 1 evidence-anchor disagreements."
+    assert not _agreement(note, rows)
+    assert _agreement("2 evidence-anchor disagreements", rows)
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "v.json").write_text(json.dumps({"grounding": rows}), encoding="utf-8")
+        (tmp / "w.json").write_text(json.dumps({"worklist": [{"claim": "c1"}, {"claim": "c2"}]}),
+                                    encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = main(["write", "--worklist", str(tmp / "w.json"), "--verdicts",
+                         str(tmp / "v.json"), "--note", note, "--out", str(tmp / "g.json")])
+    assert code == 0 and "WARNING" not in out.getvalue(), out.getvalue()
+
+
+def test_the_re_vote_line_without_its_that_is_read_as_the_redundant_count():
+    rows = _triple("c1") + _triple("c2")                 # 6 rows, 2 claims -> 4 redundant
+    note = ("Counts: 6 verdict rows over 2 distinct claims (4 rows added no new claim, usually a "
+            "re-vote).")
+    assert not _write_with_note(note, rows, ["c1", "c2"], live=["c1", "c2", "c3"])
+    # Read as the redundant count, not merely stepped over: a wrong figure in it is caught.
+    problems = _write_with_note("128 rows added no new claim, usually a re-vote.", rows,
+                                ["c1", "c2"])
+    assert problems and "this pass has 4" in problems[0], problems
+
+
+def test_a_note_that_really_says_no_claim_was_added_is_still_refused():
+    rows = _triple("c1") + _triple("c2")
+    for note in ("No new claims were added after the pin.", "The reconcile added no new claims.",
+                 "0 added claims since the pin."):
+        problems = _write_with_note(note, rows, ["c1", "c2"], live=["c1", "c2", "c3"])
+        assert problems and "1 claim(s) added since the pin" in problems[-1], (note, problems)
+
+
+# --- a cut list says how many it left out (merge 5.4, 2026-10-07) ---------------------------------
+# Six grounding lists were cut with nothing said about the cut (a bare `…`, or no tail at all) or
+# with a tail of their own (`  ... and N more`). They now go through `reporting.shown` and
+# `reporting.item_lines`, whose tail counts what was left out, in the same words everywhere.
+
+def make_access_rules(n: int) -> ProjectModel:
+    """A map of `n` access rules, BR1..BRn, each enforced at one line of src/a.py."""
+    m = ProjectModel(title="T", goal="g")
+    m.rules = [BusinessRule(id=f"BR{i}", statement=f"Only an admin may change setting {i}.",
+                            access=True, sites=[RuleSite(where=f"src/a.py:{i}",
+                                                         why="refuses a member")])
+               for i in range(1, n + 1)]
+    return m
+
+
+def make_unseen_rules(m: ProjectModel) -> list[G.ElementCheck]:
+    """Every rule of `m` as an element no skeptic looked at."""
+    return [G.ElementCheck(element_id=br.id, kind="rule_site", label=br.statement, unvoted=1)
+            for br in m.rules]
+
+
+def make_older_wording_pass(m: ProjectModel) -> tuple[list[dict], list[dict[str, object]]]:
+    """(verdict rows, pinned worklist items): each rule of `m` voted on at its own line under an
+    OLDER wording, so every one of them reads as re-worded after the vote."""
+    older = {br.id: rule_site_claim(br.statement.replace("an admin", "an owner"),
+                                    br.sites[0].where or "", br.sites[0].why) for br in m.rules}
+    rows = [{"claim": c, "grounded": True, "evidence": "src/a.py:1"} for c in older.values()]
+    pinned: list[dict[str, object]] = [
+        {"claim": older[br.id], "anchor": br.sites[0].where, "elements": [br.id]} for br in m.rules]
+    return rows, pinned
+
+
+def test_a_claims_notes_past_the_second_are_counted_on_a_line_of_their_own():
+    rows = [{"claim": "c1", "grounded": False, "evidence": "a.py:1", "note": f"note {i}"}
+            for i in range(1, 4)]
+    lines = G.format_report(["c1"], rows).splitlines()
+    i = lines.index("      note 1")
+    assert lines[i:i + 3] == ["      note 1", "      note 2", "      +1 more note(s)"], lines
+
+
+def test_the_still_in_the_map_line_counts_the_claims_it_does_not_name():
+    claims = [f"C{i} calls C{i + 1}" for i in range(1, 8)]
+    rows = [{"claim": c, "grounded": False, "evidence": "a.py:1"} for c in claims]
+    out = G.format_report(claims, rows, live_claims=claims)
+    line = next(ln for ln in out.splitlines() if ln.startswith("STILL IN THE MAP"))
+    assert line.endswith(": C1 calls C2, C2 calls C3, C3 calls C4, C4 calls C5, C5 calls C6, "
+                         "+2 more"), line
+
+
+def test_by_element_counts_the_unresolved_claims_past_twenty_on_a_line_of_their_own():
+    lines = G.format_element_checks([], [f"claim {i}" for i in range(1, 26)]).splitlines()
+    assert lines[-2:] == ["  - claim 20", "  - +5 more claim(s)"], lines[-3:]
+
+
+def test_refutations_counts_the_unseen_elements_past_fifteen_on_a_line_of_their_own():
+    m = make_access_rules(18)
+    lines = G.format_refutations([], make_unseen_rules(m), m=m).splitlines()
+    assert "  - +3 more element(s)" in lines, lines
+    assert not [ln for ln in lines if ln.lstrip().startswith("...")], lines
+
+
+def test_refutations_counts_the_access_rules_past_eight_it_does_not_name():
+    m = make_access_rules(10)
+    text = G.format_refutations([], make_unseen_rules(m), m=m)
+    line = next(ln for ln in text.splitlines() if "of those are ACCESS rules" in ln)
+    assert line.endswith(": BR1, BR2, BR3, BR4, BR5, BR6, BR7, BR8, +2 more"), line
+
+
+def test_refutations_counts_the_reworded_access_rules_past_eight_it_does_not_name():
+    m = make_access_rules(10)
+    rows, pinned = make_older_wording_pass(m)
+    text = G.format_refutations([], make_unseen_rules(m), m=m, grounding_rows=rows, pinned=pinned)
+    line = next(ln for ln in text.splitlines() if "re-worded after the vote" in ln)
+    assert line.endswith(": BR1, BR2, BR3, BR4, BR5, BR6, BR7, BR8, +2 more"), line

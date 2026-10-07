@@ -19,6 +19,10 @@ from pathlib import Path
 import pytest
 
 from coyomap import contract
+from coyomap.audit_model import description_claim
+from coyomap.dump import edges_of
+from coyomap.model import ProjectModel, load_model
+from coyomap.preindex_lib import granularity_files
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -1449,3 +1453,334 @@ def test_the_doors_rule_says_a_call_between_two_parts_of_the_product_takes_no_do
         assert phrase in words, phrase
     assert contract._compose(["trace", "doors"]).count(head) == 1
     assert "A step FROM a door counts" in contract.render("trace")
+
+
+# --- the closer's brief fits its reader's read window (retro 2026-10-07, finding 4) ---------------
+# `contract closer` wrote one 142,697-character brief (62,130 tokens, 4,489 lines) for an agent whose
+# Read shows about 25,000 tokens of a file at a time; 72 % of it was `dump` blocks, 20 of them
+# repeats. The closer saw lines 1-1535 and judged 13 of its 28 appeals without their map rows.
+
+#: The sentence every component purpose repeats, so 40 claims outgrow one Read.
+_LONG_PURPOSE = ("It checks the request, records what it saw and hands the request on. " * 10).strip()
+
+
+def make_wide_map(parts: int, hub_edges: int = 0) -> str:
+    """`parts` components with long purposes, each calling the next, and one use case walking the
+    first ten, so many refuted claims share their elements. `hub_edges` more components are each
+    called by C1, which makes C1's `dump --edges` block long."""
+    ids = range(1, parts + hub_edges + 1)
+    components = [{"id": f"C{i}", "name": f"Part {i}", "purpose": f"Part {i}. {_LONG_PURPOSE}",
+                   "source": f"src/part{i}.py:1"} for i in ids]
+    edges = [{"src": f"C{i}", "verb": "calls", "dst": f"C{i + 1}",
+              "why": f"hands it to part {i + 1}", "where": f"src/part{i}.py:{10 + i}"}
+             for i in range(1, parts)]
+    edges += [{"src": "C1", "verb": "calls", "dst": f"C{i}", "why": f"tells part {i} it arrived",
+               "where": f"src/part1.py:{100 + i}"} for i in range(parts + 1, parts + hub_edges + 1)]
+    steps: list[dict[str, object]] = [{"n": 1, "src": "R1", "dst": "C1", "phrase": "send the request"}]
+    steps += [{"n": k + 1, "src": f"C{k}", "dst": f"C{k + 1}", "phrase": f"hand it to part {k + 1}",
+               "where": f"src/part{k}.py:{10 + k}"} for k in range(1, min(parts, 10))]
+    return json.dumps({
+        "format": "coyomap-map", "title": "Wide", "components": components, "edges": edges,
+        "roles": [{"id": "R1", "name": "Caller", "kind": "human"}],
+        "use_cases": [{"id": "UC1", "name": "Send a request", "actors": ["R1"],
+                       "trigger": "A caller sends a request", "outcome": "every part saw it"}],
+        "flows": [{"uc": "UC1", "title": "Send a request", "steps": steps}],
+    })
+
+
+def make_vote(claim: str, skeptic: str, grounded: bool) -> dict[str, object]:
+    return {"claim": claim, "grounded": grounded, "evidence": "src/part1.py:11", "skeptic": skeptic,
+            "note": "the line does that" if grounded else "the line does not do that"}
+
+
+def make_wide_closer_inputs(tmp: Path, parts: int = 40) -> list[str]:
+    """The map, verdicts and slots file `--from-verdicts` reads: every component's description
+    refuted, plus nine edges and nine flow steps that share those components, plus one edge the
+    majority confirmed over a refutation. Returns every disputed claim."""
+    doc = make_wide_map(parts)
+    m = load_model(doc)
+    described = [description_claim(c.id, c.name, c.purpose) for c in m.components]
+    called = [f"C{i} calls C{i + 1}" for i in range(1, 10)]
+    stepped = [f"UC1 step {k + 1}: C{k} → C{k + 1} — hand it to part {k + 1}" for k in range(1, 10)]
+    dissent = "C10 calls C11"
+    verify = tmp / "verify"
+    verify.mkdir(parents=True, exist_ok=True)
+    batches = {"description-1": [make_vote(c, "description-1", False) for c in described],
+               "backbone-1": [make_vote(c, "backbone-1", False) for c in called + stepped],
+               "backbone-2": [make_vote(dissent, "backbone-2-a", False),
+                              make_vote(dissent, "backbone-2-b", True),
+                              make_vote(dissent, "backbone-2-c", True)]}
+    for batch, rows in batches.items():
+        (verify / f"verdicts-{batch}.json").write_text(json.dumps({"grounding": rows}),
+                                                       encoding="utf-8")
+    (tmp / "project-map.json").write_text(doc, encoding="utf-8")
+    (tmp / "closer-slots.json").write_text(
+        json.dumps({"REPO": str(tmp), "AGENT_ID": "closer1", "CLAIMS": ""}), encoding="utf-8")
+    return described + called + stepped + [dissent]
+
+
+def read_closer_files(tmp: Path) -> dict[str, str]:
+    """Every file a closer run wrote under `tmp`, by name: the brief and its parts."""
+    return {p.name: p.read_text(encoding="utf-8") for p in sorted(tmp.glob("closer*.md"))}
+
+
+def test_a_closer_brief_too_long_for_one_read_is_split_into_files_that_each_fit() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_wide_closer_inputs(tmp)
+        rc, out, index = _from_verdicts(tmp, ["--brief", "closer1"])
+        written = read_closer_files(tmp)
+        parts = sorted(p.resolve() for p in tmp.glob("closer-part*.md"))
+    assert rc == 0, out
+    assert len(written) > 2, f"{sorted(written)}: one brief of {len(written['closer.md']):,} chars"
+    over = {name: len(text) for name, text in written.items()
+            if len(text) > contract.CLOSER_BRIEF_BUDGET}
+    assert not over, over
+    listing = written["closer.md"]
+    assert all(str(p) in listing for p in parts), listing[-2000:]
+    assert "Read EVERY one COMPLETELY" in listing
+    assert out.count(contract.BRIEF_SENTENCE) == 1 and str(index) in out, "one closer, one pointer"
+
+
+def test_every_appeal_reaches_the_split_brief_exactly_once() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        claims = make_wide_closer_inputs(tmp)
+        rc, out, _index = _from_verdicts(tmp)
+        everything = "\n".join(read_closer_files(tmp).values())
+    assert rc == 0, out
+    for claim in claims:
+        assert everything.count(f"**claim (verbatim):** {claim}\n") == 1, claim
+    headings = re.findall(r"^### (\S+) — ", everything, re.M)
+    assert len(headings) == len(set(headings)) == len(claims), headings
+    assert everything.count(f"## {contract.OUTVOTED_DISSENT}") == 1
+
+
+def test_no_dump_block_is_printed_twice_in_the_whole_brief() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_wide_closer_inputs(tmp)
+        rc, out, _index = _from_verdicts(tmp)
+        everything = "\n".join(read_closer_files(tmp).values())
+    assert rc == 0, out
+    blocks = re.findall(r"^`dump --[a-z]+ [A-Z]+\d+`:\n```json\n.*?\n```$", everything, re.M | re.S)
+    assert blocks and len(blocks) == len(set(blocks)), len(blocks) - len(set(blocks))
+    assert re.search(r"^`dump --record C2`: the same rows as under \S+", everything, re.M)
+
+
+def test_a_dump_block_two_claims_share_is_printed_once_and_pointed_back_to() -> None:
+    """The single-file form too: C1 is the element of three of the four claims."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_closer_inputs(tmp, _FOUR_KINDS)
+        rc, out, brief_path = _from_verdicts(tmp)
+        text = brief_path.read_text(encoding="utf-8")
+        written = sorted(p.name for p in tmp.glob("closer*.md"))
+    assert rc == 0, out
+    assert written == ["closer.md"], "a brief that fits one Read is one file"
+    assert text.count("`dump --record C1`:\n```json") == 1, "C1's record under every claim"
+    first = re.findall(r"^### (\S+) —", text, re.M)[0]
+    assert f"`dump --record C1`: the same rows as under {first}" in text
+
+
+def test_one_claim_longer_than_a_file_continues_in_the_next_and_no_file_is_over() -> None:
+    """A step claim carries its use case and both endpoints, and one hub's `dump --edges` alone ran
+    to 13,325 characters on a real map: one appeal can outgrow a file by itself."""
+    m = load_model(make_wide_map(2, hub_edges=150))
+    hub = next(c for c in m.components if c.id == "C1")
+    claim = contract.DisputedClaim(
+        claim=description_claim(hub.id, hub.name, hub.purpose),
+        votes=(contract.Vote(id="description-1#1", grounded=False, evidence="src/part1.py:1",
+                             skeptic="description-1", note="it calls more parts than that"),))
+    budget = len(contract.render("closer")) + 4_000
+    files = contract.closer_files(m, [claim], {"REPO": "/abs/repo", "AGENT_ID": "closer1"},
+                                  Path("/abs/scratch/closer.md"), budget=budget)
+    assert len(files) >= 3, [p.name for p, _text in files]
+    assert all(len(text) <= budget for _p, text in files), [len(t) for _p, t in files]
+    parts = "\n".join(text for _p, text in files[1:])
+    assert parts.count("### description-1#1 — ") == 1 and "### description-1#1 (continued)" in parts
+    pieces = re.findall(r"^`dump --edges C1` \(piece \d+ of \d+\):\n```json\n(.*?)\n```$", parts,
+                        re.M | re.S)
+    assert len(pieces) >= 2, "the long block was never cut"
+    assert "\n".join(pieces) == json.dumps(edges_of(m, "C1"), indent=1, default=str)
+
+
+def test_a_second_wave_settles_by_the_ids_a_split_brief_carries() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_wide_closer_inputs(tmp)
+        rc, out, _index = _from_verdicts(tmp)
+        assert rc == 0, out
+        first_part = (tmp / "closer-part1.md").read_text(encoding="utf-8")
+        first_id = re.findall(r"^### (\S+) — ", first_part, re.M)[0]
+        first_claim = re.findall(r"^\*\*claim \(verbatim\):\*\* (.*)$", first_part, re.M)[0]
+        settled = tmp / "closer-closer1.json"
+        settled.write_text(json.dumps({"grounding": [
+            {"id": first_id, "claim": first_claim, "verdict": "uphold", "grounded": False,
+             "evidence": "src/part1.py:11", "skeptic": "closer1", "note": "read it"}]}),
+            encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = contract.main(["closer", "--from-verdicts", str(tmp / "verify"), "--map",
+                                str(tmp / "project-map.json"), "--fill",
+                                str(tmp / "closer-slots.json"), "--out",
+                                str(tmp / "wave2" / "closer.md"), "--settled", str(settled)])
+        second = "\n".join(p.read_text(encoding="utf-8") for p in (tmp / "wave2").glob("*.md"))
+    assert rc == 0, buf.getvalue()
+    assert f"**claim (verbatim):** {first_claim}\n" not in second
+    assert second.count("**claim (verbatim):** ") > 1
+
+
+def test_an_existing_part_file_is_refused_like_an_existing_brief() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_wide_closer_inputs(tmp)
+        (tmp / "closer-part2.md").write_text("AN AGENT IS READING THIS", encoding="utf-8")
+        rc, out, index = _from_verdicts(tmp)
+        kept = (tmp / "closer-part2.md").read_text(encoding="utf-8")
+        brief_written = index.exists()
+    assert rc == 2 and "closer-part2.md" in out, out
+    assert kept == "AN AGENT IS READING THIS" and not brief_written
+
+
+def test_a_relative_closer_brief_path_is_refused_without_a_traceback() -> None:
+    """`--brief` needs an absolute `--out`; the closer path composed the pointer outside its error
+    handling, so the refusal came out as a traceback."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        make_closer_inputs(tmp, _FOUR_KINDS)
+        relative = os.path.relpath(tmp / "closer.md")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = contract.main(["closer", "--from-verdicts", str(tmp / "verify"), "--map",
+                                str(tmp / "project-map.json"), "--fill",
+                                str(tmp / "closer-slots.json"), "--out", relative,
+                                "--brief", "closer1"])
+        written = (tmp / "closer.md").exists()
+    assert rc == 2 and "is not absolute" in buf.getvalue(), buf.getvalue()
+    assert not written
+
+
+# --- every source file the component count reads is in a slice that writes components (retro
+# 2026-10-07, finding 7) --------------------------------------------------------------------------
+# The slot check named scripts only: 41 of 307 product source files sat in no slice with a component
+# budget, and the run that cut those slices printed one warning, about 6 scripts.
+
+def make_sliced_repo(td: Path) -> Path:
+    """`src/core/` for a slice that writes components, `src/model/` for one with a budget of 0,
+    `src/infra/` for none; then what the check must leave out: an empty `__init__.py`, a doc, a
+    config file, a test and a folder `.coyomap/.ignore` drops."""
+    files = {
+        "src/core/gate.py": "def gate():\n    return 1\n",
+        "src/model/user.py": "class User:\n    pass\n",
+        "src/model/__init__.py": "",
+        "src/infra/limiter.py": "def allow():\n    return True\n",
+        "src/infra/look.css": "body { margin: 0; }\n",
+        "src/settings.yaml": "a: 1\n",
+        "docs/guide.md": "# Guide\n",
+        "tests/test_gate.py": "def test_gate():\n    assert 1\n",
+        "fixtures/sample.py": "x = 1\n",
+        ".coyomap/.ignore": "fixtures/\n",
+    }
+    for rel, text in files.items():
+        (td / rel).parent.mkdir(parents=True, exist_ok=True)
+        (td / rel).write_text(text, encoding="utf-8")
+    return td
+
+
+def make_harvest_slot(slots: Path, agent: str, repo: Path, held: str, budget: str) -> None:
+    slots.mkdir(parents=True, exist_ok=True)
+    values = _harvest_values(REPO_ABS=str(repo), EXPECTED_COMPONENTS=budget)
+    values.update({"agent-id": agent, "repo": str(repo), "FILES": held})
+    (slots / f"{agent}.json").write_text(json.dumps(values), encoding="utf-8")
+
+
+def run_harvest_batch(tmp: Path) -> tuple[int, str]:
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        rc = contract.main(["harvest", "--from-slots", str(tmp / "slots"),
+                            "--out-dir", str(tmp / "briefs")])
+    return rc, err.getvalue()
+
+
+_NO_COMPONENT_SLICE = "in no slice that writes components"
+
+
+def test_a_source_file_in_no_slice_that_writes_components_is_named() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = make_sliced_repo(tmp / "repo")
+        make_harvest_slot(tmp / "slots", "h-core", repo, f"{repo}/src/core/", "2")
+        make_harvest_slot(tmp / "slots", "h-t5", repo, f"{repo}/src/model/", "0")
+        rc, said = run_harvest_batch(tmp)
+    assert rc == 0, said
+    lines = said.splitlines()
+    head = next((line for line in lines if _NO_COMPONENT_SLICE in line), "")
+    assert head.startswith("WARNING: 3 source file(s)"), said
+    named = {line.strip() for line in lines}
+    assert {"src/model/user.py", "src/infra/limiter.py", "src/infra/look.css"} <= named, said
+    for quiet in ("src/core/gate.py", "src/model/__init__.py", "src/settings.yaml", "docs/guide.md",
+                  "tests/test_gate.py", "fixtures/sample.py"):
+        assert quiet not in said, quiet
+
+
+def test_the_unslotted_source_files_are_found_against_the_component_slices_only() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_sliced_repo(Path(td))
+        missed = contract.sources_in_no_component_slice(repo, ["src/core"])
+    assert missed == ["src/infra/limiter.py", "src/infra/look.css", "src/model/user.py"], missed
+
+
+def test_the_unslotted_source_files_are_the_files_e_is_counted_from() -> None:
+    """The check reads E's own file set (`granularity_files`), so a slot plan and the E its budgets
+    came from cannot disagree on what a source file is: code in an asset folder is out of both,
+    although the coverage checks keep it. The one file E counts that the check never names is an
+    empty one: there is nothing in it to give a slice."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_sliced_repo(Path(td))
+        (repo / "src" / "static").mkdir()
+        (repo / "src" / "static" / "app.js").write_text("run();\n", encoding="utf-8")
+        counted = sorted(f.relative_to(repo.resolve()).as_posix() for f in granularity_files(repo))
+        missed = contract.sources_in_no_component_slice(repo, [])
+    assert "src/model/__init__.py" in counted, counted
+    assert missed == [rel for rel in counted if rel != "src/model/__init__.py"], (missed, counted)
+
+
+def test_a_slot_set_holding_every_source_file_names_none() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = make_sliced_repo(tmp / "repo")
+        make_harvest_slot(tmp / "slots", "h-src", repo, f"{repo}/src/", "4")
+        make_harvest_slot(tmp / "slots", "h-t5", repo, f"{repo}/src/model/", "0")
+        rc, said = run_harvest_batch(tmp)
+    assert rc == 0, said
+    assert "WARNING" not in said, said
+
+
+def test_a_run_whose_slices_write_no_component_does_not_list_the_tree() -> None:
+    """A run of the entity-card slice alone writes no component: listing every file it does not
+    hold would be the whole tree, and none of it is that run's gap."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = make_sliced_repo(tmp / "repo")
+        make_harvest_slot(tmp / "slots", "h-t5", repo, f"{repo}/src/model/", "0")
+        rc, said = run_harvest_batch(tmp)
+    assert rc == 0, said
+    assert _NO_COMPONENT_SLICE not in said, said
+
+
+def test_the_unslotted_source_warning_never_stops_a_brief() -> None:
+    """The warning is advice, never a gate: a file left out on purpose, such as a tool's own config
+    file (`eslint.config.js` on the 2026-10-07 mcpolis slots), is the lead's call, so the run exits 0
+    and writes every brief. The retro check for this warning reads it that way."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = make_sliced_repo(tmp / "repo")
+        (repo / "eslint.config.js").write_text("export default [];\n", encoding="utf-8")
+        make_harvest_slot(tmp / "slots", "h-core", repo, f"{repo}/src/", "2")
+        make_harvest_slot(tmp / "slots", "h-t5", repo, f"{repo}/src/model/", "0")
+        rc, said = run_harvest_batch(tmp)
+        briefs = sorted(p.name for p in (tmp / "briefs").iterdir())
+    assert rc == 0, said
+    assert "WARNING: 1 source file(s)" in said and "    eslint.config.js" in said.splitlines(), said
+    assert briefs == ["h-core.md", "h-t5.md"], briefs

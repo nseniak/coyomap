@@ -7,8 +7,11 @@ Run either way (needs an editable install: `make deps`):
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -17,11 +20,12 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import get_args, get_type_hints
 
-from coyomap import assemble, prose
+from coyomap import assemble, fix, prose
 from coyomap.assemble import (_infer_ce_verb, ensure_fragments_ignored, load_fragment,
                               load_fragment_paths, merge_fragments)
 from coyomap.model import (ConfigRow, ExtraSection, ModelError, ObservabilityRow,
                            ProjectModel, load_model, to_canonical_json)
+from coyomap.validate_model import validate_model
 
 ASSEMBLE = [sys.executable, "-m", "coyomap.assemble"]
 
@@ -1567,3 +1571,129 @@ def test_a_reader_holding_the_old_map_keeps_reading_the_old_map_whole():
             assert held.read() == before, "the reader's file changed under it"
         assert path.read_text(encoding="utf-8") != before
         assert not [p.name for p in out.iterdir() if p.name.endswith(".tmp")], "a temp file was left"
+
+
+# --- the harvest pointer in `not_an_interface` (retro 2026-10-07, finding 8) ------------------------
+# The harvest contract tells a dependency agent that sees a surface to write a POINTER into
+# `not_an_interface`: "Not decided here … the id is minted at synthesis". Synthesis then links the dep
+# to its `In` through the reconcile file, and `validate` blocked 7 deps for naming an interface AND
+# saying why it is none; the lead deleted the field from each by hand.
+
+#: A pointer the 2026-10-07 mcpolis dependency agent wrote, word for word.
+POINTER = ("Not decided here. Sentry is a surface, because reports leave the product and the "
+           "operator reads them there. The id is minted at synthesis.")
+
+
+def make_pointer_build(td: Path, d1_says: str) -> list[str]:
+    """The assemble argv for a build whose dependency slice wrote `d1_says` into D1's
+    `not_an_interface` and a pointer into D2's, whose synthesis fragment authors surface I1, and whose
+    reconcile file links D1, and only D1, to I1."""
+    (td / "header.json").write_text(make_header_fragment(), encoding="utf-8")
+    (td / "h-deps.json").write_text(json.dumps({"deps": [
+        {"id": "D1", "name": "Sentry", "kind": "service", "not_an_interface": d1_says},
+        {"id": "D2", "name": "nginx", "kind": "platform",
+         "not_an_interface": "Not decided here. nginx fronts every web surface. The id is minted "
+                             "at synthesis."}]}), encoding="utf-8")
+    (td / "synthesis.json").write_text(json.dumps({"interfaces": [
+        {"id": "I1", "name": "Crash reports", "side": "theirs", "kind": "api",
+         "source": "src/obs.py:3"}]}), encoding="utf-8")
+    (td / "reconcile.json").write_text(json.dumps({"set": [{"ids": ["D1"], "interfaces": ["I1"]}]}),
+                                      encoding="utf-8")
+    return ASSEMBLE + [str(td / "header.json"), str(td / "h-deps.json"), str(td / "synthesis.json"),
+                       "--out", str(td / "map"), "--reconcile", str(td / "reconcile.json")]
+
+
+def test_the_pointer_is_dropped_once_synthesis_names_the_surface():
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        proc = subprocess.run(make_pointer_build(td, POINTER), capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        path = td / "map" / "project-map.json"
+        m = load_model(path.read_text(encoding="utf-8"))
+        d1 = next(d for d in m.deps if d.id == "D1")
+        assert d1.interfaces == ["I1"] and d1.not_an_interface == "", d1
+        problems, _warnings = validate_model(m, path)
+        assert not [p for p in problems if "says why it is none" in p], problems
+        assert "harvest interface pointers cleared 1" in proc.stdout, proc.stdout
+
+
+def test_a_real_reason_beside_a_named_surface_is_left_for_validate_to_block():
+    """Only the pointer is a note to the lead. A dep that states a real reason AND is linked to a
+    surface says two contradicting things, and which of them is wrong is the lead's call."""
+    reason = "The product writes its own records here and reads them back."
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        proc = subprocess.run(make_pointer_build(td, reason), capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        m = load_model((td / "map" / "project-map.json").read_text(encoding="utf-8"))
+        assert next(d for d in m.deps if d.id == "D1").not_an_interface == reason
+
+
+def test_a_pointer_synthesis_left_undecided_is_named_after_the_reconcile():
+    """D2 keeps its pointer and names no surface: synthesis did not decide it, and the pointer would
+    ship as the reason it is none. Two deps of the 2026-10-07 mcpolis map shipped exactly that."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        proc = subprocess.run(make_pointer_build(td, POINTER), capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        named = [ln for ln in proc.stderr.splitlines() if "Not decided here" in ln]
+        assert len(named) == 1 and "D2" in named[0] and "D1" not in named[0], proc.stderr
+
+
+def test_the_undecided_pointer_note_names_the_folder_the_fragments_are_in():
+    """(Review of finding 8.) The note built its `--fragments` folder from `--out`, so an assemble
+    whose fragments sit elsewhere (here they sit in `td`, the map goes to `td/map`) was told to edit
+    `td/map/build-fragments`, which does not exist. The route it names is followed literally here."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        argv = make_pointer_build(td, POINTER)
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        note = next(ln for ln in proc.stderr.splitlines() if "Not decided here" in ln)
+        route = re.search(r"`coyomap fix row --fragments (\S+) --id <Dn> --set-not-an-interface "
+                          r"\"<why>\"`", note)
+        assert route is not None and Path(route.group(1)) == td, note
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = fix.main(["row", "--fragments", route.group(1), "--id", "D2",
+                             "--set-not-an-interface", "nginx forwards each request to our own "
+                                                       "server and decides nothing"])
+        assert code == 0
+        again = subprocess.run(argv, capture_output=True, text=True)
+        assert again.returncode == 0, again.stderr
+        assert "Not decided here" not in again.stderr, again.stderr
+
+
+
+def test_the_note_names_no_folder_when_the_fragments_come_from_two():
+    """With fragments read from two folders there is no one folder to edit, so the note names the
+    folder by what it is rather than guess one of the two."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        argv = make_pointer_build(td, POINTER)
+        (td / "other").mkdir()
+        (td / "header.json").rename(td / "other" / "header.json")
+        argv = [str(td / "other" / "header.json") if a == str(td / "header.json") else a
+                for a in argv]
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        note = next(ln for ln in proc.stderr.splitlines() if "Not decided here" in ln)
+        assert "--fragments <the folder of the fragment that declares it> --id <Dn>" in note, note
+
+def test_the_ship_lines_name_a_repo_only_for_a_map_in_its_coyomap_folder():
+    """`coyomap ship <repo>` closes the map at `<repo>/.coyomap`. The lines named `--out`'s parent
+    whatever `--out` was, so an assemble to `td/map` was told `coyomap ship td`, which closes the
+    map at `td/.coyomap`: another map, or none."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        (td / "header.json").write_text(make_header_fragment(), encoding="utf-8")
+        elsewhere = subprocess.run(ASSEMBLE + [str(td / "header.json"), "--out", str(td / "map")],
+                                   capture_output=True, text=True)
+        in_repo = subprocess.run(ASSEMBLE + [str(td / "header.json"),
+                                             "--out", str(td / "repo" / ".coyomap")],
+                                 capture_output=True, text=True)
+    assert elsewhere.returncode == 0 and in_repo.returncode == 0, elsewhere.stderr + in_repo.stderr
+    assert "coyomap ship" not in elsewhere.stdout.replace("`coyomap ship <repo>`", ""), \
+        elsewhere.stdout
+    assert f"does not close the map at {td / 'map'}" in elsewhere.stdout, elsewhere.stdout
+    assert f"coyomap ship {td / 'repo'}\n" in in_repo.stdout, in_repo.stdout
+    assert f"coyomap ship {td / 'repo'} --note-file <path>" in in_repo.stdout, in_repo.stdout

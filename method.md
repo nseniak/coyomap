@@ -1704,10 +1704,11 @@ from memory:
 |---|---|
 | a walk over `build-fragments/*.json` counting rows | `coyomap dump --counts` (it reads a FRAGMENT too) |
 | a listing of ids / names / sources | `coyomap dump --legend`, `--id`, `--record`, `--edges`, `--members` |
+| a search of the map for the component that owns a file | `coyomap dump --owners <file>` — every owner, from the components' `files`: the list `validate` reads, never `source` |
 | a tally of `true`/`false` across the verdict files | `coyomap grounding report` — the hand tally cannot tell a tie from a stated `unverifiable` |
-| an append into an extras heading | `coyomap record --heading … --line …` |
-| **deleting or correcting a recorded line** | `coyomap record --remove "<prefix>"` / `--replace "<prefix>"` — a python splice of `extras.json` takes the heading with it when the line is the last one |
-| **a batch of recorded lines** | `coyomap record --lines-from <file\|->` — one process, one write, every line shape-checked before any of them lands |
+| an append into an extras heading | `coyomap record --map .coyomap/build-fragments/extras.json --heading … --line …` — `--map` names the FRAGMENT: the next `assemble` rebuilds the assembled map and drops what was written there |
+| **deleting or correcting a recorded line** | `coyomap record --map .coyomap/build-fragments/extras.json --heading … --remove "<prefix>"` / `--replace "<prefix>"` — a python splice of `extras.json` takes the heading with it when the line is the last one |
+| **a batch of recorded lines** | `coyomap record --map .coyomap/build-fragments/extras.json --heading … --lines-from <file\|->` — one process, one write, every line shape-checked before any of them lands |
 | **which headings may carry a comma list of ids** | `coyomap record --headings` — five of them key on free text and silence NOTHING when merged; the merged form is right only for the other six |
 | a rewrite of a rule's / entity's / **a flow step's** own TEXT | `coyomap fix row --fragments .coyomap/build-fragments --id <ID> --set-<field> <text>` — it edits the OWNING FRAGMENT, so the edit survives re-assembly. It reaches ANY row with an id, `happy_path` steps included: `--set-why`, `--set-confidence`, `--set-risk` all work |
 | **TWO OR MORE row rewrites** | `coyomap fix rows --fragments .coyomap/build-fragments --edits <file\|->` — a JSON list of `{"id"\|"edge", "set", "set_json"}`. One process, one write, all-or-nothing, every fault reported at once. One build spent twelve consecutive turns on 37 single `fix row` calls plus 8 identical hand edits |
@@ -3183,8 +3184,12 @@ contract harvest --slots` prints the slot skeleton, and `coyomap contract harves
 the pointer to send, one call per slice. The `--fill` is what records the brief's
 «EXPECTED_COMPONENTS» in `.coyomap/verify/budgets.json` (a hand-filled copy records nothing), and
 `finalize` sums those budgets against what shipped (the `component budget` leg, held to the same
-±40 % band each slice is held to): 60 budgeted and 114 shipped is a sentence at assemble time, not
-a `Balance exceptions` record 450 turns later.
+±40 % band each slice is held to). When the map ships outside that band on purpose, write why at
+assemble time, as ONE line under `Balance exceptions`: `granularity: <shipped> shipped of
+<budgeted> budgeted, because <why the map is this size>`. That one line answers the budget leg and
+validate's component-count advisory alike, because both band one fact, the map's size. The leg
+reads only a line that names both counts in those words: a line naming E or the band answers
+validate and never the budget.
 **The slices cover every script a person runs a command from, tests included.** A way in or a run
 command lives in a script, and a script no slice owns is read by nobody: one build left
 `backend/tests/integration/` in no slice, lost a way in and 3 run scripts, and still recorded
@@ -3197,6 +3202,11 @@ script it names:
   file that can also run itself), say so on the `Entry-point coverage` line for its kind, with why.
   Before the harvest is back that line says `partial`; once it is, correct the word with `record
   --replace '<kind>:'`, so the kind keeps one line.
+
+**It also names every source file no slice that writes components holds.** These are the files the
+component expectation E is counted from, and a slice whose budget is 0 (the entity cards, the
+dependency inventory) reads its files without making a component of them. Give each to a slice with
+a component budget: its folder, or the file alone.
 
 Then delete the briefs of the slices you changed and run the batch form again: it never rewrites a
 brief, and it prints pointer prompts only for the briefs it wrote that time. A script you stated
@@ -3503,11 +3513,11 @@ that is NOT a business rule has its own escape: `Sweep debt`.** Once a map carri
 the sweep worklist, and the only thing that says whether the sweep finished. There is deliberately
 no `swept` field to set: a boolean asserting "I searched the whole repo" is unfalsifiable, and
 hand-assigned data rendered as derived is what makes a screen confidently wrong. So the list shrinks
-two ways only — write the rule, or say why the step is not one. Record ``coyomap record --heading
-"Sweep debt" --line "<the step's anchor>: <why this is plumbing, not a decision>"`` under the
-**"Sweep debt"** extras heading — **name the FRAGMENT** (`--map
-.coyomap/build-fragments/extras.json`), not the assembled map, for the reason the bucket paragraph
-above gives. The key is whatever the advisory prints: the step's own `path:line` for a
+two ways only — write the rule, or say why the step is not one. Record ``coyomap record --map
+.coyomap/build-fragments/extras.json --heading "Sweep debt" --line "<the step's anchor>: <why this
+is plumbing, not a decision>"`` under the **"Sweep debt"** extras heading — **name the FRAGMENT**,
+not the assembled map, for the reason the bucket paragraph above gives. The key is whatever the
+advisory prints: the step's own `path:line` for a
 decision-sounding step, and a `BRn` for the other finding this heading answers — a rule whose sites
 land in files no component claims, which renders with no component and cannot be verified. Both work
 because this heading is read by the generic `key: why` reader, not the id-keyed one (which matches
@@ -3516,9 +3526,10 @@ silently). Every suppression is REPORTED, and it moves a derived number: a recor
 swept. **OPEN THE FILE before recording one.** The escape is for "the skeptics read a sibling file
 and the stored anchor is right" — a claim about what is at a `path:line`, which you cannot know
 without looking. Reasoning about what an anchor "is defined to point at" is not looking. (L3
-assertion 17 watches this.) Write the record with **`coyomap record --heading "Drift exceptions"
---line "…"`** rather than a hand-rolled append: it checks the heading is one a check actually reads,
-refuses a key with no why, and `--replace <prefix>` is how you correct a record whose facts moved.
+assertion 17 watches this.) Write the record with **`coyomap record --map
+.coyomap/build-fragments/extras.json --heading "Drift exceptions" --line "…"`** rather than a
+hand-rolled append: it checks the heading is one a check actually reads, refuses a key with no
+why, and `--replace <prefix>` is how you correct a record whose facts moved.
 `finalize` exits non-zero for what validate and audit already block on, and for `INCOMPLETE`;
 unapplied anchor drift is reported and never gates, because a `lifecycle` claim still has no writer
 and a gate with no remedy is a false failure. (`cadence` DID have no writer and now does — `fix

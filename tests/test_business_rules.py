@@ -2388,6 +2388,16 @@ def test_the_condition_advisory_lists_only_the_step_a_rule_site_sits_on():
     assert "coyomap fix step-notes" in found[0]
 
 
+def test_the_condition_advisory_names_the_way_to_write_a_note_in_an_update():
+    """It says "its next build or update writes the conditions", and named only `fix step-notes
+    --fragments`, a build's command: an update edits the map through its change log and never
+    reads the fragments (the class of the review of 2026-10-07, F1)."""
+    found = [w for w in check_rules_model(make_extent_model(), GUARD_EXTENTS)[1]
+             if w.startswith("Steps where a business rule decides")]
+    assert ('in an update, an entry of the change log edits each note: `{"id": "flow:UC5", '
+            '"key": "steps[n=3].note", "was": "", "now": "<condition>"}`') in found[0], found[0]
+
+
 def test_no_screen_and_no_map_text_ties_a_rule_to_a_step() -> None:
     """Matching a rule's line of code against a step's missed about 2 of 3 real ties on mcpolis and could
     not be explained to a reader, so nothing shown ties the two (2026-10-01): no rule data on a rule,

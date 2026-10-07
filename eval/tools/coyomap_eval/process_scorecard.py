@@ -34,6 +34,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from coyomap_eval.cost import Compaction, compactions_in
 from coyomap_eval.transcript import (ToolCall, Turn, bash_commands, grouping_is_consistent,
                                      read_turns, results_by_tool_use_id,
                                      errored_tool_use_ids)
@@ -919,6 +920,46 @@ def assert_8_audit_read_as_json(turns: Sequence[Turn]) -> Assertion:
                      tuple(bad or good))
 
 
+#: `finalize`'s count of what the map does about each advisory its gates still raise —
+#: `Advisory disposition: UNRECORDED: 7 · UNSURE: 1 · carried (no escape): 8 · …` — as its stdout
+#: and its gate block print it (`finalize.disposition_line`). The counts end at the first full stop.
+_DISPOSITION = re.compile(r"Advisory disposition:\s*(?P<counts>[^.\n]*)")
+_DISPOSITION_COUNT = re.compile(r"(?P<kind>[A-Za-z][A-Za-z ()]*?):\s*(?P<n>\d+)")
+
+#: The rows no record answers. finalize's own words: "an UNANSWERED or UNRECORDED row is an escape
+#: nobody took"; an UNSURE row is one it could not settle, which is not a record either. Its
+#: `carried (no escape)` and `disclosure` rows name no record at all and are not counted — the rule
+#: the validate reading applies to an advisory that names no escape.
+_UNRESOLVED_DISPOSITIONS = ("UNANSWERED", "UNRECORDED", "UNSURE")
+
+
+def _last_disposition(turns: Sequence[Turn]) -> tuple[int, dict[str, int]] | None:
+    """`(turn, {row kind: count})` from the LAST `Advisory disposition` line a finalize run put in
+    the transcript — or None when there is none, or when a later finalize raised no advisory at all:
+    that run prints no disposition, and the earlier one describes a map that is gone.
+
+    Read where assertion 12 reads the verdict, and nowhere else: the RESULT of a typed `finalize`,
+    of a `ship` that reached its finalize step, or of a read of the live gate block. Other output
+    can carry the line's shape — a `grep` over finalize.py prints its docstring's example."""
+    results = results_by_tool_use_id(turns)
+    last: tuple[int, dict[str, int]] | None = None
+    for turn in turns:
+        for call in turn.calls_named("Bash"):
+            out = results.get(call.id, "")
+            if not (_invokes(call.command, "finalize", out)
+                    or _reads_live_gate_block(call.command)):
+                continue
+            for line in out.splitlines():
+                verdict = _FINALIZE_VERDICT.search(line)
+                if verdict and int(verdict.group(3)) == 0:
+                    last = None
+                hit = _DISPOSITION.search(line)
+                if hit:
+                    last = (turn.index, {m.group("kind").strip(): int(m.group("n"))
+                                         for m in _DISPOSITION_COUNT.finditer(hit.group("counts"))})
+    return last
+
+
 def assert_9_no_advisory_waved_through(turns: Sequence[Turn]) -> Assertion:
     """9 — no advisory is left both unfixed and unrecorded.
 
@@ -937,7 +978,32 @@ def assert_9_no_advisory_waved_through(turns: Sequence[Turn]) -> Assertion:
     ended on a grep that returned a single line — against which almost anything looks resolved. So
     the note carries the run sizes, and says plainly when the last view was a fraction of the widest
     one. A transcript cannot do better than that: the full final state lives in the map file, not in
-    the transcript, and inventing precision here would be worse than reporting the limit."""
+    the transcript, and inventing precision here would be worse than reporting the limit.
+
+    **When finalize stated the disposition, the LAST one decides instead.** A build that closes
+    through `ship` runs the closing gates inside one process and types no `validate`, so its last
+    typed view can be hundreds of turns stale: the 2026-10-07 mcpolis build scored 37/37 off a view
+    narrowed to 4 lines, 341 turns before a close whose own finalize said `UNRECORDED: 7 · UNSURE:
+    1`. finalize prints those counts on stdout and in the gate block, so `recorded` rows are the
+    good count, `_UNRESOLVED_DISPOSITIONS` the misses, and the rows naming no record stay out. The
+    note says the number came from there."""
+    disposition = _last_disposition(turns)
+    if disposition is not None:
+        at, counts = disposition
+        unresolved = {kind: counts[kind] for kind in _UNRESOLVED_DISPOSITIONS if counts.get(kind)}
+        recorded = counts.get("recorded", 0)
+        summary = " · ".join(f"{kind}: {n}" for kind, n in counts.items())
+        if not (unresolved or recorded):
+            return Assertion(9, "no advisory left unfixed and unrecorded", 0, 0, (),
+                             f"the last finalize disposition (turn {at}) holds no row a record "
+                             f"answers: {summary}")
+        return Assertion(9, "no advisory left unfixed and unrecorded", recorded,
+                         recorded + sum(unresolved.values()),
+                         tuple(Evidence(at, {"unresolved": kind, "count": n})
+                               for kind, n in unresolved.items()),
+                         f"from the last finalize disposition, turn {at} ({summary}); UNANSWERED, "
+                         f"UNRECORDED and UNSURE rows count as unresolved, rows naming no record "
+                         f"are not counted")
     runs = _validate_warnings(turns)
     if not runs:
         return Assertion(9, "no advisory left unfixed and unrecorded", 0, 0, (),
@@ -1790,6 +1856,10 @@ class ScoreContext:
     #: transcript cannot show: whether an agent narrowed its own self-check. Empty when the
     #: `<session>/subagents/` directory is absent — a different harness, or no fan-out.
     agent_lint_calls: tuple[tuple[str, str], ...] = ()
+    #: Every time the harness replaced the LEAD's context with a summary inside the scored turns,
+    #: read off the transcript's `compact_boundary` records (`cost.compactions_in`). Turns cannot
+    #: show one: the summary arrives as an ordinary user turn.
+    compactions: tuple[Compaction, ...] = ()
     #: Real sub-agent runtimes in seconds, keyed by the id of the `Agent` call that spawned each —
     #: `<agent>.meta.json` carries that `toolUseId`, which is the only exact join between the lead's
     #: dispatch and the agent's own file. Empty when the `<session>/subagents/` directory is absent.
@@ -3465,6 +3535,27 @@ def assert_39_security_theme_is_fed(turns: Sequence[Turn],
                      f"{access} access rule(s), {themed} claim(s) in the security theme")
 
 
+def assert_41_lead_not_compacted(turns: Sequence[Turn], ctx: ScoreContext) -> Assertion:
+    """41 — the lead was not compacted during the build.
+
+    A compaction replaces everything the lead has read with a summary, and the build goes on from
+    the summary as if it still held the method's rules and its own recorded decisions. Two of
+    three measured mcpolis builds were compacted, at 967,939 and 968,360 tokens; on the first one
+    the record written right after the summary dropped its `--map` and was lost, and no retro
+    reported either compaction, because nothing printed one. A retro reports a 0 here as a HIGH
+    finding (`eval/retro/method.md`, What it cost).
+
+    `of` is 1 whenever there are turns: every build has the opportunity to fill its window."""
+    name = "the lead was not compacted during the build"
+    if not turns:
+        return Assertion(41, name, 0, 0, (), "no turns")
+    evidence = tuple(Evidence(c.turn, {"trigger": c.trigger, "pre_tokens": c.pre_tokens,
+                                       "post_tokens": c.post_tokens}) for c in ctx.compactions)
+    note = (f"COMPACTED {len(evidence)} time(s), first at turn {evidence[0].turn}: a HIGH finding"
+            if evidence else "")
+    return Assertion(41, name, 0 if evidence else 1, 1, evidence, note)
+
+
 ASSERTIONS = (
     assert_1_preindex_report_used,
     assert_2_preindex_not_hand_parsed,
@@ -3503,6 +3594,7 @@ ASSERTIONS = (
     assert_38_written_json_is_read,
     assert_39_security_theme_is_fed,
     assert_40_no_subagent_narrowed_its_own_lint,
+    assert_41_lead_not_compacted,
 )
 
 
@@ -3522,7 +3614,8 @@ def score_turns(turns: Sequence[Turn], *, transcript: str = "", label: str = "",
                   assert_32_every_access_rule_states_its_risk,
                   assert_33_access_granularity_is_recorded,
                   assert_39_security_theme_is_fed,
-                  assert_40_no_subagent_narrowed_its_own_lint}
+                  assert_40_no_subagent_narrowed_its_own_lint,
+                  assert_41_lead_not_compacted}
     assertions = tuple(fn(turns, ctx) if fn in _needs_ctx else fn(turns)  # type: ignore[operator]
                        for fn in ASSERTIONS)
     return Scorecard(transcript=transcript, turns=len(turns), assertions=assertions,
@@ -3530,7 +3623,7 @@ def score_turns(turns: Sequence[Turn], *, transcript: str = "", label: str = "",
 
 
 def score_transcript(path: Path | str, *, label: str = "",
-                     map_path: str | Path | None = None,
+                     map_path: str | Path | None = None, from_turn: int = 0,
                      to_turn: int | None = None) -> Scorecard:
     """Read a transcript and score it.
 
@@ -3538,15 +3631,20 @@ def score_transcript(path: Path | str, *, label: str = "",
     and the operator goes on using it, so the transcript grows under a retrospective that takes an
     hour to write: one went 449 turns to 491 while being read, and an unbounded re-score then
     covered 42 turns of unrelated scratch work as if they were build behaviour. `cost` already took
-    `--to-turn`; this did not, so the retro method could not honestly tell anyone to bound both."""
+    `--to-turn`; this did not, so the retro method could not honestly tell anyone to bound both.
+
+    `from_turn` starts at that turn index, for a build that began mid-session. `cost` took
+    `--from-turn` and this did not, so assertion 41 counted a compaction from before the build that
+    `cost` dropped: the two tools disagreed on one build, and a retro ranks 41's 0 as HIGH."""
     p = Path(path)
-    turns = read_turns(p)
-    if to_turn is not None:
-        turns = tuple(t for t in turns if t.index <= to_turn)
+    every = read_turns(p)
+    turns = tuple(t for t in every
+                  if t.index >= from_turn and (to_turn is None or t.index <= to_turn))
     ctx = read_score_context(map_path)
     # The per-agent files are keyed off the TRANSCRIPT path, not the map, so they are attached
     # here rather than inside `read_score_context`.
-    ctx = replace(ctx, agent_lint_calls=read_agent_lint_calls(p),
+    ctx = replace(ctx, compactions=compactions_in(p, every, from_turn=from_turn, to_turn=to_turn),
+                  agent_lint_calls=read_agent_lint_calls(p),
                   agent_durations=read_agent_durations(p))
     return score_turns(turns, transcript=str(p), label=label or p.stem,
                        grouping_consistent=grouping_is_consistent(p), ctx=ctx)
@@ -3700,7 +3798,7 @@ def format_diff(before: Scorecard, after: Scorecard) -> str:
 
 USAGE = """usage: coyomap-eval process <transcript.jsonl> [--map <project-map.json>]
                                   [--out <scorecard.json>] [--json] [--label L]
-                                  [--to-turn N]
+                                  [--from-turn N] [--to-turn N]
        coyomap-eval process --diff <before.json> <after.json> [--json]
 
 Score a build TRANSCRIPT against the L3 process assertions, or diff two scorecards.
@@ -3711,6 +3809,9 @@ transcript. Without it that assertion falls back to transcript evidence and says
 --to-turn N stops at that turn (inclusive). A build SESSION stays open after the map lands, so the
 transcript grows while a retrospective reads it — one went 449 turns to 491 mid-retro — and an
 unbounded score then counts unrelated later turns as build behaviour. Pass the build's last turn.
+
+--from-turn N starts at that turn, for a build that began mid-session. Pass the same bounds as to
+`coyomap-eval cost`, or the two describe different stretches.
 
 Without --out, the scorecard is written next to the transcript as <name>.l3-scorecard.json.
 This is a SCORECARD, not a gate: it always exits 0 unless a file is missing or unreadable, and
@@ -3763,7 +3864,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     positional = [a for a in args if not a.startswith("--")]
-    skip = {_arg(args, "--out"), _arg(args, "--label"), _arg(args, "--to-turn")}
+    skip = {_arg(args, "--out"), _arg(args, "--label"), _arg(args, "--from-turn"),
+            _arg(args, "--to-turn")}
     positional = [a for a in positional if a not in skip]
     if not positional:
         print("ERROR: give a transcript path\n", file=sys.stderr)
@@ -3787,14 +3889,16 @@ def main(argv: list[str] | None = None) -> int:
                   "       Fix the map, or drop --map to run the transcript-only scorecard "
                   "deliberately.", file=sys.stderr)
             return 2
+    raw_from_turn = _arg(args, "--from-turn")
     raw_to_turn = _arg(args, "--to-turn")
     try:
+        from_turn = int(raw_from_turn) if raw_from_turn else 0
         to_turn = int(raw_to_turn) if raw_to_turn else None
     except ValueError:
-        print("ERROR: --to-turn takes an integer", file=sys.stderr)
+        print("ERROR: --from-turn and --to-turn take an integer", file=sys.stderr)
         return 2
     card = score_transcript(src, label=_arg(args, "--label") or "",
-                            map_path=given_map, to_turn=to_turn)
+                            map_path=given_map, from_turn=from_turn, to_turn=to_turn)
     out = Path(_arg(args, "--out") or src.with_suffix(".l3-scorecard.json"))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(card.as_json(), indent=2), encoding="utf-8")

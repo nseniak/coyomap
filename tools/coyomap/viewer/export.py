@@ -40,6 +40,7 @@ from html import escape as html_escape
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from coyomap.reporting import shown
 from coyomap.viewer.serve import (
     _FRONTEND_DIR,
     _STATIC_FILES,
@@ -441,11 +442,10 @@ def main(argv: list[str] | None = None) -> int:
     if report.skipped_large:
         print(f"  {len(report.skipped_large)} file(s) left out for being over "
               f"{TEXT_MAX // 1_000_000} MB — the served viewer refuses these too: "
-              f"{', '.join(report.skipped_large[:3])}"
-              + (" …" if len(report.skipped_large) > 3 else ""))
+              f"{shown(report.skipped_large, 3)}")
     if report.skipped_unsafe:
         print(f"  {len(report.skipped_unsafe)} file(s) left out for an unsafe path: "
-              f"{', '.join(report.skipped_unsafe[:3])}", file=sys.stderr)
+              f"{shown(report.skipped_unsafe, 3)}", file=sys.stderr)
     print("  To read it here, serve the folder — a browser will not run the viewer's script off the "
           "disk, so opening index.html directly shows an empty page (which says so, and gives you "
           "these commands):")

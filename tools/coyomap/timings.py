@@ -78,6 +78,9 @@ PHASE_ALIASES: dict[str, str] = {
     "rule": "rules",
     "gap-fill": "gapfill",
     "test_completeness": "test-completeness",
+    # The slice's brief is `contract tests`, so `tests` is the word a lead has just typed when it
+    # reaches the barrier. The 2026-10-07 mcpolis build had `--phase tests` refused.
+    "tests": "test-completeness",
 }
 
 #: How long the longest slice must hold the barrier ALONE before splitting it is worth saying.

@@ -60,6 +60,7 @@ from coyomap.model import (
     load_model_path,
 )
 from coyomap.pathmatch import matches
+from coyomap.reporting import shown
 
 _DEFAULT_MAP = ".coyomap/project-map.json"
 _DEFAULT_RECONCILE = ".coyomap/reconcile.json"
@@ -171,7 +172,7 @@ def expand(m: ProjectModel, rules: list[dict]) -> tuple[dict, list[str]]:
                 (targets if eid in by_id else unknown).append(eid)
             if unknown:
                 report.append(f"rules[{i}]: {len(unknown)} id(s) are not in the map: "
-                              f"{', '.join(unknown[:8])}{' …' if len(unknown) > 8 else ''}")
+                              f"{shown(unknown, 8)}")
         else:
             targets = [getattr(el, "id") for el in _elements(m)
                        if _matches(r["source_glob"], _source_of(el))]
@@ -268,11 +269,11 @@ def coverage_report(m: ProjectModel, doc: dict) -> list[str]:
                    if el.id not in touched and not getattr(el, fieldname, None)]
         if missing:
             out.append(f"{len(missing)} {label}(s) still have no {fieldname} and match no rule: "
-                       f"{', '.join(missing[:10])}{' …' if len(missing) > 10 else ''}")
+                       f"{shown(missing, 10)}")
     unplaced = [c.id for c in m.components if not c.runs_in and c.id not in touched]
     if unplaced and m.deployment:
         out.append(f"{len(unplaced)} component(s) have no runs_in and match no rule: "
-                   f"{', '.join(unplaced[:10])}{' …' if len(unplaced) > 10 else ''}")
+                   f"{shown(unplaced, 10)}")
     return out
 
 

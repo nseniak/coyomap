@@ -47,6 +47,7 @@ from coyomap.model import (
     UseCase,
     all_elements,
 )
+from coyomap.reporting import shown
 from coyomap.validate_analysis import check_hierarchy
 
 
@@ -662,11 +663,10 @@ def apply_reconcile(m: ProjectModel, rec: Reconcile, stats: dict[str, object]) -
         # summary keeps the fact visible and names the anchors, which is what a reader needs when a
         # `file:line` some fragment's author read leaves the map for good.
         total = sum(len(lost) for _t, _kept, lost in dropped_anchors)
-        detail = "; ".join(f"{triple} kept {kept} over {', '.join(a for a in lost if a)}"
-                           for triple, kept, lost in dropped_anchors[:5])
-        more = "" if len(dropped_anchors) <= 5 else f" (+{len(dropped_anchors) - 5} more)"
+        detail = shown([f"{triple} kept {kept} over {', '.join(a for a in lost if a)}"
+                        for triple, kept, lost in dropped_anchors], 5, sep="; ")
         notes.append(f"keep_edges: {total} authored anchor(s) left the map, across "
-                     f"{len(dropped_anchors)} directive(s) — {detail}{more}. If one of those is the "
+                     f"{len(dropped_anchors)} directive(s) — {detail}. If one of those is the "
                      f"real call site, the directive names the wrong line")
     # Anchor corrections, through the SAME writer `fix apply-drift` uses — one matching rule, so the
     # durable record and the in-place edit cannot disagree about which element a claim names. A

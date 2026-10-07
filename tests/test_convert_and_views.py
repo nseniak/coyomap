@@ -171,6 +171,19 @@ def test_golden_graph_attaches_entry_points_and_resolves_test_targets():
             assert set(ev) == {"file", "why"}
 
 
+def test_the_file_switcher_opens_where_a_component_lives_then_pages_what_it_holds():
+    """`source` leads for DISPLAY: selecting a component opens its `source` at the line. Then every
+    file it HOLDS (`validate_model.component_files`, the answer `validate` and `dump --owners` read),
+    each once. mcpolis's C24 lived at `app.py:354`, in the file C23 lists: its switcher still opens
+    there, though `app.py` is not a file it holds."""
+    m = ProjectModel(title="Tiny", goal="A tiny demo.")
+    m.components = [Component(id="C1", name="MCP door guards", source="backend/app.py:354",
+                              files=[" backend/pin.py:12 ", "backend/guards.py", "backend/middleware/",
+                                     "backend/guards.py", "https://example.com/x.py"])]
+    node = cast("dict[str, Any]", model_to_graph(m)["nodes"]["C1"])
+    assert node["files"] == ["backend/app.py", "backend/pin.py", "backend/guards.py"]
+
+
 def test_classify_activation_reads_kind_signatures():
     """Self-starting kinds (timer/loop/boot/signal/queue consumer) -> 'self'; caller-driven kinds
     (route/CLI/callback/webhook) -> 'external'; unknown -> 'external' (safe default)."""

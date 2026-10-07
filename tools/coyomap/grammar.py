@@ -362,6 +362,19 @@ INTERFACE_FACINGS = ("user", "operator")  # who it serves. AUTHORED, never deriv
                                           # payment service `internal` while its interface is
                                           # user-facing. Measured: only 8 of the 69 interfaces across
                                           # the four live maps have roles to derive from at all.
+#: The words a harvest agent OPENS a dep's `not_an_interface` POINTER with (harvest-contract.md): a
+#: dep it takes for a surface, whose `In` id it cannot know because synthesis mints it. A pointer is
+#: a note to the lead, not a reason the dep is none, so it must not outlive the decision it asks for.
+INTERFACE_POINTER_OPENING = "not decided here"
+
+
+def is_interface_pointer(text: str) -> bool:
+    """Whether a dep's `not_an_interface` is the harvest pointer rather than a reason. Here, not in
+    `assemble`, because `validate` asks it too and must not import `assemble`: `assemble` drops a
+    pointer synthesis answered, and `validate` refuses one nobody answered."""
+    return text.strip().strip("\"'").lower().startswith(INTERFACE_POINTER_OPENING)
+
+
 # ── WHICH WAY THE DATA MOVES, on one walk step ───────────────────────────────────────────────────
 # Read from the point of view of the PRODUCT'S OWN CODE at that step, never from the arrow: `in` is
 # data arriving at it, `out` is data leaving it. That single reading covers both places the map

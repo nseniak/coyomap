@@ -17,9 +17,10 @@ actually read, nothing checked the line's shape, nothing de-duplicated, and noth
 body from the stale-paragraph problem — that build wrote a fourteen-component paragraph, then had to
 find-and-replace its own text two turns later with a fragile `body.find(...)` + `assert`.
 
-    coyomap record --map <map-or-fragment> --heading "Balance exceptions" \\
+    coyomap record --map .coyomap/build-fragments/extras.json --heading "Balance exceptions" \\
                    --line "UC5: the two clauses are one goal — <why>" [--replace <prefix>]
-    coyomap record --map <map-or-fragment> --heading "Sweep debt" --remove "<prefix>"
+    coyomap record --map .coyomap/build-fragments/extras.json --heading "Sweep debt" \\
+                   --remove "<prefix>"
 
 Under "Access baseline exceptions" each recorded path is echoed with the claim it held in the
 previous map (the newest `dev-rebuilds/NNNN/` map beside this one, or `--access-baseline <file>`),
@@ -38,20 +39,22 @@ skipped). One process, one write. Reading only the first `--line` is why a build
 make spawned 57 processes — twenty of them re-typing long prose after the first attempt failed — for
 what are independent appends under one heading:
 
-    coyomap record --heading "Entry-point coverage" \\
+    coyomap record --map .coyomap/build-fragments/extras.json --heading "Entry-point coverage" \\
                    --line "http-route: partial — <why>" \\
                    --line "ui-route: complete — <why>"
-    coyomap record --heading "Entry-point coverage" --lines-from coverage.txt
+    coyomap record --map .coyomap/build-fragments/extras.json --heading "Entry-point coverage" \\
+                   --lines-from coverage.txt
     coyomap record --headings
 
 Every line is shape-checked BEFORE anything is written, so a bad one in a batch of twenty leaves the
 fragment untouched rather than holding half a batch. `--replace` corrects one record, so it refuses
-to combine with a batch.
+to combine with a batch. To correct several, remove them in one call (`--remove` repeats), then
+write the new lines in a second (`--lines-from`).
 
 One reason may answer SEVERAL elements — write them as one comma-separated list rather than the
 same sentence once per id (live maps grew 66 lines holding 15 distinct reasons that way):
 
-    coyomap record --heading "Unclaimed surfaces" \\
+    coyomap record --map .coyomap/build-fragments/extras.json --heading "Unclaimed surfaces" \\
                    --line "C101, C148, C186: an operator surface in our own back office"
 
 BUT ONLY WHERE THE HEADING HAS A KEY GRAMMAR. Some headings key on free text — a `path:line` anchor,
@@ -61,8 +64,14 @@ it against. `coyomap record --headings` prints which is which. Two live rounds o
 following the advice above under `Sweep debt`: one line naming five anchors cleared none of them,
 and the fix was five lines, one anchor each.
 
-Writes the FRAGMENT when given one, so the next `assemble` carries the record through; writing the
-assembled map instead is the edit the next assemble discards.
+Writes the file `--map` names, and only that: a positional argument is refused, as is an unknown
+option. Ignored, `record <fragment> --heading … --line …` wrote the DEFAULT, the assembled map, and
+exited 0. Name the FRAGMENT, so the next `assemble` carries the record through; writing the
+assembled map instead is the edit the next assemble discards, so it is refused while the
+`build-fragments/` folder beside the map holds any fragment, and the refusal names the
+`build-fragments/extras.json` to record into (seeded by that call when it is missing). A map with no
+fragments beside it is written as asked. Once nothing will assemble the map again (the build is
+over, and an update changes the map directly), `--no-reassemble` writes it anyway.
 
 Stdlib-only (the cli.py firewall).
 """
@@ -76,6 +85,7 @@ from pathlib import Path
 from coyomap import prose, records
 from coyomap.access_surface import baseline_beside, held, load_claims
 from coyomap.anchor_drift import DRIFT_EXCEPTIONS_HEADING
+from coyomap.assemble import dump_preserving, load_map_or_fragment
 from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
 from coyomap.model import ExtraSection, ProjectModel, load_model_path
 from coyomap.validate_model import validate_model
@@ -91,6 +101,22 @@ USAGE = __doc__ or ""
 #: silenced keeps firing, and the operator believes it was handled.
 KNOWN_HEADINGS = records.KNOWN_HEADINGS
 
+#: The flags `record` reads that take a value. Everything else on the command line is REFUSED, never
+#: dropped: `_arg` reads flags by name, so a fragment given as a positional (`record extras.json
+#: --heading …`) was skipped, `--map` fell back to the assembled map, the line was written there with
+#: exit 0, and the next `assemble` discarded it (the 2026-10-07 mcpolis build, turn 758).
+_VALUE_FLAGS: tuple[str, ...] = ("--map", "--heading", "--line", "--lines-from", "--replace",
+                                 "--remove", "--access-baseline")
+#: The two that repeat. `_all_args` reads every occurrence, and a value only when it is not a flag.
+_REPEATED_FLAGS: tuple[str, ...] = ("--line", "--remove")
+#: The flags that take no value.
+_BARE_FLAGS: tuple[str, ...] = ("--headings", "--no-reassemble", "-h", "--help")
+
+#: How to correct SEVERAL records, which `--replace` cannot do. Both of its batch refusals stated the
+#: rule and stopped there, and a build found this way out by trying.
+_REPLACE_BATCH_WAY_OUT = ("To correct several records, remove them in one call (`--remove "
+                          "\"<prefix>\"` repeats, all or nothing), then write the new lines in a "
+                          "second (`--lines-from <file>`, or one `--line` each).")
 
 
 def _resolve_heading(heading: str) -> tuple[str, str | None]:
@@ -190,6 +216,19 @@ def assembled_beside(path: Path, present: frozenset[str] | None) -> Path | None:
     return None
 
 
+def fragments_beside(assembled: Path) -> Path | None:
+    """The folder the next `assemble` rebuilds the map at `assembled` from: `build-fragments/` in the
+    map's own folder, the reverse of `assembled_beside`, once it holds any fragment (`*.json`). None
+    when it holds none, as for a map edited directly with no fragments.
+
+    ANY fragment, not the extras one. Nothing creates `extras.json` before the first record, so a
+    refusal keyed on it let `record` write the assembled map between the first assemble and the
+    first record, exit 0, and lose the line at the next assemble (the review of the 2026-10-07
+    fixes)."""
+    folder = assembled.parent / "build-fragments"
+    return folder if folder.is_dir() and any(folder.glob("*.json")) else None
+
+
 def inert_lines(assembled: ProjectModel, map_path: Path, heading: str, lines: list[str],
                 replace_prefix: str = "") -> list[str]:
     """The new lines that, ON ITS OWN, each change nothing `validate` reports on `assembled`.
@@ -284,6 +323,42 @@ def _all_args(argv: list[str], flag: str) -> list[str]:
     return out
 
 
+def _argument_errors(argv: list[str]) -> list[str]:
+    """Every argument `_arg` and `_all_args` would drop without a word: a positional, an unknown
+    option, a flag with no value, and a one-value flag given twice (`_arg` reads the first).
+
+    Walked the way those two read the line, so a token is a flag's value here exactly when it is
+    one there. The positional is the case that cost a record: `--map` fell back to its default, the
+    assembled map, and the line went there instead of the fragment the caller had named."""
+    errors: list[str] = []
+    counts: dict[str, int] = {}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in _VALUE_FLAGS:
+            counts[a] = counts.get(a, 0) + 1
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            if nxt is None or (a in _REPEATED_FLAGS and nxt.startswith("--")):
+                errors.append(f"{a} needs a value")
+                i += 1
+                continue
+            i += 2
+            continue
+        if a.startswith("-") and a != "-" and a not in _BARE_FLAGS:
+            errors.append(f"unknown option '{a}'. Known: {', '.join(_VALUE_FLAGS)}, "
+                          f"--headings, --no-reassemble")
+        elif a not in _BARE_FLAGS:
+            # Named for the file it most likely is: what turn 758 passed was the fragment to write.
+            hint = (f" To write {a}, pass `--map {a}`." if a.endswith(".json")
+                    else " A value with spaces needs quotes.")
+            errors.append(f"'{a}' is a positional argument, and `record` takes none: it writes only "
+                          f"the file --map names, which defaults to the assembled map.{hint}")
+        i += 1
+    errors += [f"{flag} is given {n} times; it takes one value"
+               for flag, n in counts.items() if n > 1 and flag not in _REPEATED_FLAGS]
+    return errors
+
+
 def _print_headings() -> int:
     """Which headings read a comma list, and which key on free text.
 
@@ -305,11 +380,27 @@ def _print_headings() -> int:
     return 0
 
 
+def _load_target(path: Path) -> tuple[ProjectModel, frozenset[str] | None] | None:
+    """The map or fragment at `path` and its own key set (None for an assembled map), or None once
+    the reason it cannot be read is printed."""
+    try:
+        return load_map_or_fragment(path)
+    except Exception as exc:                      # noqa: BLE001 — any unreadable target is one case
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or "-h" in argv or "--help" in argv:
         print(USAGE)
         return 0
+    # Every argument is read or refused, before anything else (see `_argument_errors`).
+    bad_args = _argument_errors(argv)
+    if bad_args:
+        for err in bad_args:
+            print(f"ERROR: {err}", file=sys.stderr)
+        return 2
     if "--headings" in argv:
         return _print_headings()
     map_path = _arg(argv, "--map", ".coyomap/project-map.json")
@@ -321,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     removes = _all_args(argv, "--remove")
     remove = removes[0] if removes else ""
     baseline_arg = _arg(argv, "--access-baseline")
+    no_reassemble = "--no-reassemble" in argv
     # The TARGET is checked before the payload. A build ran 21 well-formed `record` calls in one turn
     # and every one failed with `cannot read … extras.json — no such file`, because no fan-out agent
     # owns creating that fragment; the build worked around it with `echo '{"extras": []}' >`, which is
@@ -328,7 +420,38 @@ def main(argv: list[str] | None = None) -> int:
     # reported the ARGUMENT complaint first and hid the real cause entirely.
     path = Path(map_path)
     seed_extras = False
-    if not path.exists():
+    loaded: tuple[ProjectModel, frozenset[str] | None] | None = None
+    # The fragments the assembled map at `path` is rebuilt from; None for a fragment, or for a map
+    # with none beside it. The refusal below and the closing `wrote` line both read this one answer.
+    fragments: Path | None = None
+    if path.exists():
+        loaded = _load_target(path)
+        if loaded is None:
+            return 2
+        # THE ASSEMBLED MAP, WHILE ITS FRAGMENTS ARE BESIDE IT, is refused: the next `assemble`
+        # rebuilds the map from them and drops the line. Writing it anyway with a warning on the
+        # LAST line of the output was how a record was lost: the lead read that output through
+        # `tail -2`, the exit was 0, and `ship`'s own assemble discarded the line two steps later.
+        fragments = fragments_beside(path) if loaded[1] is None else None
+        if fragments is not None and not no_reassemble:
+            extras = fragments / "extras.json"
+            seeds = "" if extras.is_file() else " (it does not exist yet, and that call seeds it)"
+            print(f"ERROR: {path} is the ASSEMBLED map, and its build fragments sit beside it in "
+                  f"{fragments}: the next `assemble` rebuilds the map from them and drops this "
+                  f"edit. Record into the extras fragment: `--map {extras}`{seeds}. Only if "
+                  f"nothing will assemble this map again (the build is over, and an update changes "
+                  f"the map directly) pass --no-reassemble to write the map anyway.",
+                  file=sys.stderr)
+            return 2
+        # A FRAGMENT WITH NO `extras` KEY cannot carry a record: `dump_preserving` writes back only
+        # the keys the fragment had, so the line was printed as "recorded", the file as "wrote", and
+        # the line was gone. Refused before anything changes.
+        if not remove and loaded[1] is not None and "extras" not in loaded[1]:
+            print(f"ERROR: {path} has no `extras` section, so a line written here would be dropped "
+                  f"when the fragment is saved. Record into the fragment that owns the extras (an "
+                  f"`extras.json` in the same folder is seeded when it is missing).", file=sys.stderr)
+            return 2
+    else:
         # Seeded, not blindly created: only an `extras.json` inside an existing directory, which is
         # the one file a build is told to record into and the one nothing else creates. Any other
         # missing path is a typo, and silently creating it would hide the typo — the direction that
@@ -346,8 +469,8 @@ def main(argv: list[str] | None = None) -> int:
             # --replace corrects ONE record by prefix; a file of lines has no single target, and
             # guessing which one it meant is the kind of silent mis-write this command exists to
             # prevent.
-            print("ERROR: --replace corrects one record and --lines-from carries many — do the "
-                  "replacement in its own call.", file=sys.stderr)
+            print(f"ERROR: --replace corrects one record and --lines-from carries many. "
+                  f"{_REPLACE_BATCH_WAY_OUT}", file=sys.stderr)
             return 2
         src = Path("/dev/stdin") if from_file == "-" else Path(from_file)
         try:
@@ -360,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
                   if ln.strip() and not ln.lstrip().startswith("#")]
     if remove:
         if lines or from_file or replace:
-            print("ERROR: --remove deletes one record and takes no --line / --lines-from / "
+            print("ERROR: --remove deletes records and takes no --line / --lines-from / "
                   "--replace — do the removal in its own call.", file=sys.stderr)
             return 2
         if not heading:
@@ -371,8 +494,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     if replace and len(lines) > 1:
-        print(f"ERROR: --replace corrects one record; {len(lines)} --line values were given.",
-              file=sys.stderr)
+        print(f"ERROR: --replace corrects one record; {len(lines)} --line values were given. "
+              f"{_REPLACE_BATCH_WAY_OUT}", file=sys.stderr)
         return 2
     # A key with no why is a dismissal, not a record — the rule every escape family already states.
     # Checked for EVERY line before anything is written: a partial append would leave the fragment
@@ -390,20 +513,10 @@ def main(argv: list[str] | None = None) -> int:
         path.write_text('{\n  "extras": []\n}\n', encoding="utf-8")
         print(f"note: seeded {path} — nothing else creates the extras fragment, and a record had "
               f"nowhere to go.")
-    from coyomap.assemble import dump_preserving, load_map_or_fragment
-    try:
-        m, present = load_map_or_fragment(path)
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        loaded = _load_target(path)
+    if loaded is None:
         return 2
-    # A FRAGMENT WITH NO `extras` KEY cannot carry a record: `dump_preserving` writes back only the
-    # keys the fragment had, so the line was printed as "recorded", the file as "wrote", and the
-    # line was gone. Refused before anything changes.
-    if not remove and present is not None and "extras" not in present:
-        print(f"ERROR: {path} has no `extras` section, so a line written here would be dropped "
-              f"when the fragment is saved. Record into the fragment that owns the extras (an "
-              f"`extras.json` in the same folder is seeded when it is missing).", file=sys.stderr)
-        return 2
+    m, present = loaded
     any_changed = False
     appended: list[str] = []
     # What each line did, printed only once the write is certain. Printed as it happened, a refused
@@ -440,12 +553,11 @@ def main(argv: list[str] | None = None) -> int:
     # `finalize` + `render` rounds were spent finding the shape by trial. `malformed_records`
     # already knows every family's key vocabulary and was already used by the validator; asking it
     # here turns those three rounds into one refusal.
-    from coyomap.records import malformed_records
     # Only the lines THIS call added. A fragment may already carry a record written before the
     # check existed, and refusing to write a good line because an old one is malformed would make
     # the command unusable on exactly the maps that need it most.
     added = {ln.strip() for ln in lines}
-    bad = [b for b in malformed_records(m, canonical) if b.strip() in added]
+    bad = [b for b in records.malformed_records(m, canonical) if b.strip() in added]
     if bad and not remove:
         for b in bad:
             print(f"ERROR: {b}", file=sys.stderr)
@@ -478,11 +590,13 @@ def main(argv: list[str] | None = None) -> int:
     # line failed, and would rewrite the fragment N times for N records.
     print("\n".join(said))
     path.write_text(dump_preserving(m, present), encoding="utf-8")
-    if present is None:
-        print(f"wrote {path} — note this is the ASSEMBLED map, so the next `assemble` discards it. "
-              f"Record against the FRAGMENT that owns the extras section to make it durable.")
-    else:
+    if fragments is None:
+        # A fragment, or a map with no fragments to rebuild it from: the edit is where it lands.
         print(f"wrote {path}")
+    else:
+        # Only `--no-reassemble` gets here: without it, the assembled map was refused above.
+        print(f"wrote {path} — the assembled map, as --no-reassemble asks: an `assemble` from "
+              f"{fragments} would drop this edit.")
     if canonical == ACCESS_BASELINE_EXCEPTIONS_HEADING and not remove:
         echo_access_claims(path, lines, Path(baseline_arg) if baseline_arg else None)
     return 0

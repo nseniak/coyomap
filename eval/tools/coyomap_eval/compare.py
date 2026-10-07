@@ -33,6 +33,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from coyomap.reporting import shown
 from coyomap_eval.judge import JudgeReport
 from coyomap_eval.profile import MapProfile
 
@@ -882,10 +883,9 @@ def _auth_site_notes(baseline: MapProfile, candidate: MapProfile) -> list[str]:
     cf = {a.rsplit(":", 1)[0] for a in c}
     lost = sorted(bf - cf)
     if lost:
-        shown = ", ".join(lost[:8]) + (f", +{len(lost) - 8} more" if len(lost) > 8 else "")
         notes.append(f"{len(lost)} file(s) held access enforcement in the baseline and are named by "
                      f"NO access rule in the candidate — wording-independent, so these are the ones "
-                     f"to read first: {shown}")
+                     f"to read first: {shown(lost, 8)}")
     gained = sorted(cf - bf)
     if gained:
         notes.append(f"{len(gained)} file(s) carry access enforcement only in the candidate — the "

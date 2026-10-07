@@ -1019,3 +1019,13 @@ def test_a_missing_cost_leaves_only_the_time_band():
     report = compare(p, p, baseline_spend=make_spend(None, 3.0), candidate_spend=make_spend(None, 3.3))
     assert [s.metric for s in report.spend_bands] == ["seconds_per_row"]
     assert any(n.startswith("cost per row was not compared") for n in report.notes), report.notes
+
+
+def test_the_files_that_lost_their_access_coverage_are_cut_at_eight_and_counted() -> None:
+    """Pinned byte for byte: this list goes through `coyomap.reporting.shown` since 2026-10-07 (merge
+    5.4), where it was cut by hand, and the merge changed none of its text."""
+    base = make_profile(auth_sites=["kept.py:1"] + [f"gone{i}.py:4" for i in range(10)])
+    cand = make_profile(auth_sites=["kept.py:1"])
+    note = next(n for n in compare(base, cand).notes if "named by NO access rule" in n)
+    assert note.endswith("these are the ones to read first: gone0.py, gone1.py, gone2.py, gone3.py, "
+                         "gone4.py, gone5.py, gone6.py, gone7.py, +2 more"), note

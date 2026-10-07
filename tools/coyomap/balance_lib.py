@@ -79,7 +79,9 @@ _LITERAL_ESCAPES: tuple[str, ...] = (
 # `isolated-network deploys: nothing to do` as an `isolated` one, and `channel-payload-review-2026:`
 # as a `channel-payload` one (adversarial-review finding #8). Requiring the space around the hyphen
 # keeps the legible `cadence - <why>` dash form working while closing the compound-word hole.
-_LITERAL_LINE = re.compile(
+# Public because `finalize`'s budget leg reads its `granularity:` line with it, so a line that leg
+# takes is a line validate takes.
+LITERAL_LINE = re.compile(
     r"^\s*(?:[-*]\s+)?\**\s*("
     + "|".join(re.escape(lit) for lit in sorted(_LITERAL_ESCAPES, key=len, reverse=True))
     + r")\**(?:\s*[:(—–]|\s+-\s|\s*$)")
@@ -229,7 +231,7 @@ def _exceptions(m: ProjectModel) -> set[str]:
     outside the deployment-quality family — an unplaced self-started entry point, and a messaging
     channel no participant's `runs_in` can place — have their own scopes (`runs-in/entry-hosts`,
     `runs-in/messaging`) rather than riding a shared literal. EVERY literal is
-    read LINE-LEADING (`_LITERAL_LINE`: `granularity: <why>`), because every one of them is an
+    read LINE-LEADING (`LITERAL_LINE`: `granularity: <why>`), because every one of them is an
     ordinary prose word — a sentence merely using the word never silences anything. Ids keep the
     anywhere-in-body scan (`_EXCEPTION_IDS`), which prose cannot trip. All consumed only as
     skip-sets, so the families can't cross-silence anything. Without a machine-readable escape a
@@ -238,13 +240,13 @@ def _exceptions(m: ProjectModel) -> set[str]:
     for body in extras_bodies(m, _EXCEPTIONS_HEADING):
         out.update(_EXCEPTION_IDS.findall(body))
         for line in body.splitlines():
-            hit = _LITERAL_LINE.match(line)
+            hit = LITERAL_LINE.match(line)
             if hit:
                 out.add(hit.group(1))
     return out
 
 
-#: A line that LOOKS like a scoped `runs_in` escape. Deliberately looser than `_LITERAL_LINE`,
+#: A line that LOOKS like a scoped `runs_in` escape. Deliberately looser than `LITERAL_LINE`,
 #: which only ever matches keys that are already recognised — so a typo'd key does not appear in
 #: `_exceptions` at all, silences nothing, and says nothing. The operator then believes the finding
 #: is adjudicated while `validate` goes on reporting it. Scoping replaced one short word with five

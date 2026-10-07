@@ -16,9 +16,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from coyomap.model import (BusinessRule, Component, Dep, DeploymentRow, Entity, Group,
+from coyomap.model import (BusinessRule, Component, Dep, DeploymentRow, Edge, Entity, Group,
                            EntryPoint, Interface, ProjectModel, RuleSite, UseCase)
-from coyomap.reconcile import SetDirective
+from coyomap.reconcile import KeepEdgeDirective, Reconcile, SetDirective, apply_reconcile
 from coyomap.reconcile_build import RuleError, coverage_report, expand, load_rules
 
 
@@ -902,3 +902,44 @@ def test_a_component_directive_round_trips_through_the_reconcile_file():
     rec = load_reconcile(json.dumps({"set": [{"ids": ["EP1"], "component": "C1"}]}), "test")
     assert rec.sets[0].component == "C1"
     assert rec.sets[0].assigned_fields() == ["component"]
+
+
+# --------------------------------------------------------------------------------------
+# a cut list says how many it left out (merge 5.4, 2026-10-07)
+# --------------------------------------------------------------------------------------
+# The id lists here ended on a bare `…`, and the keep_edges note on its own ` (+N more)`. They go
+# through `reporting.shown` now, whose tail counts what was left out, in the same words everywhere.
+
+def make_duplicated_edges(n: int) -> tuple[ProjectModel, Reconcile]:
+    """`n` calls, each declared at two lines, and a keep_edges directive per call keeping the
+    first line, so every directive drops one authored anchor."""
+    m = ProjectModel(title="T", goal="g")
+    m.components = [Component(id=f"C{i}", name=f"C{i}", source=f"src/c{i}.py:1")
+                    for i in range(1, n + 2)]
+    m.edges = [Edge(src=f"C{i}", verb="calls", dst=f"C{i + 1}", why="w", where=f"src/c{i}.py:{line}")
+               for i in range(1, n + 1) for line in (10, 20)]
+    rec = Reconcile(keep_edges=[KeepEdgeDirective(src=f"C{i}", verb="calls", dst=f"C{i + 1}",
+                                                  where=f"src/c{i}.py:10") for i in range(1, n + 1)])
+    return m, rec
+
+
+def test_the_keep_edges_note_counts_the_directives_it_does_not_name():
+    m, rec = make_duplicated_edges(7)
+    note = next(n for n in apply_reconcile(m, rec, {}) if "authored anchor(s) left the map" in n)
+    assert "C5 calls C6 kept src/c5.py:10 over src/c5.py:20; +2 more. If one of those" in note, note
+
+
+def test_a_rule_naming_ids_not_in_the_map_counts_the_ones_it_does_not_name():
+    _, report = expand(make_map(), [{"ids": [f"C{i}" for i in range(100, 111)], "runs_in": ["api"]}])
+    line = next(ln for ln in report if "id(s) are not in the map" in ln)
+    assert line.endswith(": C100, C101, C102, C103, C104, C105, C106, C107, +3 more"), line
+
+
+def test_the_coverage_report_counts_the_elements_it_does_not_name():
+    m = make_map()
+    m.components += [Component(id=f"C{i}", name=f"X{i}", source=f"x/{i}.py:1") for i in range(10, 22)]
+    out = coverage_report(m, {"set": []})
+    for head in ("16 component(s) still have no subsystem and match no rule: ",
+                 "16 component(s) have no runs_in and match no rule: "):
+        line = next(ln for ln in out if ln.startswith(head))
+        assert line == head + "C1, C2, C3, C4, C10, C11, C12, C13, C14, C15, +6 more", line

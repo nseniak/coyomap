@@ -18,9 +18,10 @@ Escalation: none on its own.
    regression sign: 1 or more UNSURE rows.
 
 2. expect: when the map ships more components than the harvest briefs budgeted, either the budget
-   leg reads "DISCLOSURE, not a request" over a `component-budget:` line naming both counts, or the
-   row is UNRECORDED and the lead answered it.
-   regression sign: a `granularity:` or other key-less line that settled the budget row.
+   leg reads "DISCLOSURE, not a request" over a `granularity:` or `component-budget:` line naming
+   both counts ("N shipped of M budgeted"), or the row is UNRECORDED and the lead answered it.
+   regression sign: a line that names neither count, or names only E or the band, that settled the
+   budget row.
 
 3. expect: every recorded 'Drift exceptions' line that matched no finding appears in the drift leg's
    advisories.

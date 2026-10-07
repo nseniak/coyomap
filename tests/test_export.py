@@ -17,6 +17,8 @@ Conventions: top-level test functions, no classes/fixtures (helpers are `make_*`
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -34,6 +36,7 @@ from urllib.request import urlopen
 import pytest
 
 from browser_harness import new_page
+from coyomap.viewer import export as export_mod
 from coyomap.viewer.export import ExportError, _safe_target, export_project, main
 from coyomap.viewer.serve import load_project
 
@@ -657,3 +660,43 @@ def test_the_served_map_redirects_its_bare_address_to_the_slash_form() -> None:
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+
+# --- a cut list says how many it left out (merge 5.4, 2026-10-07) ---------------------------------
+# The two lists of files left out named three and then a bare `…`, or nothing at all, so a publisher
+# could not tell three skipped files from three hundred. They go through `reporting.shown` now.
+
+def run_export(argv: list[str]) -> tuple[str, str]:
+    """(stdout, stderr) of one `coyomap export` run."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        main(argv)
+    return out.getvalue(), err.getvalue()
+
+
+def test_the_files_left_out_for_their_size_are_counted_past_the_third() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = make_mapped_repo(Path(td), "alpha",
+                                extra={f"big{i}.bin": "x" * 4096 for i in range(1, 6)})
+        original = export_mod.TEXT_MAX
+        export_mod.TEXT_MAX = 100       # everything but the tiniest file is now "too large"
+        try:
+            stdout, _ = run_export([str(root), "--out", str(Path(td) / "site")])
+        finally:
+            export_mod.TEXT_MAX = original
+    line = next(ln for ln in stdout.splitlines() if "left out for being over" in ln)
+    left_out = int(line.split()[0])
+    assert left_out > 3 and line.endswith(f", +{left_out - 3} more"), line
+
+
+def test_the_files_left_out_for_an_unsafe_path_are_counted_past_the_third() -> None:
+    """A name of 254 characters is a legal file, and one the export cannot write: the `.txt` it adds
+    takes the name past the 255 a file system allows, so each of these five is left out."""
+    with tempfile.TemporaryDirectory() as td:
+        root = make_mapped_repo(Path(td), "alpha",
+                                extra={"f" * 250 + f"{i}.py": "x = 1\n" for i in range(1, 6)})
+        _, stderr = run_export([str(root), "--out", str(Path(td) / "site")])
+    line = next(ln for ln in stderr.splitlines() if "left out for an unsafe path" in ln)
+    assert line.startswith("  5 file(s) left out for an unsafe path: "), line[:80]
+    assert line.endswith(f"{'f' * 250}3.py, +2 more"), line[-80:]

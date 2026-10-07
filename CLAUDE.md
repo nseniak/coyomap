@@ -337,6 +337,14 @@ design principles these come from)
 - **the skill** — what `make install` puts into the agent so `/coyomap` works.
 - **the tools** — the small programs the agent calls while building (indexing,
   code sizing, validation).
+- **lead agent** (the lead) — the main session that runs a build or an update: it reads
+  the method, starts the subagents, and writes and checks the map. Anthropic's term; the
+  Claude Code docs call it the main conversation. Its context window is finite: when it
+  fills, the harness replaces everything the lead has read with a summary, and the build
+  goes on from the summary.
+- **subagent** — an agent the lead starts for one job (harvest a slice, trace a use case,
+  check a batch of claims, review the refutations). It works in its own context and reports
+  back to the lead once. Anthropic's spelling, one word; older text here says "sub-agent".
 
 **Working on coyomap**
 

@@ -11,6 +11,7 @@ deliberately tiny and fixed (Phase-3 brief) —
   --edges <ID>     the backbone edges into / out of a node
   --members <ID>   a subsystem's / subdomain's member records (components + child subsystems,
                    entities + child subdomains)
+  --owners <path>  every component whose `files` holds a file
 
 It complements reading the map — ad-hoc lookups, change-impact spelunking, orchestration glue —
 and never replaces the whole-map read the rubric judge needs. Stdlib-only, read-only.
@@ -23,6 +24,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from coyomap.anchors import parse_anchor
 from coyomap.model import (
     Component,
     Entity,
@@ -37,6 +39,7 @@ from coyomap.model import (
     load_model,
     to_canonical_json,
 )
+from coyomap.validate_model import component_files
 
 _PREFIX = re.compile(r"^[A-Z]+")
 #: `SF` was missing, so `dump --id SF200` answered `"kind": "unknown"` about a sub-flow the map
@@ -296,11 +299,49 @@ def members_of(m: ProjectModel, gid: str) -> list[dict[str, object]]:
     return [asdict(elements[i]) for i in _group_member_ids(m, gid) if i in elements]  # type: ignore[call-overload]
 
 
+def _path_parts(cell: str | None) -> list[str]:
+    """A file path the way a tracer has it, as its `/`-separated parts, with a markdown link, a line
+    anchor and `./` dropped. Empty for a folder (`src/`): a folder holds no ONE file, the rule
+    `validate_model.component_files` keeps for the same reason."""
+    href = _href(cell)
+    if not href or href.endswith("/"):
+        return []
+    loc = parse_anchor(href)
+    return [part for part in (loc.path if loc else href).split("/") if part not in ("", ".")]
+
+
+def owners_of(m: ProjectModel, path: str) -> list[dict[str, object]]:
+    """The `--owners` slice: every component holding a file, with the path as the map writes it.
+    EVERY owner, never a pick: a file two components list returns both.
+
+    What a component holds is `validate_model.component_files`, the list `validate` gives a rule
+    site its components from, and the file comes back as that list spells it: for every file this
+    names, `validate` names the same owners. It used to read the component's `source` too, and
+    `source` is where a component LIVES: on the 2026-10-07 mcpolis map that named C24 "MCP door
+    guards" the owner of all of `app.py`, because C24 is mounted at line 354 of it, while `validate`
+    gives every rule site in `app.py` to C23 "Backend assembly" alone.
+
+    A tracer must name the component whose file a call sits in, and `dump` had no slice for it, so
+    on the 2026-10-07 mcpolis build 16 of the tracers' 44 hand-written map lookups were a `python3
+    -c` walk of every component's `files`. The path comes the way the tracer has it — repo-relative,
+    absolute off a `grep`, or a bare file name — so the shorter path must be the TAIL of the longer,
+    compared part by part: `app.py` finds `backend/app.py` and never `backend/webapp.py`."""
+    asked = _path_parts(path)
+    out: list[dict[str, object]] = []
+    for c in m.components:
+        for file in component_files(c):
+            parts = [part for part in file.split("/") if part not in ("", ".")]
+            n = min(len(asked), len(parts))
+            if n and asked[-n:] == parts[-n:]:
+                out.append({"id": c.id, "name": c.name, "file": file})
+    return out
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
 _USAGE = """usage: coyomap dump [<project-map.json> | --map <project-map.json>]
                     [--id <ID> | --record <ID> | --edges <ID> | --members <Sn|SDn|CAPn|BLKn>
-                     | --legend | --counts]
+                     | --owners <path> | --legend | --counts]
 
 Emit the parsed model as JSON — whole (no flag), or one FIXED slice:
   --id <ID>       resolve an id: kind, display name, canonical source, members
@@ -308,6 +349,10 @@ Emit the parsed model as JSON — whole (no flag), or one FIXED slice:
   --record <ID>   the element's full stored record
   --edges <ID>    the backbone edges into/out of a node: {"in": [...], "out": [...]}
   --members <ID>  a group's member records (subsystem / subdomain / capability / block)
+  --owners <path> which component owns a file: every component whose `files` lists it, as
+                  id · name · file (`source` is where a component lives, not a file it holds).
+                  The path may be repo-relative, absolute, or its tail (`app.py`); parts are
+                  compared whole, so `app.py` never finds `webapp.py`
   --legend        every element as id · name · kind · parent · source — the shared id universe a
                   fan-out needs (builds kept hand-writing this walk and handing it to sub-agents)
   --counts        how many rows each array holds — the whole inventory, not assemble's C/D/E subset
@@ -320,6 +365,8 @@ assembly (the help never said so, and a build spent a turn on `dump --help` find
 Read-only; complements reading the map, never replaces the whole-map read."""
 
 _SLICES = ("--id", "--record", "--edges", "--members")
+#: Slices that take a FILE PATH, not an element id.
+_PATH_SLICES = ("--owners",)
 #: Slices that take no argument — they describe the WHOLE map, not one element.
 _WHOLE_MAP_SLICES = ("--legend", "--counts")
 
@@ -336,10 +383,11 @@ def main(argv: list[str] | None = None) -> int:
         a = argv[i]
         if a in _WHOLE_MAP_SLICES:
             slices.append((a, ""))
-        elif a in _SLICES:
+        elif a in _SLICES or a in _PATH_SLICES:
             i += 1
             if i >= len(argv):
-                print(f"ERROR: {a} needs an element ID", file=sys.stderr)
+                needs = "a file path" if a in _PATH_SLICES else "an element ID"
+                print(f"ERROR: {a} needs {needs}", file=sys.stderr)
                 return 2
             slices.append((a, argv[i]))
         elif a == "--map":
@@ -356,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         i += 1
     if len(slices) > 1:
         print("ERROR: give at most ONE slice flag "
-              "(--id/--record/--edges/--members/--legend/--counts)", file=sys.stderr)
+              "(--id/--record/--edges/--members/--owners/--legend/--counts)", file=sys.stderr)
         return 2
     if len(positional) > 1:
         print(f"ERROR: give ONE map path, got {len(positional)}: {', '.join(positional)}",
@@ -385,6 +433,8 @@ def main(argv: list[str] | None = None) -> int:
         out = counts_of(m)
     elif flag == "--edges":
         out: object = edges_of(m, eid)
+    elif flag == "--owners":
+        out = owners_of(m, eid)
     elif flag == "--members":
         if _kind_of(eid) not in ("subsystem", "subdomain", "capability", "block"):
             print("ERROR: --members takes a group id — a subsystem (Sn), subdomain (SDn), "

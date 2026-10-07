@@ -171,9 +171,12 @@ lead; nothing above this line goes into an agent prompt.
 > - it is genuinely NOT a surface (a library the product embeds, a store it writes only to read
 >   back) → `not_an_interface: <why>`.
 > - it IS a surface and you can see which one → say so in `not_an_interface` as a POINTER, in
->   words: `"Not decided here — this is a surface; the id is minted at synthesis."` The lead reads
->   it as a candidate, not as an exclusion.
-> - **you do not know** → the same pointer, saying that. Do not guess either way.
+>   words that OPEN with `Not decided here`: `"Not decided here. This is a surface, because
+>   <why>. The id is minted at synthesis."` The lead reads it as a candidate, not as an exclusion,
+>   and `assemble` drops the pointer once synthesis links the dep to its surface: the opening words
+>   are how it knows a pointer from a reason.
+> - **you do not know** → the same pointer, with the same opening, saying that. Do not guess either
+>   way.
 >
 > **Never write a reason you do not believe.** An earlier draft of this paragraph said the answer is
 > "almost always `not_an_interface`", and an agent looking at a crash-reporting service — reports
@@ -196,7 +199,7 @@ lead; nothing above this line goes into an agent prompt.
 > | array | fields |
 > |---|---|
 > | `components` | **id**, **name**, **purpose**, **source**, kind, confidence, subsystem, entry_point, files, depends_on |
-> | `entry_points` | **kind**, **trigger**, **source**, activation, runs_in, cadence, cadence_source — NO `id`, `assemble` mints it |
+> | `entry_points` | **kind**, **trigger**, **source**, **component** (the `Cn` in this fragment that owns it; an owner in another slice goes in your reply), activation, runs_in, cadence, cadence_source — NO `id`, `assemble` mints it |
 > | `deps` | **id**, **name**, **kind**, type, used_for, where_configured, confidence, package, evidence, interfaces, not_an_interface |
 > | `observability` | **signal**, where_emitted, where_viewed, alerts |
 > | `config` | **key**, **purpose**, default, per_env |

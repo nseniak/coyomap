@@ -56,7 +56,11 @@ from coyomap.reconcile import (
     load_reconcile,
     validate_reconcile,
 )
-from coyomap.validate_model import rule_identity, unbacked_entity_steps
+from coyomap.validate_model import (
+    rule_identity,
+    unbacked_entity_steps,
+    undecided_interface_pointers,
+)
 from coyomap.whole_file import write_whole
 
 # Top-level NON-list fields, merged one-per-map with a conflict report. `grounding` belongs here:
@@ -139,6 +143,23 @@ def _derive_entity_edges(m: ProjectModel, stats: dict[str, int]) -> list[str]:
                             where=st.where, no_call_site=not bool(st.where)))
     stats["entity_edges_derived"] = len(chosen)
     return [f"{c} {v} {e}" for (c, e), (v, _st) in chosen.items()]
+
+
+def _drop_answered_interface_pointers(m: ProjectModel) -> list[str]:
+    """Clear the harvest pointer (`grammar.is_interface_pointer`) from every dep that now names its
+    surface. Returns their ids.
+
+    Synthesis links a dep to its surface through the reconcile file, and the pointer stayed beside
+    it: the dep then named an interface AND said why it is none, which `validate` blocks. The
+    2026-10-07 mcpolis lead deleted the field by hand from 7 deps. Only the POINTER goes: a real
+    reason beside a named surface is a contradiction for the lead to settle, and `validate` still
+    blocks on it."""
+    cleared: list[str] = []
+    for d in m.deps:
+        if d.interfaces and grammar.is_interface_pointer(d.not_an_interface):
+            d.not_an_interface = ""
+            cleared.append(d.id)
+    return cleared
 
 
 def load_fragment(text: str, label: str) -> ProjectModel:
@@ -1301,6 +1322,25 @@ def main(argv: list[str] | None = None) -> int:
               f"assemble did NOT apply it, so any subsystem/subdomain/runs_in/bucket/drop it holds is "
               f"absent from the written map. Re-run with `--reconcile {out_dir / 'reconcile.json'}`.",
               file=sys.stderr)
+    # THE HARVEST POINTER, once synthesis has answered it. After `--reconcile`, which is what links a
+    # dep to its surface, and on every assemble, because the fragment keeps the pointer.
+    cleared = _drop_answered_interface_pointers(model)
+    stats["interface_pointers_cleared"] = len(cleared)
+    if cleared:
+        print(f"note: dropped the harvest 'Not decided here' pointer from {len(cleared)} dep(s) "
+              f"that now name their surface: {_shown(cleared, 8)}")
+    if reconcile_path is not None:
+        # Only once synthesis has run: before it every pointer is undecided, and rightly so.
+        undecided = [d.id for d in undecided_interface_pointers(model)]
+        if undecided:
+            # Where the fragments ARE, never `<out>/build-fragments`: see `_fragments_folder`.
+            home = _fragments_folder(frags)
+            where = home if home is not None else "<the folder of the fragment that declares it>"
+            print(f"note: {len(undecided)} dep(s) still carry the harvest 'Not decided here' "
+                  f"pointer and name no surface: {_shown(undecided, 8)}. Decide each one: link it "
+                  f"to its surface (`interfaces` in the reconcile file), or replace the pointer "
+                  f"with the reason it is none (`coyomap fix row --fragments {where} --id <Dn> "
+                  f"--set-not-an-interface \"<why>\"`).", file=sys.stderr)
     from coyomap.views import model_to_markdown
 
     _stamp_tool_build(model)
@@ -1335,6 +1375,13 @@ def main(argv: list[str] | None = None) -> int:
     # TWO LINES, both runnable. The premise of naming the next verb is that a build pastes these
     # literally, so a parenthetical inside the command (`coyomap ship . (prepare)`) is a shell
     # parse error dressed as advice. `out_dir.parent` is `.` under the documented `--out .coyomap`.
+    # ONLY for a map in a `.coyomap` folder: `ship <repo>` closes `<repo>/.coyomap`, so for any other
+    # `--out` the lines named a repo whose map is another one, or none (the same review as
+    # `_fragments_folder`: `--out <dir>/out` was told `coyomap ship <dir>`).
+    if out_dir.name != ".coyomap":
+        print(f"      (`coyomap ship <repo>` closes the map at <repo>/.coyomap, so it does not close "
+              f"the map at {out_dir})")
+        return 0
     print(f"      then, once the verdicts are in — PREPARE, read the report it ends on:")
     print(f"        coyomap ship {out_dir.parent}")
     print(f"      then FINISH, with the note you wrote from that report:")
@@ -1370,6 +1417,7 @@ _STATS_LABELS: tuple[tuple[str, str], ...] = (
     # reads when the warning above has scrolled away.
     ("keyed_row_contradictions", "config/observability keys left unsettled (every answer kept)"),
     ("extras_sections_merged", "extras sections merged"),
+    ("interface_pointers_cleared", "harvest interface pointers cleared"),
 )
 
 #: The same contract for the `--reconcile` counters, which live in a second dict built by
@@ -1444,6 +1492,21 @@ def _stamp_tool_build(model: ProjectModel) -> None:
     # reader which tool produced the map.
     model.tool_commit = git_value(home, "describe", "--always", "--dirty", "--abbrev=7")
     model.tool_committed = git_value(home, "log", "-1", "--format=%cd", "--date=short")
+
+
+def _fragments_folder(frags: list[Path]) -> Path | None:
+    """The one folder the fragments were read from, for a command that edits them: a directory
+    argument is that folder, a file argument the folder that holds it (`expand_directories` decides
+    which is which). None when they came from more than one folder, so the command names no folder
+    rather than the wrong one.
+
+    Never `<out>/build-fragments`: `--out` says where the map is WRITTEN, and the fragments may sit
+    anywhere. Built from `--out`, the undecided-pointer note sent an assemble with `--out <dir>/out`
+    to edit `<dir>/out/build-fragments`, a folder that did not exist (the review of the 2026-10-07
+    fixes)."""
+    folders = {p.parent.resolve(): p.parent for p in expand_directories(frags, [])}
+    return next(iter(folders.values())) if len(folders) == 1 else None
+
 
 def _unconsumed_fragment_notes(out_dir: Path, consumed: list[Path]) -> list[str]:
     """Warn about fragments sitting in `<out>/build-fragments/` that were NOT passed to assemble — a

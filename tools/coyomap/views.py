@@ -40,6 +40,7 @@ from coyomap.validate_model import (
     capability_elements,
     completeness_counts,
     component_file_owners,
+    component_files,
     capability_audience,
     element_capabilities,
     interface_actors,
@@ -140,10 +141,16 @@ def _bare_local_file(href: str | None) -> str | None:
 
 
 def _component_files(c: Component) -> list[str]:
-    """A component's owned files as bare repo-relative paths — the canonical `source` file first,
-    then the rest of `files`, deduped. This is the list the code-viewer switcher pages through."""
+    """The list the code-viewer switcher pages through, as bare repo-relative paths: the file the
+    component's `source` names first, then every file it HOLDS (`validate_model.component_files`,
+    the answer `validate` and `dump --owners` read), each once.
+
+    `source` leads for DISPLAY, not ownership: selecting a component opens its `source` at its line,
+    and the switcher must list the file on screen. A component can live in a file it does not hold
+    (C24 "MCP door guards" sits at `app.py:354` on the 2026-10-07 mcpolis map, in C23's file), and
+    the components the viewer gives a rule site come from `site_components`, never from this list."""
     out: list[str] = []
-    for f in ([_bare_local_file(c.source)] + [_bare_local_file(f) for f in c.files]):
+    for f in [_bare_local_file(c.source), *(_bare_local_file(p) for p in component_files(c))]:
         if f and f not in out:
             out.append(f)
     return out

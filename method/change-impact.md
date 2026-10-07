@@ -269,6 +269,24 @@ entry, or waive with a `why` — and costs nothing else: the map on disk has not
 the gate simply run again. Step 6's check should find nothing step 5 did not; if it does, the map on
 disk is not the one the log was gated on.
 
+**A problem the map had before the log.** `lint` validates the map the log leaves behind, so it
+also refuses a problem the map already had: an update must leave a map that validates, whoever
+broke it. Lint says so at the front of the line: `the map would not validate after apply, and did
+not before this log either: …`. Nothing in your entries caused it. Clear it in the log like any
+other change, with an entry that names the box and edits the field. Two shipped maps meet one at
+their next update: a dependency whose reason is still the harvest's pointer, `D11 (nginx) still
+gives the harvest pointer ('Not decided here …')` (mcpolis: D11 and D13; reminderrepo: D32 and
+D33). Decide it: if it is no surface, an entry naming `D11` makes the edit
+
+```json
+{"id": "D11", "key": "not_an_interface", "was": "Not decided here. nginx fronts every web surface, …", "now": "A proxy in front of the product's own surfaces, with none of its own."}
+```
+
+where `was` is the field exactly as `coyomap dump --record D11` prints it. If it belongs to a
+surface, the entry sets `interfaces` (`"was": [], "now": ["I1"]`) and removes the pointer
+(`"key": "not_an_interface"`, `"now": null`). The problem also names `coyomap fix row --fragments
+…`: that is the way during a build, and it edits fragments an update never reads.
+
 **What counts as a box for the rule.** Every row with an id; a keyed row under a synthetic id
 (`glossary:<term>`, `run:<action>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
 `net:<name>`); the map's own header under `map` (its `title`, `goal` and the other header fields —

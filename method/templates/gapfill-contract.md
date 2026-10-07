@@ -36,6 +36,8 @@ already cost a re-run.
 >
 > **The id legend is at «LEGEND».** Read it before you write a single id. Every id you use must
 > already exist there; an id you invent dies at the lead's `assemble`, after you are gone.
+> `«COYOMAP_HOME»/.venv/bin/coyomap dump «REPO»/.coyomap/project-map.json --owners <file>` names
+> every component that owns a file; never search the map with a script of your own.
 >
 > Read the code these gaps run through, then produce ONLY the rows your jobs name. The one file you
 > may write is your own fragment. **Do this work yourself — do NOT spawn sub-agents, and do NOT write

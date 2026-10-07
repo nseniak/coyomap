@@ -454,6 +454,28 @@ coyomap-eval cost <prev-transcript> --map <archive>/project-map.json
 
 Wall time, tokens, and both PER ROW of map produced, plus the straggler waste in each fan-out.
 
+**Read the CONTEXT block first, before anything else in that output.** It gives the lead's context at
+its first turn and at its peak, and every time the harness replaced the lead's whole context with a
+summary (`!! COMPACTED … turn N: before -> after tokens`), read off the `compact_boundary` records.
+A build that ran as a sub-agent keeps that record in its own file: profile that file with
+`--include-sidechains`, or the block is blind to it.
+
+**A compaction of the lead during the build is ALWAYS a HIGH finding**, ranked with the HIGH
+findings whatever harm is visible, and it leads `Process signals`. The summary drops what it judges
+detail, a flag, a recorded decision, a method rule, and the build goes on as if it still held them:
+nothing marks what was lost, so a defect of that kind can reach a shipped map unnoticed, which is
+the HIGH definition below. For the finding:
+- read the summary itself (the `isCompactSummary` record right after the boundary) beside the turns
+  before it, and name what it dropped;
+- list every action after it that a dropped detail explains: a verb run without a flag it used to
+  pass, a method rule not followed, a number restated wrongly;
+- break the peak down by source (sub-agent reports and the harness text around them, method docs
+  read, the lead's own commands, file reads, tool outputs), because the fix is in the biggest one.
+
+A peak flagged `!  near the point where the harness compacts` with no compaction is a MED finding:
+the next build of that size will not fit. A compacted SUB-AGENT (`sub-agents compacted:`) is a
+finding about that agent's slice and ranks like any other.
+
 **PROPOSE this build's line for the Cost log in `backlog.md`, written out ready to paste** —
 the report-only rule covers the backlog, and this step used to say "append", which contradicted it
 twice over (the opening rule and Step 6's). The durability decision of 2026-08-27 stands: the
@@ -479,7 +501,8 @@ seconds; it cannot promise the operator will not come back to that window while 
 / 3.4 MB by the time the findings were written, and an unbounded `cost` re-run then covered 42 turns
 of unrelated scratch work. Turn INDICES are stable — records only ever append — so findings keep
 their turn numbers and nothing has to be redone. Note the last build turn once (the `finalize` or
-commit turn), pass `--to-turn` on every `cost` and `process` run, and say in the report which
+commit turn), pass `--to-turn` on every `cost` and `process` run (and the same `--from-turn` to
+both when the build began mid-session), and say in the report which
 snapshot the numbers describe.
 
 **Note the transcript's turn count now** (`coyomap-eval transcript <t> --stats`) so Step 6 can tell
@@ -658,7 +681,9 @@ the minutes it spent.
   the only one of the three tags that describes the BUG rather than the fix. HIGH: the map ships
   something false or unverified, or a defect of that kind can reach a shipped map unnoticed. MED:
   the map is not wrong, but a signal was lost, work was redone, or a measurement that future
-  decisions rest on is wrong. LOW: friction, cost or hygiene, and the map is unaffected either way;
+  decisions rest on is wrong. LOW: friction, cost or hygiene, and the map is unaffected either way.
+  A compaction of the lead during the build is HIGH by this definition, never lower (`What it
+  cost`, the CONTEXT block);
 - **`fix_class`** — `HARD | SOFT | HARD / SOFT`. **Whether there is one right answer.** HARD: the
   defect is deterministic and the fix is exact, a machine can tell whether it landed, and a
   regression test can hold it. SOFT: the fix is a judgement — a threshold, a wording, a prompt, a
@@ -827,7 +852,8 @@ Write `.coyomap-eval/retro/<ts>/report.md` and summarise it in chat. Structure:
 # Retrospective — <project> build of <built_at> (session <id>)
 
 ## What this covers
-the map, the transcript, and what could NOT be assessed
+the map, the transcript, and what could NOT be assessed · the lead's context: first and peak
+tokens and every compaction, from `cost`'s CONTEXT block (say "0 compactions" when there were none)
 
 ## Carried forward
 landed and worse FIRST · landed but ineffective · open and worsening · open, reproduced
@@ -844,7 +870,8 @@ blocking problems · advisories surviving · components vs E · grounding covera
 · deltas vs the previous map
 
 ## Process signals
-every L3 assertion the scorecard printed, with the diff against the previous build
+a compaction of the lead FIRST, when there was one · every L3 assertion the scorecard printed,
+with the diff against the previous build
 
 ## Findings
 FIRST a `Findings at a glance` table — one row per finding, columns

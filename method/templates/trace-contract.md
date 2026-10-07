@@ -128,6 +128,8 @@ lead; nothing above this line goes into an agent prompt.
 >        the cart screen whose Pay button sends the order.
 >     4. **A neighbour's call** — a step given to a component because it sits in the same folder or
 >        subsystem as the one that makes the call. `where` must be in the `src` component's own files.
+>        `«COYOMAP_HOME»/.venv/bin/coyomap dump «REPO»/.coyomap/project-map.json --owners <file>`
+>        names every component that owns a file; never search the map with a script of your own.
 >   For example, `orders.py:40` calls `billing.charge()`, whose line 12 calls `stripe.charge()`: the
 >   steps are `orders → billing` at `orders.py:40` and `billing → Stripe` at `billing.py:12`. Not
 >   `billing → orders` (reversed), not `orders → Stripe` (the skipped middle).

@@ -8,9 +8,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from coyomap import lint_fragment
+from coyomap import lint_fragment, reporting
 from coyomap.assemble import load_fragment
 from coyomap.model import ProjectModel
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 def make_fragment(obj: dict) -> ProjectModel:
@@ -898,11 +900,16 @@ def make_door_fragment_files(tmp: Path) -> tuple[Path, Path]:
     return frag, legend
 
 
-def lint_output(args: list[str]) -> str:
+def lint_run(args: list[str]) -> tuple[int, str]:
+    """`lint-fragment` in-process: its exit code, and everything it printed on both streams."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        lint_fragment.main(args)
-    return out.getvalue() + err.getvalue()
+        code = lint_fragment.main(args)
+    return code, out.getvalue() + err.getvalue()
+
+
+def lint_output(args: list[str]) -> str:
+    return lint_run(args)[1]
 
 
 def test_the_agent_sees_a_door_nobody_stands_at_once_the_map_says_the_door_is_ours():
@@ -913,3 +920,83 @@ def test_the_agent_sees_a_door_nobody_stands_at_once_the_map_says_the_door_is_ou
         frag, legend = make_door_fragment_files(Path(td))
         assert "Doors nobody stands at: UC1 step 1 (C4 → I1 → C3)" in lint_output([str(frag), "--ids", str(legend)])
         assert "Doors nobody stands at" not in lint_output([str(frag)])
+
+
+# --- every list the lint cuts can be printed whole (retro 2026-10-07, finding 24) -------------------
+# Turn 230 of the 2026-10-07 mcpolis build: the lint named 3 of 10 long sentences and `+7 more
+# field(s)`, nothing printed the other seven, and the next turns split sentences found by hand.
+
+def make_long_purpose_fragment(tmp: Path, n: int) -> Path:
+    """A harvest fragment whose `n` components each carry one 25-word purpose."""
+    purpose = " ".join(["word"] * 24) + " end."
+    return make_fragment_file(tmp, "h1.json", {"components": [
+        {"id": f"C{i}", "name": f"Part {i}", "purpose": purpose, "source": f"src/p{i}.py:1"}
+        for i in range(1, n + 1)]})
+
+
+def test_all_prints_every_long_sentence_the_default_cuts_to_three():
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_long_purpose_fragment(Path(td), 10)
+        code, cut = lint_run([str(frag)])
+        assert code == 0, cut
+        line = next(ln for ln in cut.splitlines() if "with a long sentence" in ln)
+        assert "+7 more field(s)" in line, line
+        assert "--all" in cut, "a cut list must say how to see the rest"
+        code, whole = lint_run(["--all", str(frag)])
+        assert code == 0, whole
+        line = next(ln for ln in whole.splitlines() if "with a long sentence" in ln)
+        assert all(f"C{i} purpose" in line for i in range(1, 11)), line
+        assert "more field" not in line and "--all" not in whole, whole
+    assert not reporting.full_lists(), "--all must not outlive the run that asked for it"
+
+
+def test_the_lints_own_hand_cut_lists_follow_all_too():
+    """Two lists in this file were cut by hand, `[:12]` and `[:6]` then ` …`, which whole-list mode
+    cannot reach: `--all` would have printed every list but these two."""
+    m = make_fragment({
+        "rules": [{"id": f"BR{i}", "name": f"Rule {i}", "statement": "A member may not do it.",
+                   "access": True, "sites": [{"where": f"src/a.py:{i}"}]} for i in range(1, 15)],
+        "components": [{"id": f"C{i}", "name": f"Part {i}", "source": f"src/p{i}.py:1",
+                        "runs_in": ["backend"]} for i in range(1, 9)]})
+    try:
+        reporting.reset_full_lists()
+        cut = (lint_fragment._access_rule_risk_problems(m)
+               + lint_fragment._authored_runs_in_warnings(m))
+        reporting.set_full_lists(True)
+        whole = (lint_fragment._access_rule_risk_problems(m)
+                 + lint_fragment._authored_runs_in_warnings(m))
+    finally:
+        reporting.reset_full_lists()
+    assert "BR14" not in cut[0] and "BR14" in whole[0], whole[0]
+    assert "C8" not in cut[1] and "C8" in whole[1], whole[1]
+
+
+# --- a way in names the component that owns it (retro 2026-10-07, finding 8) ------------------------
+# The harvest contract's field table listed no `component` for `entry_points`, so 51 of 221 ways in
+# came back from the 2026-10-07 mcpolis harvest with no owner, and the lead filled 45 of them by
+# hand. `validate` warns on an unowned way in; the slice that harvested it holds its owner.
+
+def test_a_way_in_that_names_no_owning_component_is_an_advisory():
+    m = make_fragment({
+        "components": [{"id": "C1", "name": "Routes", "source": "src/routes.py:1"}],
+        "entry_points": [
+            {"kind": "http-route", "trigger": "GET /teams", "source": "src/routes.py:3",
+             "activation": "external"},
+            {"kind": "job", "trigger": "nightly cleanup", "source": "src/routes.py:9"},
+            {"kind": "http-route", "trigger": "GET /members", "source": "src/routes.py:5",
+             "component": "C1", "activation": "external"}]})
+    assert not [p for p in lint_fragment.lint_fragment_problems(m, None) if "owning" in p]
+    warnings = lint_fragment.lint_fragment_warnings(m)
+    lines = [w for w in warnings if "owning `component`" in w]
+    assert len(lines) == 1, warnings
+    assert lines[0].startswith("2 way(s) in"), lines[0]
+    assert "GET /teams" in lines[0] and "nightly cleanup" in lines[0], lines[0]
+    assert "GET /members" not in lines[0], lines[0]
+
+
+def test_the_harvest_contract_asks_for_the_owning_component():
+    """The lint asks for a field, so the field table the agent authors from must list it."""
+    contract = (REPO / "method" / "templates" / "harvest-contract.md").read_text(encoding="utf-8")
+    row = next(ln for ln in contract.splitlines()
+               if ln.startswith("> | `entry_points` |") and "**trigger**" in ln)
+    assert "component" in row, row

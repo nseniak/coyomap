@@ -231,6 +231,24 @@ every build, the prose surface on request — landed `a080fc3`) and 8 (the acces
 function now, and the 19 lost files are answered under question 7 below). **Still open, as
 recorded:** 26, 29 and 30, the method-wording rows.
 
+### Landed 2026-10-07 — from the mcpolis build of 2026-10-07 01:11 (session `d55942be`, retro `2026-10-07_0903`)
+
+**Decided 2026-10-07 by the operator:** the 11 low-risk tool fixes (findings 1, 4-10, 21, 23, 24),
+finding 14 raised to HIGH with a compaction of the lead made a HIGH finding in every retro, and the
+5 shared-code merges the fixes turned up. Fixed on branch `claude/retro-fixes-2026-10-07`, each with
+a test and a check file under `method/retro-checks/2026-10-07-*.md`, then reviewed by an
+independent sub-agent before landing.
+
+| what | evidence |
+|---|---|
+| Gate lines survive a cut: the access-baseline advisory counts first and names one lost file per line; finalize's budget leg accepts the granularity line method.md names; five self-contradicting messages corrected | findings 1, 6, 23 · `2026-10-07-a-gate-list-survives-a-cut.md` |
+| The closer's brief splits into numbered parts above 40,000 characters; the slot check names every source file in no component slice, not only scripts | findings 4, 7 · `2026-10-07-the-closer-brief-fits-one-read-and-every-source-file-is-in-a-component-slice.md` |
+| `record` refuses a positional, an unknown option and a repeated one-value flag, and refuses to write the assembled map while the build's fragments sit beside it, naming the extras fragment to write instead (`--no-reassemble` to override); `assemble` clears the harvest pointer once a dep is linked to a surface; the harvest contract asks each way in for its component and `lint-fragment` warns when one has none | findings 5, 8, 24 · `2026-10-07-record-writes-the-named-fragment-and-harvest-rows-arrive-whole.md` |
+| `validate` reads a count only when it counts the kind; `fix` refusals name the fragment files; `timings record --phase tests`; `coyomap dump --owners <file>` | findings 21, 23, 24 · `2026-10-07-validate-reads-only-totals-and-dump-names-a-files-owner.md` |
+| `coyomap-eval transcript` renders every hand-back, as a message or a queued attachment, without shifting a turn number; assertion 9 reads the last finalize disposition | findings 9, 10 · `2026-10-07-every-hand-back-renders-and-assertion-9-reads-what-shipped.md` |
+| A compaction of the lead is always a HIGH finding: `cost` prints a CONTEXT block, assertion 41 scores it, `eval/retro/method.md` ranks it | finding 14, the flag only: shrinking what fills the lead's context stays open · `2026-10-07-a-compaction-of-the-lead-is-always-a-high-finding.md` |
+| Shared code: one list of a component's files (`dump --owners` now answers as `validate` does), one check for a way in's live owner, one rule for the files E counts, one printer for a cut list (22 lists now end on `+N more`), and `validate` blocks a dep still giving the harvest pointer as its reason | `2026-10-07-dump-owners-and-validate-read-one-list-of-a-components-files.md`, `2026-10-07-a-cut-list-says-how-many-it-left-out.md`, `2026-10-07-validate-refuses-the-undecided-interface-pointer.md` |
+
 ## Open — tools
 
 What is still open. Landed items move to the table above, with the commit. `scope` here means
@@ -245,6 +263,7 @@ what the change would have to read.
 | 44 | **`compare` gates a metric that stops being measurable** — **OPEN** | A metric numeric in the BASELINE and `None` in the CANDIDATE is REGRESSED. Why a gate and not a band: `rules` is written `len(...) or None`, so a section that DISAPPEARS reads `None`, the band demotes to a buried note and the verdict stays PASS. A shrink band catches 88 rules → 20; nothing catches 88 rules → the section is gone, and that is the worse failure. Scope: the 38 `int \| None` / `float \| None` fields of `MapProfile`, the same numeric population the band loop already walks; not opt-in, and it needs no band configured — the point is that no band can see this. Skip: candidate key ABSENT (rather than present and null) means the candidate predates the field. **Blast radius, measured 2026-09-14: 0 trips across 17 real baseline→candidate pairs, and 0 of 38 fields `None` on the four live maps. All 21 explicit nulls in 44 archived profiles are BASELINE-side — the layer being ADOPTED, which this gate ignores by construction — so the skip is a footnote, not the design.** Risk to name in review: `unclaimed_entry_points`, `entities_in_flows` and `edges_per_component` are `None` for a legitimate "not computable" reason, so a candidate that traced nothing trips the gate. That IS a regression, but it would be reported as "the entities-in-flows layer disappeared" when the cause is "this build traced nothing" — a clearer message for that shape, not an exemption. |
 | 45 | **The L3 corpus cannot be re-pinned to the data it was built on** — **OPEN** | All nine `test_process_corpus.py` tests assert a `base`-vs-`post` adoption comparison across 2026-07-29 builds, and those nine transcripts have evaporated from `~/.claude/projects/`. Re-pinning is not editing paths, it is rewriting nine assertions around different questions. **Recommendation from the batch that found it: commit two or three hand-trimmed transcripts as fixtures beside `eval/fixtures/transcript/build.jsonl` and pin them the way `FIXTURE_SCORES` is pinned, rather than re-pointing `CORPUS` at more files under `~/.claude/projects/`** — that directory is exactly what lost the first nine. A design call about the instrument, not a bug fix. The gate itself is now loud (asked-for-and-absent fails, un-asked skips visibly). |
 | 46 | **Two weak siblings of the assertion-12 `elif` class** — **OPEN** | `process_scorecard.py:721` — assertion 4 labels a call that runs both `finalize` and `anchor-drift` as `finalize` only. `process_scorecard.py:826` — assertion 7 credits a call that runs `coyomap reconcile` AND separately hand-writes a `reconcile.json`. Both lose a fact rather than a measurement and both err toward UNDER-reporting, which the module's own rule permits — recorded so they are not re-found. The rest of the class was swept clean: no other `max(…, default=…)` invents an owner, every other splitter splits on all operators, and the two remaining `[^)]*` patterns start immediately inside `open(`. |
+| 47 | **The agent-findings collector cannot read this harness's hand-backs** — **OPEN** | From the 2026-10-07 mcpolis retro, finding 12. `grounding.agent_findings()` reads assistant text, but since the 2026-09-30 build every agent hands back through a `SubagentHandback` tool call: 126 of 126 on the 2026-10-07 build, 119 of 119 on the one before, 0 of 79 on 2026-09-08. "FINDINGS THE AGENTS SENT UP" printed 0 on both, while the 2026-10-07 lead hand-collected 57 findings from 27 agents. Read from the call, all 126 hand-backs arrive, but sections go only 0 → 1, because agents write plain lead-ins rather than the `##` headings the matcher wants. **Fix this before asking helpers for shorter reports** (finding 14's remedy): the reports are the channel that carried the build's two most important product findings. | `grounding.py` (`agent_findings`, `_final_message`: read the `SubagentHandback` call) and the hand-back section of every contract (one heading every agent uses) |
 
 ---
 
@@ -454,16 +473,20 @@ folder. These are the parked ones, with who can answer them.
 
 | # | question | owner | raised |
 |---|---|---|---|
-| 1 | Do the 44 access rules of the 2026-08-17 mcpolis map SAY what the previous map's 50 said? The deterministic half is answered — the two maps share 25 % of their enforcement lines, 17 files lost their coverage and 16 gained it, so it is neither a clean merge nor a clean loss. What no deterministic check can settle is whether the surviving statements cover the same decisions. | `/coyomap-eval` (judges) | 2026-08-17 |
+| 1 | Do the 44 access rules of the 2026-08-17 mcpolis map SAY what the previous map's 50 said? The deterministic half is answered — the two maps share 25 % of their enforcement lines, 17 files lost their coverage and 16 gained it, so it is neither a clean merge nor a clean loss. What no deterministic check can settle is whether the surviving statements cover the same decisions. **Narrowed 2026-10-07 — see below.** | `/coyomap-eval` (judges) | 2026-08-17 |
 | 2 | Which of the 17 files that lost access coverage hold enforcement the map should still be claiming? Two were verified by hand as real — a sign-in signature check and a credential encryption call — and one old anchor was a config constant rather than enforcement. The remaining fourteen are unread. | a human, or a targeted skeptic pass | 2026-08-17 |
 | 3 | ~~What actually causes the access enforcement-line churn?~~ **ANSWERED 2026-08-29 — see below** | the next build | 2026-08-19 |
-| 4 | Do the 47 access rules of the 2026-08-18 map say what the previous map's 44 said? Same shape as question 1, for the newer pair: 50 shared enforcement lines of a 181-line union, 17 files lost, 11 gained. | `/coyomap-eval` (judges) | 2026-08-19 |
+| 4 | Do the 47 access rules of the 2026-08-18 map say what the previous map's 44 said? Same shape as question 1, for the newer pair: 50 shared enforcement lines of a 181-line union, 17 files lost, 11 gained. **Narrowed 2026-10-07 — see below.** | `/coyomap-eval` (judges) | 2026-08-19 |
 | 6 | ~~Is the four-build "0 verdict disagreements" record evidence, or an artefact of a contract that named one repo's answer to every skeptic of that repo?~~ **ANSWERED 2026-09-09 — see below** | one skeptic wave | 2026-09-08 |
-| 7 | ~~Which of the 19 files that lost access coverage on the 2026-09-08 mcpolis map hold enforcement the map should still be claiming?~~ **ANSWERED 2026-09-09 — see below.** Nine are OAuth or token handling (`pending_auth.py`, `oauth_refresh.py`, `tool_router.py`, `upstream_oauth_callback.py` among them); the list is in that retro's run directory. Fourth build parked on this shape; `ship` now runs the leg that names them before the commit. | a targeted skeptic pass, or a human | 2026-09-08 |
-| 5 | Is one refuted-claim-in-the-map a pattern? `grounding report`'s `REFUTED BUT NOT SUPERSEDED` section found two on the 2026-08-18 map, both from a reconcile that corrected one copy of a row and left another. Nobody has looked at an older map with the same command. | anyone, one command per archived map | 2026-08-19 |
+| 7 | ~~Which of the 19 files that lost access coverage on the 2026-09-08 mcpolis map hold enforcement the map should still be claiming?~~ **ANSWERED 2026-09-09 — see below.** Nine are OAuth or token handling (`pending_auth.py`, `oauth_refresh.py`, `tool_router.py`, `upstream_oauth_callback.py` among them); the list is in that retro's run directory. Fourth build parked on this shape; `ship` now runs the leg that names them before the commit. **2026-10-07:** BR204, the P1 decision that answer says the map owes, lost every cited file again (see the narrowing below, and question 14). | a targeted skeptic pass, or a human | 2026-09-08 |
+| 5 | Is one refuted-claim-in-the-map a pattern? `grounding report`'s `REFUTED BUT NOT SUPERSEDED` section found two on the 2026-08-18 map, both from a reconcile that corrected one copy of a row and left another. Nobody has looked at an older map with the same command. **Re-opened 2026-10-07, not answered:** on the 2026-10-07 mcpolis map 3 refuted claims were kept on appeal, and 1 of them (C142) contradicts the code. | anyone, one command per archived map | 2026-08-19 |
 | 8 | Of the **25 saved records no flow reaches** on the reminderrepo map, how many are genuinely unreachable (a record the product keeps for something no use case covers) and how many are a MISSING WALK STEP (the flow does touch them and nobody wrote the step)? The two have opposite fixes: the first is a recorded line, the second is a re-trace. One recorded line under the unstoried heading answers all 25 at once, which is exactly why nobody has separated them. | a targeted skeptic pass, or a human | 2026-09-13 |
 | 9 | Is a map's Data section **readable to a non-coder** when 52 of 59 record names are class names (`WeeklyMultipleRequestTypeWithIntervalEndWithOccurence`, `NotificationSecurityData`)? This is NOT the accuracy question — every one of those rows is correct and carries a good plain-language `meaning` beside it. It asks whether a reader who does not read code can use the section at all. The naming rule landed in the T5 addendum on 2026-09-13; `method/retro-checks/2026-09-13-an-entity-name-is-the-readers-word.md` counts the names, and this question is the half a count cannot answer. | `/coyomap-eval` (judges), or a human at the viewer | 2026-09-13 |
-| 10 | Has the **`unverifiable` verdict ever been used on a REAL repository**? 0 of 2,970 challenged claims across four real project maps (reminderrepo 0 of 946, coyomap's own 0 of 728, mcpolis 0 of 842, argus 0 of 454); 3 of 153 on the Trapdoor planted-defect corpus (`/Users/nitsanseniak/Projects/coyodex-test-project/.coyomap/`), each with a substantive note saying what the skeptic read and why it could not settle the claim. **The verdict is reachable and the contract does make it usable** — `method/templates/skeptic-contract.md:115-121` carries the WARNING against defaulting to refuted, and Trapdoor shows it works. So the question is whether a real repo genuinely settles every claim, or whether a skeptic facing real code reaches for confirmed/refuted rather than admit it cannot tell. Trapdoor is the instrument that could separate them, because it is the one place the verdict has fired. | one skeptic wave designed to produce one on a real repo | 2026-09-13 |
+| 10 | ~~Has the **`unverifiable` verdict ever been used on a REAL repository**?~~ **ANSWERED 2026-10-07 — see below.** 0 of 2,970 challenged claims across four real project maps (reminderrepo 0 of 946, coyomap's own 0 of 728, mcpolis 0 of 842, argus 0 of 454); 3 of 153 on the Trapdoor planted-defect corpus (`/Users/nitsanseniak/Projects/coyodex-test-project/.coyomap/`), each with a substantive note saying what the skeptic read and why it could not settle the claim. **The verdict is reachable and the contract does make it usable** — `method/templates/skeptic-contract.md:115-121` carries the WARNING against defaulting to refuted, and Trapdoor shows it works. So the question is whether a real repo genuinely settles every claim, or whether a skeptic facing real code reaches for confirmed/refuted rather than admit it cannot tell. Trapdoor is the instrument that could separate them, because it is the one place the verdict has fired. | one skeptic wave designed to produce one on a real repo | 2026-09-13 |
+| 11 | Do other shipped claims **contradict evidence the lead held**? Two did on the 2026-10-07 mcpolis map: UC40's outcome, and C142 kept on appeal (finding 3 of that retro). | a human, reading the build's findings file against the map line by line | 2026-10-07 |
+| 12 | Did any of the **13 appeals judged without their map rows** go wrong? The 2026-10-07 closer read about a third of its 62,130-token brief and judged 13 of 28 appeals with no map rows shown (finding 4; the brief now splits into parts). | one closer re-run with a paged brief | 2026-10-07 |
+| 13 | Do the **18 caveat notes whose claims shipped unchanged**, and the concern notes, hide more defects like BR25? BR25 was confirmed by all 3 security voters, each noting that the check is skipped when the team's runtime is not cached (finding 2). | a targeted pass over those notes | 2026-10-07 |
+| 14 | Which of the **20 files that lost access coverage** on the 2026-10-07 mcpolis map hold decisions the map should still claim? 6 previous access rules lost every cited file (BR201, 202, 204, 205, 206, 208); the lead opened 0 of the 20 files. | a targeted skeptic pass, as for question 7 | 2026-10-07 |
 
 
 ### Answered 2026-08-29 — question 3, the enforcement-line churn
@@ -585,6 +608,23 @@ elsewhere rather than lost. The 2026-08-29 answer to question 3 ("mostly placeme
 not hold on this pair. Questions 1 and 4 stay open on their own terms (whether the surviving
 statements cover the same decisions), but the number to judge them by is now the function one.
 
+### Narrowed 2026-10-07 — questions 1, 4 and 7
+
+On the previous → 2026-10-07 mcpolis pair, `compare` reads enforcement-function agreement at 90 of
+162 (55 %) and line agreement at 105 of 299 (35 %), up from 38 % and 28 % on the 2026-09-08 pair.
+The loss did not shrink: 6 previous access rules lost every cited file (BR201, 202, 204, 205, 206,
+208), and BR204 is the P1 decision the answer to question 7 says the map owes. The likeliest
+mechanism is finding 11 of that retro: files the lead's seed lists left out lost their rules 16 of
+25 times, seeded files 4 of 34. Questions 1 and 4 stay open on their own terms; question 14 asks
+which of the 20 lost files still hold decisions.
+
+### Answered 2026-10-07 — question 10, `unverifiable` on a real repository
+
+Yes. 19 of 2,086 challenged claims got `unverifiable` on the previous mcpolis build, and 2 of 2,095
+on the 2026-10-07 build, all of them steps outside the repository. What stays open is consistency:
+the same step shape got `unverifiable` from 2 skeptics and `true` from 13 (ledger row 09-30b-13,
+carried).
+
 ### Open 2026-09-07 — the 45 number-claims in the tools that can go stale
 
 **The class.** Six defects fixed on 2026-09-07 were all one shape: a sentence that stopped matching
@@ -658,6 +698,12 @@ never per build — absolute dollars track how big the map got.
 | 2026-08-29 | mcpolis | 1,292 | 156.9 | 493.45 | 38.19 | 82.88 / 83.63 / 87.84 / 162.67 / 76.42 |
 | 2026-09-08 | mcpolis | 1,614 | 102.9 | 398.77 | 24.71 | 66.72 / 58.54 / 70.62 / 131.72 / 71.18 |
 | 2026-09-13 | reminderrepo | 1,016 | 42.0 | 348.62 | 34.31 | 69.28 / 43.08 / 52.38 / 132.73 / 34.17 |
+| 2026-09-30 | mcpolis | 1,486 | 92.5 | n/a — no list price for claude-opus-5-5 | n/a | n/a — cache read 583M (0.39M/row, 1.22× the 2026-09-08 row); output under-recorded |
+| 2026-10-07 | mcpolis | 1,559 | 77.1 | n/a — no list price for claude-opus-5-5 | n/a | n/a — cache read 679M (0.436M/row, 1.12× the 2026-09-30 row); fixed base per agent turn 85.9K (was 46.2K) |
+
+**The rows from 2026-09-30 on carry no dollars**, because `cost` has no list price for
+`claude-opus-5-5`. Compare them with each other by cache-read tokens per row. The 2026-10-07 lead
+was compacted at turn 747; `cost` now prints that in its CONTEXT block.
 
 **Two things about the reminderrepo row.** (1) Its `active min` is the LEAD's own turn span, not
 `coyomap-eval cost`'s figure: on this build `cost` over-reports active time by **12.8 minutes**,

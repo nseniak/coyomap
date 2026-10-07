@@ -19,9 +19,10 @@ from coyomap.changelog import (
     Addition, ChangeLog, Entry, FieldEdit, Waiver, _prose_warnings, apply, check, check_before_write, dump_log,
     get_field, lint, load_log, render, set_field, touched_ids,
 )
-from coyomap.model import load_model
+from coyomap.model import load_model, to_canonical_json
 
 from test_mapdiff import make_edge, make_map, make_rule, make_steps
+from test_validate_model import NGINX_POINTER, make_interface_model
 
 
 def make_entry(eid: str = "e1", elements: list[str] | None = None, **kw: Any) -> Entry:
@@ -433,6 +434,42 @@ def test_lint_runs_the_validator_s_blocking_checks_on_the_applied_map():
     log = make_log(make_entry("e1", elements=["BR2"], added=[Addition("rules", row)]))
     p = lint(log, doc)
     assert len(p.errors) == 1 and "would not validate after apply" in p.errors[0] and "no_call_site" in p.errors[0]
+
+
+def make_undecided_dep_doc() -> dict[str, Any]:
+    """A map that records its surfaces and whose one dep, D1, still gives the harvest pointer as the
+    reason it is no interface: the shipped 2026-10-07 mcpolis map with nginx (D11) and Caddy (D13),
+    in small."""
+    m = make_interface_model()
+    m.deps[0].not_an_interface = NGINX_POINTER
+    return json.loads(to_canonical_json(m))
+
+
+def test_lint_says_which_problems_the_map_had_before_the_log():
+    """Review of 2026-10-07, F1: lint validates the map the log leaves, so every update of the
+    shipped mcpolis map was refused, even one with an empty log, for two deps its build left
+    undecided. The refusal stays: the update decides them. Its line says the problem came with the
+    map and names the change-log edit that clears it; a log making that edit lints clean."""
+    doc = make_undecided_dep_doc()
+    errors = lint(make_log(), doc).errors
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("the map would not validate after apply, and did not before this "
+                                "log either: D1 (Postgres) still gives the harvest pointer"), errors[0]
+    assert '`{"id": "D1", "key": "not_an_interface", "was": ' in errors[0], errors[0]
+    decided = make_log(make_entry("e1", elements=["D1"], edits=[FieldEdit(
+        "D1", "not_an_interface", NGINX_POINTER, "the product writes these rows and reads them back")]))
+    assert lint(decided, doc).errors == []
+
+
+def test_a_problem_the_log_makes_is_not_called_one_the_map_had():
+    m = make_interface_model()
+    doc = json.loads(to_canonical_json(m))
+    assert lint(make_log(), doc).ok
+    log = make_log(make_entry("e1", elements=["D1"], edits=[FieldEdit(
+        "D1", "not_an_interface", m.deps[0].not_an_interface, NGINX_POINTER)]))
+    errors = lint(log, doc).errors
+    assert len(errors) == 1 and errors[0].startswith(
+        "the map would not validate after apply: D1 (Postgres) still gives the harvest pointer"), errors
 
 
 def test_a_keyed_row_and_the_map_s_header_are_boxes_the_gate_sees():

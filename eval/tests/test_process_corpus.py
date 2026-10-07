@@ -191,6 +191,7 @@ FIXTURE_SCORES: dict[int, tuple[int, int]] = {
     27: (1, 1),   # nothing hand-scripted the model
     29: (1, 1),   # no previous map read
     31: (1, 1),   # the brief cites the draft
+    41: (1, 1),   # the lead was never compacted
 }
 
 
@@ -198,7 +199,7 @@ def test_the_committed_fixture_transcript_still_scores_the_same():
     """The one corpus member that cannot evaporate — so the one that actually gates.
 
     Every other transcript here lives outside the repo and all nine of the originals are already
-    gone. This one is committed, runs with no flag on any machine, and covers twelve assertions in
+    gone. This one is committed, runs with no flag on any machine, and covers thirteen assertions in
     BOTH directions. It is small, so it cannot replace the real corpus; what it can do is stop this
     file from being nine green dots that measured nothing."""
     assert FIXTURE.is_file(), f"the committed fixture transcript is missing: {FIXTURE}"

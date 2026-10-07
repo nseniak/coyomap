@@ -71,6 +71,12 @@ MODEL_RATES: dict[str, tuple[float, float]] = {
 CACHE_READ_MULTIPLIER = 0.1
 CACHE_WRITE_MULTIPLIER = {"5m": 1.25, "1h": 2.0}
 
+#: A lead whose context reaches this is one large fan-out away from being replaced by a summary.
+#: Both compactions measured on real builds fired at 967,939 and 968,360 tokens, on a 1M window, and
+#: a build that ended at 937,840 with no summary was followed by one that compacted. The harness's
+#: own threshold is not written anywhere a reader can see, so this is the measured one.
+CONTEXT_NEAR_LIMIT = 900_000
+
 #: Roles are GUESSED from the agent's own description, because nothing in the harness records the
 #: phase an agent belonged to. Order matters: "trace" before "harvest" so "Trace the harvest gaps"
 #: lands as a trace. A description matching nothing is reported as `other`, never forced into a
@@ -491,6 +497,116 @@ def read_lead(session: Path, *, from_turn: int = 0, to_turn: int | None = None,
                              if from_turn <= t.index <= upper))
 
 
+@dataclass(frozen=True)
+class Compaction:
+    """One time the harness replaced a context with a summary of it."""
+
+    #: The first turn that ran on the summary (the summary itself, when the reader yields it).
+    turn: int
+    #: `auto` when the window filled, `manual` when someone typed /compact.
+    trigger: str
+    pre_tokens: int
+    post_tokens: int
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class ContextFacts:
+    """The lead's own context window over the build."""
+
+    lead_first: int = 0
+    lead_peak: int = 0
+    lead_peak_turn: int = -1
+    compactions: tuple[Compaction, ...] = ()
+    #: The sub-agents whose own window filled, by their description.
+    subagents_compacted: tuple[str, ...] = ()
+
+
+def read_compactions(path: Path, *,
+                     include_sidechains: bool = False) -> list[tuple[int, Compaction]]:
+    """Every time the harness replaced this transcript's context with a summary, with the 0-based
+    JSONL line of its record (`turn` is left at -1 for the caller to place).
+
+    Read off the `compact_boundary` records the harness writes, never off the summary's wording:
+    the record carries the tokens before and after and the trigger. A sidechain record belongs to a
+    sub-agent unless the caller is reading a sub-agent's own file, exactly as `read_turns` decides."""
+    found: list[tuple[int, Compaction]] = []
+    with path.open(encoding="utf-8") as fh:
+        for line, raw in enumerate(fh):
+            if "compact_boundary" not in raw:
+                continue
+            try:
+                record = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("subtype") != "compact_boundary":
+                continue
+            if record.get("isSidechain") and not include_sidechains:
+                continue
+            meta = record.get("compactMetadata")
+            meta = meta if isinstance(meta, dict) else {}
+            found.append((line, Compaction(turn=-1, trigger=str(meta.get("trigger") or ""),
+                                           pre_tokens=int(meta.get("preTokens") or 0),
+                                           post_tokens=int(meta.get("postTokens") or 0),
+                                           timestamp=str(record.get("timestamp") or ""))))
+    return found
+
+
+def compactions_in(path: Path, turns: Sequence[Turn], *, from_turn: int = 0,
+                   to_turn: int | None = None,
+                   include_sidechains: bool = False) -> tuple[Compaction, ...]:
+    """The compactions of one transcript, each placed at the first turn after its record (the
+    summary itself, which `read_turns` yields as a turn), and kept only when that turn lies inside
+    the bound. `turns` must come from the same file, read with the same sidechain filter. ONE
+    placement shared by `cost` and the L3 scorecard, so the two never name different turns."""
+    upper = to_turn if to_turn is not None else 10 ** 9
+    placed: list[Compaction] = []
+    for line, boundary in read_compactions(path, include_sidechains=include_sidechains):
+        after = next((t.index for t in turns if t.line > line), None)
+        if after is not None and from_turn <= after <= upper:
+            placed.append(replace(boundary, turn=after))
+    return tuple(placed)
+
+
+def _agent_description(path: Path) -> str:
+    """A sub-agent's own job description from the `.meta.json` beside it, else its file name."""
+    meta_path = path.with_suffix(".meta.json")
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except ValueError:
+            return path.stem
+        if isinstance(meta, dict) and isinstance(meta.get("description"), str):
+            return meta["description"]
+    return path.stem
+
+
+def context_facts(session: Path, lead: Actor, *, from_turn: int = 0, to_turn: int | None = None,
+                  include_sidechains: bool = False) -> ContextFacts:
+    """The lead's own context window: where it started, where it peaked, and every summary.
+
+    A compaction replaces everything the lead has read with a summary of it, and the build goes on
+    as if it still held the rules and decisions the summary dropped. Nothing else in this report can
+    see one, which is why two compacted builds went unreported.
+
+    A compaction counts for THIS build when the turn that ran on the summary lies inside the turn
+    bound: a session keeps talking after the commit, and a summary there says nothing about the
+    build."""
+    turns = read_turns(session, include_sidechains=include_sidechains)
+    compactions = compactions_in(session, turns, from_turn=from_turn, to_turn=to_turn,
+                                 include_sidechains=include_sidechains)
+    calls = lead.requests
+    peak = max(calls, key=lambda t: t.usage.context, default=None)
+    directory = subagent_dir(session)
+    compacted = (tuple(_agent_description(p) for p in sorted(directory.glob("agent-*.jsonl"))
+                       if read_compactions(p, include_sidechains=True))
+                 if directory.is_dir() else ())
+    return ContextFacts(lead_first=calls[0].usage.context if calls else 0,
+                        lead_peak=peak.usage.context if peak is not None else 0,
+                        lead_peak_turn=peak.index if peak is not None else -1,
+                        compactions=compactions, subagents_compacted=compacted)
+
+
 def build_window(lead: Actor, *, from_turn: int = 0,
                  to_turn: int | None = None) -> tuple[float, float] | None:
     """The stretch of clock a turn bound picks out, or `None` when the run is unbounded.
@@ -743,6 +859,8 @@ class Report:
     spawn_prompt_tokens: int
     #: The bill by charge type — what the money bought, not who spent it.
     charges: dict[str, float] = field(default_factory=dict)
+    #: The lead's own window: first and peak context, every compaction, compacted sub-agents.
+    context: ContextFacts = field(default_factory=ContextFacts)
     map: dict[str, int] = field(default_factory=dict)
     per_row: dict[str, float] = field(default_factory=dict)
 
@@ -882,6 +1000,8 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
         },
         tool_seconds=_tool_seconds(agents),
         spawn_prompt_tokens=_spawn_tokens(lead),
+        context=context_facts(session, lead, from_turn=from_turn, to_turn=to_turn,
+                              include_sidechains=include_sidechains),
     )
     if map_path is not None:
         facts = read_map(map_path)
@@ -902,6 +1022,32 @@ def _m(seconds: float) -> str:
     return f"{seconds / 60:.1f}m"
 
 
+def _context_lines(report: Report) -> list[str]:
+    """The CONTEXT block, printed right under the header because it is the one number in this report
+    that can mean the build forgot its own instructions. Each compaction gets its own short line, so
+    a `head` or a `cut` keeps it."""
+    c = report.context
+    # A range can hold a compaction and no lead API call (`--from-turn 746 --to-turn 747`: the
+    # summary turn alone). Hiding the block then hid the compaction while `--json` carried it.
+    if not (c.lead_peak or c.compactions or c.subagents_compacted):
+        return []
+    size = (f"  first turn {c.lead_first:,} tokens · peak {c.lead_peak:,} at turn {c.lead_peak_turn}"
+            if c.lead_peak else "  no lead API call in this turn range, so no context size to show")
+    out = ["", "CONTEXT (the lead's own window)", size]
+    if c.compactions:
+        out.append(f"  !! COMPACTED {len(c.compactions)} time(s) during the build: the lead went on"
+                   f" from a summary, and a retro reports this as a HIGH finding")
+        out.extend(f"     turn {e.turn} ({e.trigger}): {e.pre_tokens:,} -> {e.post_tokens:,} tokens"
+                   for e in c.compactions)
+    elif c.lead_peak >= CONTEXT_NEAR_LIMIT:
+        out.append("  !  peak near the point where the harness compacts (~968,000 tokens on the"
+                   " measured builds); the next larger build will not fit")
+    if c.subagents_compacted:
+        out.append(f"  sub-agents compacted: {len(c.subagents_compacted)} — "
+                   + ", ".join(c.subagents_compacted))
+    return out
+
+
 def format_report(report: Report) -> str:
     lines: list[str] = []
     active = report.wall_seconds - report.idle_seconds
@@ -912,6 +1058,8 @@ def format_report(report: Report) -> str:
                  f" ({100 * report.agent_busy_seconds / max(active, 1):.0f}% of active)"
                  f"   lead alone {_m(report.lead_only_seconds)}")
     lines.append(f"  {report.agents} sub-agent(s), {report.requests} API call(s)")
+
+    lines.extend(_context_lines(report))
 
     lines.append("")
     lines.append("FAN-OUT")

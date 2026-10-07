@@ -7,6 +7,8 @@ Run either way (needs an editable install: `make install-eval`):
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 from pathlib import Path
@@ -587,3 +589,173 @@ def test_a_transcript_from_before_the_rename_still_counts_its_calls():
     assert _subs("coyodex-eval score a b") == _subs("coyomap-eval score a b")
     assert (_subs("CX=/p/.venv/bin/coyodex-eval; $CX score a b")
             == _subs("CX=/p/.venv/bin/coyomap-eval; $CX score a b"))
+
+
+# --- a sub-agent's report is the agent's, whichever way it arrives (retro 2026-10-07, finding 9) --
+# The harness hands a sub-agent's final report to the lead either as a USER message, which `--full`
+# rendered as "(operator)", or as a `queued_command` ATTACHMENT, which the reader skipped with every
+# other attachment. On the 2026-10-07 mcpolis build that was 66 reports labelled as the person and
+# 62 not rendered at all, an escalation report among them. Both carry the same structured `origin`.
+# An attachment is not an API message, so it must reach its turn without becoming one: other tools
+# and past ledgers cite turn numbers.
+
+
+def make_handback_origin(agent: str, report: list[str]) -> dict[str, object]:
+    """The `origin` the harness stamps on a hand-back: its frame at column zero, then the report
+    with every line indented."""
+    body = ("[Subagent hand-back] A frame the harness writes at column zero.\n"
+            + "\n".join(f"  {line}" for line in report))
+    return {"kind": "peer", "from": agent, "body": body, "handback": True}
+
+
+def make_queued_handback(agent: str, report: list[str]) -> str:
+    """A report delivered while the lead was busy: an ATTACHMENT record, not a message."""
+    origin = make_handback_origin(agent, report)
+    return json.dumps({"type": "attachment", "isSidechain": False, "attachment": {
+        "type": "queued_command", "commandMode": "prompt", "isMeta": True,
+        "prompt": f'<agent-message from="{agent}">\n{origin["body"]}\n</agent-message>',
+        "origin": origin}})
+
+
+def make_user_handback(agent: str, report: list[str]) -> str:
+    """A report delivered while the lead was idle: a USER message carrying the same origin."""
+    origin = make_handback_origin(agent, report)
+    return json.dumps({"type": "user", "isMeta": True, "origin": origin, "message": {
+        "role": "user",
+        "content": (f'Another Claude session sent a message:\n<agent-message from="{agent}">\n'
+                    f'{origin["body"]}\n</agent-message>\n\nA note the harness appends.')}})
+
+
+def make_handback_transcript(tmp: Path, *, with_attachment: bool = True) -> Path:
+    """A lead that launches an agent and runs a command while it works, takes that agent's report as
+    an attachment beside the command's result, then takes a second agent's report as a message.
+
+    Turns: 0 the launch, 1 and 2 the two results, 3 a wait, 4 the second report, 5 the reply."""
+    lines = [
+        json.dumps({"type": "assistant", "message": {"id": "m0", "content": [
+            {"type": "tool_use", "id": "a0", "name": "Agent",
+             "input": {"description": "harvest deps", "prompt": "…"}},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}}),
+        json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "a0", "content": "launched, agentId: agent-a"}]}}),
+        json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "a.txt"}]}}),
+    ]
+    if with_attachment:
+        lines.append(make_queued_handback("agent-a", ["Fragment written: 3 deps.", "",
+                                                      "- D2 has no owner."]))
+    lines += [
+        json.dumps({"type": "assistant", "message": {"id": "m1", "content": [
+            {"type": "text", "text": "Waiting for the second agent."}]}}),
+        make_user_handback("agent-b", ["Rules fragment written."]),
+        json.dumps({"type": "assistant", "message": {"id": "m2", "content": [
+            {"type": "text", "text": "Both reports are in."}]}}),
+    ]
+    p = tmp / "handbacks.jsonl"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def test_a_queued_handback_is_rendered_as_the_agents_report_in_its_turn():
+    with tempfile.TemporaryDirectory() as td:
+        turns = transcript.read_turns(make_handback_transcript(Path(td)))
+    out = transcript.format_turns(turns, full=True)
+    assert "[   2] (hand-back from agent-a) Fragment written: 3 deps." in out, out
+    assert "- D2 has no owner." in out, out
+    assert "A frame the harness writes" not in out, "the frame is the same on every report"
+    assert "(operator)" not in out, out
+
+
+def test_a_queued_handback_creates_no_turn():
+    """Rendering the attachment must not renumber anything: the turns, their roles and their
+    contents are what they are without it, and the report rides on the result turn before it."""
+    def shape(turns: tuple[transcript.Turn, ...]) -> list[tuple[int, str, int, int, str]]:
+        return [(t.index, t.role, len(t.tool_calls), len(t.tool_results), t.text) for t in turns]
+
+    with tempfile.TemporaryDirectory() as td:
+        with_it = transcript.read_turns(make_handback_transcript(Path(td)))
+        without = transcript.read_turns(make_handback_transcript(Path(td), with_attachment=False))
+    assert len(with_it) == len(without) == 6
+    assert shape(with_it) == shape(without)
+    assert [(t.index, h.agent) for t in with_it for h in t.handbacks] == [(2, "agent-a"),
+                                                                          (4, "agent-b")]
+
+
+def test_a_handback_that_arrives_as_a_message_is_the_agent_not_the_operator():
+    """The message was a turn before and stays one; only its label was wrong."""
+    with tempfile.TemporaryDirectory() as td:
+        turns = transcript.read_turns(make_handback_transcript(Path(td)))
+    out = transcript.format_turns(turns, full=True)
+    assert "[   4] (hand-back from agent-b) Rules fragment written." in out, out
+    assert "Another Claude session" not in out and "(operator)" not in out, out
+
+
+def test_full_reads_a_turn_whose_only_content_is_a_handback():
+    """A tool-result turn carries no text of its own, and the unfiltered `--full` read kept only
+    turns with calls or text, so the report beside the result was dropped a second time."""
+    buffer = io.StringIO()
+    with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(buffer):
+        assert transcript.main([str(make_handback_transcript(Path(td))), "--full"]) == 0
+    out = buffer.getvalue()
+    assert "(hand-back from agent-a)" in out and "(hand-back from agent-b)" in out, out
+
+
+def test_a_tool_filtered_read_leaves_handbacks_out():
+    """`--tool`/`--grep` ask about tool calls; a report is not an answer to that question."""
+    buffer = io.StringIO()
+    with tempfile.TemporaryDirectory() as td, contextlib.redirect_stdout(buffer):
+        p = make_handback_transcript(Path(td))
+        assert transcript.main([str(p), "--full", "--tool", "Bash"]) == 0
+    assert "(hand-back" not in buffer.getvalue()
+
+
+def test_the_frame_is_dropped_and_the_report_kept_whole():
+    """The harness writes its frame at column zero and indents every report line, so the report
+    starts at the first indented line. A body with no indented line is kept whole: a changed frame
+    must not cost the report."""
+    origin = make_handback_origin("agent-a", ["Line one.", "    nested detail", "Line three."])
+    handback = transcript._handback_of(origin)
+    assert handback is not None and handback.agent == "agent-a"
+    assert handback.text == "Line one.\n    nested detail\nLine three."
+    bare = transcript._handback_of({"kind": "peer", "from": "x", "body": "no frame",
+                                    "handback": True})
+    assert bare is not None and bare.text == "no frame"
+    assert transcript._handback_of({"kind": "human"}) is None
+
+
+# --- the operator's words in a record that also holds a reminder (carried 08-29-23) ------------
+# The harness files a `<system-reminder>` block and the operator's own text as two blocks of ONE user
+# record. The reader joins them, and `operator_text` tested the first 400 characters for the
+# reminder marker, so the reminder hid the person: turns 767 and 789 of the 2026-10-07 mcpolis build.
+
+
+def make_reminder_then_words_transcript(tmp: Path, words: str) -> Path:
+    p = tmp / "reminder.jsonl"
+    p.write_text(json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "text", "text": "<system-reminder>\nA note the harness adds.\n</system-reminder>\n\n"},
+        {"type": "text", "text": words}]}}) + "\n", encoding="utf-8")
+    return p
+
+
+def test_the_operators_words_beside_a_reminder_block_are_kept():
+    with tempfile.TemporaryDirectory() as td:
+        turns = transcript.read_turns(make_reminder_then_words_transcript(Path(td),
+                                                                          "why only some of them?"))
+    out = transcript.format_turns(turns, full=True)
+    assert "(operator) why only some of them?" in out, out
+    assert "A note the harness adds." not in out, out
+
+
+def test_a_reminder_span_is_removed_wherever_it_sits():
+    """Before the words or after them, with or without an id: the span is machine text."""
+    assert transcript.operator_text("<system-reminder>x</system-reminder>\nA") == "A"
+    assert transcript.operator_text('A\n<system-reminder id="r1">x</system-reminder id="r1">') == "A"
+    assert transcript.operator_text("<system-reminder>only this</system-reminder>") == ""
+
+
+def test_a_reminder_the_stripping_cannot_close_still_hides_the_record():
+    """A nested or unclosed tag leaves part of the reminder behind, and rendering that as a person
+    is the failure `operator_text` exists to prevent — so the record stays hidden, as before."""
+    nested = "<system-reminder>a<system-reminder>b</system-reminder>c</system-reminder>\nA"
+    assert transcript.operator_text(nested) == ""
+    assert transcript.operator_text("<system-reminder>never closed\nA") == ""

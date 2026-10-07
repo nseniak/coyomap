@@ -540,18 +540,34 @@ class DirExpectation:
     children: list["DirExpectation"]
 
 
+def granularity_files(root: Path) -> list[Path]:
+    """The files E is counted from, as absolute paths in walk order: the pre-index's walk
+    (`iter_source_files`) narrowed to code in a known language (no docs or config text, no unknown
+    extension) with no test, docs, internal or asset folder at any depth above it.
+
+    ONE rule, because three answers read it and must agree: E itself (`expected_components`), the
+    median file size that explains a file-cap-bound E (`median_file_loc`), and the harvest slot check
+    that names every such file no component-writing slice holds
+    (`contract.sources_in_no_component_slice`). Each carried its own copy of these tests, and a copy
+    that drifted would check the slices against a different file set than the E they were cut by."""
+    walk = iter_source_files(root)
+    out: list[Path] = []
+    for f in walk.files:
+        lang = lang_of(f)
+        if lang is None or lang in GRANULARITY_TEXT_LANGS:
+            continue
+        if any(part in GRANULARITY_SKIP_DIRS for part in f.relative_to(walk.root).parts[:-1]):
+            continue
+        out.append(f)
+    return out
+
+
 def median_file_loc(root: Path) -> int:
-    """Median LOC of the files E is computed over. The companion to `bound_by`: when the file cap
-    binds AND the median file is small, E is counting many tiny files as if each were a unit's worth
-    of mass — the signal that E is high for a structural reason, not because the repo really holds
-    that many components."""
-    sizes = sorted(
-        count_loc(f)
-        for f in iter_source_files(root).files
-        if (lang := lang_of(f)) is not None
-        and lang not in GRANULARITY_TEXT_LANGS
-        and not any(part in GRANULARITY_SKIP_DIRS for part in f.relative_to(root.resolve()).parts[:-1])
-    )
+    """Median LOC of the files E is computed over (`granularity_files`). The companion to
+    `bound_by`: when the file cap binds AND the median file is small, E is counting many tiny files
+    as if each were a unit's worth of mass — the signal that E is high for a structural reason, not
+    because the repo really holds that many components."""
+    sizes = sorted(count_loc(f) for f in granularity_files(root))
     return sizes[len(sizes) // 2] if sizes else 0
 
 
@@ -564,20 +580,15 @@ def _ceil_units(files: int, loc: int, file_cap: int, loc_cap: int) -> int:
 def expected_components(root: Path, *, file_cap: int = GRANULARITY_FILE_CAP,
                         loc_cap: int = GRANULARITY_LOC_CAP) -> DirExpectation:
     """Compute the component-granularity expectation E for a repo tree. Deterministic and derived
-    from the code alone: the walk is `iter_source_files` (the pre-index's exclusions), narrowed to
-    component-forming source (no docs/config text, no conventional non-product trees)."""
+    from the code alone: the files are `granularity_files` (the pre-index's walk, narrowed to
+    component-forming source: no docs/config text, no conventional non-product trees)."""
     root = root.resolve()
     # dir node: {"loc": direct LOC, "files": direct file count, "dirs": {name: node}}
     def new_node() -> dict:
         return {"loc": 0, "files": 0, "dirs": {}}
     tree = new_node()
-    for f in iter_source_files(root).files:
+    for f in granularity_files(root):
         rel = f.relative_to(root)
-        lang = lang_of(f)
-        if lang is None or lang in GRANULARITY_TEXT_LANGS:
-            continue
-        if any(part in GRANULARITY_SKIP_DIRS for part in rel.parts[:-1]):
-            continue
         node = tree
         for part in rel.parts[:-1]:
             node = node["dirs"].setdefault(part, new_node())

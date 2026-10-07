@@ -53,8 +53,8 @@ from coyomap.challenge import (
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from coyomap import records
-from coyomap.reporting import shown
+from coyomap import balance_lib, records
+from coyomap.reporting import item_lines, shown
 
 if TYPE_CHECKING:
     from coyomap.model import ProjectModel
@@ -545,42 +545,44 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
                  f"adding the pinned worklist answers a different question (what the skeptics saw) "
                  f"and gives a different number."]
                 if unchecked else [])
-    # THE ACCESS ROWS, SAID SEPARATELY AND FIRST. They are a subset of the count above, so this is
-    # not a second finding — it is the part of it that is worth acting on, named. Who-may-do-what is
-    # the one thing a reader trusts a map for.
+    # THE ACCESS ROWS, SAID SEPARATELY AND FIRST. They are a subset of the count of unseen elements,
+    # so this is not a second finding — it is the part of it that is worth acting on, named.
+    # Who-may-do-what is the one thing a reader trusts a map for. Every list below takes
+    # `item_lines`' shape: the count on a short first line, then one item per line. Readers that
+    # match an advisory by substring (`advisory_disposition`) read the whole string, so the lines
+    # change nothing there.
     if reworded:
         advisory.insert(0, (
             f"{len(reworded)} ACCESS rule(s) were re-worded after the vote: the skeptics voted on an "
-            f"older wording at the same line, and no skeptic has read the current one: "
-            + ", ".join(f"{e['id']} ({e['label']}, {e['reworded_after_vote']['sites_voted']} of "
-                        f"{e['reworded_after_vote']['sites']} site(s) voted under the older wording)"
-                        for e in reworded[:6])
-            + (" …" if len(reworded) > 6 else "")
-            + ". These are among the count above. Send the current wording to a skeptic in a "
-              "second wave (method.md; `coyomap audit <map> --batches .coyomap/verify --since "
-              ".coyomap/verify/worklist.json` cuts it), or say in the grounding note why it needs "
-              "none."))
+            f"older wording at the same line, and no skeptic has read the current one:\n"
+            + item_lines([f"{e['id']} ({e['label']}, {e['reworded_after_vote']['sites_voted']} of "
+                          f"{e['reworded_after_vote']['sites']} site(s) voted under the older "
+                          f"wording)" for e in reworded], 6, unit="rule(s)")
+            + f"\nThese are among the {len(unchecked)} element(s) no skeptic looked at. Send the "
+              f"current wording to a skeptic in a second wave (method.md; `coyomap audit <map> "
+              f"--batches .coyomap/verify --since .coyomap/verify/worklist.json` cuts it), or say in "
+              f"the grounding note why it needs none."))
     if unvetted_access:
         advisory.insert(0, (
             f"{len(unvetted_access)} ACCESS rule(s) were never challenged — no skeptic voted on "
-            f"them under this anchor or any other: "
-            f"{', '.join(f'{e['id']} ({e['label']})' for e in unvetted_access[:6])}"
-            f"{' …' if len(unvetted_access) > 6 else ''}. These are among the count above and are "
-            f"called out because of what they claim. Send them to a skeptic, or say in the "
-            f"grounding note why they could not be (a rule minted after the worklist was pinned "
-            f"is the common honest reason)."))
+            f"them under this anchor or any other:\n"
+            + item_lines([f"{e['id']} ({e['label']})" for e in unvetted_access], 6,
+                         unit="rule(s)")
+            + f"\nThese are among the {len(unchecked)} element(s) no skeptic looked at, and are "
+              f"called out because of what they claim. Send them to a skeptic, or say in the "
+              f"grounding note why they could not be (a rule minted after the worklist was pinned "
+              f"is the common honest reason)."))
     # DISCLOSURE, not a finding: the map is right to keep these claims, and the reader is entitled
     # to know a named second reader is why. It rides as an advisory so it reaches the report, the
     # gate block and the disposition table, where `_DISCLOSURE` files it as what it is.
     if appealed:
         advisory.insert(0, (
             f"{len(appealed)} refuted claim(s) are in this map because the CLOSER REJECTED the "
-            f"refutation, not because nobody acted: "
-            + "; ".join(f"{a['claim'][:90]}"
-                        + (f" — closer: {a['note'][:160]}" if a.get("note") else "")
-                        for a in appealed[:4])
-            + (f" … and {len(appealed) - 4} more" if len(appealed) > 4 else "")
-            + ". This is a disclosure of what the refutation gate did NOT block on; the appeals are "
+            f"refutation, not because nobody acted:\n"
+            + item_lines([f"{a['claim'][:90]}"
+                          + (f" — closer: {a['note'][:160]}" if a.get("note") else "")
+                          for a in appealed], 4, unit="claim(s)")
+            + "\nThis is a disclosure of what the refutation gate did NOT block on; the appeals are "
               "recorded in the map's `grounding.closer_rejected`."))
     # HEARD AND NOT SETTLED: a closer said `unsure`, or two appeals disagree. The claim stands on
     # the majority, which is not the same as settled, so it is said rather than blocked.
@@ -588,21 +590,19 @@ def _refutations_leg(map_path: Path, verdicts: list[Path]) -> Leg:
     if unsettled:
         advisory.insert(0, (
             f"{len(unsettled)} ACCESS claim(s) the majority CONFIRMED over a dissent the closer "
-            f"could not settle: "
-            + "; ".join(f"{d['id']}: {d['claim'][:90]} (closer said {d['closed']})"
-                        for d in unsettled[:4])
-            + (f" … and {len(unsettled) - 4} more" if len(unsettled) > 4 else "")
-            + ". Each stands on the majority vote alone. Send it to a second closer, or correct "
+            f"could not settle:\n"
+            + item_lines([f"{d['id']}: {d['claim'][:90]} (closer said {d['closed']})"
+                          for d in unsettled], 4, unit="claim(s)")
+            + "\nEach stands on the majority vote alone. Send it to a second closer, or correct "
               "the claim if the dissent is right."))
     if report_only:
         advisory.insert(0, (
             f"{len(report_only)} refuted walk-step or interface claim(s) are still in the map, "
-            f"unchanged — reported, not blocking yet: "
-            + "; ".join(f"{s['claim'][:110]} (refuted by {s['refuted_by']}"
-                        + (f", closer said {s['closed']}" if s.get("closed") else "") + ")"
-                        for s in report_only[:6])
-            + (f" … and {len(report_only) - 6} more" if len(report_only) > 6 else "")
-            + ". Correct each step or drop it, as for any refutation; a claim a closer rejected "
+            f"unchanged — reported, not blocking yet:\n"
+            + item_lines([f"{s['claim'][:110]} (refuted by {s['refuted_by']}"
+                          + (f", closer said {s['closed']}" if s.get("closed") else "") + ")"
+                          for s in report_only], 6, unit="claim(s)")
+            + "\nCorrect each step or drop it, as for any refutation; a claim a closer rejected "
               "is not here."))
     unheard = len(dissent) - len(unsettled)
     return Leg("grounding refutations", RAN if code in (0, 1) else FAILED,
@@ -638,12 +638,12 @@ def _unasked_verdicts(map_path: Path, verdicts: list[Path]) -> list[Path]:
 
 
 def _unasked_verdicts_leg(found: list[Path]) -> Leg:
-    names = ", ".join(p.name for p in found[:3]) + (" …" if len(found) > 3 else "")
     return Leg(name="anchor-drift (verdict-based)", status=RAN, blocking=[], advisory=[
-        f"NOT RUN — {len(found)} verdict file(s) sit beside this map ({names}) and this run was "
-        f"given none, so the verdict-based anchor-drift leg and its coverage attestation are "
-        f"missing from this report. Re-run with `--verdicts <file>` per file; `--verdicts` and "
-        f"`--emit-gate-block` combine in ONE invocation."],
+        f"NOT RUN — {len(found)} verdict file(s) sit beside this map "
+        f"({shown([p.name for p in found], 3)}) and this run was given none, so the verdict-based "
+        f"anchor-drift leg and its coverage attestation are missing from this report. Re-run with "
+        f"`--verdicts <file>` per file; `--verdicts` and `--emit-gate-block` combine in ONE "
+        f"invocation."],
                note="the leg was skipped because no --verdicts was passed")
 
 
@@ -927,27 +927,30 @@ def _access_baseline_leg(map_path: Path, baseline: Path,
                        note=f"every one of {len(base)} file(s) that held access enforcement in "
                             f"{baseline.name} is still named by an access rule")
         return Leg("access baseline", RAN, note=note, advisory=[
-            f"DISCLOSURE, not a request: {covered} of {len(base)} file(s) that held ACCESS "
-            f"enforcement in {baseline.name} are still named by an access rule, and the other "
-            f"{len(excused_here)} are NOT — they are already recorded as deliberate under "
-            f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}': {shown(excused_here, 8, unit='file(s)')}. "
-            f"There is nothing to record here and recording more would raise this number; the line "
-            f"stays so a reader can see what the escape forgave. It clears when the rules cover "
-            f"those files again, or when the records are deleted. A recorded gap is still a gap — "
-            f"re-read one by validating a copy with its line removed.", *advisory])
+            f"DISCLOSURE, not a request: {len(excused_here)} of {len(base)} file(s) that held "
+            f"ACCESS enforcement in {baseline.name} are excused under "
+            f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}':\n"
+            + item_lines(excused_here, 8, unit="file(s)")
+            + f"\nNo access rule in this map names them; they are recorded as deliberate, and the "
+              f"other {covered} are still named by an access rule. There is nothing to record here "
+              f"and recording more would raise this number; this disclosure stays so a reader can "
+              f"see what the escape forgave. It clears when the rules cover those files again, or "
+              f"when the records are deleted. A recorded gap is still a gap — re-read one by "
+              f"validating a copy with its line removed.", *advisory])
     # Every file, never a `+N more`: this list IS the reading list, and a build that ran the leg
-    # would have seen 8 of its 19 names. Each with the claim it held, which is the question.
-    listed = "; ".join(f"{f} held {held(base[f])}" for f in lost)
+    # would have seen 8 of its 19 names. Each with the claim it held, which is the question, and
+    # each on a line of its own (`item_lines`).
     return Leg("access baseline", RAN, note=note, advisory=[
         f"{len(lost)} of {len(base)} file(s) that held ACCESS enforcement in "
-        f"{baseline.parent.name}/{baseline.name} are "
-        f"named by NO access rule in this map. Each is listed with the claim it held there: "
-        f"{listed}. The code may be unchanged — check each one before shipping: open the file, "
-        f"then restore a rule that states the claim, or record why that claim no longer holds. "
-        f"A statement count can hold steady while a claim disappears, so this is not visible in "
-        f"`auth-surfaces-no-drop`. Record '<path>: <why>' under an "
-        f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}' extras heading for each one that is "
-        f"deliberate — the why answers the claim above, not the new map{excused_note}.",
+        f"{baseline.parent.name}/{baseline.name} are named by NO access rule in this map:\n"
+        + item_lines([f"{f} held {held(base[f])}" for f in lost], None)
+        + f"\nEach is listed with the claim it held there. The code of these {len(lost)} file(s) "
+          f"may be unchanged — check each one before shipping: open the file, then restore a rule "
+          f"that states the claim, or record why that claim no longer holds. A statement count can "
+          f"hold steady while a claim disappears, so this is not visible in "
+          f"`auth-surfaces-no-drop`. Record '<path>: <why>' under an "
+          f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}' extras heading for each one that is deliberate — "
+          f"the why answers the claim above, not the new map{excused_note}.",
         *advisory])
 
 
@@ -973,16 +976,22 @@ def _unread_excuses(excused: list[str], base: dict[str, list[AccessClaim]],
                 f"Pass --lead-transcript with a readable copy."]
     if not never:
         return []
-    listed = "; ".join(f"{f} (held {held(base[f])})" for f in never)
-    return [f"{len(never)} of {len(excused)} access path(s) {UNREAD_EXCUSES}: the lead's "
-            f"transcript ({lead_transcript.name}) shows no tool call reading {listed}. A drop is "
-            f"recorded after reading the file (dispatch.md). Open each one, then keep its line, "
-            f"correct its why, or remove it and restore the rule."]
+    # The transcript's name goes after the list, so the count line stays short whatever the session
+    # id is called.
+    return [f"{len(never)} of {len(excused)} access path(s) {UNREAD_EXCUSES}: no tool call in the "
+            f"lead's transcript reads them:\n"
+            + item_lines([f"{f} (held {held(base[f])})" for f in never], None)
+            + f"\nThe transcript read is {lead_transcript.name}. A drop is recorded after reading "
+              f"the file (dispatch.md). Open each one, then keep its line, correct its why, or "
+              f"remove it and restore the rule."]
 
 
-#: The 'Balance exceptions' key the component-budget leg reads. The line must NAME both counts, so a
-#: record written against another size stops answering the leg once the map moves, and a bare
-#: `granularity:` sentence (which answers validate's own count advisory) never answers this one.
+#: The 'Balance exceptions' keys the component-budget leg reads: this one, and the `granularity`
+#: literal exactly as validate reads it (`balance_lib.LITERAL_LINE`). Validate holds the component
+#: count to E and this leg holds it to the summed budgets: one fact, the map's size, banded two
+#: ways, so ONE `granularity:` line naming both counts answers both checks. Either key, the line
+#: must NAME the shipped and the budgeted count, so a record written against another size stops
+#: answering once the map moves, and a line naming E or the band answers validate and never this.
 BUDGET_KEY = "component-budget"
 
 
@@ -992,7 +1001,13 @@ def budget_record(m: "ProjectModel", shipped: int, budgeted: int) -> str:
     # bounds, E or a date answered it too, whatever it said about the size.
     said = re.compile(rf"(?<![\w.]){shipped} shipped of {budgeted} budgeted(?![\w.])")
     for line in records.lines(m, "Balance exceptions"):
-        if line.lower().startswith(BUDGET_KEY) and said.search(line):
+        # `granularity` read by validate's own reader, so a line this leg takes is one validate
+        # takes too. Reading only its own key, the leg shipped UNRECORDED on the 2026-10-07 mcpolis
+        # build beside the `granularity:` line that answered validate.
+        literal = balance_lib.LITERAL_LINE.match(line)
+        keyed = (line.lower().startswith(BUDGET_KEY)
+                 or (literal is not None and literal.group(1) == "granularity"))
+        if keyed and said.search(line):
             return line
     return ""
 
@@ -1038,7 +1053,7 @@ def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
                    advisory=[f"the map could not be re-read to count its components: {e}"])
     shipped = len(m.components)
     total = sum(budgets.values())
-    uncounted = (f", {len(unnumbered)} brief(s) with no numeric budget ({', '.join(unnumbered[:6])})"
+    uncounted = (f", {len(unnumbered)} brief(s) with no numeric budget ({shown(unnumbered, 6)})"
                  if unnumbered else "")
     e_note = ""
     try:
@@ -1059,8 +1074,10 @@ def _budget_leg(map_path: Path, repo: Path) -> Leg | None:
             advisory.append(f"{shipped} component(s) shipped against {total} budgeted across "
                             f"{len(budgets)} harvest brief(s) (band {low}-{high}{e_note}{uncounted}). "
                             f"Every slice can be inside its own band while the sum is not; record "
-                            f"'{BUDGET_KEY}: {shipped} shipped of {total} budgeted, because <why the "
-                            f"map is this size>' under 'Balance exceptions', or re-cut the slices.")
+                            f"'granularity: {shipped} shipped of {total} budgeted, because <why the "
+                            f"map is this size>' under 'Balance exceptions', in place of any other "
+                            f"`granularity:` line there, since that one line also answers "
+                            f"validate's component-count advisory; or re-cut the slices.")
     return Leg("component budget", RAN, advisory=advisory,
                note=f"{shipped} shipped / {total} budgeted across {len(budgets)} brief(s), "
                     f"band {low}-{high}{e_note}{uncounted}")
@@ -1341,9 +1358,9 @@ def advisory_disposition(map_path: Path, report: FinalizeReport) -> list[tuple[s
                 continue
             # Three advisories whose key is known although it is no id. A lost access FILE is
             # listed only while no line records it, so each one is unrecorded by construction; the
-            # budget advisory is printed only when no `component-budget` line names both counts; and
-            # an excuse nobody read, or a recorded line that silences nothing, is answered by
-            # reading or deleting, never by recording more.
+            # budget advisory is printed only when no `granularity:` or `component-budget:` line
+            # names both counts (`budget_record`); and an excuse nobody read, or a recorded line
+            # that silences nothing, is answered by reading or deleting, never by recording more.
             if "named by NO access rule in this map" in a or "budgeted across" in a:
                 out.append(("UNRECORDED", heading, a))
                 continue
@@ -1779,8 +1796,7 @@ def main(argv: list[str] | None = None) -> int:
         # `--verdicts` glob above went unnoticed for so long: the files landed here and nothing said
         # a word about them.
         print(f"ERROR: finalize takes ONE map path; got {len(positional)} "
-              f"({', '.join(positional[:4])}{' …' if len(positional) > 4 else ''}). Pass verdict "
-              f"files after --verdicts.", file=sys.stderr)
+              f"({shown(positional, 4)}). Pass verdict files after --verdicts.", file=sys.stderr)
         return 2
     map_path = Path(positional[0] if positional else ".coyomap/project-map.json")
     if not map_path.exists():

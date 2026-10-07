@@ -25,7 +25,7 @@ from pathlib import Path
 
 from coyomap import grammar, prose, provenance
 from coyomap.anchors import parse_anchor
-from coyomap.reporting import shown
+from coyomap.reporting import clip, reset_full_lists, set_full_lists, shown
 from coyomap.assemble import load_fragment
 from coyomap.model import ID_SHAPE, ModelError, ProjectModel, access_rules, all_elements
 from coyomap.validate_model import (
@@ -378,10 +378,12 @@ def _access_rule_risk_problems(m: ProjectModel) -> list[str]:
     naked = [r.id for r in access_rules(m) if not (r.risk or "").strip()]
     if not naked:
         return []
-    return [f"{len(naked)} `access: true` rule(s) with an empty `risk`: {', '.join(naked[:12])}"
-            + (" …" if len(naked) > 12 else "")
-            + " — an auth surface must say what is at stake if it fails. The Security & auth table "
-              "renders `risk` as its own column, so an empty one ships as a blank cell."]
+    # Through `shown`, never a hand-cut `[:12]`: `--all` prints every list whole, and a list cut here
+    # by hand was the one it could not reach.
+    return [f"{len(naked)} `access: true` rule(s) with an empty `risk`: "
+            f"{shown(naked, 12, unit='rule(s)')} — an auth surface must say what is at stake if it "
+            f"fails. The Security & auth table renders `risk` as its own column, so an empty one "
+            f"ships as a blank cell."]
 
 
 def _authored_runs_in_warnings(m: ProjectModel) -> list[str]:
@@ -401,12 +403,36 @@ def _authored_runs_in_warnings(m: ProjectModel) -> list[str]:
     rows += [ep.id or ep.source for ep in m.entry_points if ep.runs_in]
     if not rows:
         return []
-    shown = ", ".join(str(x) for x in rows[:6]) + (" …" if len(rows) > 6 else "")
-    return [f"{len(rows)} row(s) carry `runs_in`: {shown} — if you are a HARVEST slice, drop it: "
+    listed = shown([str(x) for x in rows], 6, unit="row(s)")   # `shown`, so `--all` reaches it
+    return [f"{len(rows)} row(s) carry `runs_in`: {listed} — if you are a HARVEST slice, drop it: "
             f"`runs_in` is assigned by the lead through `coyomap reconcile` after the fan-out, and "
             f"the deployment-unit names come from a different slice running beside you, so a guess "
             f"passes this lint and hard-fails the lead's `validate`. If you are the lead's own "
             f"synthesis fragment, this is yours to keep."]
+
+
+def _unowned_entry_point_warnings(m: ProjectModel) -> list[str]:
+    """Advisory: a way in that names no owning `component`.
+
+    The owner is what relates a way in to a use case, a coverage count and a deployment unit, and
+    `validate` warns on every externally activated way in that has none. The harvest contract's
+    field table did not list the field, so on the 2026-10-07 mcpolis build 51 of 221 ways in came
+    back unowned and the lead filled 45 of them by hand. The slice that harvested a way in usually
+    holds the component that owns it, so the agent that wrote the row is the one who can answer.
+
+    Every way in, not only the externally activated ones `validate` names: a job's owner places it
+    in its deployment unit, and the one self-started way in of those 51 had none either. ADVISORY,
+    as `validate`'s own line is, and because an owner can sit in another slice, whose ids this agent
+    cannot know: that one is assigned at synthesis, by the reconcile file's `component` directive."""
+    unowned = [f"[{ep.kind}] {clip(ep.trigger)}" for ep in m.entry_points
+               if not ep.component.strip()]
+    if not unowned:
+        return []
+    return [f"{len(unowned)} way(s) in name no owning `component`: "
+            f"{shown(unowned, 5, sep='; ', unit='way(s) in')} — set each one's `component` to the "
+            f"`Cn` in this fragment whose code holds it, or say in your reply which ones another "
+            f"slice owns. `validate` warns on every externally activated way in with no owner, and "
+            f"the lead otherwise fills them in by hand."]
 
 
 #: Below this a fragment is too small for "nearly every row says the same thing" to mean anything —
@@ -474,6 +500,7 @@ def lint_fragment_warnings(m: ProjectModel) -> list[str]:
     _problems, warnings = check_domain_relations(m.entities)
     warnings += _legacy_security_warnings(m)
     warnings += _authored_runs_in_warnings(m)
+    warnings += _unowned_entry_point_warnings(m)
     warnings += _authored_confidence_warnings(m)
     # The roleless-C→D-verb nudge rides THIS non-blocking channel (never `lint_fragment_problems`,
     # which would promote it to a blocking problem — trap T7), so an authoring agent SEES it and
@@ -542,11 +569,25 @@ def _budget_warnings(m: ProjectModel, expect: int | None) -> list[str]:
             f"extras heading; if it is drift, fold the near-duplicates into one component."]
 
 
+#: The tail `reporting.shown` puts on a list it cut to its first items (`+7 more field(s)`).
+_CUT_LIST_TAIL = re.compile(r"\+\d+ more\b")
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Thin wrapper: whole-list mode (`--all`) is process-wide, so it is reset on EVERY exit path,
+    the way `validate` and `audit` reset it after their `--json`. Without the reset, one `--all` run
+    in-process would widen every later list in that process."""
+    try:
+        return _run(argv)
+    finally:
+        reset_full_lists()
+
+
+def _run(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "-h" in argv or "--help" in argv or not argv:
         print("usage: coyomap lint-fragment [--repo <root>] [--ids <legend-or-map>] [--expect N]\n"
-              "                             <fragment.json>...\n\n"
+              "                             [--all] <fragment.json>...\n\n"
               "Self-check a build fragment BEFORE returning it: schema, anchor format, `extra`-key\n"
               "conventions, (with --repo) that every anchor's file exists, and (with --ids) that every\n"
               "cross-referenced id is defined in the fragment or the given id universe — pass the\n"
@@ -560,7 +601,9 @@ def main(argv: list[str] | None = None) -> int:
               "--finalize: on a CLEAN lint, rename each <id>.draft.json to <id>.json — the rename\n"
               "  the method asks for, done by the check instead of by hand, so a draft can only\n"
               "  become a fragment by passing. All fragments must be drafts, no target may already\n"
-              "  exist, and a failing lint renames nothing.")
+              "  exist, and a failing lint renames nothing.\n"
+              "--all: print every list whole. A list cut to its first items ends `+N more`; this\n"
+              "  prints the rest, so you never rebuild a list the lint already found.")
         return 0 if ("-h" in argv or "--help" in argv) else 2
     repo_root: Path | None = None
     known_ids: set[str] | None = None
@@ -568,12 +611,17 @@ def main(argv: list[str] | None = None) -> int:
     sibling_doors: set[str] = set()
     expect: int | None = None
     finalize = False
+    show_all = False
     frags: list[Path] = []
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--finalize":
             finalize = True
+        elif a == "--all":
+            # Set before any check runs: `shown` reads it while each message is built.
+            show_all = True
+            set_full_lists(True)
         elif a == "--repo":
             i += 1
             if i >= len(argv):
@@ -748,6 +796,12 @@ def main(argv: list[str] | None = None) -> int:
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         except OSError:
             pass
+    # A CUT LIST SAYS HOW TO SEE THE REST. The long-sentence advisory named 3 of 10 fields and `+7
+    # more`, and nothing said how to print the other seven. Read off the printed rows: a fragment
+    # whose own text holds `+3 more` can add this one note, and never changes a count.
+    if not show_all and any(_CUT_LIST_TAIL.search(line) for line, _err in detail):
+        print("note: a list above ends in `+N more`, cut to its first items. Re-run with --all to "
+              "print every item.", file=sys.stderr)
     if unreadable:
         print("LINT DID NOT RUN on the file(s) above — they could not be read, so nothing was "
               "checked. This is not a rule violation; fix the path and re-run.", file=sys.stderr)

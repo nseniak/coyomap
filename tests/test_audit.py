@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coyomap import audit_model
+from coyomap import audit_model, reporting
 from coyomap.model import (
     BusinessRule,
     ExtraSection,
@@ -2660,3 +2660,54 @@ def test_since_does_not_claim_the_operator_passed_with_behavioural():
             code = audit_model.main([str(mp), "--batches", str(tmp / "verify"), "--since", str(pin)])
     assert code == 0, err.getvalue()
     assert "--with-behavioural" not in err.getvalue(), err.getvalue()
+
+
+# --- a cut list says how many it left out (merge 5.4, 2026-10-07) ---------------------------------
+# A description claim named the component's first six files and a bare `…`, and the note about
+# removed prose batches named five and a `, …`: neither said how many it left out, and the first
+# cut its list in `--json` too, which promises whole lists. Both go through `shown` now, as the
+# far-side detail beside them already did.
+
+def make_component_with_files(n: int) -> ProjectModel:
+    """One component that holds `n` files, s/f1.py .. s/fn.py, and says what it does."""
+    return load_model(json.dumps({
+        "format": "coyomap-map", "title": "T", "goal": "g",
+        "components": [{"id": "C1", "name": "Store", "purpose": "Keeps the records.",
+                        "source": "s/f1.py:1", "files": [f"s/f{i}.py" for i in range(1, n + 1)]}]}))
+
+
+def description_detail(m: ProjectModel) -> str:
+    """The `detail` of the one description claim `m` makes."""
+    item = next(i for i in audit_model.l2_worklist_model(m) if i.theme == "description")
+    assert item.detail is not None, item
+    return item.detail
+
+
+def test_a_description_claim_counts_the_files_it_does_not_name():
+    assert description_detail(make_component_with_files(9)) == (
+        "declared at s/f1.py:1; files: s/f1.py, s/f2.py, s/f3.py, s/f4.py, s/f5.py, s/f6.py, +3 more")
+
+
+def test_a_description_claim_names_every_file_in_json_mode():
+    try:
+        reporting.set_full_lists(True)
+        detail = description_detail(make_component_with_files(9))
+    finally:
+        reporting.reset_full_lists()
+    assert detail.endswith("s/f8.py, s/f9.py") and "more" not in detail, detail
+
+
+def test_the_removed_prose_batches_are_counted_past_the_fifth():
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "map.json"
+        p.write_text(make_precedence_map(bad=False), encoding="utf-8")
+        out = Path(td) / "verify"
+        out.mkdir()
+        for i in range(1, 8):
+            (out / f"prose-{i}.json").write_text("{}", encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            assert audit_model.main([str(p), "--batches", str(out)]) == 0
+    line = next(ln for ln in err.getvalue().splitlines() if "prose batch file(s)" in ln)
+    assert ("removed 7 prose batch file(s) from an earlier run (prose-1.json, prose-2.json, "
+            "prose-3.json, prose-4.json, prose-5.json, +2 more)") in line, line

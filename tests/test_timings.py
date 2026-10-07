@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from coyomap.contract import CONTRACTS
 from coyomap.timings import PHASES, VERSION, Run, latest_by_slice, load_runs, main, record_path
 
 
@@ -291,6 +292,26 @@ def test_a_plural_phase_name_is_accepted_and_stored_canonically() -> None:
                      "--slice", "batch 1", "--minutes", "3.0"]) == 0
         assert read_record(tmp)[0]["phase"] == "skeptic"
         assert main(["order", "--repo", tmp, "--phase", "skeptic"]) == 0
+
+
+def test_the_tests_contract_name_records_the_test_completeness_phase() -> None:
+    """The slice's brief comes from `contract tests`, so the lead types `--phase tests`, and on the
+    2026-10-07 mcpolis build that was refused. The stored name stays `test-completeness`, so `order`
+    and `show` still read what earlier builds recorded under it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        assert main(["record", "--repo", make_repo(tmp), "--phase", "tests",
+                     "--slice", "x-tests", "--minutes", "7.5"]) == 0
+        assert read_record(tmp)[0]["phase"] == "test-completeness"
+        assert main(["order", "--repo", tmp, "--phase", "tests"]) == 0
+
+
+def test_every_fan_out_contract_name_is_a_phase_name() -> None:
+    """A contract's name is what the lead types at dispatch, and the same word comes back at the
+    barrier. The closer is one agent, not a fan-out, and `harvest-t5` rides on a harvest brief."""
+    for name in sorted(set(CONTRACTS) - {"closer", "harvest-t5"}):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert main(["record", "--repo", make_repo(tmp), "--phase", name,
+                         "--slice", "s", "--minutes", "1.0"]) == 0, name
 
 
 def test_a_real_typo_is_still_refused(capsys) -> None:

@@ -1568,8 +1568,23 @@ def _resolve(edit: _Edit, docs: dict[Path, object]) -> tuple[list[tuple[Path, st
                     f"here; correct the entry point by its trigger/source in the harvest fragment "
                     f"that declares it."]
     detail = ", ".join(f"{p.name}: {k}[{i}]" for p, k, i in owners)
-    return [], [f"{edit.label}: declared by {len(owners)} fragment rows — refusing rather than "
-                f"guessing which ({detail})"]
+    refusal = (f"{edit.label}: declared by {len(owners)} fragment rows — refusing rather than "
+               f"guessing which ({detail})")
+    # NAME THE WAY TO EACH COPY. The refusal used to stop at the list, and the lead of the
+    # 2026-10-07 mcpolis build rewrote both copies of an edge by heredoc, erasing one agent's text.
+    # An edge carries no id, so two agents that draw one call each declare it, legitimately; given
+    # one FILE, `--fragments` reads that file alone and reaches its copy. An id declared twice is
+    # never legitimate — `assemble` refuses it — so editing one copy through one file would only
+    # hide the conflict.
+    files = list(dict.fromkeys(p for p, _, _ in owners))
+    if edit.edge and len(files) == len(owners):
+        refusal += ("; an edge carries no id, so each copy is its own row: give `--fragments` one "
+                    "file to edit that file's copy, and run once per file to edit them all: "
+                    + ", ".join(f"`--fragments {p}`" for p in files))
+    elif edit.row_id:
+        refusal += ("; one id is one row and `assemble` refuses an id defined twice, so remove or "
+                    "renumber the extra row first")
+    return [], [refusal]
 
 
 def _new_triple(edit: _Edit, target: dict) -> tuple[str, str, str] | None:
@@ -1962,9 +1977,13 @@ def step_notes(argv: list[str]) -> int:
         container, n = hit.group(1), int(hit.group(2))
         owners = [(path, st) for path, doc in docs.items() for st in _steps_in(doc, container, n)]
         if len(owners) != 1:
+            # Name the files. A use case has one walk, so a second copy is a defect to remove, and
+            # a refusal that does not say where the copies are leaves a search to do by hand.
+            writers = ", ".join(sorted({path.name for path, _ in owners}))
             faults.append(f"{address}: {len(owners)} fragment step(s) match — "
                           + ("no fragment writes that walk step" if not owners else
-                             "more than one fragment writes it; fix the fragments first"))
+                             f"more than one fragment writes it ({writers}); fix the fragments "
+                             f"first"))
             continue
         targets.append((str(address), owners[0][0], owners[0][1], text.strip()))
     if faults:

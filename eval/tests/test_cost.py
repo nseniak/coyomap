@@ -860,3 +860,156 @@ def test_a_leading_bound_does_not_move_an_agents_base_context():
         assert cost.build_report(session).base_context_median == 20_000
         assert cost.build_report(session, from_turn=1).base_context_median == 20_000, (
             "the brief was paid at dispatch, before the bound")
+
+
+# --- the lead's context window ---------------------------------------------------------
+# A lead whose context fills is replaced by a summary, and the build goes on from the summary as if
+# it still held everything. Two of three measured mcpolis builds did so, at 967,939 and 968,360
+# tokens, and the first one went unreported for two retros because nothing printed it.
+
+
+def make_lead_response(message_id: str, stamp: str, context: int) -> dict[str, object]:
+    """One lead response whose request read `context` tokens."""
+    return {"type": "assistant", "timestamp": stamp,
+            "message": {"id": message_id, "model": "claude-opus-5",
+                        "usage": {"input_tokens": 1, "output_tokens": 10,
+                                  "cache_read_input_tokens": context - 1,
+                                  "cache_creation_input_tokens": 0},
+                        "content": [{"type": "text", "text": "working"}]}}
+
+
+def make_operator_message(stamp: str, text: str, **extra: object) -> dict[str, object]:
+    return {"type": "user", "timestamp": stamp, "message": {"content": text}, **extra}
+
+
+def make_boundary_record(stamp: str, pre: int, post: int, *,
+                         sidechain: bool = False) -> dict[str, object]:
+    """The record the harness writes when it replaces a context with a summary."""
+    return {"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted",
+            "isSidechain": sidechain, "timestamp": stamp,
+            "compactMetadata": {"trigger": "auto", "preTokens": pre, "postTokens": post}}
+
+
+def make_compacted_session(tmp: Path) -> Path:
+    """A lead that grows to 960,000 tokens, is compacted, and goes on from a 13,000-token summary.
+
+    Turns: 0 operator, 1 lead (100,000), 2 operator, 3 lead (960,000), 4 the summary, 5 lead."""
+    records = [
+        make_operator_message("2026-10-06T22:00:00.000Z", "/coyomap build"),
+        make_lead_response("m1", "2026-10-06T22:00:05.000Z", 100_000),
+        make_operator_message("2026-10-06T22:30:00.000Z", "next"),
+        make_lead_response("m2", "2026-10-06T22:30:05.000Z", 960_000),
+        make_boundary_record("2026-10-06T23:00:00.300Z", 967_000, 13_000),
+        make_operator_message("2026-10-06T23:00:00.000Z",
+                              "This session is being continued from a previous conversation",
+                              isCompactSummary=True),
+        make_lead_response("m3", "2026-10-06T23:00:10.000Z", 20_000),
+    ]
+    return write_jsonl(tmp / "session.jsonl", records)
+
+
+def test_the_report_names_the_leads_first_and_peak_context():
+    with tempfile.TemporaryDirectory() as td:
+        context = cost.build_report(make_compacted_session(Path(td))).context
+        assert context.lead_first == 100_000
+        assert context.lead_peak == 960_000
+        assert context.lead_peak_turn == 3
+
+
+def test_a_compaction_is_reported_at_the_turn_that_ran_on_the_summary():
+    """The boundary record carries the tokens before and after; the turn is the first one after it
+    in the file, which is the summary itself."""
+    with tempfile.TemporaryDirectory() as td:
+        compactions = cost.build_report(make_compacted_session(Path(td))).context.compactions
+        assert compactions == (cost.Compaction(turn=4, trigger="auto", pre_tokens=967_000,
+                                               post_tokens=13_000,
+                                               timestamp="2026-10-06T23:00:00.300Z"),)
+
+
+def test_the_text_report_leads_with_the_compaction():
+    """Printed before the fan-out table, and loud: a retro reads the top of this report first."""
+    with tempfile.TemporaryDirectory() as td:
+        text = cost.format_report(cost.build_report(make_compacted_session(Path(td))))
+        assert text.index("CONTEXT") < text.index("FAN-OUT")
+        assert "COMPACTED 1 time(s)" in text
+        assert "turn 4" in text and "967,000" in text
+
+
+def test_a_compaction_after_the_build_bound_is_not_this_builds():
+    """A session keeps going after the commit; a summary there says nothing about the build."""
+    with tempfile.TemporaryDirectory() as td:
+        report = cost.build_report(make_compacted_session(Path(td)), to_turn=3)
+        assert report.context.compactions == ()
+        assert "COMPACTED" not in cost.format_report(report)
+
+
+def test_a_range_holding_only_the_compaction_still_prints_it():
+    """Turn 4 is the summary alone: no lead API call, so no context size, but the compaction is in
+    range and the text must say so, as `--json` does."""
+    with tempfile.TemporaryDirectory() as td:
+        report = cost.build_report(make_compacted_session(Path(td)), from_turn=4, to_turn=4)
+        text = cost.format_report(report)
+        assert report.context.compactions
+        assert "COMPACTED 1 time(s)" in text and "turn 4" in text
+        assert "no lead API call in this turn range" in text
+
+
+def test_a_peak_near_the_compaction_point_is_flagged_even_without_one():
+    """The previous build ended at 937,840 tokens with no summary; the next one compacted."""
+    with tempfile.TemporaryDirectory() as td:
+        session = write_jsonl(Path(td) / "session.jsonl", [
+            make_operator_message("2026-10-06T22:00:00.000Z", "/coyomap build"),
+            make_lead_response("m1", "2026-10-06T22:00:05.000Z", 937_840),
+        ])
+        text = cost.format_report(cost.build_report(session))
+        assert "COMPACTED" not in text
+        assert "near the point where the harness compacts" in text
+
+
+def test_a_lean_lead_raises_no_flag():
+    with tempfile.TemporaryDirectory() as td:
+        session = write_jsonl(Path(td) / "session.jsonl", [
+            make_operator_message("2026-10-06T22:00:00.000Z", "/coyomap build"),
+            make_lead_response("m1", "2026-10-06T22:00:05.000Z", 400_000),
+        ])
+        text = cost.format_report(cost.build_report(session))
+        assert "COMPACTED" not in text and "near the point" not in text
+
+
+def test_a_compacted_subagent_is_counted_and_named():
+    with tempfile.TemporaryDirectory() as td:
+        session = make_compacted_session(Path(td))
+        agents = cost.subagent_dir(session)
+        make_agent(agents, "quiet", "Skeptic security-1", minutes=1.0)
+        make_agent(agents, "full", "Harvest h-t5 domain model", minutes=1.0)
+        with (agents / "agent-full.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(make_boundary_record("2026-08-02T10:05:30.000Z", 968_000, 9_000,
+                                                     sidechain=True)) + "\n")
+        assert cost.build_report(session).context.subagents_compacted == (
+            "Harvest h-t5 domain model",)
+
+
+def test_a_helper_run_build_reports_its_own_compaction():
+    """A build that ran AS a sub-agent is profiled from that agent's own file, every record a
+    sidechain. Its boundary record is a sidechain too, and still the lead's."""
+    with tempfile.TemporaryDirectory() as td:
+        records: list[dict[str, object]] = [
+            {**make_operator_message("2026-09-29T21:00:00.000Z", "build"), "isSidechain": True},
+            {**make_lead_response("m1", "2026-09-29T21:00:05.000Z", 966_062), "isSidechain": True},
+            make_boundary_record("2026-09-29T22:20:20.318Z", 968_360, 18_176, sidechain=True),
+            {**make_operator_message("2026-09-29T22:20:20.317Z", "continued"), "isSidechain": True,
+             "isCompactSummary": True},
+            {**make_lead_response("m2", "2026-09-29T22:21:00.000Z", 30_000), "isSidechain": True},
+        ]
+        session = write_jsonl(Path(td) / "agent-lead.jsonl", records)
+        context = cost.build_report(session, include_sidechains=True).context
+        assert [c.pre_tokens for c in context.compactions] == [968_360]
+
+
+def test_the_retro_method_reads_the_context_block_and_ranks_a_compaction_high():
+    """Both ends must point at each other: `cost` prints the block, and the retro method tells the
+    reader to look at it and what a compaction is worth. A rule only one side states is the rule
+    that silently stops happening."""
+    method = (Path(__file__).resolve().parents[1] / "retro" / "method.md").read_text(encoding="utf-8")
+    assert "CONTEXT" in method and "COMPACTED" in method
+    assert "compaction of the lead" in method and "HIGH" in method

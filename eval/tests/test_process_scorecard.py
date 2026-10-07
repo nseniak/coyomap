@@ -20,6 +20,8 @@ bug in this module, and it produced exactly the wrong answer for the assertion t
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -27,6 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from coyomap_eval import cost
 from coyomap_eval import process_scorecard as P
 from coyomap_eval.transcript import ToolCall, Turn, read_turns
 
@@ -478,6 +481,85 @@ def test_a9_is_not_applicable_without_captured_validate_output():
     assert (a.observed, a.of, a.score) == (0, 0, None)
 
 
+# Retro 2026-10-07, finding 10: assertion 9 read only TYPED `validate` runs. A build that closes
+# through `ship` runs the closing gates inside one process, so its last typed validate view was 341
+# turns before the close and narrowed to 4 lines, and the line scored 37/37 on a build whose own
+# finalize said "UNRECORDED: 7 · UNSURE: 1". finalize prints that count on stdout and in the gate
+# block, so the transcript already holds the answer about what shipped.
+
+_DISPOSITION_7_1 = ("finalize: Advisory disposition: UNRECORDED: 7 · UNSURE: 1 · carried (no escape): "
+                    "8 · disclosure: 11 · recorded: 1. An UNANSWERED or UNRECORDED row is an escape "
+                    "nobody took, not a carried one. Which advisory is which — its text, and the "
+                    "heading it names — is in the `Advisory disposition` table of f.md")
+
+
+def make_ship_turn(index: int, uid: str, output: str) -> Turn:
+    return make_turn(index, make_bash("coyomap ship --note-file note.md 2>&1 | tail -12", uid),
+                     results=((uid, output),))
+
+
+def test_a9_scores_the_last_finalize_disposition_over_a_narrowed_validate_view():
+    verdict = "finalize: ADVISORIES — 0 blocking, 28 advisory. Full findings: f.md\n"
+    turns = (make_validate_turn(0, "v1", (_ESCAPABLE,)),
+             make_validate_turn(1, "v2", (_PLAIN,)),        # narrowed: the escapable one looks gone
+             make_ship_turn(2, "s", verdict + _DISPOSITION_7_1))
+    a = P.assert_9_no_advisory_waved_through(turns)
+    assert (a.observed, a.of) == (1, 9), a
+    assert "disposition" in a.note and "turn 2" in a.note, a.note
+    assert {e.detail["unresolved"]: e.detail["count"] for e in a.evidence} == {
+        "UNRECORDED": 7, "UNSURE": 1}, a.evidence
+
+
+def test_a9_reads_the_disposition_from_a_gate_block_read():
+    """The gate block is the other place finalize writes the line, and a `cat` of it is how a ship
+    build sees its verdict. An UNANSWERED row is, in finalize's own words, an escape nobody took."""
+    block = ("Gates: finalize ADVISORIES — 0 blocking, 5 advisory (map sha256 3a755167016c…).\n"
+             "Advisory disposition: UNANSWERED: 1 · UNSURE: 1 · recorded: 3. An UNANSWERED or "
+             "UNRECORDED row is an escape nobody took, not a carried one.\n")
+    turns = (make_turn(4, make_bash("cat .coyomap/verify/gate-block.md", uid="g"),
+                       results=(("g", block),)),)
+    a = P.assert_9_no_advisory_waved_through(turns)
+    assert (a.observed, a.of) == (3, 5), a
+
+
+def test_a9_takes_the_last_disposition_and_a_later_clean_run_supersedes_it():
+    """The LAST finalize decides. A run that raised no advisory prints no disposition at all, and
+    the one before it no longer describes the map, so today's validate reading applies again."""
+    first = make_ship_turn(1, "s1", _DISPOSITION_7_1)
+    second = make_turn(3, make_bash("coyomap finalize m.json 2>&1 | tail -4", uid="f"),
+                       results=(("f", "finalize: Advisory disposition: UNSURE: 1 · recorded: 8. "
+                                      "An UNANSWERED or UNRECORDED row is …"),))
+    a = P.assert_9_no_advisory_waved_through((first, second))
+    assert (a.observed, a.of) == (8, 9), a
+    clean = make_turn(5, make_bash("coyomap finalize m.json", uid="c"),
+                      results=(("c", "finalize: CLEAN — 0 blocking, 0 advisory. Full findings: "
+                                     "f.md"),))
+    a = P.assert_9_no_advisory_waved_through((first, second, clean))
+    assert (a.observed, a.of) == (0, 0), a
+    assert "validate" in a.note, a.note
+
+
+def test_a9_reads_no_disposition_outside_a_finalize_output():
+    """A `grep` over finalize.py prints its docstring's example line: source text, not a verdict
+    on this map."""
+    grep = make_turn(2, make_bash('grep -n "Advisory disposition" tools/coyomap/finalize.py',
+                                  uid="g"),
+                     results=(("g", '1393:    """`Advisory disposition: UNSURE: 1 · disclosure: 9 '
+                                    '· …`, or ""'),))
+    a = P.assert_9_no_advisory_waved_through((make_validate_turn(0, "v1", (_ESCAPABLE,)),
+                                              make_validate_turn(1, "v2", (_PLAIN,)), grep))
+    assert (a.observed, a.of) == (1, 1), a
+
+
+def test_a9_a_disposition_with_nothing_recordable_has_no_opportunity_and_says_why():
+    """`carried (no escape)` and `disclosure` rows name no record, so they are not counted — the
+    same rule the validate reading applies to an advisory naming no escape."""
+    a = P.assert_9_no_advisory_waved_through((make_ship_turn(
+        1, "s", "finalize: Advisory disposition: carried (no escape): 3 · disclosure: 2. …"),))
+    assert (a.observed, a.of) == (0, 0), a
+    assert "turn 1" in a.note and "carried (no escape): 3" in a.note, a.note
+
+
 # --- assertion 10 ---------------------------------------------------------------------
 
 def test_a10_counts_fanouts_that_stayed_under_the_poll_threshold():
@@ -679,7 +761,10 @@ def test_every_assertion_id_is_unique_and_skips_the_reserved_eleven():
     # `--json` written and never opened while its contents were re-derived by hand to a different
     # answer. The fourth reads the MAP: the audit's `security` theme going empty after auth surfaces
     # moved into rules, which left 200 access claims triaged as ordinary ones for two builds.
-    assert ids == [*range(1, 11), *range(12, 19), 21, 22, 23, 24, 25, *range(26, 41)], ids
+    # 41 came from the 2026-10-07 mcpolis retrospective: the lead's context was compacted at turn
+    # 747, two of the last three builds compacted, and the summary dropped a flag the next record
+    # needed. A compaction is always a HIGH finding in a retro, so the scorecard names it too.
+    assert ids == [*range(1, 11), *range(12, 19), 21, 22, 23, 24, 25, *range(26, 42)], ids
     assert 11 not in ids, "id 11 is reserved for the fixture-specific golden-map assertion"
     assert len(ids) == len(set(ids))
 
@@ -3324,3 +3409,92 @@ def test_40_a_grep_dash_h_after_the_pipe_is_still_a_lint_invocation():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         assert len(_lint_calls_from("coyomap lint-fragment f.json 2>&1 | grep -h FAIL", Path(td))) == 1
+
+
+# --- 41: the lead was not compacted ------------------------------------------------------------
+
+
+def make_compaction(turn: int, pre: int = 967_939, post: int = 12_810) -> "P.Compaction":
+    return P.Compaction(turn=turn, trigger="auto", pre_tokens=pre, post_tokens=post,
+                        timestamp="2026-10-06T23:09:57.497Z")
+
+
+def make_compacting_transcript(tmp: Path) -> Path:
+    """A lead that is compacted between its second and third responses.
+
+    Turns: 0 operator, 1 lead, 2 operator, 3 lead, 4 the summary, 5 lead."""
+    def lead(mid: str, stamp: str) -> dict[str, object]:
+        return {"type": "assistant", "timestamp": stamp,
+                "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": "ok"}],
+                            "usage": {"input_tokens": 1, "output_tokens": 1,
+                                      "cache_read_input_tokens": 900_000}}}
+
+    def operator(stamp: str, text: str, **extra: object) -> dict[str, object]:
+        return {"type": "user", "timestamp": stamp,
+                "message": {"role": "user", "content": text}, **extra}
+
+    records = [
+        operator("2026-10-06T22:00:00.000Z", "build the map"),
+        lead("m1", "2026-10-06T22:00:05.000Z"),
+        operator("2026-10-06T22:30:00.000Z", "go on"),
+        lead("m2", "2026-10-06T22:30:05.000Z"),
+        {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-10-06T23:00:00.300Z",
+         "compactMetadata": {"trigger": "auto", "preTokens": 967_939, "postTokens": 12_810}},
+        operator("2026-10-06T23:00:00.000Z", "This session is being continued from a previous "
+                 "conversation", isCompactSummary=True),
+        lead("m3", "2026-10-06T23:00:10.000Z"),
+    ]
+    path = tmp / "lead.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+    return path
+
+
+def test_a41_a_compaction_scores_zero_and_names_its_turn():
+    a = P.assert_41_lead_not_compacted((make_turn(0),),
+                                       P.ScoreContext(compactions=(make_compaction(747),)))
+    assert (a.observed, a.of) == (0, 1)
+    assert a.evidence[0].turn == 747 and "HIGH" in a.note
+
+
+def test_a41_a_lead_that_was_never_compacted_scores_one():
+    a = P.assert_41_lead_not_compacted((make_turn(0),), P.ScoreContext())
+    assert (a.observed, a.of) == (1, 1) and a.evidence == ()
+
+
+def test_a41_reads_the_boundary_record_from_the_transcript_file():
+    with tempfile.TemporaryDirectory() as td:
+        card = P.score_transcript(make_compacting_transcript(Path(td)))
+        a41 = next(a for a in card.assertions if a.id == 41)
+        assert (a41.observed, a41.of) == (0, 1)
+        assert a41.evidence[0].turn == 4
+
+
+def test_a41_a_compaction_before_the_first_build_turn_is_not_the_builds_and_cost_agrees():
+    """A build that began mid-session: the summary at turn 4 came before it. The scorecard and
+    `cost` take the same bounds and must give the same answer, or a retro ranks a 0 as HIGH that
+    the cost report never shows."""
+    with tempfile.TemporaryDirectory() as td:
+        transcript = make_compacting_transcript(Path(td))
+        card = P.score_transcript(transcript, from_turn=5)
+        a41 = next(a for a in card.assertions if a.id == 41)
+        assert (a41.observed, a41.of) == (1, 1)
+        assert cost.build_report(transcript, from_turn=5).context.compactions == ()
+
+
+def test_process_takes_a_from_turn_bound_on_the_command_line():
+    with tempfile.TemporaryDirectory() as td:
+        transcript = make_compacting_transcript(Path(td))
+        out = Path(td) / "card.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = P.main([str(transcript), "--from-turn", "5", "--out", str(out)])
+        assert code == 0
+        a41 = next(a for a in json.loads(out.read_text(encoding="utf-8"))["assertions"]
+                   if a["id"] == 41)
+        assert a41["observed"] == 1
+
+
+def test_a41_a_compaction_after_the_last_build_turn_is_not_the_builds():
+    with tempfile.TemporaryDirectory() as td:
+        card = P.score_transcript(make_compacting_transcript(Path(td)), to_turn=3)
+        a41 = next(a for a in card.assertions if a.id == 41)
+        assert (a41.observed, a41.of) == (1, 1)

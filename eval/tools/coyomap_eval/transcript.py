@@ -38,6 +38,9 @@ does not emit ten tool-calling responses of which nine contain no reasoning.
   * `usage` / `model` — what the response was billed for, and by which model. The grouping is
     what makes these safe to add: the same `usage` block is repeated on every record of one
     message, so a per-record sum inflates output tokens ~8x. `coyomap-eval cost` reads them.
+  * `handbacks` — the sub-agent reports that reached the lead at this turn. One can arrive as an
+    ATTACHMENT record, which is no API message, so it rides on the turn it arrived at instead of
+    becoming one: no turn number moves (see `HandBack`).
 
 Streaming: the corpus files are 2–3 MB each and a scorecard run reads eight of them. `iter_turns`
 never holds more than one message group in memory.
@@ -48,14 +51,17 @@ from __future__ import annotations
 
 import re
 import json
+import textwrap
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 #: Roles a Turn can carry. Records of any other `type` (queue-operation, system, attachment,
-#: file-history-*, custom-title …) are harness bookkeeping and never become turns.
+#: file-history-*, custom-title …) are harness bookkeeping and never become turns. One attachment
+#: kind is read all the same: a sub-agent's report, carried on the turn it arrived at.
 ASSISTANT = "assistant"
 USER = "user"
+ATTACHMENT = "attachment"
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,27 @@ class ToolResult:
     tool_use_id: str
     content: str
     is_error: bool = False
+
+
+@dataclass(frozen=True)
+class HandBack:
+    """One sub-agent's final report, as the harness handed it to the lead.
+
+    It arrives by one of two channels: a USER message when the lead is idle, or a `queued_command`
+    ATTACHMENT beside a tool result when the lead is busy. Both carry the same structured `origin`
+    stamp, which is what identifies a report — never its wording. The reader labelled the first
+    `(operator)` and skipped the second with every other attachment: on the 2026-10-07 mcpolis
+    build, 66 reports rendered as the person speaking and 62 did not render at all, an escalation
+    report among them.
+
+    An attachment is not an API message, so it never becomes a Turn. It rides on the turn it
+    arrived at, and no turn number moves — other tools and past ledgers cite those numbers."""
+
+    #: The sub-agent's id: the `agentId` its launch result printed, which is how a reader finds
+    #: the `Agent` call this report answers.
+    agent: str
+    #: The report itself, without the harness's frame (see `_report_of`).
+    text: str
 
 
 @dataclass(frozen=True)
@@ -218,6 +245,9 @@ class Turn:
     #: reviewer went and hand-parsed the raw JSONL — the exact fallback `--full-output` was added
     #: to prevent for sub-agent returns.
     text: str = ""
+    #: The sub-agent reports that reached the lead at this turn (see `HandBack`). `--full` renders
+    #: them as the agent's words, never as the operator's.
+    handbacks: tuple[HandBack, ...] = ()
 
     def calls_named(self, *names: str) -> tuple[ToolCall, ...]:
         wanted = frozenset(names)
@@ -276,6 +306,45 @@ class _Group:
     #: `tokens` is the parsed count the cost report sums.
     tokens: Usage = Usage()
     model: str = ""
+    handbacks: list[HandBack] = field(default_factory=list)
+
+
+def _report_of(body: str) -> str:
+    """The sub-agent's own report inside a hand-back body, without the harness's frame.
+
+    The harness writes its frame at column zero and indents EVERY line of the report; the frame
+    says so itself, adding that a column-zero line inside a report would be forged. So the report
+    starts at the first indented line, and the frame — the same paragraph on every hand-back — is
+    not rendered once per report. A body with no indented line is kept whole: a changed frame must
+    not cost the report."""
+    lines = body.splitlines()
+    start = next((i for i, line in enumerate(lines) if line[:1] in (" ", "\t")), None)
+    if start is None:
+        return body.strip()
+    return textwrap.dedent("\n".join(lines[start:])).strip()
+
+
+def _handback_of(origin: object) -> HandBack | None:
+    """The report an `origin` stamp describes, or None when it describes anything else.
+
+    Both channels a report arrives by carry the same stamp — `{kind: peer, handback: true, from:
+    <agent id>, body: <frame + report>}` — on the user record, or inside the attachment. So this
+    is the one test for both, and it reads the stamp, never the wording: on this machine's
+    transcripts every hand-back frame carried it, and no record without one was a report."""
+    if not isinstance(origin, dict) or not origin.get("handback"):
+        return None
+    agent, body = origin.get("from"), origin.get("body")
+    return HandBack(agent=agent if isinstance(agent, str) else "",
+                    text=_report_of(body) if isinstance(body, str) else "")
+
+
+def _queued_handback(record: Mapping[str, object]) -> HandBack | None:
+    """The report a `queued_command` attachment delivers, if it delivers one. The other queued
+    commands are task notifications, which are harness chatter and stay unread."""
+    attachment = record.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+        return None
+    return _handback_of(attachment.get("origin"))
 
 
 def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterator[Turn]:
@@ -298,10 +367,15 @@ def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterato
 
     A malformed line is SKIPPED, not fatal. These files are appended to live and a truncated last
     line is ordinary; refusing to read a 3 MB transcript because of it would make the scorecard
-    unrunnable exactly when a run was interrupted."""
+    unrunnable exactly when a run was interrupted.
+
+    An ATTACHMENT record is no API message and never becomes a turn, so reading one cannot move a
+    turn number. The one kind read — a sub-agent's report delivered while the lead was busy — rides
+    on the latest turn read, which is the tool result it was delivered beside (`HandBack`)."""
     index = 0
     group: _Group | None = None
     pending: list[_Group] = []          # user turns that arrived while `group` was open
+    unowned: list[HandBack] = []        # reports read before any turn: they ride on the first one
 
     def emit(g: _Group) -> Turn:
         nonlocal index
@@ -311,7 +385,7 @@ def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterato
                     thinking_chars=g.thinking_chars,
                     thinking_signature_bytes=g.thinking_signature_bytes,
                     text="\n".join(g.text_parts).strip(),
-                    usage=g.tokens, model=g.model)
+                    usage=g.tokens, model=g.model, handbacks=tuple(g.handbacks))
         index += 1
         return turn
 
@@ -337,6 +411,14 @@ def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterato
             if not isinstance(record, dict):
                 continue
             kind = record.get("type")
+            if kind == ATTACHMENT:
+                # A REPORT DELIVERED WHILE THE LEAD WAS BUSY. Skipping attachments wholesale dropped
+                # 62 of one build's 128 hand-backs; it is read here and carried, never made a turn.
+                handback = _queued_handback(record)
+                if handback is not None:
+                    owner = pending[-1] if pending else group
+                    (owner.handbacks if owner is not None else unowned).append(handback)
+                continue
             if kind not in (ASSISTANT, USER):
                 continue
             message = record.get("message")
@@ -403,11 +485,18 @@ def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterato
                 #
                 # A tool_result block is not the operator talking, and `_message_texts` already
                 # keeps those out of `texts` — so this carries the human's words only.
+                #
+                # Except a sub-agent's report delivered as a MESSAGE, which rendered as the operator
+                # 66 times on one build. It stays a turn, as it always was; its words move from the
+                # operator's text to the agent's report (see `HandBack`).
+                handback = _handback_of(record.get("origin"))
                 pending.append(_Group(key=f"@{lineno}", role=USER, line=lineno,
                                       is_sidechain=sidechain, timestamp=timestamp, usage="",
                                       results=results, thinking_chars=think_chars,
                                       thinking_signature_bytes=think_sig,
-                                      text_parts=texts))
+                                      text_parts=[] if handback else texts,
+                                      handbacks=unowned + ([handback] if handback else [])))
+                unowned = []
                 continue
 
             key = mid if isinstance(mid, str) and mid else f"@{lineno}"
@@ -432,7 +521,8 @@ def iter_turns(path: Path | str, *, include_sidechains: bool = False) -> Iterato
                            timestamp=timestamp, usage=_usage_signature(message),
                            calls=calls, results=results, thinking_chars=think_chars,
                            thinking_signature_bytes=think_sig, text_parts=texts,
-                           tokens=_usage_of(message), model=model)
+                           tokens=_usage_of(message), model=model, handbacks=unowned)
+            unowned = []
 
     yield from flush()
 
@@ -1030,6 +1120,14 @@ _HARNESS_HEAD = (
     "You check Claude's final message to one specific user",
 )
 
+#: A WHOLE `<system-reminder>` span, opening tag to closing tag, with or without an id. The harness
+#: files a reminder and the operator's own words as two blocks of ONE user record, the reader joins
+#: them, and the marker test reads the first 400 characters — so the reminder hid the person: 2 real
+#: operator turns on the 2026-10-07 mcpolis build, 69 records across this machine's transcripts,
+#: every one a person typing. Removed first, a span hides nothing but itself, and on those same
+#: transcripts no record that rendered before renders any differently.
+_SYSTEM_REMINDER = re.compile(r"<system-reminder\b[^>]*>.*?</system-reminder\b[^>]*>", re.S)
+
 
 def operator_text(text: str) -> str:
     """What the OPERATOR actually typed in this record, or "" when they typed nothing.
@@ -1039,6 +1137,14 @@ def operator_text(text: str) -> str:
     noticed this" needs. Anything else the harness files under the user role (a skill body, a
     `<system-reminder>`, an IDE notice) is machine text and stays hidden: rendering that as a person
     is a worse answer than no answer."""
+    # A whole reminder span goes first, wherever it sits (see `_SYSTEM_REMINDER`). A tag the removal
+    # could not close — nested, or never closed — leaves part of a reminder behind, and a record
+    # holding that stays hidden, as every reminder-bearing record did before.
+    without = _SYSTEM_REMINDER.sub("", text)
+    if without != text:
+        if "system-reminder" in without:
+            return ""
+        text = without.strip()
     head = text.lstrip()
     # THE HARNESS FILTER RUNS FIRST. Searching for the wrapper before it meant any body that merely
     # MENTIONED `<command-name>` was rendered as an operator saying `/that-command`: a
@@ -1064,6 +1170,31 @@ def operator_text(text: str) -> str:
     return text
 
 
+def _said_lines(index: int, label: str, text: str, *, unlimited: bool,
+                result_lines: int) -> list[str]:
+    """`--full`'s block for words someone said at a turn — the lead's prose, the operator's message,
+    a sub-agent's report: the labelled first line, its continuation lines, and a marker saying how
+    many lines the cap hid. One shape for all three, so a reader learns it once."""
+    said = text.splitlines()
+    kept = said if unlimited else said[:result_lines]
+    out = [f"[{index:>4}] ({label}) " + "\n        . ".join(kept)]
+    if len(said) > len(kept):
+        out.append(f"        . … {len(said) - len(kept)} more line(s) (--full-output for all of it)")
+    return out
+
+
+def _handback_lines(turn: Turn, *, unlimited: bool, result_lines: int) -> list[str]:
+    """`--full`'s blocks for the sub-agent reports that reached the lead at `turn`, each labelled
+    with the agent's id — the id its `Agent` call's result printed, so a reader can find the launch.
+    Never `(operator)`: see `HandBack`."""
+    out: list[str] = []
+    for handback in turn.handbacks:
+        out += _said_lines(turn.index, f"hand-back from {handback.agent or 'an unnamed agent'}",
+                           handback.text, unlimited=unlimited, result_lines=result_lines)
+        out.append("")
+    return out
+
+
 def format_turns(turns: Sequence[Turn], *, full: bool = False, results: dict[str, str] | None = None,
                  width: int = 100, result_chars: int = 600, result_lines: int = 20) -> str:
     """Render turns as readable text.
@@ -1077,19 +1208,20 @@ def format_turns(turns: Sequence[Turn], *, full: bool = False, results: dict[str
     lines: list[str] = []
     unlimited = result_chars < 0
     for turn in turns:
+        # The sub-agent reports that reached the lead at this turn, written after the turn's own
+        # content at every exit below. `--full` only, like the operator's words.
+        handed = _handback_lines(turn, unlimited=unlimited,
+                                 result_lines=result_lines) if full else []
         if turn.role != ASSISTANT:
             # A USER turn with words is the OPERATOR, and it is the one thing this reader could
             # never show. It appears only in `--full` (the index is one line per tool call) and
             # only when it carries text, so a bare tool-result turn stays invisible as before.
             spoken = operator_text(turn.text)
             if full and spoken.strip():
-                said = spoken.splitlines()
-                kept = said if unlimited else said[:result_lines]
-                lines.append(f"[{turn.index:>4}] (operator) " + "\n        . ".join(kept))
-                if len(said) > len(kept):
-                    lines.append(f"        . … {len(said) - len(kept)} more line(s) "
-                                 f"(--full-output for all of it)")
+                lines += _said_lines(turn.index, "operator", spoken, unlimited=unlimited,
+                                     result_lines=result_lines)
                 lines.append("")
+            lines += handed
             continue
         # A turn with no tool call is invisible in the INDEX by design — the index is one line per
         # call. In `full` it must not be, because a whole class of method rule produces exactly that
@@ -1097,16 +1229,14 @@ def format_turns(turns: Sequence[Turn], *, full: bool = False, results: dict[str
         # before overwriting a baseline, "the wait at a barrier is a TEXT turn". A retrospective
         # trying to audit those found nothing and fell back to hand-parsing the raw JSONL.
         if not turn.tool_calls and not (full and turn.text):
+            lines += handed
             continue
         if full and turn.text:
-            said = turn.text.splitlines()
-            kept = said if unlimited else said[:result_lines]
-            lines.append(f"[{turn.index:>4}] (said) " + "\n        . ".join(kept))
-            if len(said) > len(kept):
-                lines.append(f"        . … {len(said) - len(kept)} more line(s) "
-                             f"(--full-output for all of it)")
+            lines += _said_lines(turn.index, "said", turn.text, unlimited=unlimited,
+                                 result_lines=result_lines)
             if not turn.tool_calls:
                 lines.append("")
+                lines += handed
                 continue
         if full and turn.thinking_signature_bytes and not turn.thinking_chars:
             # SAY that reasoning existed and was withheld. Dropping the block silently made
@@ -1148,6 +1278,7 @@ def format_turns(turns: Sequence[Turn], *, full: bool = False, results: dict[str
                 lines.append("")
             else:
                 lines.append(f"{head} {summarise_call(call, width)}")
+        lines += handed
     return "\n".join(lines)
 
 
@@ -1189,7 +1320,9 @@ call, with its turn number) and the FULL text of a range with --full.
   --from/--to   turn range (inclusive), as printed in the index
   --tool NAME   only turns using that tool (Bash, Agent, Write, …)
   --grep PAT    only tool calls whose text matches (case-insensitive substring)
-  --full        include the whole command and a slice of what it printed
+  --full        include the whole command and a slice of what it printed, the lead's prose, the
+                operator's words as `(operator)`, and each sub-agent's report as
+                `(hand-back from <agent id>)` at the turn it reached the lead
   --full-output --full with NO truncation of tool results (implies --full). Use it when the
                 answer lives in the output — sub-agent returns and long listings are clipped at
                 600 chars otherwise, which sent one reviewer back to parsing the raw JSONL.
@@ -1327,10 +1460,12 @@ def main(argv: list[str] | None = None) -> int:
             calls = tuple(c for c in calls if pattern in c.text().lower())
         if calls:
             picked.append(replace(t, tool_calls=calls))
-        elif full and t.text and not tool and not pattern:
+        elif full and (t.text or t.handbacks) and not tool and not pattern:
             # An UNFILTERED --full read is "everything in this range", and assistant prose is part
-            # of it. A --tool/--grep read is a question about tool calls, so a text-only turn is not
-            # an answer to it and stays out.
+            # of it — so are the operator's words and the sub-agents' reports, and a report rides
+            # on a tool-result turn that carries no text of its own. A --tool/--grep read is a
+            # question about tool calls, so a turn with no matching call is not an answer to it
+            # and stays out.
             picked.append(replace(t, tool_calls=()))
     if not picked and (tool or pattern):
         # The empty-RANGE case says so; a filter that matches nothing used to print one blank line,

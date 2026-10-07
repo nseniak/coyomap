@@ -27,3 +27,5 @@ Escalation: none on its own.
    (`-rw-r--r--` under the usual umask), or the ones they had before the build.
    regression sign: `-rw-------` on a file that was not made private by hand (the first whole-file
    writer left them readable by their owner only).
+
+verified in mcpolis build of 2026-10-07 01:11

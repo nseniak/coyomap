@@ -1087,13 +1087,17 @@ def _apply_audit_exceptions(m: ProjectModel, findings: list[Finding]) -> list[Fi
             silenced.append(f"{f.check} {eid}")
             continue
         kept.append(f)
+    # SAY ONLY WHAT THIS KNOWS: a line sits under the heading. Not who wrote it or weighed it — this
+    # said each one "was judged acceptable by an operator", and on the 2026-10-07 mcpolis build the
+    # lead wrote every one of them alone.
     if silenced:
         kept.append(Finding(
             "recorded-exceptions", WARNING, f"'{AUDIT_EXCEPTIONS_HEADING}' extras heading",
             f"{len(silenced)} advisory/advisories suppressed by recorded exception(s): "
-            f"{', '.join(sorted(silenced))}. Each was judged acceptable by an operator and is NOT "
-            f"re-reported above; re-read them by validating a copy with the line removed. A recorded "
-            f"line silences exactly one (check, id) pair — never a whole family."))
+            f"{', '.join(sorted(silenced))}. Each has a line under '{AUDIT_EXCEPTIONS_HEADING}', "
+            f"written by whoever ran the build, and is NOT re-reported above; re-read them by "
+            f"validating a copy with the line removed. A recorded line silences exactly one "
+            f"(check, id) pair — never a whole family."))
     unused = sorted(f"{c} {i}" for c, i in recorded
                     if f"{c} {i}" not in silenced)
     if unused:
@@ -1101,7 +1105,7 @@ def _apply_audit_exceptions(m: ProjectModel, findings: list[Finding]) -> list[Fi
             "recorded-exceptions", WARNING, f"'{AUDIT_EXCEPTIONS_HEADING}' extras heading",
             f"{len(unused)} recorded exception(s) matched no finding: {', '.join(unused)} — the "
             f"advisory was fixed, the id moved, or the check name is misspelled. A line that silences "
-            f"nothing reads as a decision the operator never had to make."))
+            f"nothing reads as a decision nobody had to make."))
     return kept
 
 
@@ -1565,7 +1569,9 @@ def l2_worklist_model(m: ProjectModel, *, behavioural: bool = False) -> list[Wor
         purpose = (c.purpose or "").strip()
         if not purpose:
             continue
-        files = ", ".join(c.files[:6]) + (" …" if len(c.files) > 6 else "") if c.files else ""
+        # Through `shown`, like the far-side detail above: a bare `…` said nothing of how many
+        # files were left out, and cut `--json` too, which promises whole lists.
+        files = _shown(c.files, 6) if c.files else ""
         items.append(WorkItem(
             claim=description_claim(c.id, c.name, purpose),
             anchor=_anchor(c.source) if c.source else None, elements=(c.id,),
@@ -2135,9 +2141,8 @@ def _run(argv: list[str] | None = None) -> int:
                 # SAY SO: a lead that minted them on purpose and re-runs this for the claims files
                 # has just lost them, and a silent unlink reads like they were never there.
                 print(f"note: removed {len(stale_prose)} prose batch file(s) from an earlier run "
-                      f"({', '.join(p.name for p in stale_prose[:5])}"
-                      f"{', …' if len(stale_prose) > 5 else ''}); pass --with-prose to mint them "
-                      f"again", file=sys.stderr)
+                      f"({_shown([p.name for p in stale_prose], 5)}); pass --with-prose to mint "
+                      f"them again", file=sys.stderr)
         for name, n in prose_written:
             print(f"{name}: {n} prose field(s)")
         n_fields = sum(n for _name, n in prose_written)
