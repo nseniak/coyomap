@@ -625,12 +625,16 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   **Every build harvests T2 as its own job, and the job is complete.** In a fan-out it is one
   dedicated slice, never a side job of another slice; in a serial build it is a step of its own. It
   lists every outside system the code talks to AND every top-level library or framework the
-  package files declare as a PRODUCT dependency (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml` …;
-  dev and test dependencies, dependency groups and package files under tests/docs/internal folders
-  are left out, the same set `validate --check-coverage` reads): **one row per
-  package**, never two merged ("React and Vite" is two rows). Its D-ids are the legend the T5 owner
-  needs (see *Build order*), and the lead never writes that legend by hand instead. On one build the
-  lead wrote a legend of 9 outside services so every agent could start at once, and gave the deps
+  package files declare as a PRODUCT dependency. `validate --check-coverage` reads exactly three
+  kinds of package file: `package.json` `dependencies`, `pyproject.toml` `[project] dependencies`
+  and `[tool.poetry.dependencies]`, `go.mod` requires not marked indirect. Left out: dev and test
+  dependencies, dependency groups, optional extras, packages of the same repo (an npm `workspace:`,
+  `file:` or `link:` version, a poetry `path`, a Go module replaced by a local folder), and package
+  files under tests/docs/internal folders. A project declaring its packages in any other file
+  (`Cargo.toml`, `Gemfile` …) gets no check, and its slice reads that file by hand: **one row per
+  package**, never two merged ("React and Vite" is two rows). Its D-ids are what synthesis sets
+  each entity's `store.dep` to (see *Build order*), and the lead never writes a legend of them by
+  hand instead. On one build the lead wrote a legend of 9 outside services so every agent could start at once, and gave the deps
   to an operations slice among 4 other jobs. The map shipped 19 deps where the previous build had
   29: the slice merged frameworks and skipped 12 libraries. Two
   independent axes describe each dep:
@@ -2222,16 +2226,17 @@ synthesis → parallel trace.**
     touched" list or a bag of `C→E` edges — those record which component uses an entity, not how the
     entities relate; the `E↔E` RELATIONS are the domain backbone and only the T5 owner authors them.
     (`--check-coverage` independently flags a sparse / under-harvested domain model — see below.)
-    - **The T5 owner needs the deps legend to fill `store.dep` — sequence or inject it.** The
-      structured store's `dep` is a D-id, and a T5 agent launched in parallel with the deps harvest
-      has no D-id universe — it then ships `dep: null` on every entity, silently disabling the
-      persistence-coverage rule. Either run the T2 deps slice first and inject its
-      datastore/messaging ids into the T5 prompt (`D1=MongoDB, D2=Redis…`), or have synthesis
-      BACKFILL `store.dep` from the assembled deps (a `--reconcile` set). **Either way the legend is
-      the deps slice's own D-ids, read off its fragment. A legend the lead writes by hand up front is
-      not allowed**: it lets every agent start at once, and it then becomes the whole deps list,
-      which is how one build lost 10 of its 29 deps. The "container but no dep"
-      validate advisory is the backstop, not the plan.
+    - **The T5 owner leaves `store.dep` empty; synthesis backfills it from the assembled deps.**
+      The structured store's `dep` is a D-id, and the T5 agent runs in the same batch as the deps
+      slice, so it has no D-id universe — it then ships `dep: null` on every entity, silently disabling
+      the persistence-coverage rule until synthesis fills it. It writes the rest of the store
+      (`container`, `mode`, `notes`) and leaves `dep` null. At synthesis the lead reads the D-ids off the assembled deps
+      (`coyomap dump --legend`) and sets each persisted entity's store with a `--reconcile` set
+      (`{"ids": ["E1", "E4"], "store_dep": "D2"}`), in the same file that sets the buckets. Do not
+      run the deps slice first to inject its ids: that breaks the one-batch launch. **A legend the
+      lead writes by hand up front is not allowed**: it lets every agent start at once, and it then
+      becomes the whole deps list, which is how one build lost 10 of its 29 deps. The "container
+      but no dep" validate advisory is the backstop, not the plan.
     - **Author `states` where the code implements a lifecycle** — an entity with a status
       enum/constants (a subscription's states) gets a `states` machine on its card; a component
       whose purpose lists phases ("5-phase: disabled/deferred/connecting/live/failed") gets one on
@@ -2356,8 +2361,8 @@ synthesis → parallel trace.**
   and `tech` are blocked on it, as they are on a subdomain. Leave `rules[]` empty: it is written after
   the trace, when the flows exist to sweep. **Also assign each component's `subsystem`, each
   entity's `subdomain`, each use case's `capability` and its trigger `entry_points`, each
-  component's `runs_in`, and EVERY dep's `bucket` here — as a `--reconcile` file, NOT a
-  hand-script.** **Every dependency gets a `bucket`, not only the ones you would fix.** The harvest
+  component's `runs_in`, EVERY dep's `bucket` and each stored entity's `store_dep` here — as a
+  `--reconcile` file, NOT a hand-script.** **Every dependency gets a `bucket`, not only the ones you would fix.** The harvest
   does not author it, so a dep this file skips ships with none, and the viewer then guesses a
   group from `type` and `used_for`. On one build the reconcile set 7 fields and no bucket: all 19
   deps shipped with none, 8 of the 19 guesses were wrong, and `validate` reported nothing. Synthesis owns the finalized ids and has just seen the harvested `deployment[]`

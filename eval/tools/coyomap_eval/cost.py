@@ -458,9 +458,27 @@ def runner_ids(agents: Sequence[Actor]) -> set[str]:
     A runner's span is the span of its slowest child plus its own dispatch and collection, so
     timing it as one more worker charges its whole pool's wait as one straggler. Only a parent that
     is itself one of `agents` counts; a child whose parent is missing (a bound dropped it) is
-    timed with the lead's own fan-outs."""
+    timed with the lead's own fan-outs. And only a parent of MORE THAN ONE agent: a worker that
+    spawned a single helper is still a worker (see `helper_ids`)."""
     present = {a.agent_id for a in agents if a.agent_id}
-    return {a.parent_id for a in agents if a.parent_id and a.parent_id in present}
+    children: dict[str, int] = {}
+    for a in agents:
+        if a.parent_id and a.parent_id in present:
+            children[a.parent_id] = children.get(a.parent_id, 0) + 1
+    return {parent for parent, n in children.items() if n > 1}
+
+
+def helper_ids(agents: Sequence[Actor]) -> set[str]:
+    """The agents a WORKER spawned alone: a parent of this build with exactly one child.
+
+    A runner dispatches a pool; a worker that asks one helper for one lookup is still a worker,
+    doing its own job while it waits. It keeps its row in its fan-out, and the helper gets none,
+    because the helper's time is already inside the worker's. Counting every parent as a runner
+    took that worker's row away and gave its helper a one-agent fan-out of its own."""
+    runners = runner_ids(agents)
+    present = {a.agent_id for a in agents if a.agent_id}
+    return {a.agent_id for a in agents
+            if a.agent_id and a.parent_id in present and a.parent_id not in runners}
 
 
 def bounded_agents(agents: Sequence[Actor], window: tuple[float, float],
@@ -664,7 +682,8 @@ class Batch:
     """One fan-out: the agents spawned close together, and what waiting for the slowest one cost.
 
     `waste` is the batch's wall MINUS its mean agent duration — the time the fast agents spent
-    finished and idle. It is the single number a slice-balancing change has to move."""
+    finished and idle (for a runner's fan-out, its slowest agent minus the mean: see `waste`). It
+    is the single number a slice-balancing change has to move."""
 
     index: int
     start: float
@@ -672,6 +691,8 @@ class Batch:
     agents: tuple[Actor, ...]
     #: Who dispatched this fan-out: "lead", or the runner agent's name.
     via: str = "lead"
+    #: True when a runner dispatched it. See `waste` for what that changes.
+    by_runner: bool = False
 
     @property
     def wall(self) -> float:
@@ -706,6 +727,16 @@ class Batch:
 
     @property
     def waste(self) -> float:
+        """The lead's fan-out: `wall - mean`, launch stagger included, because the lead's agents
+        all wait at one barrier for the last of them.
+
+        A RUNNER's fan-out: `slowest - mean`, each agent timed from its own launch. A runner
+        launches its pool over minutes and collects it itself, so a skeptic launched late waited
+        on nobody. Reading it the lead's way counted the launch stagger as straggler waste: the
+        2026-10-08 mcpolis wave-1 runner row launched 29 skeptics over 583.8 s and read 13.3
+        minutes of waste."""
+        if self.by_runner:
+            return max(0.0, (self.durations[0] if self.agents else 0.0) - self.mean)
         return max(0.0, self.wall - self.mean)
 
     @property
@@ -759,10 +790,12 @@ def batches(agents: Sequence[Actor], gap: float = 120.0) -> list[Batch]:
     wave-1 runner of the 2026-10-08 mcpolis build a 53.0-minute straggler, 45.0 minutes of "waste"
     that was its own pool's wait, already charged to the pool's fan-outs."""
     runners = runner_ids(agents)
+    helpers = helper_ids(agents)
     names = {a.agent_id: a.name for a in agents if a.agent_id}
     groups: dict[str, list[Actor]] = {}
     for agent in agents:
-        if agent.agent_id in runners or agent.launched_at is None or agent.start is None:
+        if (agent.agent_id in runners or agent.agent_id in helpers
+                or agent.launched_at is None or agent.start is None):
             continue
         parent = agent.parent_id if agent.parent_id in runners else ""
         groups.setdefault(parent, []).append(agent)
@@ -777,13 +810,16 @@ def batches(agents: Sequence[Actor], gap: float = 120.0) -> list[Batch]:
         if current:
             clusters.append((parent, current))
     clusters.sort(key=lambda c: min(a.launched_at or 0.0 for a in c[1]))
-    return [_batch(i, members, names.get(parent, parent) if parent else "lead")
+    return [_batch(i, members, names.get(parent, parent) if parent else "lead",
+                   by_runner=bool(parent))
             for i, (parent, members) in enumerate(clusters)]
 
 
-def _batch(index: int, agents: list[Actor], via: str = "lead") -> Batch:
+def _batch(index: int, agents: list[Actor], via: str = "lead", *,
+           by_runner: bool = False) -> Batch:
     return Batch(index=index, start=min(a.start or 0.0 for a in agents),
-                 end=max(a.end or 0.0 for a in agents), agents=tuple(agents), via=via)
+                 end=max(a.end or 0.0 for a in agents), agents=tuple(agents), via=via,
+                 by_runner=by_runner)
 
 
 def reply_latencies(actor: Actor) -> list[tuple[str, float]]:
@@ -1066,7 +1102,8 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
                   "median": statistics.median(b.durations) if b.agents else 0.0,
                   "mean": b.mean, "waste": b.waste, "stagger": b.stagger,
                   "cost": b.cost(cache_ttl),
-                  "thinking_share": b.thinking_share(), "via": b.via}
+                  "thinking_share": b.thinking_share(), "via": b.via,
+                  "by_runner": b.by_runner}
                  for b in batches(agents)],
         base_context_median=int(statistics.median(bases)) if bases else 0,
         context_per_turn={
@@ -1166,17 +1203,22 @@ def format_report(report: Report) -> str:
                      f" {_num(b, 'stagger'):>7.1f}s {_num(b, 'cost'):>7.2f}"
                      f" {(f'{100 * share:.0f}%' if share else '-'):>6}  {b.get('via', 'lead')}")
     waste = sum(_num(b, "waste") for b in report.batches)
-    stagger = sum(_num(b, "stagger") for b in report.batches)
+    stagger = sum(_num(b, "stagger") for b in report.batches if not b.get("by_runner"))
+    by_runner = sum(1 for b in report.batches if b.get("by_runner"))
     # THE TWO NUMBERS TOGETHER, always. `waste` alone reads as "reorder the dispatch", and
     # `method.md` priced that at 7.7 minutes for years on exactly that reading. `stagger` is the
     # whole ceiling on what reordering can win — every agent in a batch launches in one message —
     # and it is measured in SECONDS. Apart, each invites the wrong lever; together they say the
     # lever is slice SIZING.
+    # A runner's rows are timed from each agent's own launch, so their stagger is in neither
+    # number: the runner launches its pool over minutes, and a late skeptic waited on nobody.
+    runner_note = (f"   ·   {by_runner} runner row(s) timed from each agent's own launch,"
+                   f" their stagger not counted" if by_runner else "")
     lines.append(f"  straggler waste {_m(waste)}"
                  f" ({100 * waste / max(active, 1):.0f}% of active time)"
-                 f"   ·   dispatch stagger {stagger:.1f}s total"
+                 f"   ·   lead dispatch stagger {stagger:.1f}s total"
                  f" — the whole ceiling on what LAUNCH ORDER can win; the waste above is a slice"
-                 f" SIZING problem")
+                 f" SIZING problem{runner_note}")
 
     lines.append("")
     lines.append("TOKENS")

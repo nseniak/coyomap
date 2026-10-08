@@ -14,7 +14,8 @@ Two directive kinds:
   set        — bulk-assign `subsystem` / `subdomain` / `runs_in` / `bucket` to named elements (replaces
                the per-build patch_synth.py). On the LIST field `runs_in`, `set` REPLACES the list, so a
                re-run is idempotent. `subsystem` targets a component, `subdomain` an entity, `runs_in` a
-               component, `bucket` a dependency.
+               component, `bucket` a dependency. (The full field list is `_SET_FIELD_OWNER`; among
+               them `store_dep`, an entity's `store.dep`.)
   drop_edges — remove a refuted backbone edge by (src, verb, dst) and heal/report the flow steps that
                rode it, exactly like `fix drop-edge` (replaces consolidate.py's drop). It runs AFTER
                `_derive_entity_edges` so a dropped C→E edge is NOT silently re-derived from its surviving
@@ -44,6 +45,7 @@ from coyomap.model import (
     EntryPoint,
     FlowStep,
     ProjectModel,
+    Store,
     UseCase,
     all_elements,
 )
@@ -104,6 +106,11 @@ _SET_FIELD_OWNER: dict[str, tuple[type, str]] = {
     # too, in the same pass that mints the features, so `subdomains[].owners` is written directly
     # on the area and never has to travel through this file.
     "owners": (Entity, "entity"),
+    # An entity's `store.dep`, KEYED `store_dep` because the field is nested. Here for the same
+    # reason `bucket` is: the whole harvest launches as one batch, so the data-model (T5) agent has
+    # no D-ids and leaves `store.dep` empty, and synthesis fills it from the assembled deps. The
+    # method prescribed this backfill before any reconcile field could do it.
+    "store_dep": (Entity, "entity"),
 }
 
 
@@ -141,6 +148,7 @@ class SetDirective:
     ways_in: list[str] | None = None
     interfaces: list[str] | None = None
     interface_kind: str | None = None      # sets `Interface.kind` — see `_SET_FIELD_OWNER`
+    store_dep: str | None = None           # sets `Entity.store.dep` — see `_SET_FIELD_OWNER`
     #: id → the `source` anchor the author SAW on that entry point, for the witnessed form
     #: `{"id": "EP1", "source": "orders.py:9"}`. Empty when every value was written bare.
     #: `EPn` is minted by `assemble` from harvested content and is order-independent but NOT
@@ -340,7 +348,7 @@ def load_reconcile(text: str, label: str) -> Reconcile:
         # generator meanwhile emits it happily. `interface` shipped missing, and three directives made
         # the repo's own reconcile.json unloadable.
         for fld in ("subsystem", "subdomain", "capability", "bucket", "block", "interface_kind",
-                    "component"):
+                    "component", "store_dep"):
             if fld in d:
                 if not isinstance(d[fld], str):
                     raise ReconcileError(f"{label}: set[{i}].{fld}: expected a string")
@@ -486,6 +494,7 @@ def validate_reconcile(m: ProjectModel, rec: Reconcile) -> list[str]:
     ep_ids = {ep.id for ep in m.entry_points if ep.id}
     ep_sources = {ep.id: (ep.source or "").strip() for ep in m.entry_points if ep.id}
     iface_ids = {i.id for i in m.interfaces}
+    dep_ids = {d.id for d in m.deps}
     hier_parents: dict[str, str] = {}                # touched child → intended parent, for check_hierarchy
     for si, sd in enumerate(rec.sets):
         for eid in sd.ids:
@@ -584,6 +593,11 @@ def validate_reconcile(m: ProjectModel, rec: Reconcile) -> list[str]:
                                         f"the SHAPE of the surface "
                                         f"({', '.join(grammar.INTERFACE_KIND_SEEDS)}), or drop the "
                                         f"directive to leave the decision unmade")
+                elif fld == "store_dep":
+                    dep_id = (sd.store_dep or "").strip()
+                    if dep_id not in dep_ids:
+                        problems.append(f"reconcile set[{si}] {eid}: store_dep '{dep_id}' is not a "
+                                        f"defined dependency (a `Dn` in `deps[]`)")
                 elif fld == "runs_in":
                     bad = [u for u in (sd.runs_in or []) if u not in units]
                     if bad:
@@ -724,6 +738,11 @@ def apply_reconcile(m: ProjectModel, rec: Reconcile, stats: dict[str, object]) -
             if sd.component is not None and isinstance(el, EntryPoint):
                 el.component = sd.component
                 set_counts["component"] += 1
+            if sd.store_dep is not None and isinstance(el, Entity):
+                if el.store is None:
+                    el.store = Store()
+                el.store.dep = sd.store_dep.strip()
+                set_counts["store_dep"] += 1
     stats["reconcile_set"] = set_counts
     dropped_total = 0
     # Riding steps left unhealed by a report-only drop. Counted here so `assemble` can put the number

@@ -11,18 +11,23 @@ eval profile counts it.
 the product runs with:
 
   * `package.json`: `dependencies` (never `devDependencies`, `peerDependencies` or
-    `optionalDependencies`);
+    `optionalDependencies`), but not a `workspace:`, `file:` or `link:` version, which points at
+    another folder of the same repo;
   * `pyproject.toml`: `[project] dependencies` and `[tool.poetry.dependencies]` but `python`
-    (never an optional extra, a dependency group or a dev group);
-  * `go.mod`: every `require` but those marked `// indirect`.
+    (never an optional extra, a poetry dependency marked `optional = true` or given a `path`,
+    a dependency group or a dev group);
+  * `go.mod`: every `require` but those marked `// indirect` and those a `replace` points at a
+    local `./` or `../` folder.
 
 A package file under a test, docs or internal folder (`NON_PRODUCT_DIRS`) is not read: an e2e
 suite's `package.json` declares the test tools, not the product.
 
 **What counts as named.** A dependency names a package when its `package` field or its name
-carries it, as a word, case and `-`/`_`/`.` ignored. So one merged dependency counts for every
-package it lists: "React and Vite" names both `react` and `vite`. A scoped npm package
-(`@sentry/react`) is also named by its scope (`Sentry`), and a Go module path by its last part.
+carries it, as a word, case and `-`/`_`/`.` ignored. The method asks for one dependency per
+package; this check stays lenient and lets a merged one ("React and Vite") name both `react` and
+`vite`, because its job is to find a package no row names, not to police the rows. A scoped npm package
+(`@sentry/react`) is also named by its scope (`Sentry`), and a Go module path by its last part,
+without a major-version suffix (`github.com/foo/bar/v2` by `bar`, `gopkg.in/yaml.v3` by `yaml`).
 
 Stdlib-only (the cli.py firewall).
 """
@@ -44,6 +49,9 @@ PACKAGE_FILES: tuple[str, ...] = ("package.json", "pyproject.toml", "go.mod")
 _WORD = re.compile(r"[@a-z0-9][a-z0-9._/@-]*")
 _PEP508_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 _GO_REQUIRE = re.compile(r"^\s*(?:require\s+)?([^\s()]+)\s+v\S+(.*)$")
+_GO_REPLACE = re.compile(r"^\s*(?:replace\s+)?([^\s()]+)(?:\s+v\S+)?\s*=>\s*(\S+)")
+#: A Go major-version suffix: `/v2` at the end of a module path, `.v3` on a gopkg.in path.
+_GO_MAJOR = re.compile(r"(?:/v\d+|\.v\d+)$")
 
 
 @dataclass(frozen=True)
@@ -62,10 +70,17 @@ def _squash(word: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", word.lower())
 
 
+#: npm version prefixes that point inside the repo: a workspace sibling or a local folder.
+_NPM_LOCAL = ("workspace:", "file:", "link:")
+
+
 def _npm(text: str) -> list[str]:
     doc = json.loads(text)
     deps = doc.get("dependencies") if isinstance(doc, dict) else None
-    return sorted(deps) if isinstance(deps, dict) else []
+    if not isinstance(deps, dict):
+        return []
+    return sorted(n for n, v in deps.items()
+                  if not (isinstance(v, str) and v.strip().startswith(_NPM_LOCAL)))
 
 
 def _python(text: str) -> list[str]:
@@ -81,27 +96,34 @@ def _python(text: str) -> list[str]:
     poetry = tool.get("poetry") if isinstance(tool, dict) else None
     deps = poetry.get("dependencies") if isinstance(poetry, dict) else None
     if isinstance(deps, dict):
-        names.extend(n for n in deps if n.lower() != "python")
+        names.extend(n for n, v in deps.items() if n.lower() != "python" and not (
+            isinstance(v, dict) and ("path" in v or v.get("optional") is True)))
     return sorted(dict.fromkeys(names))
 
 
 def _go(text: str) -> list[str]:
     names: list[str] = []
-    in_block = False
+    local: set[str] = set()
+    block = ""
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("require ("):
-            in_block = True
+        if stripped in ("require (", "replace ("):
+            block = stripped.split()[0]
             continue
-        if in_block and stripped.startswith(")"):
-            in_block = False
+        if block and stripped.startswith(")"):
+            block = ""
             continue
-        if not (in_block or stripped.startswith("require ")):
+        if block == "replace" or stripped.startswith("replace "):
+            hit = _GO_REPLACE.match(stripped)
+            if hit and hit.group(2).startswith(("./", "../")):
+                local.add(hit.group(1))
+            continue
+        if not (block == "require" or stripped.startswith("require ")):
             continue
         hit = _GO_REQUIRE.match(stripped)
         if hit and "// indirect" not in hit.group(2):
             names.append(hit.group(1))
-    return sorted(dict.fromkeys(names))
+    return sorted(n for n in dict.fromkeys(names) if n not in local)
 
 
 _READERS = {"package.json": _npm, "pyproject.toml": _python, "go.mod": _go}
@@ -144,14 +166,15 @@ def _named_by(deps: Iterable[Dep]) -> set[str]:
 
 
 def _forms(name: str) -> set[str]:
-    """The words that name `name`: itself, its npm scope, the last part of a Go module path."""
+    """The words that name `name`: itself, its npm scope, the last part of a Go module path without
+    its major-version suffix."""
     low = name.lower()
     forms = {_norm(low), _squash(low)}
     if low.startswith("@") and "/" in low:
         scope = low[1:].split("/", 1)[0]
         forms.update((_norm(scope), _squash(scope)))
     elif "/" in low:
-        last = low.rstrip("/").rsplit("/", 1)[-1]
+        last = _GO_MAJOR.sub("", low.rstrip("/")).rsplit("/", 1)[-1]
         forms.update((_norm(last), _squash(last)))
     forms.discard("")
     return forms

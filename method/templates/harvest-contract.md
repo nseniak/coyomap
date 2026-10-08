@@ -164,9 +164,11 @@ lead; nothing above this line goes into an agent prompt.
 >
 > **If yours is the dependency slice, the list is complete.** Every outside system the code talks
 > to, AND every top-level library or framework the package files declare as a product dependency
-> (`package.json`, `pyproject.toml`, `go.mod` …; leave out dev and test dependencies): **one row per package**, never two merged into one row ("React and
-> Vite" is two rows). Your D-ids are the legend the data-model agent uses, so a dep you leave out
-> is one no entity can name.
+> (`package.json`, `pyproject.toml`, `go.mod`, or any other package file the repo has; leave out
+> dev and test dependencies, optional extras, and packages of the same repo, such as an npm
+> `workspace:` version or a local `path`): **one row per package**, never two merged into one row
+> ("React and Vite" is two rows). At synthesis the lead sets each stored record's datastore from
+> your D-ids, so a dep you leave out is one no record can name.
 >
 > **AUTHORING A `deps` ROW: one rule lives in `model.md` and blocks you if you do not know it.**
 > Every dep in the EXTERNAL group (`datastore` / `messaging` / `service` / `platform`) must either

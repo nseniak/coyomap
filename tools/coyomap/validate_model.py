@@ -3856,9 +3856,9 @@ def unnamed_package_warnings(m: ProjectModel, root: Path) -> list[str]:
     rows = [f"{p.name} ({p.file})" for p in missing]
     return [f"{len(missing)} top-level package(s) the repo's package files declare are named by no "
             f"dependency: {_shown(rows, 12)}. Each is something the product is built on, and the "
-            f"map's Dependencies view does not show it. Add a dependency for it, or list it in the "
-            f"`package` field of the dependency that covers it: one dependency may list several "
-            f"packages (\"react ^19, react-dom ^19 (frontend/package.json)\")."]
+            f"map's Dependencies view does not show it. Add one dependency per package, its "
+            f"`package` field naming that one package (\"react-dom ^19 (frontend/package.json)\"), "
+            f"never one row for several packages."]
 
 
 def _check_activations(m: ProjectModel) -> list[str]:
@@ -5163,7 +5163,8 @@ def _persistence_coverage_warnings(m: ProjectModel) -> list[str]:
             f"{len(deplinkable)} entity store(s) name a container but link no `dep` "
             f"({_shown(deplinkable, 8)}) — the "
             "persistence-coverage rule can't engage without the D-id; link `store.dep` to the "
-            "datastore dep (give the domain agent the deps legend, or backfill at synthesis), "
+            "datastore dep with a reconcile set at synthesis "
+            f"(`{{\"ids\": [\"{deplinkable[0]}\"], \"store_dep\": \"D<n>\"}}`), "
             "or record the literal `store` under a 'Balance exceptions' extras heading (which "
             "silences the WHOLE store family, not just this one)"))
         #  * a container that reads as PROSE, not a name — the live-map failure this caught: a map

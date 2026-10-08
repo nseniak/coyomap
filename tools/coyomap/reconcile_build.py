@@ -89,6 +89,9 @@ _FIELD_OWNER: dict[str, type] = {
     # it was a hand-written heredoc over the assembled map — the 2026-09-01 argus build did exactly
     # that for 88 entry points, outside every check `reconcile` applies.
     "component": EntryPoint,
+    # An entity's `store.dep`: the data-model agent runs in the same batch as the dependency slice,
+    # so it has no D-ids and synthesis backfills them (see `reconcile._SET_FIELD_OWNER`).
+    "store_dep": Entity,
 }
 
 

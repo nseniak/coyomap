@@ -38,3 +38,18 @@ package files, lost libraries from the map: run the eval before accepting it.
    profiles' `packages_without_dep`.
    regression sign: a candidate profile with `packages_without_dep` null although it was scored
    with `--repo`.
+
+Review fix (2026-10-08, independent review of round 2, findings 6a and 7): the "named by no
+dependency" advice asks for one dependency per package, its `package` field naming that one
+package; it told the lead that one dependency may list several. The package check no longer counts
+packages of the same repo (an npm `workspace:`, `file:` or `link:` version, a poetry `path`
+dependency, a Go module a `replace` points at a `./` or `../` folder) or a poetry dependency marked
+`optional = true`, and names a Go module without its major-version suffix
+(`github.com/foo/bar/v2` by `bar`, `gopkg.in/yaml.v3` by `yaml`) · tools/coyomap/packages.py,
+tools/coyomap/validate_model.py, tests/test_validate_model.py, tests/test_method_contract.py.
+On the mcpolis repo and its map the list is unchanged: 36 declared, the same 21 named by no
+dependency (mcpolis has none of those declaration kinds).
+
+4. expect: on a monorepo with workspace or local-path packages, the "named by no dependency" line
+   names none of them.
+   regression sign: a sibling folder's package (`@acme/shared`, a `path` dependency) in the line.

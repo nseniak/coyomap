@@ -17,8 +17,9 @@ import tempfile
 from pathlib import Path
 
 from coyomap.model import (BusinessRule, Component, Dep, DeploymentRow, Edge, Entity, Group,
-                           EntryPoint, Interface, ProjectModel, RuleSite, UseCase)
-from coyomap.reconcile import KeepEdgeDirective, Reconcile, SetDirective, apply_reconcile
+                           EntryPoint, Interface, ProjectModel, RuleSite, Store, UseCase)
+from coyomap.reconcile import (KeepEdgeDirective, Reconcile, SetDirective, apply_reconcile,
+                               load_reconcile, validate_reconcile)
 from coyomap.reconcile_build import RuleError, coverage_report, expand, load_rules
 
 
@@ -943,3 +944,33 @@ def test_the_coverage_report_counts_the_elements_it_does_not_name():
                  "16 component(s) have no runs_in and match no rule: "):
         line = next(ln for ln in out if ln.startswith(head))
         assert line == head + "C1, C2, C3, C4, C10, C11, C12, C13, C14, C15, +6 more", line
+
+
+# --------------------------------------------------------------------------------------
+# the data-model agent's `store.dep` is backfilled at synthesis (review of round 2, 2026-10-08)
+# --------------------------------------------------------------------------------------
+# method.md launches the whole harvest as one batch, so the T5 agent starts with no D-ids, and the
+# method sends `store.dep` through a reconcile set from the assembled deps. No reconcile field could
+# set it: the method named a backfill the tool did not have.
+
+def make_store_dep_reconcile(dep_id: str) -> Reconcile:
+    return load_reconcile(json.dumps({"set": [{"ids": ["E1"], "store_dep": dep_id}]}),
+                          "reconcile.json")
+
+
+def test_a_reconcile_set_backfills_an_entitys_store_dep():
+    m = make_map()
+    m.entities.append(Entity(id="E2", name="Session", meaning="m", source="a.py:1",
+                             store=Store(container="sessions", mode="collection")))
+    rec = make_store_dep_reconcile("D1")
+    rec.sets[0].ids.append("E2")
+    assert not validate_reconcile(m, rec)
+    apply_reconcile(m, rec, {})
+    assert [e.store.dep if e.store else None for e in m.entities] == ["D1", "D1"]
+    # The rest of a store the T5 agent wrote is kept.
+    assert m.entities[1].store and m.entities[1].store.container == "sessions"
+
+
+def test_a_store_dep_that_names_no_dependency_is_refused():
+    probs = validate_reconcile(make_map(), make_store_dep_reconcile("D9"))
+    assert probs and "not a defined dependency" in probs[0], probs

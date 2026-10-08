@@ -17,7 +17,9 @@ source — the main contract keeps only the one sentence forbidding it.
 > Your fragment also carries the **`entities` array — per-entity objects, never a flat table**
 > (`id`, `name`, `store`, `meaning`, `source`, `fields`, `relations` — the semantic spec is
 > [domain-cards.md](«COYOMAP_HOME»/method/domain-cards.md)), with **a `relations` item wherever two
-> entities relate** — the entities + their `E↔E` relations are the whole point of the slice. Each
+> entities relate** — the entities + their `E↔E` relations are the whole point of the slice. In
+> each `store`, write `container`, `mode` and `notes` and leave `dep` null: the dependency ids
+> come from a slice running beside you, and the lead sets `dep` at synthesis. Each
 > entity is a **real named type** (class / dataclass / enum) whose `source` anchors its
 > **definition** — do NOT synthesize an entity for an unnamed concept. **`name` is the READER's
 > word for the thing, never the class's spelling** (`source` already carries that): one build named

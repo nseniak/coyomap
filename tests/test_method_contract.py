@@ -53,6 +53,8 @@ from pathlib import Path
 
 from coyomap import balance_lib
 from coyomap.buildstate import PHASES
+from coyomap.packages import PACKAGE_FILES
+from coyomap.reconcile import _SET_FIELD_OWNER
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOOLS = REPO_ROOT / "tools" / "coyomap"
@@ -664,11 +666,11 @@ KNOWN_NO_ESCAPE: dict[str, str] = {
     "External bucket '{}' is minted (not a seed)": "the minted name IS the record",
     "The '{}' catch-all among {} holds {} deps": "splitting the bucket is the fix",
     # Backlog row 49. Both have a structured answer that costs one line of the map, so there is
-    # no judgement to record: a bucket is one reconcile `set`, and a package no dep names goes in
-    # the `package` field of the dep that covers it (one dep may list several).
+    # no judgement to record: a bucket is one reconcile `set`, and a package no dep names gets a
+    # dependency row of its own (one row per package, never merged).
     "{} of {} dependencies have no authored bucket": "set the bucket; the reconcile `set` takes it",
     "{} top-level package(s) the repo's package files declare are named by no dependency":
-        "add a dependency, or list the package in the `package` field of the one that covers it",
+        "add one dependency per package, its `package` field naming that package",
     "Many purpose buckets among {}": "merging near-duplicates is the fix",
     "entry-point kind '{}' ({} row(s)) is a drift spelling": "write the canonical spelling",
     "entry-point kind(s) minted (not a seed)": "the minted kind IS the record",
@@ -1929,3 +1931,30 @@ def test_the_method_says_which_steps_of_a_wave_the_runner_runs():
     for needed in ("runs steps 2 and 3 and the closer in step 4",
                    "the `ship` without a note in step 4 (the prepare step) and step 5 stay yours"):
         assert needed in intro, f"the second wave's runner sentence lost {needed!r}: {intro}"
+
+
+# --- the dependency rules of method.md agree with the tools (review of round 2, 2026-10-08) ------
+
+def make_t2_paragraph() -> str:
+    """method.md's T2 section, from its heading bullet to the next top-level bullet."""
+    text = (REPO_ROOT / "method.md").read_text(encoding="utf-8")
+    start = text.index("- **T2 External dependencies**")
+    return text[start:text.index("\n- **", start + 1)]
+
+
+def test_the_t2_section_names_exactly_the_package_files_the_check_reads():
+    """method.md listed `Cargo.toml` and called the list "the same set validate --check-coverage
+    reads", while the tool reads only three kinds of package file."""
+    t2 = make_t2_paragraph()
+    claim = t2[t2.index("`validate --check-coverage` reads"):t2.index("Left out:")]
+    named = set(re.findall(r"`([\w.-]+\.(?:json|toml|mod))`", claim))
+    assert named == set(PACKAGE_FILES), (named, PACKAGE_FILES)
+
+
+def test_the_method_backfills_store_dep_and_never_runs_the_deps_slice_first():
+    """The harvest launches as one batch, and the T5 owner's `store.dep` is filled at synthesis
+    by a reconcile set. The text used to offer "run the T2 deps slice first and inject" beside it,
+    and the reconcile field it pointed at did not exist."""
+    text = make_method_text()
+    assert "Either run the T2 deps slice first" not in text
+    assert '"store_dep"' in text and "store_dep" in _SET_FIELD_OWNER

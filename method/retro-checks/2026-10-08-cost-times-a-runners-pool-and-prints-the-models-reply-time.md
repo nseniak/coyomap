@@ -30,3 +30,18 @@ claude-opus-5-5, the number the retro had computed by hand.
    retro does not compute it by hand.
    regression sign: a retro that times replies with its own script, or reads a change in seconds per
    row as a method change without naming the reply time beside it.
+
+Review fix (2026-10-08, independent review of round 2, findings 8 and 9): a runner's fan-out row
+measures waste as its slowest agent minus the mean, each agent timed from its own launch, so its
+launch stagger is no longer straggler waste; the lead's rows keep `wall - mean`. The footer sums
+the dispatch stagger of the lead's rows only and says how many runner rows were timed from each
+agent's launch. Only a parent of more than one agent is a runner: a worker that spawned one helper
+keeps its row, and the helper gets none. A test now holds the "reply to a tool result only"
+filter · eval/tools/coyomap_eval/cost.py, eval/tests/test_cost.py.
+On the 2026-10-08 mcpolis build (`--to-turn 447`): straggler waste 75.2 → 64.5 minutes (41 % →
+35 % of active time); the 29-agent wave-1 runner row (stagger 583.8 s) 13.3 → 7.1 minutes, the
+15-agent one (213.9 s) 13.2 → 9.8, the 10-agent one (91.8 s) 2.2 → 1.1; the lead rows and the
+runner count (2 runners, 81 agents) unchanged.
+
+4. expect: no runner row's waste exceeds its slowest agent minus its mean.
+   regression sign: a runner row whose waste grows with its stagger column.

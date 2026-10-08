@@ -20,6 +20,7 @@ from pathlib import Path
 from coyomap import grammar, lint_fragment, reporting
 from coyomap import balance_lib as balance_lib_mod
 from coyomap import validate_model as validate_model_mod
+from coyomap.packages import DeclaredPackage, declared_packages, unnamed_packages
 from coyomap.model import (
     Interface,
     ModelError,
@@ -658,6 +659,9 @@ def test_container_without_dep_is_nudged_and_exempt_modes_stay_quiet() -> None:
     m.edges = [e for e in m.edges if not e.dst.startswith("E")]
     ws = [w for w in warnings_of(m) if "link no `dep`" in w]
     assert len(ws) == 1 and "1 entity store(s)" in ws[0] and "E1" in ws[0]
+    # The fix it names is the reconcile field that exists (review of round 2, 2026-10-08): it used
+    # to say "give the domain agent the deps legend", which the one-batch harvest cannot do.
+    assert '"store_dep"' in ws[0] and "legend" not in ws[0], ws[0]
     m.extras = [ExtraSection(heading="Balance exceptions", body="store: dual-mode, dep ambiguous")]
     assert not any("link no `dep`" in w for w in warnings_of(m))
 
@@ -7080,3 +7084,62 @@ def test_a_declared_package_no_dependency_names_is_reported():
             assert name in hit[0], (name, hit[0])
         # Without the tree-reading flag nothing reads the package files.
         assert not [w for w in validate_model(m, repo_root=root)[1] if UNNAMED_PACKAGE_LINE in w]
+
+
+def make_monorepo_with_local_packages(root: Path) -> None:
+    """Package files that also declare monorepo-internal packages (an npm workspace sibling, a
+    `file:` and a `link:` folder, a poetry `path` dependency, a Go module replaced by a local
+    folder) and an optional poetry extra: none of them is something the product is built on."""
+    (root / "web").mkdir()
+    (root / "web" / "package.json").write_text(json.dumps({"dependencies": {
+        "react": "^19", "@acme/shared": "workspace:*", "local-ui": "file:../ui",
+        "linked": "link:../linked"}}), encoding="utf-8")
+    (root / "api").mkdir()
+    (root / "api" / "pyproject.toml").write_text(
+        '[tool.poetry.dependencies]\npython = "^3.12"\n'
+        'uvicorn = {extras = ["standard"], version = "^0.30"}\n'
+        'mylib = {path = "../mylib", develop = true}\n'
+        'boto3 = {version = "^1", optional = true}\n'
+        '[tool.poetry.extras]\naws = ["boto3"]\n', encoding="utf-8")
+    (root / "go.mod").write_text(
+        "module example.com/app\n\ngo 1.22\n\nrequire (\n\tgopkg.in/yaml.v3 v3.0.1\n"
+        "\texample.com/local v0.0.0\n\texample.com/shared v0.0.0\n\texample.com/forked v1.2.0\n)\n"
+        "replace example.com/local => ../local\n"
+        "replace (\n\texample.com/shared v0.0.0 => ./shared\n"
+        "\texample.com/forked => github.com/me/forked v1.2.1\n)\n", encoding="utf-8")
+
+
+def test_monorepo_internal_and_optional_packages_are_not_declared():
+    """Review of round 2 (2026-10-08): the package check counted a workspace sibling, a local
+    folder and an optional extra as packages the map must name, which the method never asks for."""
+    with tempfile.TemporaryDirectory() as td:
+        make_monorepo_with_local_packages(Path(td))
+        got = sorted(p.name for p in declared_packages(Path(td)))
+    # A replace to another module (not a local folder) keeps the require.
+    assert got == sorted(["react", "uvicorn", "gopkg.in/yaml.v3", "example.com/forked"]), got
+
+
+def test_a_go_module_is_named_without_its_major_version_suffix():
+    """`github.com/foo/bar/v2` is named by `bar`, `gopkg.in/yaml.v3` by `yaml`: before the
+    review fix the last part was `v2` or `yaml.v3`, so a dependency named "Bar" or "YAML" left
+    the package reported as named by no dependency."""
+    declared = [DeclaredPackage("github.com/foo/bar/v2", "go.mod"),
+                DeclaredPackage("gopkg.in/yaml.v3", "go.mod"),
+                DeclaredPackage("github.com/lib/pq", "go.mod")]
+    deps = [Dep(id="D1", name="Bar", kind="library", type="x", bucket="B"),
+            Dep(id="D2", name="YAML parser", kind="library", type="x", bucket="B")]
+    assert [p.name for p in unnamed_packages(deps, declared)] == ["github.com/lib/pq"]
+
+
+def test_the_unnamed_package_advice_asks_for_one_dependency_per_package():
+    """The method's rule is one dependency row per package, never merged. The warning used to tell
+    the lead the opposite: "one dependency may list several packages"."""
+    m = make_valid_model()
+    m.deps = []
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        make_package_repo(root)
+        _, warnings = validate_model(m, repo_root=root, check_coverage=True)
+    hit = next(w for w in warnings if UNNAMED_PACKAGE_LINE in w)
+    assert "one dependency per package" in hit, hit
+    assert "may list several" not in hit, hit

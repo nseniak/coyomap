@@ -1128,3 +1128,92 @@ def test_seconds_per_row_prints_the_model_latency_beside_it(capsys):
         assert cost.main([str(session), "--map", str(map_path)]) == 0
         line = next(l for l in capsys.readouterr().out.splitlines() if "seconds per row" in l)
         assert "model median reply 5.0s claude-opus-5" in line
+
+
+def test_a_reply_to_a_brief_is_not_the_models_latency():
+    """A reply to a brief or a follow-up includes the time its writer took to write it, so only a
+    reply to a tool result counts. Dropping that filter survived every test before this one."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        brief = {"type": "user", "timestamp": "2026-08-02T09:59:00.000Z",
+                 "message": {"content": "Harvest the adapters and write the fragment."}}
+        records = [brief, *json_records(make_reply_session(tmp))]
+        session = write_jsonl(tmp / "briefed.jsonl", records)
+        report = cost.build_report(session)
+        assert report.reply_seconds == {"claude-opus-5": 5.0}, report.reply_seconds
+
+
+def json_records(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+# --- a runner's pool is timed from each agent's own launch (review of round 2, 2026-10-08) --
+
+
+def make_staggered_runner_build(tmp: Path) -> Path:
+    """A runner that launches its three skeptics 90 s apart, each taking 3 minutes. Shaped on the
+    2026-10-08 mcpolis wave-1 runner row: 29 agents launched over 583.8 s, read as 13.3 minutes
+    of straggler waste although no skeptic waited on a slower one."""
+    records = [
+        {"type": "assistant", "timestamp": f"2026-08-02T{stamp}.000Z",
+         "message": {"id": f"m{i}", "model": "claude-opus-5", "usage": {"output_tokens": 100},
+                     "content": [{"type": "text", "text": str(i)}]}}
+        for i, stamp in enumerate(("10:00:00", "10:31:00"))
+    ]
+    session = write_jsonl(tmp / "s.jsonl", records)
+    agents = cost.subagent_dir(session)
+    make_nested_agent(agents, "r1", "Fact-check wave 1 runner",
+                      start="2026-08-02T10:00:00.000Z", end="2026-08-02T10:30:00.000Z")
+    for name, launch in (("k1", "10:01:00"), ("k2", "10:02:30"), ("k3", "10:04:00")):
+        hour, minute, second = (int(p) for p in launch.split(":"))
+        make_nested_agent(agents, name, f"skeptic {name}", parent="r1",
+                          start=f"2026-08-02T{launch}.000Z",
+                          end=f"2026-08-02T{hour}:{minute + 3:02d}:{second:02d}.000Z")
+    return session
+
+
+def test_a_runners_launch_stagger_is_not_straggler_waste():
+    with tempfile.TemporaryDirectory() as td:
+        report = cost.build_report(make_staggered_runner_build(Path(td)))
+        (batch,) = report.batches
+        assert batch["via"] == "Fact-check wave 1 runner"
+        assert round(cost._num(batch, "stagger")) == 180
+        assert cost._num(batch, "waste") == 0.0, "three equal skeptics: nobody waited"
+
+
+def test_the_leads_own_launch_stagger_still_counts_as_waste():
+    """The lead's agents wait at one barrier for the last of them, so its stagger is part of
+    that wait: only a runner's rows are timed from each agent's own launch."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        session = write_jsonl(tmp / "s.jsonl", [
+            {"type": "assistant", "timestamp": "2026-08-02T10:00:00.000Z",
+             "message": {"id": "m", "model": "claude-opus-5", "usage": {"output_tokens": 1},
+                         "content": [{"type": "text", "text": "x"}]}}])
+        for name, launch, done in (("h1", "10:01:00", "10:04:00"), ("h2", "10:02:30", "10:05:30")):
+            make_nested_agent(cost.subagent_dir(session), name, f"harvest {name}",
+                              start=f"2026-08-02T{launch}.000Z", end=f"2026-08-02T{done}.000Z")
+        (batch,) = cost.build_report(session).batches
+        assert batch["via"] == "lead" and round(cost._num(batch, "waste")) == 90
+
+
+def test_a_worker_with_one_helper_keeps_its_own_row():
+    """A runner dispatched a pool. A worker that spawned ONE helper is still a worker: it keeps
+    its row in the lead's fan-out, and the helper, whose time is inside the worker's, gets none."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        session = write_jsonl(tmp / "s.jsonl", [
+            {"type": "assistant", "timestamp": "2026-08-02T10:00:00.000Z",
+             "message": {"id": "m", "model": "claude-opus-5", "usage": {"output_tokens": 1},
+                         "content": [{"type": "text", "text": "x"}]}}])
+        agents = cost.subagent_dir(session)
+        make_nested_agent(agents, "w1", "Harvest the gateway",
+                          start="2026-08-02T10:01:00.000Z", end="2026-08-02T10:20:00.000Z")
+        make_nested_agent(agents, "h2", "Harvest the dashboard",
+                          start="2026-08-02T10:01:30.000Z", end="2026-08-02T10:10:00.000Z")
+        make_nested_agent(agents, "x1", "Look up one adapter", parent="w1",
+                          start="2026-08-02T10:05:00.000Z", end="2026-08-02T10:08:00.000Z")
+        report = cost.build_report(session)
+        assert [(b["via"], b["agents"]) for b in report.batches] == [("lead", 2.0)]
+        assert round(cost._num(report.batches[0], "slowest") / 60) == 19, "the worker's own row"
+        assert (report.runners, report.nested) == (0, 0)
