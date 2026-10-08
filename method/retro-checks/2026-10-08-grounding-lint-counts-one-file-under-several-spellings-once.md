@@ -19,3 +19,17 @@ ambiguous · tools/coyomap/grounding.py (`_resolves`), tests/test_grounding.py.
    pass opened under any spelling (spot-check 5).
    regression sign: a listed file whose `Read`, `sed -n` or `cat` call is in a skeptic's
    transcript.
+
+## Review fix (2026-10-08)
+
+A path ending merged two spellings even when both are files of the repo: `index.ts` read as
+`src/index.ts` and `packages/foo/src/index.ts` counted as one file. With the repo known (from the
+verdict files' `.coyomap/` folder), an absolute spelling is read from the repo root, and a shorter
+spelling that is a repo file of its own stays a separate file. With no repo, a path ending is still
+taken as the same file. On the 2026-10-08 mcpolis data the note is unchanged: 27 rows over 15
+files · tools/coyomap/grounding.py, tests/test_grounding.py.
+
+3. expect: on a repo with two files of one name where one path ends the other, a bare-name citation
+   of that name is in the "worth a second look" note or the ghost list.
+   regression sign: the lint silent on such a citation while only one of the two files was
+   opened.

@@ -596,8 +596,9 @@ _COYOMAP_SUBCOMMANDS = frozenset({
 #: `fix row` invocation in the whole build". Same bug class as the alias-blind subcommand list
 #: above, at the next level down.
 #:
-#: `test_subverbs_cover_every_dispatched_verb` reads the three dispatch tables and fails when a new
-#: verb ships without landing here, which is the half a comment cannot enforce.
+#: `test_subverbs_cover_every_dispatched_verb` reads the dispatch tables (`fix` and `findings`
+#: by their `_VERBS`) and fails when a new verb ships without landing here, which is the half a
+#: comment cannot enforce. `findings withdraw` was missing until 2026-10-08.
 _COYOMAP_SUBVERBS = frozenset({
     # fix
     "apply-drift", "drop-edge", "dedup-relation", "dedup-edge", "security-row", "dedup-security",
@@ -610,7 +611,7 @@ _COYOMAP_SUBVERBS = frozenset({
     # start by `state phase`
     "start", "phase",
     # findings
-    "add", "collect",
+    "add", "withdraw", "collect",
 })
 
 #: `coyomap <subcommand>` anywhere in a shell command, including behind `;`, `&&` or a `$CX` alias.

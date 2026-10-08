@@ -422,7 +422,25 @@ def skeleton(names: list[str], root: Path | None = None) -> dict[str, str]:
 _BEHAVIOURAL_ID = re.compile(r"\b(?:CAP\d+|UC\d+|HP\d+|R\d+)\b")
 
 #: A structural id a rules agent can `dump`: a component `Cn` or a subsystem `Sn`.
-_STRUCTURAL_ID = re.compile(r"\b(?:C\d+|S\d+)\b")
+_STRUCTURAL_ID = re.compile(r"[CS]\d+")
+
+
+def _structural_ids(text: str) -> list[str]:
+    """The `Cn` / `Sn` ids `text` names, each a word of its own. NOT one right after a capitalised
+    word that is no id itself, with only a space between: there it is part of a name, as `S3` is in
+    "AWS S3" and `C2` in "Phase C2" (review of round 2, 2026-10-08). After an id ("C3 C7"), a
+    lowercase word ("the subsystem S2"), punctuation or the start, it is an id."""
+    out: list[str] = []
+    prev: re.Match[str] | None = None
+    for word in re.finditer(r"[\w-]+", text):
+        joined = prev is not None and not text[prev.end():word.start()].strip()
+        named = (joined and prev is not None and prev.group(0)[:1].isupper()
+                 and not _STRUCTURAL_ID.fullmatch(prev.group(0)))
+        if _STRUCTURAL_ID.fullmatch(word.group(0)) and not named:
+            out.append(word.group(0))
+        prev = word
+    return out
+
 
 def _slot_content_faults(name: str, values: dict[str, str]) -> list[str]:
     """Faults in what a slot was filled WITH, as opposed to whether it was filled.
@@ -452,7 +470,7 @@ def _slot_content_faults(name: str, values: dict[str, str]) -> list[str]:
     # `dump --members` / `--edges` on these, and a block name or a sentence gives it nothing to
     # dump: before the slot existed, 0 of 11 rules agents on the 2026-10-08 mcpolis build ran either.
     components = (values.get("COMPONENTS") or "").strip()
-    if name == "rules" and components and not _STRUCTURAL_ID.search(components):
+    if name == "rules" and components and not _structural_ids(components):
         faults.append(
             f"«COMPONENTS» names no component or subsystem id: {components[:80]!r}. It must list "
             f"the `Cn` / `Sn` ids whose code makes this block's decisions (`dump --legend` lists "

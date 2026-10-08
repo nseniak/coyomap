@@ -3875,7 +3875,7 @@ def make_two_wave_pin(root: Path, m: ProjectModel, *, reworded: str, upheld: str
 
 def test_a_claim_a_later_wave_re_stated_is_not_a_loss():
     """On the 2026-10-08 mcpolis build the advisory said 21 claims were gone, and all of them had
-    been removed on purpose: 20 re-stated and voted in wave 2. The second wave APPENDS to the pin,
+    been removed on purpose: 4 of the 25 gone by text were re-stated and voted in wave 2. The second wave APPENDS to the pin,
     so the pin holds the old wording and the new one while the map carries only the new one, and a
     count by theme reads that pair as one claim lost."""
     m = make_valid_model()
@@ -3893,7 +3893,7 @@ def test_a_claim_a_later_wave_re_stated_is_not_a_loss():
 
 
 def test_a_claim_the_closer_upheld_a_refutation_of_is_not_a_loss():
-    """The other 5 of the 25 gone claims on that build: a skeptic refuted each, the closer upheld
+    """The other 21 of the 25 gone claims on that build: a skeptic refuted each, the closer upheld
     the refutation, and the build removed the claim. That removal is the correction working."""
     m = make_valid_model()
     with tempfile.TemporaryDirectory() as td:
@@ -3907,6 +3907,43 @@ def test_a_claim_the_closer_upheld_a_refutation_of_is_not_a_loss():
         hit = [w for w in validate_model(m, model_path)[1] if CLAIM_LOSS_LINE in w]
         assert len(hit) == 1 and hit[0].startswith("1 claim(s)") and "backbone" in hit[0], hit
         assert "1 claim(s) a later wave re-stated" in hit[0], "it says what it did not count"
+
+
+def make_pin_row(claim: str, anchor: str | None, theme: str = "rule",
+                 elements: tuple[str, ...] = ("BR7",)) -> dict[str, object]:
+    return {"claim": claim, "anchor": anchor, "theme": theme, "elements": list(elements)}
+
+
+def test_one_re_stated_site_does_not_excuse_the_other_sites_of_its_rule():
+    """Review of round 2 (2026-10-08): a rule's claims share one (theme, boxes) key, one per site,
+    and a rule holds up to 8 sites. Matching on that key alone let one re-stated site excuse every
+    other dropped site of the rule. A later row now explains at most ONE earlier row, the one at
+    its own anchor."""
+    rows = [make_pin_row("BR7 at a.py:10", "a.py:10"), make_pin_row("BR7 at b.py:20", "b.py:20"),
+            make_pin_row("BR7 at c.py:30", "c.py:30"),
+            make_pin_row("BR7 (reworded) at a.py:10", "a.py:10")]
+    pin = validate_model_mod._Pin(rows=tuple(rows), later_waves=1)
+    out = validate_model_mod._explained_losses(pin, {"BR7 (reworded) at a.py:10"}, set())
+    assert out.restated == {"BR7 at a.py:10"}, out
+    assert out.refuted == frozenset(), out
+    # One later row explains one earlier row, even when two earlier rows share its anchor.
+    rows = [make_pin_row("BR7 at a.py:10", "a.py:10"), make_pin_row("BR7 again at a.py:10", "a.py:10"),
+            make_pin_row("BR7 (reworded) at a.py:10", "a.py:10")]
+    pin = validate_model_mod._Pin(rows=tuple(rows), later_waves=1)
+    out = validate_model_mod._explained_losses(pin, {"BR7 (reworded) at a.py:10"}, set())
+    assert len(out.restated) == 1, out
+
+
+def test_an_upheld_refutation_is_counted_before_a_re_statement_could_claim_it():
+    """A claim the closer upheld a refutation of is refuted, whatever later row shares its key; and
+    it leaves the later row free to explain another lost claim."""
+    rows = [make_pin_row("BR7 wrong at a.py:10", "a.py:10"), make_pin_row("BR7 at a.py:10", "a.py:10"),
+            make_pin_row("BR7 (reworded) at a.py:10", "a.py:10")]
+    pin = validate_model_mod._Pin(rows=tuple(rows), later_waves=1)
+    out = validate_model_mod._explained_losses(pin, {"BR7 (reworded) at a.py:10"},
+                                               {"BR7 wrong at a.py:10"})
+    assert out.refuted == {"BR7 wrong at a.py:10"}, out
+    assert out.restated == {"BR7 at a.py:10"}, out
 
 
 def test_full_live_coverage_is_silent():

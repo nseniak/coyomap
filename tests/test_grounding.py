@@ -2277,6 +2277,34 @@ def test_a_bare_name_opened_under_several_spellings_of_one_file_is_read():
     assert not any("session_owner_guard" in ln for ln in lines), lines
 
 
+def make_repo_with_files(tmp: Path, files: list[str]) -> Path:
+    """A repo holding each of `files` (repo-relative), with its `.coyomap/verify/` folder."""
+    repo = tmp / "repo"
+    for f in files:
+        (repo / f).parent.mkdir(parents=True, exist_ok=True)
+        (repo / f).write_text("x = 1\n", encoding="utf-8")
+    (repo / ".coyomap" / "verify").mkdir(parents=True)
+    return repo
+
+
+def test_a_spelling_that_is_its_own_repo_file_is_not_merged_into_a_longer_one():
+    """Review of round 2 (2026-10-08): `src/index.ts` is a path ending of
+    `packages/foo/src/index.ts`, but in a repo holding both they are two files, and a bare
+    `index.ts` citation cannot say which one was read."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo_with_files(Path(td), ["src/index.ts", "packages/foo/src/index.ts",
+                                               "backend/x/a.py"])
+        pool = {"src/index.ts", "packages/foo/src/index.ts"}
+        assert not G._resolves("index.ts", pool, repo)
+        # A longer citation is not read through a shorter spelling that is another repo file.
+        assert not G._resolves("packages/foo/src/index.ts", {"src/index.ts"}, repo)
+        # One file under three spellings is still one file: absolute (collapsed through the repo
+        # root), repo-relative, and from a subfolder that is no repo file of its own.
+        spellings = {f"{repo}/backend/x/a.py", "backend/x/a.py", "x/a.py"}
+        assert G._resolves("a.py", spellings, repo)
+        assert G._resolves("backend/x/a.py", {f"{repo}/backend/x/a.py"}, repo)
+
+
 def test_a_bare_name_two_different_files_share_is_still_ambiguous():
     # The guard the one-file rule exists for: two real files named `config.py`, and the citation
     # cannot say which one was read.

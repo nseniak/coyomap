@@ -24,6 +24,7 @@ Stdlib-only (the cli.py firewall).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -2420,7 +2421,28 @@ def _mentioned_files(files: list[Path]) -> set[str]:
     return {p for p in out if p}
 
 
-def _resolves(claimed: str, pool: set[str]) -> bool:
+def _repo_relative(p: str, repo: Path | None) -> str:
+    """`p` from the repo root when it is an absolute path inside `repo`, else `p` unchanged."""
+    if repo is None or not p.startswith("/"):
+        return p
+    for root in (repo, repo.resolve()):
+        with contextlib.suppress(ValueError):
+            return Path(p).relative_to(root).as_posix()
+    return p
+
+
+def _one_file(shorter: str, longer: str, repo: Path | None) -> bool:
+    """Are two spellings, one a path ending of the other, ONE file? Yes, unless the shorter one is
+    itself a file of the repo: then `src/index.ts` and `packages/foo/src/index.ts` are two files.
+    With no repo to look in, a path ending is taken as the same file."""
+    if shorter == longer:
+        return True
+    if not longer.endswith("/" + shorter):
+        return False
+    return repo is None or shorter.startswith("/") or not (repo / shorter).is_file()
+
+
+def _resolves(claimed: str, pool: set[str], repo: Path | None = None) -> bool:
     """Is `claimed` one of `pool`?
 
     SYMMETRIC, because the sides disagree about absoluteness in both directions: a transcript may
@@ -2430,17 +2452,20 @@ def _resolves(claimed: str, pool: set[str]) -> bool:
     A bare BASENAME never matches on suffix alone. `config.py` would otherwise resolve against
     `vendor/thirdparty/junk/config.py` and clear a row that cited a file nobody opened — the check
     would report clean on exactly the shape it exists to catch. A one-segment claim must match
-    whole."""
-    c = _norm_path(claimed)
+    whole.
+
+    `repo`, when known, is where a spelling is checked: an absolute path inside it is read from its
+    root, and a path ending that is a file of the repo on its own names THAT file (`_one_file`)."""
+    c = _repo_relative(_norm_path(claimed), repo)
     if not c:
         return False
-    normed = {_norm_path(p) for p in pool}
+    normed = {_repo_relative(_norm_path(p), repo) for p in pool}
     if c in normed:
         return True
     if "/" in c:
         # The other way round too, and for the same reason: a bare name read somewhere (`cat
         # same.py`) says nothing about which `same.py` a longer path means.
-        return any(p.endswith("/" + c) or ("/" in p and c.endswith("/" + p)) for p in normed)
+        return any(_one_file(c, p, repo) or ("/" in p and _one_file(p, c, repo)) for p in normed)
     # A one-segment claim (`config.py`, `Makefile`) matches on basename ONLY when the pool holds
     # exactly one file with that name. Two candidates and the claim cannot say which was read; zero
     # is a genuine miss. Matching any suffix would clear a row that cited `config.py` against a
@@ -2450,10 +2475,11 @@ def _resolves(claimed: str, pool: set[str]) -> bool:
     # and from a subdirectory (`/u/repo/backend/x/a.py`, `backend/x/a.py`, `x/a.py`); counted as
     # three candidates, its bare-name citation was ambiguous and flagged. All 8 visible flagged
     # names on the 2026-10-08 mcpolis build were such files (18 of 24 rows). So a spelling that is
-    # a path suffix of another candidate is that candidate, and only the longest spellings count.
-    # Two DIFFERENT files (`src/a/config.py`, `vendor/b/config.py`) are suffixes of neither.
+    # a path ending of another candidate is that candidate, and only the longest spellings count.
+    # Two DIFFERENT files (`src/a/config.py`, `vendor/b/config.py`) are endings of neither, and
+    # neither are `src/index.ts` and `packages/foo/src/index.ts` in a repo that holds both.
     same_name = {p for p in normed if p.rsplit("/", 1)[-1] == c}
-    files = {p for p in same_name if not any(q.endswith("/" + p) for q in same_name)}
+    files = {p for p in same_name if not any(q != p and _one_file(p, q, repo) for q in same_name)}
     return len(files) == 1
 
 
@@ -2488,9 +2514,10 @@ def _fabricated_evidence(rows: list[dict], agent_dir: Path, files: Sequence[_Ver
     # A file in EITHER set is not a ghost. Testing `mentioned` alone accused two real, opened files
     # on a live pass: `mentioned` is built from path-shaped tokens with a dot in them, so
     # `Makefile` — which the agent had genuinely opened with `Read` — never entered it.
-    ghosts = sorted(f for f in claimed if not _resolves(f, mentioned | opened))
+    repo = buildstate.repo_of(*(f.path for f in files))
+    ghosts = sorted(f for f in claimed if not _resolves(f, mentioned | opened, repo))
     unopened = sorted(f for f in claimed
-                      if f not in ghosts and not _resolves(f, opened))
+                      if f not in ghosts and not _resolves(f, opened, repo))
     found = VerdictLint()
     # THE ROW COUNT FIRST, on a short line, and one file per line under it (`item_lines`). The
     # second-look note ended on its count, at the end of one 912-character line, and a

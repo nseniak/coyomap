@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import tempfile
 from pathlib import Path
 
@@ -193,6 +194,18 @@ def test_a_clean_run_calls_every_step_once():
             run = ship.run_plan(steps, runner)
         assert run.rc == 0 and run.stopped is None, run
         assert len(calls) == len(steps)
+
+
+def test_each_step_prints_a_line_the_shell_can_run_again():
+    """Review of round 2 (2026-10-08): the step line was the argv joined by spaces, so a path with a
+    space split into two words when the retro copied the line, as its method tells it to."""
+    steps = [ship.Step(title="validate", argv=("validate", "/a b/.coyomap/project-map.json", "--x"))]
+    _calls, runner = make_recording_runner()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        ship.run_plan(steps, runner)
+    line = next(ln.strip() for ln in out.getvalue().splitlines() if ln.startswith("    "))
+    assert shlex.split(line) == list(steps[0].argv), line
 
 
 # --- the command shell ----------------------------------------------------------

@@ -553,11 +553,25 @@ def test_a_read_after_the_build_closed_writes_no_line() -> None:
         # A record after the end opens the build again, and its reads are logged.
         assert append(repo, "record", "+1 under \"Walk jumps\"")
         assert append(repo, "barrier", "VERDICTS OK — 3 file(s)")
-        # `phase commit` closes it as `end` does.
+        # In the commit phase, the build closes once `finalize` has written its verdict.
         assert append(repo, "phase", "commit")
+        assert append(repo, "finalize", "PASS — 0 blocking, 0 advisory")
         assert append(repo, "findings", "FINDINGS — 2 from 2 agent(s)") is False
         assert append(repo, "phase", "verify")
         assert append(repo, "barrier", "VERDICTS OK — 3 file(s)")
+
+
+def test_the_reads_of_the_pre_commit_check_are_logged() -> None:
+    """Review of round 2 (2026-10-08): the method starts the commit phase BEFORE `finalize`, so a
+    `phase commit` line alone does not close the build. The pre-commit read's barrier and findings
+    lines must still go in, a failed barrier above all."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_state(td)
+        assert append(repo, "phase", "verify")
+        assert append(repo, "phase", "commit")
+        assert append(repo, "barrier", "VERDICTS FAILED — 1 file(s) missing")
+        assert append(repo, "findings", "FINDINGS — 2 from 2 agent(s)")
+        assert "VERDICTS FAILED" in "".join(make_log_lines(repo))
 
 
 if __name__ == "__main__":

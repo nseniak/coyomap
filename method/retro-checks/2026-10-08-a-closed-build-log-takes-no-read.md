@@ -25,3 +25,15 @@ Escalation: none.
    record, assemble, grounding, finalize, ship and end lines all appear.
    regression sign: a `ship complete` in the transcript after the first `end` with no matching
    `ship` line in the log.
+
+## Review fix (2026-10-08)
+
+`phase commit` alone no longer closes the log: the method starts that phase BEFORE `finalize`, so
+the pre-commit read's barrier and findings lines were dropped. The build closes at `end`, or at a
+`finalize` or `ship` line written in the commit phase · tools/coyomap/buildstate.py,
+tests/test_buildstate.py.
+
+4. expect: a build's log shows the barrier and findings lines of the reads run between
+   `phase commit` and the first `finalize` line.
+   regression sign: a `phase commit` line followed directly by `finalize` while the transcript shows
+   a `grounding lint` or `findings collect` run between them.

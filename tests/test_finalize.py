@@ -2378,8 +2378,8 @@ def make_pinned_repo(closer_word: str) -> tuple[Path, Path]:
 
 def test_finalize_does_not_call_a_claim_the_closer_upheld_a_refutation_of_gone():
     """Retro 2026-10-08 #3: the finalize report carried "21 claim(s) the skeptics were given are
-    GONE" as a no-escape advisory, and every one of the 21 had been removed on purpose. Five of them
-    were refuted, the closer upheld the refutation, and the build deleted the claim."""
+    GONE" as a no-escape advisory, and every one of the 21 had been removed on purpose. 21 of the 25
+    gone by text were refuted, the closer upheld the refutation, and the build deleted the claim."""
     root, p = make_pinned_repo("uphold")
     finalize.main([str(p), "--repo", str(root)])
     md = (root / ".coyomap" / "finalize-report.md").read_text(encoding="utf-8")

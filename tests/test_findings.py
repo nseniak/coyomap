@@ -325,6 +325,45 @@ def test_withdraw_keeps_the_finding_and_its_reason_and_collect_counts_it_no_more
     assert "[harvest-1#2]" in report[:report.index("## withdrawn")], report
 
 
+def test_a_new_finding_after_a_withdrawal_counts_as_new() -> None:
+    """Review of round 2 (2026-10-08): "+N since the last collect" was the total minus the last
+    report's total, and a withdrawal lowers the total. Collect one bug, withdraw it, file one risk:
+    the next collect must say +1, not +0."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        make_filed(repo, [("harvest-1", "bug", "the retry sends the email twice")])
+        assert run_findings(["collect", "--repo", str(repo)])[0] == 0
+        assert run_findings(["withdraw", "--repo", str(repo), "harvest-1#1",
+                             "--why", "the retry is idempotent, line 12"])[0] == 0
+        make_filed(repo, [("harvest-2", "risk", "the admin route has no guard")])
+        code, out, err = run_findings(["collect", "--repo", str(repo)])
+        assert code == 0, err
+        assert "(+1 since the last collect)" in out, out
+        # and a collect with nothing new says +0
+        code, out, _err = run_findings(["collect", "--repo", str(repo)])
+        assert "(+0 since the last collect)" in out, out
+
+
+def test_withdrawing_the_repeat_of_a_withdrawn_finding_is_refused() -> None:
+    """Review of round 2 (2026-10-08): an exact repeat is one finding. Withdrawing #1 took both
+    lines back, so withdrawing #2 printed WITHDRAWN and then read as a malformed line. It is now
+    refused as already withdrawn, and nothing is written."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        make_filed(repo, [("harvest-1", "risk", "the admin route has no guard"),
+                          ("harvest-1", "risk", "the admin route has no guard")])
+        assert run_findings(["withdraw", "--repo", str(repo), "harvest-1#1",
+                             "--why", "the guard sits in the middleware, line 40"])[0] == 0
+        own = repo / ".coyomap" / "findings" / "harvest-1.jsonl"
+        before = own.read_text(encoding="utf-8")
+        code, _out, err = run_findings(["withdraw", "--repo", str(repo), "harvest-1#2",
+                                        "--why", "same"])
+        assert code == 2 and "already withdrawn" in err, err
+        assert own.read_text(encoding="utf-8") == before
+        code, out, _err = run_findings(["collect", "--repo", str(repo)])
+        assert "· 0 malformed" in out, out
+
+
 def test_withdraw_refuses_every_fault_at_once_and_writes_nothing() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo = make_repo(td)

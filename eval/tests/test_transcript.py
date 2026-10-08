@@ -303,9 +303,9 @@ def test_shell_grammar_that_must_not_split_a_command():
 
 def test_subverbs_cover_every_dispatched_verb():
     """The allowlist is checked against the dispatch tables, not against a comment."""
-    from coyomap import fix, grounding, provenance  # the tools this reader measures
+    from coyomap import findings, fix, grounding, provenance  # the tools this reader measures
 
-    dispatched = set(fix._VERBS)
+    dispatched = set(fix._VERBS) | set(findings._VERBS)
     dispatched |= {"write", "report", "lint"}          # grounding.main's own `verb not in (...)`
     dispatched |= {"stamp", "show"}                    # provenance.main's own guard
     missing = sorted(dispatched - transcript._COYOMAP_SUBVERBS)

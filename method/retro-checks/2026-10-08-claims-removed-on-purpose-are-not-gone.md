@@ -31,3 +31,18 @@ Escalation: none. An advisory's count; no gate reads it.
 3. expect: the commit message's findings count equals the `agent findings (informational)` line
    of `verify/gate-block.md`.
    regression sign: a commit amended only to change a findings count.
+
+## Review fix (2026-10-08)
+
+A later row re-stated EVERY lost row that shared its theme and boxes, and a rule's sites all share
+those: one re-stated site of BR7 excused its other dropped sites. Now a later row explains at most
+one earlier row, at the same anchor, and an upheld refutation is checked first. On the 2026-10-08
+mcpolis map the 25 claims gone by text split 21 refuted with the closer upholding and 4 re-stated
+(not 20 and 5 as written above); none is lost. The closer files are read from the build's own
+`verify/` folder only: no closer row carries a build id, and file times cannot tell builds apart
+· tools/coyomap/validate_model.py, tests/test_validate_model.py.
+
+4. expect: on a rule whose sites were partly dropped, the GONE line counts each dropped site that
+   no later row at its own anchor re-states.
+   regression sign: a GONE line silent while the pin holds two first-wave sites of one rule that
+   the map no longer makes and only one later row for that rule.

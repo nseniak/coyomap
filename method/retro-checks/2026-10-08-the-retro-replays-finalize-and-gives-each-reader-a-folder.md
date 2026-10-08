@@ -27,3 +27,11 @@ two slice readers overwrote each other's `slice.txt` in the shared scratchpad.
    reports another reader's file in its place.
    regression sign: a reader's note that a scratch file was overwritten, or two readers writing one
    file name outside their folders.
+
+## Review fix (2026-10-08)
+
+`ship` prints each step's command quoted for the shell (`shlex.join`), so a copied line with a
+space in a path runs as printed · tools/coyomap/ship.py, tests/test_ship.py.
+
+- expect: the retro's replayed finalize line runs without hand edits.
+  regression sign: a retro that re-quotes a path from `ship`'s printed step line by hand.

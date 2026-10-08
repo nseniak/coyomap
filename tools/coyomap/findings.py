@@ -80,6 +80,8 @@ _WHERE = re.compile(r"(?P<path>[^:]+)(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?")
 #: The report's first line, which carries the total the next `collect` counts the new from.
 _REPORT_TITLE = "# Agent findings — "
 _REPORT_TOTAL = re.compile(r"^# Agent findings — (?:(\d+) from |none filed)")
+#: A finding's line in the report: `- [<agent>#<n>] ...`, under its kind or under "withdrawn".
+_REPORT_ID = re.compile(r"^- \[([^\]\s]+#\d+)\] ")
 
 
 def findings_dir(repo: Path) -> Path:
@@ -279,11 +281,18 @@ def withdraw_faults(repo: Path, finding_id: str | None, why: str | None) -> list
     else:
         filed = load_folder(findings_dir(repo))
         agent, line = m.group("agent"), int(m.group("line"))
-        if any(w.finding.agent == agent and w.finding.line == line for w in filed.withdrawn):
-            faults.append(f"{finding_id} is already withdrawn")
+        target = _finding_at(findings_dir(repo) / f"{agent}.jsonl", agent, line)
+        # The key holds the agent, so this finds the line itself or an exact repeat of it.
+        gone = next((w.finding for w in filed.withdrawn
+                     if target is not None and w.finding.key == target.key), None)
+        if gone is not None:
+            # An exact repeat is one finding: withdrawing one of its lines took them all back.
+            faults.append(f"{finding_id} is already withdrawn"
+                          + (f" (as {gone.id}, of which it is an exact repeat)"
+                             if gone.line != line else ""))
         elif not (findings_dir(repo) / f"{agent}.jsonl").is_file():
             faults.append(f"no findings file for agent {agent!r} under {buildstate.FINDINGS_DIR}")
-        elif not _is_finding_line(findings_dir(repo) / f"{agent}.jsonl", agent, line):
+        elif target is None:
             faults.append(f"line {line} of {agent}.jsonl is no finding: `collect` writes each "
                           f"finding's id into the report")
     said = " ".join((why or "").split())
@@ -296,17 +305,19 @@ def withdraw_faults(repo: Path, finding_id: str | None, why: str | None) -> list
     return faults
 
 
-def _is_finding_line(path: Path, agent: str, line: int) -> bool:
+def _finding_at(path: Path, agent: str, line: int) -> Finding | None:
+    """The finding on line `line` of `path`, or None when that line is no finding."""
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        return False
+        return None
     if not 1 <= line <= len(lines):
-        return False
+        return None
     try:
-        return isinstance(_parse(lines[line - 1], agent, line), Finding)
+        parsed = _parse(lines[line - 1], agent, line)
     except ValueError:
-        return False
+        return None
+    return parsed if isinstance(parsed, Finding) else None
 
 
 def withdraw(repo: Path, finding_id: str | None, why: str | None,
@@ -471,16 +482,17 @@ READER_GUIDANCE = (f"Each agent filed these into its own file under {buildstate.
 
 # ── collect ──────────────────────────────────────────────────────────────────────────────────────
 
-def previous_total(report: Path) -> int | None:
-    """The total the last `collect` wrote into `report`, or None when there is no readable one."""
+def previous_ids(report: Path) -> set[str] | None:
+    """The ids of every finding the last `collect` listed in `report`, withdrawn ones included, or
+    None when there is no readable one. By id and not by total: a withdrawal lowers the total, so
+    a total said "+0" for a finding filed after one."""
     try:
-        first = report.read_text(encoding="utf-8").splitlines()[:1]
+        lines = report.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
         return None
-    m = _REPORT_TOTAL.match(first[0]) if first else None
-    if m is None:
+    if not lines or _REPORT_TOTAL.match(lines[0]) is None:
         return None
-    return int(m.group(1)) if m.group(1) else 0
+    return {m.group(1) for ln in lines if (m := _REPORT_ID.match(ln))}
 
 
 def _place(path: Path, repo: Path) -> str:
@@ -548,12 +560,13 @@ def collect(repo: Path, out: Path | None = None, at: str | None = None) -> Colle
     """Read every agent's file, write the whole list, and return the ONE line to print. Raises
     `OSError` when the report cannot be written.
 
-    `since` counts against the total the previous report states, so it moves only at a `collect`:
-    a reader that prints the line without writing the list leaves it where it was."""
+    `since` counts the findings whose id the previous report does not list, so it moves only at a
+    `collect`: a reader that prints the line without writing the list leaves it where it was."""
     filed = load(repo)
     target = out if out is not None else repo / REPORT
-    before = previous_total(target)
-    since = max(0, len(filed.findings) - before) if before is not None else len(filed.findings)
+    before = previous_ids(target)
+    since = (sum(1 for f in filed.findings if f.id not in before) if before is not None
+             else len(filed.findings))
     write_whole(target, report_text(filed, since, at or now_minute()))
     return Collected(filed=filed, since=since, report=target,
                      line=verdict_line(filed, since=since, report=_place(target, repo)))

@@ -389,7 +389,7 @@ def run_plan(steps: list[Step], runner: Runner) -> PlanRun:
     """
     for i, step in enumerate(steps):
         print(f"\n=== ship [{i + 1}/{len(steps)}] {step.title}")
-        print("    " + " ".join(step.argv))
+        print("    " + shlex.join(step.argv))
         rc = runner(list(step.argv))
         if rc != 0:
             remaining = [s.title for s in steps[i + 1:]]

@@ -4603,13 +4603,17 @@ def _read_pin(model_path: Path) -> _Pin | None:
     return _Pin(rows=tuple(rows), later_waves=later if isinstance(later, int) and later > 0 else 0)
 
 
-def _pin_key(row: dict[str, object]) -> tuple[str, tuple[str, ...]] | None:
-    """What a claim is ABOUT: its theme and its boxes. `None` for a row with no boxes (a pin written
-    before `elements` existed, or a legacy security row): nothing can say what re-states it."""
+def _pin_key(row: dict[str, object]) -> tuple[str, tuple[str, ...], str | None] | None:
+    """What a claim is ABOUT: its theme, its boxes and its anchor. `None` for a row with no boxes (a
+    pin written before `elements` existed, or a legacy security row): nothing can say what re-states
+    it. The anchor is in the key because theme and boxes alone are too coarse: every site of one
+    rule shares them, and a rule has up to 8 sites."""
     elements = row.get("elements")
     if not isinstance(elements, list) or not elements:
         return None
-    return (str(row.get("theme")), tuple(sorted(str(e) for e in elements)))
+    anchor = row.get("anchor")
+    return (str(row.get("theme")), tuple(sorted(str(e) for e in elements)),
+            anchor if isinstance(anchor, str) else None)
 
 
 @dataclass(frozen=True)
@@ -4621,42 +4625,54 @@ class _OnPurpose:
 
 
 def _explained_losses(pin: _Pin, live: set[str], upheld: set[str]) -> _OnPurpose:
-    """The pinned claims that are gone ON PURPOSE, re-stated or refuted.
+    """The pinned claims that are gone ON PURPOSE, refuted or re-stated, checked in that order.
 
+    * REFUTATION UPHELD: a skeptic refuted the claim, the closer upheld the refutation, and the build
+      removed it. That removal is the correction working.
     * RE-STATED: a correction rewrote the claim and a LATER wave challenged the new wording. The pin
       then holds both, the old row and the new one, and the map carries only the new one. Counted by
       theme, that pair read as one claim lost. A later row re-states an earlier one when it comes
-      after it in the pin, sits in a later wave, says something about the same boxes under the same
-      theme, and is still in the map.
-    * REFUTATION UPHELD: a skeptic refuted the claim, the closer upheld the refutation, and the build
-      removed it. That removal is the correction working.
+      after it in the pin, sits in a later wave, has the same theme, boxes and anchor, and is still
+      in the map. ONE-TO-ONE: each later row explains at most one earlier row. Matching on theme and
+      boxes alone let one re-stated site of a rule excuse every other dropped site of that rule.
 
-    On the 2026-10-08 mcpolis build the advisory said 21 claims were gone. All 25 claims gone by
-    text were one of these two: 20 re-stated and voted in wave 2, the other 5 removed after an
-    upheld refutation."""
+    On the 2026-10-08 mcpolis build the advisory said 21 claims were gone, and 25 were gone by text:
+    21 are refutations the closer upheld and 4 are re-stated (one-to-one, by anchor), none lost. The
+    coarse key first used had said 20 and 5, then 21 and 4 once refuted was checked first, and it
+    would have excused any other dropped site of rule BR162 the same way."""
     first_wave = len(pin.rows) - pin.later_waves
-    restating: dict[tuple[str, tuple[str, ...]], int] = {}
+    restating: dict[tuple[str, tuple[str, ...], str | None], list[int]] = {}
     for i, row in enumerate(pin.rows):
         key = _pin_key(row)
         if i >= first_wave and key is not None and row["claim"] in live:
-            restating[key] = max(restating.get(key, -1), i)
+            restating.setdefault(key, []).append(i)
     restated: set[str] = set()
     refuted: set[str] = set()
     for i, row in enumerate(pin.rows):
         claim = str(row["claim"])
         if claim in live:
             continue
-        key = _pin_key(row)
-        if key is not None and restating.get(key, -1) > i:
-            restated.add(claim)
-        elif claim in upheld:
+        if claim in upheld:
             refuted.add(claim)
+            continue
+        key = _pin_key(row)
+        later = restating.get(key, []) if key is not None else []
+        # Earliest unused later row: walking the lost rows in pin order, this pairs as many as can be.
+        j = next((n for n, at in enumerate(later) if at > i), None)
+        if j is not None:
+            del later[j]
+            restated.add(claim)
     return _OnPurpose(restated=frozenset(restated), refuted=frozenset(refuted))
 
 
 def _upheld_refutations(model_path: Path) -> set[str]:
     """The claims whose refutation the closer upheld, read from its own files beside the map. A
-    claim two appeals disagree on is not among them: a dispute settles nothing."""
+    claim two appeals disagree on is not among them: a dispute settles nothing.
+
+    NOT SCOPED FURTHER than the `verify/` folder, on purpose. That folder is the build's own: the
+    archive moves it with its map, and only claims in this build's pin are ever looked up here. No
+    closer row and no provenance entry carries a build id, and file times cannot tell builds apart:
+    a second wave rewrites the pin AFTER the closer wrote its file."""
     # LOCAL for the reason `_closer_record_warnings` gives: `grounding` imports this module.
     from coyomap.grounding import closer_ruling, is_closer_row  # noqa: PLC0415
     rows = [r for r in _verify_rows(model_path) if is_closer_row(r)]

@@ -187,6 +187,20 @@ def test_a_rules_components_slot_naming_no_component_is_refused() -> None:
         contract.fill("rules", values)
 
 
+def test_a_components_slot_whose_only_id_is_part_of_a_name_is_refused() -> None:
+    """Review of round 2 (2026-10-08): `S3` in "AWS S3" and `C2` in "Phase C2" matched the id
+    pattern, so a sentence about a storage service passed as a list of ids. An id right after a
+    capitalised word that is no id itself is part of a name. Lists of ids still pass."""
+    values = make_slot_values("rules")
+    for prose in ("the uploads go to AWS S3", "Phase C2 of the plan"):
+        values["COMPONENTS"] = prose
+        with pytest.raises(ValueError, match="COMPONENTS» names no component"):
+            contract.fill("rules", values)
+    for ids in ("C3, C7 and the subsystem S2", "C3 C7 S2", "(C12) the gateway", "S3"):
+        values["COMPONENTS"] = ids
+        contract.fill("rules", values)
+
+
 def test_the_skeleton_is_json_with_every_slot_empty() -> None:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
