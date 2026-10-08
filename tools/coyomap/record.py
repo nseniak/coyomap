@@ -90,7 +90,7 @@ from coyomap import buildstate, prose, records
 from coyomap.access_surface import baseline_beside, load_claims, where_lines
 from coyomap.anchor_drift import DRIFT_EXCEPTIONS_HEADING
 from coyomap.assemble import dump_preserving, load_map_or_fragment
-from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
+from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING, LATE_CLAIMS_HEADING
 from coyomap.model import ExtraSection, ProjectModel, load_model_path
 from coyomap.reporting import clip
 from coyomap.subverb_args import undecodable
@@ -208,9 +208,12 @@ def remove_line(m: ProjectModel, heading: str, prefix: str) -> tuple[bool, str]:
 #: line exists to answer a finding. A note ('Entry-point coverage', 'Bucket vocabulary') answers
 #: none, so silencing nothing is no defect there. 'Drift exceptions' is left out by name: its
 #: reader is `anchor-drift`, which `validate` never runs, and which names its own unmatched lines.
+#: 'Late claims without a vote' is left out for the same reason: its reader is `finalize`'s late-claims
+#: leg, so trying its lines against `validate` refused every line the leg itself asked for (2026-10-08).
 LIVE_CHECKED: frozenset[str] = frozenset(
     h.heading for h in records.HEADINGS
-    if h.maintenance and h.key is None and h.heading != DRIFT_EXCEPTIONS_HEADING)
+    if h.maintenance and h.key is None
+    and h.heading not in (DRIFT_EXCEPTIONS_HEADING, LATE_CLAIMS_HEADING))
 
 #: A `path:line` anchor, to say "one line per anchor" when a refused key holds several.
 _ANCHOR = re.compile(r"[\w./-]+:\d+")

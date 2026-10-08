@@ -7,6 +7,19 @@ VENV := $(REPO)/.venv
 PY := $(VENV)/bin/python
 MIN_PY := 3.10
 
+# The Python that builds the venv: plain python3 when it is $(MIN_PY)+, so a machine that worked
+# keeps the same Python; otherwise the newest python3.1x on the PATH that is. An old Mac's
+# /usr/bin/python3 can come first on the PATH even after `brew install python@3.12`, which adds
+# python3.12: asking for python3 alone refused an install that had a good Python one name away. `make install PYTHON=/path/to/python3`
+# picks one by hand. Empty when none qualifies; `venv` then names what it found.
+PY_CANDIDATES := python3 python3.14 python3.13 python3.12 python3.11 python3.10
+ifeq ($(origin PYTHON),undefined)
+PYTHON := $(shell for p in $(PY_CANDIDATES); do \
+	command -v $$p >/dev/null 2>&1 && \
+	$$p -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 10) else 1)' 2>/dev/null && \
+	{ command -v $$p; break; }; done)
+endif
+
 # Skills homes to install into — one per agent family, chosen to cover Claude
 # Code, Codex, and Cursor while keeping duplicate discovery to a minimum:
 #   ~/.claude/skills  -> Claude Code (Cursor also reads this for compatibility)
@@ -27,11 +40,12 @@ PORT ?= 8765
 # Create the repo-local venv. Requires Python $(MIN_PY)+ (the pre-index's tree-sitter deps
 # declare requires-python >=3.10); fail fast with a clear message instead of a cryptic error.
 venv:
-	@command -v python3 >/dev/null 2>&1 || { \
-		echo "ERROR: python3 not found. coyomap requires Python $(MIN_PY)+ (see README 'Requirements')."; exit 1; }
-	@python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 10) else 1)' || { \
-		echo "ERROR: Python $(MIN_PY)+ required; found $$(python3 --version 2>&1). See README 'Requirements'."; exit 1; }
-	@test -d "$(VENV)" || python3 -m venv "$(VENV)"
+	@test -n "$(PYTHON)" || { \
+		echo "ERROR: coyomap requires Python $(MIN_PY)+; looked for $(PY_CANDIDATES) on the PATH."; \
+		echo "Found: $$(python3 --version 2>&1 || echo 'no python3')."; \
+		echo "Install a newer one (for example: brew install python@3.12), or name it: make install PYTHON=/path/to/python3"; \
+		echo "See README 'Requirements'."; exit 1; }
+	@test -d "$(VENV)" || { echo "Creating $(VENV) with $(PYTHON) ($$($(PYTHON) --version 2>&1))"; "$(PYTHON)" -m venv "$(VENV)"; }
 
 # Install the coyomap CLI editable into the venv, WITH the pre-index extra (tree-sitter for
 # polyglot symbol/import extraction). The core gate (validate + render) stays dependency-free;
@@ -73,14 +87,14 @@ gates:
 # passes stops the landing until its line is removed.
 # Stdlib only, so it needs no venv of its own; the gates it runs use the main checkout's.
 land:
-	python3 tools/land.py
+	"$(or $(PYTHON),python3)" tools/land.py
 
 # Which tests notice a broken behaviour? Each break in BREAKS (a JSON file, see
 # tools/break_check.py) is made in a scratch copy, one at a time, and the viewer's tests run on
 # it: `make break-check BREAKS=breaks.json`. The checkout itself is never touched. Stdlib only,
 # like land; the tests it runs use the main checkout's venv. Exit 1 when some break went unnoticed.
 break-check:
-	python3 tools/break_check.py --breaks $(BREAKS)
+	"$(or $(PYTHON),python3)" tools/break_check.py --breaks $(BREAKS)
 
 # A build nobody watches, as a headless Claude Code session (`claude -p`), with its own run folder
 # under the project's .coyomap/runs/ (git ignores it): `make claude-build REPO=<repo>`. The build writes the map into the project's

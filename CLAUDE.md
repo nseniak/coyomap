@@ -62,6 +62,8 @@ the code's names.
   "since the …"; `changes lint` warns when an update writes them in.
 - **build** — analyzing a project from scratch and producing a new map. Throws
   away hand edits.
+- **late claim** — a claim written after the last fact-check wave. It ships only after a
+  small late wave votes on it, or with a reason recorded under 'Late claims without a vote'.
 - **viewer** — the browser page that shows a map. Served live, never committed.
 - **view** (a tab in the viewer) — one screen answering one question. Today:
   Features, Description, Happy Path, Interfaces, Rules, Data, Glossary, Architecture,

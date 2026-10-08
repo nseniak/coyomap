@@ -62,7 +62,7 @@ cd coyomap
 make install
 ```
 
-The coyomap CLI runs on Python 3.10+, which needs to be installed on your machine.
+The coyomap CLI runs on Python 3.10+, which needs to be installed on your machine. `make install` uses `python3` when it is new enough, and otherwise the newest `python3.1x` it finds (for example, the `python3.12` that `brew install python@3.12` adds). To pick one yourself, run `make install PYTHON=/path/to/python3`.
 
 Run `make install` again after each new `git pull`.
 
