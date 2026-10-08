@@ -2,50 +2,48 @@
 
 # coyomap: agentic coding without running off the cliff
 
-A map of your project, from features down to the code
+**Know what your agents are building.**
+
+An interactive map, from features to code.
 
 ## Why coyomap?
 
-When coding agents generate most of your code, you can lose track of your project's features
-and implementation. Everything runs fine until the day you look down and see there is nothing under
-your feet.
+When coding agents generate most of your code, it is easy to lose track of what your project does and how it works. Everything runs fine until the day you look down and see there is nothing under your feet.
 
-coyomap helps you keep visibility into the project and find your way around it as it grows.
+coyomap helps you understand what your agents are building and find your way around the project as it grows.
 
 ## What is coyomap?
 
-coyomap analyzes your project and builds an interactive map of its features and use cases, linked to the underlying architecture, data model and code. Map components are annotated with plain language descriptions of their goal and function. Use the map to understand what your project does and how it is implemented, top-down, drilling down into the code only when needed.
+coyomap analyzes your project and builds an interactive map linking its features and use cases to the architecture, data model and code. Plain-language explanations describe what each part does and why it exists.
 
-The map also provides a shared picture of the project for your non-developer teammates.
+Start with the product, explore how it works, and open the code when you need the details. The same map gives non-developer teammates a shared picture of the project.
 
 ## What coyomap shows
 
-The viewer shows your project in three sections: *Product*, *Under the hood* and *Update log*.
+The map has three sections: *Product*, *Under the hood* and *Update log*.
 
-**Product** shows the project's functionality: who uses it, its features and use cases, the happy
-path, the rules it enforces, and the data it keeps.
+**Product** shows who uses the product, what they can do, how its use cases work, the rules it enforces, and the data it keeps.
 
 <p align="center">
   <img src="assets/viewer-product.png" alt="MCP Hero's Features diagram, connecting actors, features, and data subdomains" width="80%"><br>
   <em>Features diagram for the <a href="https://github.com/nseniak/mcphero">MCP Hero project</a>.</em>
 </p>
 
-**Under the hood** shows how the project is built and run: its architecture, components, dependencies, how its data is stored, and how it is deployed.
+**Under the hood** shows how the product is built and run: its architecture, components, dependencies, data storage and deployment.
 
 <p align="center">
   <img src="assets/viewer-hood.png" alt="MCP Hero's Architecture diagram" width="80%"><br>
   <em>Architecture diagram for the <a href="https://github.com/nseniak/mcphero">MCP Hero project</a>.</em>
 </p>
 
-**Update log** shows how the product changed, one entry per update of the map (`/coyomap update`), newest first.
+**Update log** records how the product has changed between map updates, with one entry per `/coyomap update`, newest first.
 
 ## Why not just ask my agent to explain the code?
 
-You can ask your agent to analyze the code, generate summaries and draw diagrams. However, coyomap
-differs in two ways:
+You can ask your agent to analyze code, write summaries and draw diagrams. coyomap adds two things:
 
-- coyomap builds an explorable, hierarchical map, with cross-reference links and plain-language annotations. The map is saved as a set of files that can be committed and shared with the project, so everyone sees the same one.
-- An AI agent can miss things or make things up. coyomap combines code indexing, automated consistency checks, and independent agent reviews to find gaps and unsupported claims.
+- **A map you can explore and share.** Follow links between features, use cases and implementation, with plain-language explanations along the way. The map is stored as files you can commit with your project, so your team can work from the same picture.
+- **Checks for gaps and unsupported claims.** AI agents can miss things or make things up. coyomap combines code indexing, automated consistency checks and independent agent reviews to help catch these problems.
 
 ## How to use
 
@@ -68,7 +66,7 @@ Run `make install` again after each new `git pull`.
 
 ### Build your project map
 
-To create the map of your project, run the `/coyomap` command in your project's agent. Use a capable coding model at its default effort setting (e.g., Opus 5.5 at medium effort). Allow about an hour for the initial build; larger projects can take longer, depending on the model and agent.
+Open your coding agent in the project you want to map, then run `/coyomap`. Use a capable coding model at its default effort setting (e.g., Opus 5.5 at medium effort). Allow about an hour for the initial build; larger projects can take longer, depending on the model and agent.
 
 ```
 # Build the map
@@ -83,9 +81,10 @@ The map is created in your project's `.coyomap/` subdirectory. Commit it with yo
 
 Open the map in your browser with the coyomap viewer. It runs on your machine and shows every map you have opened.
 
+From your coyomap clone, start the viewer:
+
 ```
-# Start the viewer
-cd coyomap && make start
+make start
 ```
 
 Your browser opens at `http://127.0.0.1:8765`. Click your project to see its map. If your project is not listed, add its folder from that page.
@@ -101,21 +100,37 @@ After committing code changes, run an incremental update of the map.
 /coyomap update
 ```
 
-### Interacting with the map
+### Ask questions and edit the map
 
-You may use the coyomap skill to ask questions about the map and request updates.
+Ask your agent to explain parts of the map or make changes to it.
 
 ```
-# ask for a change to the map itself
+# Ask a question about the map
+/coyomap explain how authentication works in this project
+
+# Ask for a change to the map itself
 /coyomap rename the "API" subsystem to "Public API"
 ```
 
-### Building the map using headless Claude Code
+### Share the map
 
-To build a map with no chat window open (Claude Code's headless mode):
+Export the map as a static website that others can browse without installing coyomap.
+
+From your coyomap clone, run:
 
 ```
-cd coyomap
+.venv/bin/coyomap export ~/my-project --out ./site
+```
+
+The export includes the viewer, the map, and your project's source code. Share it with an audience that should have access to that code.
+
+Host the generated folder on GitHub Pages or another static web host. No server-side application is required. The export is a snapshot, so export again after updating the map.
+
+### Build without a chat window
+
+To build a map with no chat window open (Claude Code's headless mode), run this from your coyomap clone:
+
+```
 make claude-build REPO=~/my-project
 ```
 
@@ -125,17 +140,6 @@ To run `claude -p` yourself, check these two settings:
 
 - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: otherwise the session ends the build after 10 minutes of waiting for its helper agents.
 - `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`: leave it unset, or 2 or more. Some helper agents start their own helpers.
-
-### Share the map
-
-Export the map as a static website that others can browse without installing coyomap.
-
-```
-# To export the map
-cd coyomap && .venv/bin/coyomap export ~/my-project --out ./site
-```
-
-This command generates a folder of plain files: the viewer, the map, and your code. Put it on GitHub Pages or any web host and send the link. Nothing runs on the server. It is a snapshot, so export again after the map changes.
 
 ## Which files are analyzed
 
@@ -147,7 +151,8 @@ what each pattern removed.
 
 ## Status
 
-coyomap is **work in progress**, in daily use. The stored map format still moves: a newer coyomap
-may not read an older map, and a rebuild is the fix, so treat a map as replaceable. Rebuilding can overwrite manual changes to the map.
+Early-stage, used daily.
 
-Feedback and bug reports are welcome, please [open an issue](../../issues).
+Map formats may change between versions, requiring a rebuild. Rebuilding can overwrite manual edits to the map.
+
+Feedback and bug reports are welcome: [open an issue](../../issues).
