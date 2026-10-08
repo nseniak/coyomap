@@ -162,6 +162,12 @@ lead; nothing above this line goes into an agent prompt.
 > **`entities` is NOT yours** unless your brief carries the T5 addendum. Neither is any array not
 > listed above.
 >
+> **If yours is the dependency slice, the list is complete.** Every outside system the code talks
+> to, AND every top-level library or framework the package files declare (`package.json`,
+> `pyproject.toml`, `go.mod` …): **one row per package**, never two merged into one row ("React and
+> Vite" is two rows). Your D-ids are the legend the data-model agent uses, so a dep you leave out
+> is one no entity can name.
+>
 > **AUTHORING A `deps` ROW: one rule lives in `model.md` and blocks you if you do not know it.**
 > Every dep in the EXTERNAL group (`datastore` / `messaging` / `service` / `platform`) must either
 > name the surface(s) it belongs to in `interfaces`, or carry `not_an_interface: <why it is none>`.
@@ -199,13 +205,19 @@ lead; nothing above this line goes into an agent prompt.
 >
 > | array | fields |
 > |---|---|
-> | `components` | **id**, **name**, **purpose**, **source**, kind, confidence, subsystem, entry_point, files, depends_on |
-> | `entry_points` | **kind**, **trigger**, **source**, **component** (the `Cn` in this fragment that owns it; an owner in another slice goes in your reply), activation, runs_in, cadence, cadence_source — NO `id`, `assemble` mints it |
-> | `deps` | **id**, **name**, **kind**, type, used_for, where_configured, confidence, package, evidence, interfaces, not_an_interface |
+> | `components` | **id**, **name**, **purpose**, **source**, kind, confidence (`verified` or `inferred`), files (a list of repo-relative paths), depends_on (one line of text, never a list) |
+> | `entry_points` | **kind**, **trigger**, **source**, **component** (the `Cn` in this fragment that owns it; an owner in another slice goes in your reply), activation (`self` or `external`, never a sentence), cadence, cadence_source |
+> | `deps` | **id**, **name**, **kind** (`datastore`, `messaging`, `service`, `platform`, `framework` or `library`), type, used_for, where_configured, confidence (`verified` or `inferred`), package, evidence (a list of `{"file", "why"}`), interfaces (a list of `In` ids), not_an_interface |
 > | `observability` | **signal**, where_emitted, where_viewed, alerts |
 > | `config` | **key**, **purpose**, default, per_env |
-> | `deployment` | **unit**, runs_on, exposed_as, config_source, variants |
+> | `deployment` | **unit**, runs_on, exposed_as, config_source, variants (a list of `{"env", "source"}`) |
 > | `run_commands` | action, command, source |
+>
+> An `entry_points` row has NO `id`: `assemble` mints it. `activation` is `self` when the way in
+> runs with no caller (a timer, a loop, a boot step, a queue consumer) and `external` when
+> something outside calls it (a route, a command, a webhook). `depends_on` is a short sentence;
+> the arrows between components are edges, written in Phase 3, never a list here. This table is
+> checked against the model by a test, so a field it names is a field `lint-fragment` accepts.
 >
 > `deps[].kind` is a CLOSED vocabulary: `datastore`, `messaging`, `service`, `platform`,
 > `framework`, `library`. The first four are the EXTERNAL group the interface rule below governs;
@@ -219,7 +231,7 @@ lead; nothing above this line goes into an agent prompt.
 > fragment (a T5 return routinely exceeds 50 KB) is silently truncated by sub-agent result caps,
 > and a truncated fragment fails `assemble`. An empty slice is an empty array plus a one-line note.
 > **Anchor formats** (`assemble` does not fix these up — write them right, or `coyomap validate`
-> rejects them): `components[].source`, `entities[].source`, `components[].entry_point`,
+> rejects them): `components[].source`, `entities[].source`,
 > `deps[].where_configured`, `edges[].where`, `entry_points[].source`, `evidence[].file`,
 > `run_commands[].source`, `non_entity_types[].source`,
 > **`rules[].sites[].where`** (the OPERATIVE line — its `:line` is REQUIRED, never a bare file),

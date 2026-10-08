@@ -8,10 +8,13 @@ say `block` is assigned by the lead through `coyomap reconcile`, never in a frag
 failure fired in **13 of that build's 71 agent transcripts** and every one of the eleven fragments
 had to be repaired. One wrong sentence, eleven agents, thirteen failures.
 
-Fill the «angle-bracket» slots. There are exactly SIX — «COYOMAP_HOME», «REPO», «MAP», «PROJECT»,
-«BLOCK», «AGENT_ID» — each spelled the same way everywhere.
+Fill the «angle-bracket» slots. There are exactly SEVEN — «COYOMAP_HOME», «REPO», «MAP», «PROJECT»,
+«BLOCK», «COMPONENTS», «AGENT_ID» — each spelled the same way everywhere.
 
 - **«BLOCK»** is this agent's one block id and its BR id range, taken from the lead's block plan.
+- **«COMPONENTS»** — the `Cn` and `Sn` ids whose code makes this block's decisions, read off the map with `dump`.
+  The brief tells the agent to start from these, and before this slot no brief carried them: 0 of
+  11 rules agents on one build ran `--members` or `--edges`. `contract` refuses a value with no id.
 - **«PROJECT»** is two or three sentences on what the product is, in product language.
 
 Everything below the line is what the agent reads.
@@ -41,8 +44,9 @@ $CX dump --map $MAP --id UC31          # a use case: its flow steps and their an
 ```
 
 **Do NOT read the map file whole** — it is tens of thousands of tokens, and `dump` serves exactly
-the slice a rule needs. Start from `--members` on your block's components and the anchors the map
-already holds in them.
+the slice a rule needs. **Your block's components are «COMPONENTS».** Start there: `--members` on
+each `Sn`, `--record` and `--edges` on each `Cn`, then the anchors the map already holds in them.
+The list is where to begin, not a fence: follow an edge out of it when a decision lives there.
 
 **Do this work yourself — do NOT spawn sub-agents and do NOT write a program that writes your
 fragment.** Author the rows.

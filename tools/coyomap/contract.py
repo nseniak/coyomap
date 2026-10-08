@@ -421,6 +421,9 @@ def skeleton(names: list[str], root: Path | None = None) -> dict[str, str]:
 #: `CAPn` (feature), `HPn` (happy-path step).
 _BEHAVIOURAL_ID = re.compile(r"\b(?:CAP\d+|UC\d+|HP\d+|R\d+)\b")
 
+#: A structural id a rules agent can `dump`: a component `Cn` or a subsystem `Sn`.
+_STRUCTURAL_ID = re.compile(r"\b(?:C\d+|S\d+)\b")
+
 def _slot_content_faults(name: str, values: dict[str, str]) -> list[str]:
     """Faults in what a slot was filled WITH, as opposed to whether it was filled.
 
@@ -445,6 +448,15 @@ def _slot_content_faults(name: str, values: dict[str, str]) -> list[str]:
             f"map-section name ('T5 domain model') reads like an answer and is not one: all 14 "
             f"briefs on one build filled it that way, and the harvest came back with components "
             f"carrying no backbone edge at all")
+    # A rules brief's components with no id in them. The brief tells the agent to start from
+    # `dump --members` / `--edges` on these, and a block name or a sentence gives it nothing to
+    # dump: before the slot existed, 0 of 11 rules agents on the 2026-10-08 mcpolis build ran either.
+    components = (values.get("COMPONENTS") or "").strip()
+    if name == "rules" and components and not _STRUCTURAL_ID.search(components):
+        faults.append(
+            f"«COMPONENTS» names no component or subsystem id: {components[:80]!r}. It must list "
+            f"the `Cn` / `Sn` ids whose code makes this block's decisions (`dump --legend` lists "
+            f"them), because the agent starts from `dump --members` and `--edges` on each one")
     # A batch id filled with a PATH. The skeptic contract composes `.coyomap/verify/claims-«CLAIMS».json`
     # and `verdicts-«BATCH».json` from these two, so a path here builds a file name that exists
     # nowhere — 38 of 38 briefs on one build named `claims-/Users/…/claims-backbone-1.json.json`.

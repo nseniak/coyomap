@@ -621,7 +621,16 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   product (a clean-up script) is a component like any other. `validate` advises on a component whose
   every file is test code and that no story reaches; one kept as a component on purpose is recorded
   as `<Cn>: <why>` under the `Test code exceptions` extras heading.
-- **T2 External dependencies**: `Name | Kind | Bucket | Type | Used for | Where configured`. Two
+- **T2 External dependencies**: `Name | Kind | Bucket | Type | Used for | Where configured`.
+  **Every build harvests T2 as its own job, and the job is complete.** In a fan-out it is one
+  dedicated slice, never a side job of another slice; in a serial build it is a step of its own. It
+  lists every outside system the code talks to AND every top-level library or framework the
+  package files declare (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml` …): **one row per
+  package**, never two merged ("React and Vite" is two rows). Its D-ids are the legend the T5 owner
+  needs (see *Build order*), and the lead never writes that legend by hand instead. On one build the
+  lead wrote a legend of 9 outside services so every agent could start at once, and gave the deps
+  to an operations slice among 4 other jobs. The map shipped 19 deps where the previous build had
+  29: the slice merged frameworks and skipped 12 libraries. Two
   independent axes describe each dep:
   - **Kind** (optional, CLOSED vocabulary) = *where it lives* — decides shown-vs-folded. External
     **systems** the project talks to across a boundary (`datastore` / `messaging` / `service`, incl.
@@ -2029,7 +2038,7 @@ synthesis → parallel trace.**
 > never from *verifying the result*.
 
 - Phase 1 Harvest (fan out, one agent each). **Start: `coyomap state phase harvest --repo <repo>`.**
-  T4 entry points, T2 deps, T5 model, T3
+  T4 entry points, T2 deps (always its own slice, see *T2*), T5 model, T3
   run/build, product description/Roles reader. Parallel harvest also improves completeness. **Launch the whole
   harvest as one concurrent batch** (all agents in a single fan-out), not in waves — the slices are
   disjoint and use pre-allocated ID ranges, so no agent needs another's output first, and they
@@ -2216,7 +2225,10 @@ synthesis → parallel trace.**
       has no D-id universe — it then ships `dep: null` on every entity, silently disabling the
       persistence-coverage rule. Either run the T2 deps slice first and inject its
       datastore/messaging ids into the T5 prompt (`D1=MongoDB, D2=Redis…`), or have synthesis
-      BACKFILL `store.dep` from the assembled deps (a `--reconcile` set). The "container but no dep"
+      BACKFILL `store.dep` from the assembled deps (a `--reconcile` set). **Either way the legend is
+      the deps slice's own D-ids, read off its fragment. A legend the lead writes by hand up front is
+      not allowed**: it lets every agent start at once, and it then becomes the whole deps list,
+      which is how one build lost 10 of its 29 deps. The "container but no dep"
       validate advisory is the backstop, not the plan.
     - **Author `states` where the code implements a lifecycle** — an entity with a status
       enum/constants (a subscription's states) gets a `states` machine on its card; a component
@@ -2322,7 +2334,13 @@ synthesis → parallel trace.**
   reconcile the drafted use-case list against the harvested **external** entry surface in both
   directions — a use case with no entry point behind its trigger (stale docs), an
   externally-triggered entry point no drafted use case claims (missing use case or dead surface) —
-  BEFORE the trace fan-out, so Phase 3 traces the corrected list, not the draft. (The entry-surface
+  BEFORE the trace fan-out, so Phase 3 traces the corrected list, not the draft. **Decide each use
+  case that still names no way in, before the trace.** Once the reconcile file has linked the ways
+  in, list the use cases with none. Keep each one only with a reason a reader could check (its door
+  was harvested as one group row), or drop it now. A tracer sent to a use case with no way in is
+  the one that finds there is no code: on one build two went to trace that way and were dropped
+  after it. The lead then recorded a false reason for a sub-flow one of them had shared. When a
+  trace drops a use case anyway, every recorded line about its pieces says it was dropped. (The entry-surface
   advisory itself stays quiet until flows exist; during Phase 3 it fires on every not-yet-traced
   surface and **drains as traces land** — a mid-trace wall of these warnings is expected, not a
   defect. Only what survives the full trace is a finding.) **Mint the BLOCKS here too** (`blocks[]`,
@@ -2336,8 +2354,11 @@ synthesis → parallel trace.**
   and `tech` are blocked on it, as they are on a subdomain. Leave `rules[]` empty: it is written after
   the trace, when the flows exist to sweep. **Also assign each component's `subsystem`, each
   entity's `subdomain`, each use case's `capability` and its trigger `entry_points`, each
-  component's `runs_in`, and any dep `bucket` fixes here — as a `--reconcile` file, NOT a
-  hand-script.** Synthesis owns the finalized ids and has just seen the harvested `deployment[]`
+  component's `runs_in`, and EVERY dep's `bucket` here — as a `--reconcile` file, NOT a
+  hand-script.** **Every dependency gets a `bucket`, not only the ones you would fix.** The harvest
+  does not author it, so a dep this file skips ships with none, and the viewer then guesses a
+  group from `type` and `used_for`. On one build the reconcile set 7 fields and no bucket: all 19
+  deps shipped with none, 8 of the 19 guesses were wrong, and `validate` reported nothing. Synthesis owns the finalized ids and has just seen the harvested `deployment[]`
   units, so this is where the grouping and the code↔process link the Deployment view needs get wired
   — no later phase does it, so if synthesis skips it the view ships empty. **The two behavioral
   assignments have no other home.** `CAPn` is minted at synthesis, and `EPn` does not exist until
@@ -2499,7 +2520,8 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   The map has a home for DATA (entities), SEQUENCE (flows), STATES (lifecycles) and
   STRUCTURE (components, edges) — and none for the DECISION the code makes, which is exactly the
   part a reader calls "product-specific". Each agent gets ONE block (its `name` + `purpose`), the
-  map, and its own `BR` id range (BR1–19, BR20–39, … — one contiguous range per agent, exactly like
+  map, the `Cn` / `Sn` ids whose code makes that block's decisions (the brief's «COMPONENTS» slot,
+  where it starts its `dump --members` and `--edges` reads), and its own `BR` id range (BR1–19, BR20–39, … — one contiguous range per agent, exactly like
   the trace fan-out's `SFn` ranges, because two agents minting `BR7` is a hard `assemble` failure).
 
   **One block per agent is the rule, and bundling is allowed only when you say what it costs.** A

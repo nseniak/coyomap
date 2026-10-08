@@ -146,7 +146,8 @@ def test_the_verb_prints_the_contract_to_stdout() -> None:
 #: Slots whose CONTENT is checked, not only its presence — `_slot_content_faults`. A uniform
 #: placeholder cannot satisfy those, so the builder gives each one a value of the right shape.
 _CONTENTFUL_SLOTS = {"SERVES": "UC7 rename a page, R1 the owner", "BRIEFS": "/abs/briefs/wave-1",
-                     "PREFIX": "''", "VOTES": "security=3", "POOL": "8"}
+                     "PREFIX": "''", "VOTES": "security=3", "POOL": "8",
+                     "COMPONENTS": "C3, C7 and the subsystem S2"}
 
 
 def make_slot_values(name: str, value: str = "filled") -> dict[str, str]:
@@ -163,7 +164,27 @@ def test_the_skeleton_lists_only_slots_the_agent_actually_receives() -> None:
     those would ask the lead to fill words that reach nobody."""
     keys = contract.slots("rules")
     assert "angle-bracket" not in keys
-    assert set(keys) == {"REPO", "PROJECT", "COYOMAP_HOME", "MAP", "BLOCK", "AGENT_ID"}
+    assert set(keys) == {"REPO", "PROJECT", "COYOMAP_HOME", "MAP", "BLOCK", "COMPONENTS",
+                         "AGENT_ID"}
+
+
+def test_a_rules_brief_hands_its_agent_the_components_to_start_from() -> None:
+    """The rules brief says to start from `dump --members` on the block's components, and no slot
+    used to carry them: 0 of 11 rules agents on the 2026-10-08 mcpolis build ran `--members` or
+    `--edges`. The ids now reach the agent beside the commands that read them."""
+    values = make_slot_values("rules")
+    text = contract.fill("rules", values)
+    assert values["COMPONENTS"] in text
+    at = text.index(values["COMPONENTS"])
+    assert "--members" in text[at - 600:at + 600] and "--edges" in text[at - 600:at + 600]
+
+
+def test_a_rules_components_slot_naming_no_component_is_refused() -> None:
+    """A block name or a sentence reads like an answer and gives the agent no id to dump."""
+    values = make_slot_values("rules")
+    values["COMPONENTS"] = "the gateway and the policy engine"
+    with pytest.raises(ValueError, match="COMPONENTS» names no component"):
+        contract.fill("rules", values)
 
 
 def test_the_skeleton_is_json_with_every_slot_empty() -> None:

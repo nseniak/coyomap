@@ -88,6 +88,12 @@ A large build can fill the main session's context. Each tool, connector and plug
 
 **Not measured yet:** whether a helper limited by `tools:` really starts with a smaller context. It is expected and has not been shown; if you try it, compare the fixed base per agent turn that `coyomap-eval cost` prints.
 
+**A headless build (`claude -p`) needs one setting.** By default a headless session stops waiting for background helpers after 10 minutes, and a build's fact-check phase runs longer than that: one build was cut off there. Start it with the limit turned off:
+
+```
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p "/coyomap"
+```
+
 ### Explore the map
 
 Open the map in your browser with the coyomap viewer. It runs on your machine and shows every map you have opened.
