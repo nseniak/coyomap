@@ -625,7 +625,9 @@ is not leaning — a word every box uses, or a glossary term, is always availabl
   **Every build harvests T2 as its own job, and the job is complete.** In a fan-out it is one
   dedicated slice, never a side job of another slice; in a serial build it is a step of its own. It
   lists every outside system the code talks to AND every top-level library or framework the
-  package files declare (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml` …): **one row per
+  package files declare as a PRODUCT dependency (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml` …;
+  dev and test dependencies, dependency groups and package files under tests/docs/internal folders
+  are left out, the same set `validate --check-coverage` reads): **one row per
   package**, never two merged ("React and Vite" is two rows). Its D-ids are the legend the T5 owner
   needs (see *Build order*), and the lead never writes that legend by hand instead. On one build the
   lead wrote a legend of 9 outside services so every agent could start at once, and gave the deps

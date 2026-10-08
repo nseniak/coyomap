@@ -163,8 +163,8 @@ lead; nothing above this line goes into an agent prompt.
 > listed above.
 >
 > **If yours is the dependency slice, the list is complete.** Every outside system the code talks
-> to, AND every top-level library or framework the package files declare (`package.json`,
-> `pyproject.toml`, `go.mod` …): **one row per package**, never two merged into one row ("React and
+> to, AND every top-level library or framework the package files declare as a product dependency
+> (`package.json`, `pyproject.toml`, `go.mod` …; leave out dev and test dependencies): **one row per package**, never two merged into one row ("React and
 > Vite" is two rows). Your D-ids are the legend the data-model agent uses, so a dep you leave out
 > is one no entity can name.
 >
