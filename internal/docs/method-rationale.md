@@ -454,13 +454,13 @@ and code docstrings under `tools/coyomap/` — so this file is not the only copy
 
 ### R81 — Three false clauses in a commit message
 - **Where**: `method.md`
-- **Anchor**: `in the COMMIT MESSAGE too, not only in chat.** Its stdout can be piped away:`
-- **Evidence**: A live build quoted the verdict honestly in chat ("that is not a clean pass") and then wrote `validate … clean … anchor-drift clean … each reconciled or recorded` into its commit: three false clauses against its own report, with an anchor count copied from a validate run 32 minutes earlier.
+- **Anchor**: `closing report, not a summary from memory.** Its stdout can be piped away:`
+- **Evidence**: (Since 2026-10-08 a build writes no commit message; the rule binds its closing report.) A live build quoted the verdict honestly in chat ("that is not a clean pass") and then wrote `validate … clean … anchor-drift clean … each reconciled or recorded` into its commit: three false clauses against its own report, with an anchor count copied from a validate run 32 minutes earlier.
 
 ### R82 — A map that cost hours and hundreds of dollars, left in one working tree
 - **Where**: `method.md`
-- **Anchor**: `**Then actually commit.** The build is not over at `finalize`. Stopping there`
-- **Evidence**: A live build ran the gates, wrote the report, and stopped — leaving `.coyomap/` untracked, so the map it had just spent 103 minutes and hundreds of dollars building existed only in one working tree. Two of the scorecard's assertions have never had an opportunity to score on that project, because both read the commit.
+- **Anchor**: `never runs `git add` or `git commit` on it: whether and how the map is kept in git is the operator's choice`
+- **Evidence**: RETIRED on 2026-10-08 by the operator, and REVERSED: "Then actually commit" was the rule this entry justified, and a build now commits nothing. The risk below is accepted on purpose, because keeping the map in git is the project owner's choice; two of the projects mapped then hid `.coyomap/` in their own `.gitignore`, and the build force-added it anyway. Do not re-add a commit step on this evidence. The original account: a live build ran the gates, wrote the report, and stopped — leaving `.coyomap/` untracked, so the map it had just spent 103 minutes and hundreds of dollars building existed only in one working tree. Two of the scorecard's assertions have never had an opportunity to score on that project, because both read the commit.
 
 ### R83 — Nine advisories neither fixed nor recorded
 - **Where**: `method.md`

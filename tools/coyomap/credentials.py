@@ -1,8 +1,7 @@
-"""Credential-shaped values in the files a build commits — found by SHAPE, reported by PLACE.
+"""Credential-shaped values in the files of a map — found by SHAPE, reported by PLACE.
 
-`finalize` prints a `git add -f` line that force-adds the map and the agents' own files (`verify/`,
-`build-fragments/`), because the repo's own `.gitignore` usually ignores `.coyomap/`. Nothing looked
-at what that line would commit. On the 2026-09-30 mcpolis build a skeptic's `grep … $R/.env*`
+A map folder holds the agents' own files (`verify/`, `build-fragments/`), and a plain `git add` of
+the folder takes them with the map. Nothing looked at what that would commit. On the 2026-09-30 mcpolis build a skeptic's `grep … $R/.env*`
 printed the production deployment config, API key included, into its own transcript; the harness
 hook stopped nine explicit reads of that file and let the glob through. The key reached no committed
 file that time, and nothing would have said so if it had.
@@ -33,7 +32,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from coyomap.uncommitted import never_committed
+from coyomap.uncommitted import RUNS_FOLDER, never_committed
 
 #: What may stand before a shape: nothing that could be part of a token. `\b` missed a value right
 #: after an `_`, and after a JSON `\n` or `\t` escape, whose letter is a word character; the files
@@ -153,15 +152,18 @@ UNCOMMITTED_REMEDY = ("Remove that line from the file: it is the build's own rec
 
 #: The folder under a map folder that holds archived maps: a map committed long ago, not this one.
 ARCHIVE = "dev-rebuilds"
+#: Folders no scan reads: the archive, and the run records of headless builds (`uncommitted`),
+#: which hold whole session logs and are never part of the map.
+NOT_SCANNED = (ARCHIVE, RUNS_FOLDER)
 
 
 def map_folder_files(folder: Path) -> list[Path]:
-    """Every file under a map folder, archived maps aside: what a build's commit line force-adds
+    """Every file under a map folder, archived maps and run records aside: every part of a map
     (the map, `verify/`, `build-fragments/`) and what an update commits with a plain `git add`
     (`changes/` too), plus `.ignore`, which the scan used to skip, and the files no commit takes
     (`never_committed`), where a hit only warns."""
     return sorted(f for f in folder.rglob("*")
-                  if f.is_file() and ARCHIVE not in f.relative_to(folder).parts)
+                  if f.is_file() and not set(NOT_SCANNED) & set(f.relative_to(folder).parts))
 
 
 USAGE = """usage: coyomap credentials [<map folder>]

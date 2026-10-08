@@ -2,7 +2,7 @@
 name: coyomap
 description: >
   Everything about a coyomap project map — a top-down, drillable map of a codebase (behavioral
-  layer first, then the structural machine), committed next to the code as a model and served as an
+  layer first, then the structural machine), kept next to the code as a model and served as an
   interactive C4 diagram by `coyomap serve`. Use this skill whenever the user wants to build one
   ("map this repo", "with the coyomap method"), analyze the change impact of a diff against an
   existing map, accept a change-impact report into the baseline, or work with a map that already

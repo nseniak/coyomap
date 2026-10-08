@@ -642,10 +642,10 @@ path named), merges by ID (a duplicate ID across fragments is an error, never a 
 and serializes the canonical `project-map.json`. Nothing is silently fixed up: a malformed field
 fails loudly, naming the fragment and the field — `coyomap validate` on the assembled result is
 what catches anything `assemble`'s own checks don't. Validity of the stored file is guaranteed by
-the serializer, not by the LLM. It also normalizes `<out>/.gitignore` so every per-run artifact is
-ignored — `build-fragments/`, `finalize-report.json`, `finalize-report.md`, `dev-rebuilds/` — and
-removes any `preindex.json` line (the pre-index ships WITH the map), so the scratch dirs never
-dirty the tree and the committed artifacts are never ignored by accident. Agents WRITE
+the serializer, not by the LLM. It also normalizes `<out>/.gitignore` so it hides only what is not
+part of the map — `dev-rebuilds/`, `fanout-timings.json`, the build state and the findings — and
+removes any line hiding a part of it (`preindex.json`, `build-fragments/`, `finalize-report.*`), so a
+plain `git add` of the folder takes the whole map and nothing else. Agents WRITE
 their fragments to files in that dir and return only the path (a large fragment returned inline
 gets truncated by sub-agent result caps — see method.md's harvest prompt). Then the usual invariant
 runs unchanged: `validate → audit → render`.

@@ -41,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 
@@ -1687,23 +1688,21 @@ def gate_block(report: FinalizeReport, map_sha: str, disposition: str | None = N
 
 
 @dataclass(frozen=True)
-class ForceAdded:
-    """What the `git add -f` line names: the files, in the order it names them, and the warrant
-    DIRECTORIES after them. ONE list, read by the commit line and by the credential scan, so the scan
-    covers exactly what the line would commit."""
+class MapParts:
+    """The parts of a finished map that `finalize`'s closing line names: the files, in the order it
+    names them, and the warrant DIRECTORIES after them. A build does not commit them: whether and how
+    the map is kept in git is the operator's choice, and `.coyomap/.gitignore` hides only scratch, so
+    a plain `git add .coyomap` takes exactly these."""
     present: list[Path]
     missing: list[Path]
     warrant: list[Path]
     reconcile: Path
 
 
-def force_added(map_path: Path) -> ForceAdded:
-    """The paths `finalize`'s commit line force-adds, and the required ones not there yet."""
-    # The four artifacts the method says ship with the map, and whether git will actually take them.
-    # A live build ran `git check-ignore`, GOT the answer (`.gitignore:85:.coyomap/`), and then issued
-    # an un-forced `git add` two turns later that failed — shipping a map whose viewer symbol-search
-    # input (`preindex.json`) and provenance were left untracked. Naming the command removes the step
-    # where the operator has to remember the `-f`.
+def map_parts(map_path: Path) -> MapParts:
+    """The parts of the map that are there, and the required ones not there yet."""
+    # The four artifacts the method says make up the map. A map without `preindex.json` loses the
+    # viewer's symbol search, and one without provenance loses the transcript it was built from.
     required = [map_path, map_path.with_suffix(".md"),
                 map_path.parent / "preindex.json", map_path.parent / "provenance.json"]
     present = [p for p in required if p.exists()]
@@ -1714,7 +1713,8 @@ def force_added(map_path: Path) -> ForceAdded:
     # shipped the map WITHOUT the decisions that produced it. Re-assembling the 2026-09-13
     # reminderrepo build's committed fragments without it gives 248 edges against the committed
     # map's 243: the two arrows the closer upheld as false come back, 8 code links revert, and 119
-    # directive rows naming 340 element ids are lost.
+    # directive rows naming 340 element ids are lost. (That was a commit line; a build no longer
+    # commits, and the closing line still names it, so an operator who keeps the map keeps it whole.)
     #
     # With the INPUTS rather than with the WARRANT: `verify/` and `build-fragments/` are the reason
     # to BELIEVE the map, while this file is one of the things `assemble` READS to produce it —
@@ -1727,31 +1727,31 @@ def force_added(map_path: Path) -> ForceAdded:
     # the reason to BELIEVE it. That lives in `verify/` — the pinned worklist, the claims batches
     # and every skeptic's verdict file — and in the fragments each agent authored. `grounding.note`
     # cites "1,048 verdict rows … 33 skeptic labels" as the map's warrant, and on the 2026-09-02
-    # mcpolis build 71 verify files and 47 fragments were git-ignored and force-added by nothing.
-    # A fresh clone got the conclusion and could check no part of it.
+    # mcpolis build 71 verify files and 47 fragments were git-ignored and committed by nothing.
+    # A fresh clone got the conclusion and could check no part of it. `build-fragments/` is no
+    # longer in `.coyomap/.gitignore` for that reason.
     #
-    # Named as DIRECTORIES, not expanded: `git add -f <dir>` takes the whole tree, the count is
-    # what an operator needs to see, and a 118-path command line is not copyable.
+    # Named as DIRECTORIES, not expanded: the count is what an operator needs to see.
     warrant = [d for d in (map_path.parent / "verify", map_path.parent / "build-fragments")
                if d.is_dir() and any(d.iterdir())]
-    return ForceAdded(present=present, missing=missing, warrant=warrant, reconcile=reconcile)
+    return MapParts(present=present, missing=missing, warrant=warrant, reconcile=reconcile)
 
 
 def _credential_leg(map_path: Path) -> Leg:
-    """Credential-shaped values in the files of the map folder. BLOCKING in a file the commit takes.
+    """Credential-shaped values in the files of the map folder. BLOCKING in a file a commit takes.
 
-    The commit line takes the agents' own files — every verdict, every fragment — and nothing read
-    them. On the 2026-09-30 mcpolis build a skeptic's glob printed the production API key into its
+    A plain `git add` of the map folder takes the agents' own files — every verdict, every fragment —
+    and nothing read them. On the 2026-09-30 mcpolis build a skeptic's glob printed the production API key into its
     transcript; it reached no committed file, and nothing would have said so if it had. No recorded
     escape, and none is needed: the remedy is to rewrite one sentence without the value, which costs
     nothing and is always possible. The value itself is never printed (`credentials`).
 
     A value in a file NO commit takes (`never_committed`: the findings, the build state) is an
-    ADVISORY that names the file and says to remove the line. Blocking there withheld the commit
-    line over a value the commit would never have carried. `coyomap credentials` reads the same
+    ADVISORY that names the file and says to remove the line. Blocking there held the map back over
+    a value no commit would ever have carried. `coyomap credentials` reads the same
     answer, so an update's close and a build's finalize never disagree about a file."""
-    # THE WHOLE MAP FOLDER, archived maps aside: everything the commit line force-adds, and
-    # `.ignore` and `changes/`, which it takes too and the first version of this leg never read.
+    # THE WHOLE MAP FOLDER, archived maps aside: every part of the map, and `.ignore` and
+    # `changes/`, which a commit takes too and the first version of this leg never read.
     # Not this command's own report, which this run rewrites from masked strings: counting it made
     # two identical runs report different numbers.
     own = {f"{REPORT_STEM}.json", f"{REPORT_STEM}.md"}
@@ -1761,13 +1761,12 @@ def _credential_leg(map_path: Path) -> Leg:
     by_file = places(hits)
     kept = {path for path in by_file if never_committed(folder, path)}
     blocking = [f"{path}: {', '.join(where)} — a credential-shaped value in a file of the map "
-                f"folder, which the commit takes. Rewrite that text without the value (name the "
-                f"setting, never its value) and re-run finalize; the commit line is withheld until "
-                f"then. If the value is real it is also in the transcript of the agent that wrote "
+                f"folder, which a commit takes. Rewrite that text without the value (name the "
+                f"setting, never its value) and re-run finalize; the map is not ready until then. If the value is real it is also in the transcript of the agent that wrote "
                 f"it: tell the operator, who decides whether to rotate it."
                 for path, where in by_file.items() if path not in kept]
     advisory = [f"{path}: {', '.join(where)} — a credential-shaped value in a file no commit "
-                f"takes, so the commit line stands. {UNCOMMITTED_REMEDY}"
+                f"takes, so the map stays ready. {UNCOMMITTED_REMEDY}"
                 for path, where in by_file.items() if path in kept]
     return Leg("credential scan", RAN, blocking=blocking, advisory=advisory,
                note=f"{len(files)} file(s) of the map folder scanned for credential shapes: "
@@ -1776,26 +1775,37 @@ def _credential_leg(map_path: Path) -> Leg:
                        f"commit takes" if kept else ""))
 
 
-def _commit_hint(map_path: Path, withheld: bool = False) -> None:
-    """What to commit, and the `git add -f` line that will actually take it — unless the credential
-    scan found a value in those files, when the line is withheld rather than printed."""
-    fa = force_added(map_path)
+def hidden_by_git(map_path: Path) -> bool:
+    """Whether git ignores the map file where it stands — the project's own `.gitignore` hiding the
+    whole map folder, as two of the projects mapped on 2026-10-08 did. False outside a git repo."""
+    done = subprocess.run(["git", "check-ignore", "-q", map_path.name], cwd=map_path.parent,
+                          capture_output=True, text=True)
+    return done.returncode == 0
+
+
+def _map_ready(map_path: Path, withheld: bool = False) -> None:
+    """The closing line: where the finished map is and what makes it up. A build does not commit
+    or stage it; committing is the operator's choice. When the credential scan found a value in
+    the map's files, the line says so instead: anyone may commit the folder later."""
+    fa = map_parts(map_path)
     present, missing, warrant, reconcile = fa.present, fa.missing, fa.warrant, fa.reconcile
     if withheld:
-        print("finalize: NO commit line — the credential scan found a credential-shaped value in the "
-              "files it would force-add. Rewrite those lines and re-run finalize.")
+        print("finalize: the map is NOT ready — the credential scan found a credential-shaped value "
+              "in its files. Rewrite those lines and re-run finalize.")
         return
     if present:
         counts = ", ".join(f"{d.name}/ ({sum(1 for _ in d.rglob('*') if _.is_file())} files)"
                            for d in warrant)
-        print("finalize: commit these with the map — "
-              f"git add -f {' '.join(str(p) for p in present + warrant)}\n"
-              "  (`-f` because a repo whose root .gitignore ignores `.coyomap/` refuses a plain "
-              "`git add`, and method.md requires the pre-index and provenance to ship with the map.)"
+        print(f"finalize: the map is ready in {map_path.parent} — "
+              f"{', '.join(p.name for p in present + warrant)}. Do not commit or stage it: whether "
+              f"and how the map is kept in git is the operator's choice. "
+              + (f"The project's own .gitignore hides this folder, so git takes none of it until "
+                 f"the operator changes that file." if hidden_by_git(map_path) else
+                 f"A plain `git add {map_path.parent}` takes all of it.")
               + (f"\n  The last of those are the map's WARRANT — {counts}. The note cites the "
                  f"verdict rows as the reason to believe the map; without them a fresh clone has "
                  f"the conclusion and can check no part of it." if warrant else "")
-              + (f"\n  {reconcile.name} rides with them: it is what makes a reconcile decision "
+              + (f"\n  {reconcile.name} belongs with them: it is what makes a reconcile decision "
                  f"survive a rebuild, and an assemble without it silently reverts every one."
                  if reconcile.exists() else ""))
     if not reconcile.exists():
@@ -1803,14 +1813,12 @@ def _commit_hint(map_path: Path, withheld: bool = False) -> None:
         # here. A build that reconciled nothing has no reconcile file and needs none, so absence is
         # reported as a question rather than as a defect.
         print(f"finalize: no {reconcile} — right if this build reconciled nothing. If it recorded "
-              f"decisions somewhere else, commit that file too: it is the ONLY thing that carries "
+              f"decisions somewhere else, keep that file in the map folder: it is the ONLY thing that carries "
               f"a reconcile decision into the next rebuild.")
     if missing:
-        # NAME what is absent instead of quietly dropping it from the command. The filter above is
-        # right — `git add` on a non-existent path fails — but printing the survivors alone turns a
-        # missing artifact into a shorter, still-copyable line. A live build ran finalize before
-        # stamping provenance, and the hint it printed would have committed the map WITHOUT it: the
-        # exact omission the hint exists to prevent. The operator caught it by hand.
+        # NAME what is absent instead of quietly dropping it from the list. A live build ran
+        # finalize before stamping provenance, and the line it printed would have shipped the map
+        # WITHOUT it. The operator caught it by hand.
         # NAME THE COMMAND for each, too. Telling a build to "produce them" without saying how
         # cost a live run two extra finalize rounds: it re-ran finalize unchanged, got the identical
         # complaint, and only then went hunting — provenance was, at the time, produced by a script
@@ -1818,10 +1826,9 @@ def _commit_hint(map_path: Path, withheld: bool = False) -> None:
         # stamp` now, and the hint says so.
         how = {"provenance.json": "coyomap provenance stamp .",
                "preindex.json": "coyomap preindex . --report"}
-        print(f"finalize: NOT in that command, because {'it does' if len(missing) == 1 else 'they do'}"
-              f" not exist yet — {', '.join(str(p) for p in missing)}. method.md requires the "
-              f"pre-index and provenance to ship WITH the map; produce them and re-run finalize "
-              f"rather than committing the shorter line above.")
+        print(f"finalize: the map is NOT complete — {', '.join(str(p) for p in missing)} "
+              f"{'does' if len(missing) == 1 else 'do'} not exist yet. method.md requires the "
+              f"pre-index and provenance to come WITH the map; produce them and re-run finalize.")
         for p_missing in missing:
             cmd = how.get(p_missing.name)
             if cmd:
@@ -1978,8 +1985,8 @@ def main(argv: list[str] | None = None) -> int:
         gate_block_path.parent.mkdir(parents=True, exist_ok=True)
         gate_block_path.write_text(gate_block(report, sha, disposition) + "\n",
                                    encoding="utf-8")
-        print(f"finalize: wrote the commit-message gate block to {gate_block_path}")
-    _commit_hint(map_path, withheld=any(l.name == "credential scan" and l.blocking
+        print(f"finalize: wrote the gate block to {gate_block_path}")
+    _map_ready(map_path, withheld=any(l.name == "credential scan" and l.blocking
                                         for l in report.legs))
     unran = [f"{l.name} ({l.status})" for l in report.legs if not l.ran]
     print(f"finalize: {report.verdict} — {report.blocking_total} blocking, "

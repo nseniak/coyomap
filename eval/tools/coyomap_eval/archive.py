@@ -50,6 +50,7 @@ import sys
 from pathlib import Path
 
 from coyomap.buildstate import STATE_NAME, read_state
+from coyomap.uncommitted import RUNS_FOLDER
 
 #: The container for every archived map. NESTED, so `.coyomap/` holds one entry instead of the dozen
 #: sibling dot-directories the flat `.old-ignore*` convention accumulated.
@@ -59,14 +60,16 @@ ARCHIVE_DIR = "dev-rebuilds"
 #: wrong (a baseline picker sorted on name length and chose the wrong archive in 28 of 40 trials).
 #: Padding removes the trap instead of documenting it.
 ARCHIVE_WIDTH = 4
-# Kept in place: `.gitignore` is coyomap's own (it ignores build-fragments/ and the archives),
+# Kept in place: `.gitignore` is coyomap's own (it ignores the build's scratch and the archives),
 # `.ignore` is the repo's analysis-scope declaration and moving it rescopes E and coverage for every
 # later build and score (see WHY `.ignore` STAYS above), and archiving the archive container would
 # nest it one inside the next on every run.
 # `fanout-timings.json` is cross-build input, not build output: `timings order` reads the most
 # recent recording per slice to order the NEXT build's dispatch, and archiving it made that verb
 # start cold on a repo with 26 rebuilds behind it.
-KEEP = {".gitignore", ".ignore", "fanout-timings.json", ARCHIVE_DIR}
+# `runs/` holds the records of headless builds, one of which may be the build that is archiving
+# right now, still writing its own log there.
+KEEP = {".gitignore", ".ignore", "fanout-timings.json", ARCHIVE_DIR, RUNS_FOLDER}
 
 
 def next_archive_dir(coyomap: Path) -> Path:

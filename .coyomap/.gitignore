@@ -1,5 +1,7 @@
-build-fragments/
-finalize-report.json
-finalize-report.md
 dev-rebuilds/
 fanout-timings.json
+build-state.log
+build-state.prev.log
+findings-report.md
+findings/
+runs/

@@ -586,6 +586,6 @@ def test_a_complete_ship_ends_the_state():
     assert calls[-1][0] == "finalize", calls[-1]
     assert [k for k, _t in events] == ["ship", "end"], events
     assert events[0][1].startswith(f"complete — {len(calls)} step(s) ran through finalize"), events
-    assert events[1][1] == "ship complete · next: commit with the `git add -f` line ship printed"
+    assert events[1][1] == "ship complete · the map is ready; the build does not commit it"
     assert state is not None and not state.is_open, "a completed ship leaves the state open"
 

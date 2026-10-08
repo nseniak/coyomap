@@ -1,8 +1,7 @@
-"""The credential scan `finalize` runs over what its commit line force-adds (retro 2026-09-30,
-finding 6).
+"""The credential scan `finalize` runs over the files of the map (retro 2026-09-30, finding 6).
 
 On the 2026-09-30 mcpolis build a skeptic's recursive search printed the production API key into
-its own transcript, and nothing scanned the agents' files the commit line takes. The scan looks for
+its own transcript, and nothing scanned the agents' files a commit of the map takes. The scan looks for
 SPECIFIC shapes: a naive "32 or more characters" rule hit 247 strings in 7 of that map's committed
 files.
 

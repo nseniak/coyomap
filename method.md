@@ -14,7 +14,7 @@ They join at **use case ↔ flow**.
 See also: [dispatch](method/dispatch.md) · [the map model](method/model.md) · [domain cards](method/domain-cards.md) · [change-impact](method/change-impact.md) · [diagrams](method/diagrams.md).
 
 **The stored map is a structured JSON model** (`.coyomap/project-map.json`, [the map model](method/model.md));
-the markdown map and the HTML diagram are **generated views** committed next to it. Build agents
+the markdown map and the HTML diagram are **generated views** kept next to it. Build agents
 return structured rows; `coyomap assemble` writes the model — nobody hand-authors the stored file.
 
 The method is `method.md` and the `method/` docs (plus the `tools/coyomap/` package). The coyomap repo's
@@ -1846,7 +1846,7 @@ First draft the behavioral layer (Product description → Glossary → Roles →
 **then** run the pre-index and let it *size and locate* while you keep *naming and judging*:
 
 ```
-.venv/bin/coyomap preindex --root <repo>       # writes .coyomap/preindex.json (committed with the map)
+.venv/bin/coyomap preindex --root <repo>       # writes .coyomap/preindex.json (part of the map)
 ```
 
 It returns, for the whole tree: a **weight map** (LOC + file count + git churn per directory), a
@@ -2897,7 +2897,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   **Then quote the `NOTE FACTS` block `write` prints, rather than remembering a number.** It states
   the verdict rows, the distinct skeptic labels, the confirmed / refuted / unverifiable / tied
   split, and how many superseded claims had been CONFIRMED — each one a settled verdict the build
-  overrode. A note is free prose in a permanent record and in the commit message, and nothing
+  overrode. A note is free prose in a permanent record, and nothing
   checks it: one said "Eighteen fresh-context skeptics" about a build that dispatched 17 and
   produced 20 labels, and "Four superseded claims had been CONFIRMED" where the true count was 11,
   leaving seven overrides undisclosed. Both numbers were on screen when the note was written.
@@ -3152,7 +3152,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     It derives every path from `<repo>/.coyomap/` (map, fragments, reconcile.json, the pinned
     `verify/worklist.json`, `verify/verdicts-*.json`) and refuses, naming the missing input, rather
     than running a shorter sequence — so a skipped step can never read as a clean one. Steps 0, 1
-    and 13 stay yours: the collection-time verdicts lint, the refutation reconcile, and the commit.
+    and 13 stay yours: the collection-time verdicts lint, the refutation reconcile, and the stop.
     Run the steps by hand only when ship refuses and the refusal is genuinely wrong for this build.
     Where an older note disagrees with the list below, the list wins.
 
@@ -3183,12 +3183,12 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
     11. validate `--check-sources`, then audit, then render.
     12. finalize with the verdicts AND `--emit-gate-block`, in ONE run.
     12b. YOURS — if this build ran an EXPERIMENT the backlog asked for, write its answer somewhere
-        durable BEFORE the commit: `COYOMAP_HOME/eval/retro/backlog.md`, or the map's own extras. A
+        durable BEFORE the build ends: `COYOMAP_HOME/eval/retro/backlog.md`, or the map's own extras. A
         scratchpad is not a destination: on one build the experiment ran, answered its question with
         real numbers, and the 53-line write-up was left in a temp folder, one sweep from gone, while
         the backlog row still read unanswered. That question had been parked three times before
         somebody finally ran it.
-   13. commit the map, the .md, the pre-index and provenance
+   13. stop: the map is ready. Do not commit or stage it (see "The build does not commit" below)
     ```
 
     **Steps 5, 8, 9 and 12 are here because the list without them cost real builds.** `grounding
@@ -3364,9 +3364,9 @@ existing `.coyomap/` map, so you should only be here for a first map or a user-c
 [dispatch](method/dispatch.md) routes an existing baseline to Analyze, not Build. The committed
 source of truth is `.coyomap/project-map.json` ([the map model](method/model.md)),
 written by `coyomap assemble` together with its generated markdown view, `.coyomap/project-map.md`
-(readable diffs). Both are committed — and so is the structural pre-index `.coyomap/preindex.json`
-when the build produced one: the viewer's symbol search reads it, pinned to the map's commit, so it
-must ship with the map (it is generated at that commit, so its `file:line` anchors match). The
+(readable diffs). Both are part of the map — and so is the structural pre-index `.coyomap/preindex.json`
+when the build produced one: the viewer's symbol search reads it, pinned to the map's code commit, so it
+must stay with the map (it is generated at that commit, so its `file:line` anchors match). The
 interactive C4 diagram is not a committed file: it is served live by `coyomap serve` (built on
 demand from the model), and `coyomap export` writes that same viewer out as a folder of plain files
 for anyone to host — how a map is shared with people who have neither the repo nor coyomap. Record
@@ -3378,7 +3378,7 @@ at in the model's `commit`/`committed`/`built` fields (the baseline pin — see 
 uncommitted changes, HEAD alone is a misleading pin (and a later `git diff <pin>..<now>` would miss
 the edits already baked into the map). So before recording the pin, check the analyzed repo for
 uncommitted **code** — coyomap's own files under `.coyomap/` (map / markdown view / report) don't count, they
-are always in flux and the workflow commits them:
+are always in flux:
 
 ```
 git -C <repo> status --porcelain -- . ':(exclude).coyomap'   # empty = code is committed
@@ -3437,10 +3437,10 @@ Pass `--built-at` only when you are deliberately restating a time you did not ju
 `accept` pass re-stamping an earlier build). On a build it is the flag that makes the map lie.
 
 It reads this session's id from `$CLAUDE_CODE_SESSION_ID` and writes `<repo>/.coyomap/provenance.json`
-(committed — session id + build time), so a later `.venv/bin/python tools/map_backup.py backup <repo>`
+(part of the map — session id + build time), so a later `.venv/bin/python tools/map_backup.py backup <repo>`
 can bundle the map **and** the exact transcript deterministically. Run it in the **main** build
-session, not a delegated sub-agent, so the id recorded is the driver conversation's. **Commit
-`provenance.json`** with the map + diagram.
+session, not a delegated sub-agent, so the id recorded is the driver conversation's. **Keep
+`provenance.json`** with the map: never delete it.
 
 **Assemble the model from the agents' fragments — never hand-author the stored file.** Each agent
 wrote its JSON fragment to the scratch dir (`.coyomap/build-fragments/<agent>.json` — the harvest
@@ -3546,27 +3546,23 @@ It adds no check of its own. What it adds is a record and an answer:
   looks exactly like a clean one. A leg that should have run and did not makes the verdict
   `INCOMPLETE`, which exits non-zero — "the gate did not run" must never read as "the gate passed".
 
-**Read the report file, and quote finalize's verdict line when you report the gates — in the COMMIT
-MESSAGE too, not only in chat.** Its stdout can be piped away: in a shell pipeline the exit status
-is the last command's, so `finalize | grep …` returns grep's `0` — and so does `finalize | tail -3`.
-An honest verdict in chat and a clean-sounding commit message are not the same deliverable, and the
-commit is the only record a future reader sees. `finalize --emit-gate-block <file>` writes the block
-to paste, so the durable record is generated rather than remembered.
+**Read the report file, and quote finalize's verdict line when you report the gates — in your
+closing report, not a summary from memory.** Its stdout can be piped away: in a shell pipeline the
+exit status is the last command's, so `finalize | grep …` returns grep's `0` — and so does
+`finalize | tail -3`. `finalize --emit-gate-block <file>` writes the block to quote, so the record
+is generated rather than remembered, and it stays in the map folder with the report.
 
-**Then actually commit.** The build is not over at `finalize`. Stopping there leaves `.coyomap/`
-untracked, so a map that cost hours and hundreds of dollars exists only in one working tree — and
-the whole argument for generating the gate block is that the commit is the durable half. `finalize`
-prints the exact `git add -f` line to use; run it, and commit the pre-index and provenance with the
-map.
-
-**COMMIT THE WARRANT TOO — `verify/` and `build-fragments/`.** The map is a set of claims; the
-reason to believe them is the pinned worklist, the claims batches and every skeptic's verdict file,
-plus the fragments each agent authored. `grounding.note` cites the verdict rows BY COUNT as that
-reason. Ship the counts without the rows and a fresh clone has the conclusion and can check no part
-of it — which is what happened on the 2026-09-02 mcpolis build: 71 verify files and 47 fragments,
-force-added by nothing, in a repo whose `.gitignore` ignores `.coyomap/`. The `git add -f` line
-`finalize` prints now names both directories. They are also what makes the NEXT build's
-change-analysis and the eval's archive possible; regenerating them costs another full build.
+**The build does not commit.** It ends with the map ready in `.coyomap/`, and never runs `git add`
+or `git commit` on it: whether and how the map is kept in git is the operator's choice. The map is
+the model, the markdown view, the pre-index, provenance, `reconcile.json` when there is one, and
+the WARRANT — `verify/` and `build-fragments/`. The map is a set of claims; the reason to believe
+them is the pinned worklist, the claims batches and every skeptic's verdict file, plus the
+fragments each agent authored. `grounding.note` cites the verdict rows BY COUNT as that reason;
+without the rows a fresh clone has the conclusion and can check no part of it. They are also what
+makes the NEXT build's change-analysis and the eval's archive possible. `.coyomap/.gitignore` hides
+only what is not part of the map, so a plain `git add .coyomap` takes all of it, unless the
+project's own `.gitignore` hides the folder; `finalize`'s closing line names the parts and says
+which. Tell the operator the map is ready, and where.
 
 **`finalize` also reads the advisory disposition** — each advisory as fixed / recorded / carried,
 against what the map's extras actually record. Read that table rather than the raw list.
@@ -3637,7 +3633,7 @@ model (assemble already wrote it; re-run after any patch):
 ```
 
 It is a *rendering* of the model (no second source; never hand-edit it — `validate` flags a stale
-view) — commit it alongside the model so the two stay in step. The interactive diagram is not a file:
+view) — keep it beside the model so the two stay in step. The interactive diagram is not a file:
 it is served live from the model by `coyomap serve`. **Finish by reporting the artifacts as links** —
 the model (`.coyomap/project-map.json`) and the markdown view (`.coyomap/project-map.md`), as relative
 paths.

@@ -127,7 +127,7 @@ read count beside it was stale the same way. `wc -l` divided by 650 is how many 
 **When you archive, remember the archived map at the GATE.** `coyomap finalize --access-baseline
 <archived-map.json>` adds one advisory leg: files that held ACCESS enforcement in that map and are
 named by no access rule in the new one. It runs after the map is written, so it cannot contaminate
-the rebuild, and before the commit, which is the last moment anybody looks. It is not a
+the rebuild, and before the build ends, which is the last moment anybody looks. It is not a
 contradiction of the rule below: the build is finished by then, and a claim that vanished between
 two maps of unchanged code is invisible to every other gate — one pair held its access-rule COUNT at
 21 → 21 while the file verifying an identity token's signature lost its claim outright.

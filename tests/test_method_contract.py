@@ -1760,7 +1760,7 @@ def test_the_closing_step_list_carries_no_pasteable_commands():
     from pathlib import Path
     text = (Path(__file__).resolve().parents[1] / "method.md").read_text(encoding="utf-8")
     block = text[text.index("Ordering — ONE sequence"):]
-    block = block[:block.index("13. commit the map")]
+    block = block[:block.index("13. stop: the map is ready")]
     # The two `ship` invocations are the point of the block and stay runnable; nothing else does.
     runnable = [l.strip() for l in block.splitlines()
                 if "coyomap " in l and "ship" not in l and l.strip().startswith(("coyomap", "."))]

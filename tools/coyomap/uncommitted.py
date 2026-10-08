@@ -3,7 +3,7 @@
 A build keeps its own working memory in the map folder: the build state (`coyomap state`) and the
 one before it, the findings each agent files (`coyomap findings add`) and the report they are
 collected into. The folder's `.gitignore` keeps them out (`assemble` writes it from the names below),
-`finalize`'s `git add -f` line never names them, and an update's plain `git add` follows that
+`finalize`'s closing line never names them as part of the map, and a plain `git add` follows that
 `.gitignore`. So a credential-shaped value in one of them is a line to remove, never a commit to
 stop.
 
@@ -25,11 +25,14 @@ PREV_NAME = "build-state.prev.log"
 #: `coyomap findings collect` writes beside it.
 FINDINGS_FOLDER = "findings"
 FINDINGS_REPORT = "findings-report.md"
+#: The folder a headless build keeps its run records in (`tools/claude_headless.py`): one folder
+#: per run, holding the session's whole log. Not part of the map, and far too large to scan.
+RUNS_FOLDER = "runs"
 
 #: The files at the top of a map folder that no commit takes, and the folders whose whole tree none
 #: takes.
 FILES: tuple[str, ...] = (STATE_NAME, PREV_NAME, FINDINGS_REPORT)
-FOLDERS: tuple[str, ...] = (FINDINGS_FOLDER,)
+FOLDERS: tuple[str, ...] = (FINDINGS_FOLDER, RUNS_FOLDER)
 #: The same files and folders as `.gitignore` lines.
 IGNORE_LINES: tuple[str, ...] = (*FILES, *(f"{name}/" for name in FOLDERS))
 

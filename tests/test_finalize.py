@@ -1027,39 +1027,39 @@ def _repo_with_warrant(tmp: Path) -> Path:
     return out / "project-map.json"
 
 
-def test_the_commit_line_names_the_maps_warrant(tmp_path, capsys):
+def test_the_ready_line_names_the_maps_warrant(tmp_path, capsys):
     """`grounding.note` cites the verdict rows as the reason to believe the map. Ship the counts
     without the rows and a fresh clone has the conclusion and can check no part of it."""
-    from coyomap.finalize import _commit_hint
-    _commit_hint(_repo_with_warrant(tmp_path))
+    from coyomap.finalize import _map_ready
+    _map_ready(_repo_with_warrant(tmp_path))
     out = capsys.readouterr().out
     assert "verify" in out and "build-fragments" in out, out
     assert "WARRANT" in out, out
 
 
-def test_the_commit_line_omits_a_warrant_that_is_not_there(tmp_path, capsys):
-    from coyomap.finalize import _commit_hint
+def test_the_ready_line_omits_a_warrant_that_is_not_there(tmp_path, capsys):
+    from coyomap.finalize import _map_ready
     out_dir = tmp_path / ".coyomap"
     out_dir.mkdir()
     (out_dir / "project-map.json").write_text("{}")
-    _commit_hint(out_dir / "project-map.json")
+    _map_ready(out_dir / "project-map.json")
     printed = capsys.readouterr().out
     assert "WARRANT" not in printed, printed
 
 
-# --- the reconcile file was in nobody's commit line (retro 2026-09-13 reminderrepo, T1) ----------
+# --- the reconcile file was in nobody's commit line, now the ready line (retro 2026-09-13 reminderrepo, T1) ----------
 # `method.md` calls `.coyomap/reconcile.json` the only mechanism that makes a reconcile decision
 # survive a rebuild, and the printed `git add -f` line never named it. Re-assembling that build's
 # COMMITTED fragments without it gives 248 edges against the committed map's 243: the two arrows
 # the closer upheld as false come back, 8 code links revert, 119 directive rows are lost.
 
-def test_the_commit_line_takes_the_reconcile_file(tmp_path, capsys):
-    from coyomap.finalize import _commit_hint
+def test_the_ready_line_names_the_reconcile_file(tmp_path, capsys):
+    from coyomap.finalize import _map_ready
     map_path = _repo_with_warrant(tmp_path)
     (map_path.parent / "reconcile.json").write_text('{"set": []}')
-    _commit_hint(map_path)
+    _map_ready(map_path)
     out = capsys.readouterr().out
-    command = next(ln for ln in out.splitlines() if "git add -f" in ln)
+    command = next(ln for ln in out.splitlines() if "the map is ready in" in ln)
     assert "reconcile.json" in command, command
     # With the INPUTS, ahead of the two warrant directories the sentence below calls "the last".
     assert command.index("reconcile.json") < command.index("verify"), command
@@ -1068,12 +1068,12 @@ def test_the_commit_line_takes_the_reconcile_file(tmp_path, capsys):
 def test_a_build_that_reconciled_nothing_is_asked_not_scolded(tmp_path, capsys):
     """Absence is legitimate — a build that reconciled nothing has no such file and needs none —
     so it must not join the `produce them and re-run finalize` arm."""
-    from coyomap.finalize import _commit_hint
-    _commit_hint(_repo_with_warrant(tmp_path))
+    from coyomap.finalize import _map_ready
+    _map_ready(_repo_with_warrant(tmp_path))
     out = capsys.readouterr().out
     assert "reconcile.json" in out, out
     assert "no " in out and "reconciled nothing" in out, out
-    assert "NOT in that command" not in out, out
+    assert "NOT complete" not in out, out
 
 
 
@@ -1704,7 +1704,7 @@ def test_a_dissent_on_a_claim_that_is_not_about_access_does_not_block() -> None:
     assert not leg.blocking, leg.blocking
 
 
-# --- a credential in the files the commit line force-adds (retro 2026-09-30, finding 6) ---------
+# --- a credential in the files of the map (retro 2026-09-30, finding 6) ---------
 
 def test_a_key_shaped_value_in_a_fragment_blocks_and_withholds_the_commit_line() -> None:
     """The value is built from filler at run time (see tests/test_credentials.py): this file holds
@@ -1725,13 +1725,13 @@ def test_a_key_shaped_value_in_a_fragment_blocks_and_withholds_the_commit_line()
     assert code == 1, said
     assert "extras.json: line 1 (AWS access key id)" in said, said
     assert value not in said, "the scan printed the value it found"
-    assert "NO commit line" in said and "git add -f" not in said, said
+    assert "the map is NOT ready" in said and "the map is ready in" not in said, said
 
 
-def test_a_key_in_a_file_no_commit_takes_is_an_advisory_and_the_commit_line_stands() -> None:
+def test_a_key_in_a_file_no_commit_takes_is_an_advisory_and_the_map_stays_ready() -> None:
     """The findings, the build state and the findings report never reach a commit: the map folder's
-    `.gitignore` keeps them out and the `git add -f` line names none of them. A key-shaped value
-    there names its file and asks for the line to go; it does not withhold the commit line. The
+    `.gitignore` keeps them out and the ready line names none of them. A key-shaped value
+    there names its file and asks for the line to go; it does not hold the map back. The
     value is built from filler at run time."""
     root, p = make_repo()
     value = "gh" + "p_" + "z" * 40
@@ -1751,7 +1751,7 @@ def test_a_key_in_a_file_no_commit_takes_is_an_advisory_and_the_commit_line_stan
     named = sorted(row.split(": line 1 (GitHub token) — ", 1)[0] for row in leg.advisory)
     assert named == sorted(str(f) for f in local), leg.advisory
     assert all("Remove that line from the file" in row for row in leg.advisory), leg.advisory
-    assert "git add -f" in said and "NO commit line" not in said, said
+    assert "the map is ready in" in said and "the map is NOT ready" not in said, said
     assert value not in said, "the scan printed the value it found"
 
 
@@ -1771,14 +1771,16 @@ def test_a_key_in_a_committed_file_beside_one_no_commit_takes_still_blocks() -> 
         str(root / ".coyomap" / "findings" / "harvest-1.jsonl")], leg.advisory
 
 
-def test_a_clean_map_keeps_its_commit_line() -> None:
+def test_a_clean_map_is_ready_and_not_committed() -> None:
     import contextlib
     import io
     root, p = make_repo()
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         finalize.main([str(p), "--repo", str(root), "--no-write"])
-    assert "git add -f" in out.getvalue()
+    said = out.getvalue()
+    assert "the map is ready in" in said and "Do not commit or stage it" in said, said
+    assert "git add -f" not in said, said
 
 
 # --- a refuted walk step is reported, not blocked (retro 2026-09-30, finding 1) -----------------
@@ -2536,3 +2538,18 @@ def test_no_statement_of_the_old_map_reaches_any_output_of_finalize_or_record():
     for i, text in enumerate(texts):
         for old in _OLD_WORDS:
             assert old not in text, (i, old, text)
+
+
+def test_the_ready_line_says_when_the_project_hides_the_map_folder(tmp_path, capsys):
+    """Two projects mapped on 2026-10-08 hid `.coyomap/` in their own `.gitignore`; telling their
+    operator that a plain `git add` takes the map was false there."""
+    import subprocess as sp
+    from coyomap.finalize import _map_ready
+    map_path = _repo_with_warrant(tmp_path)
+    sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _map_ready(map_path)
+    assert "A plain `git add" in capsys.readouterr().out
+    (tmp_path / ".gitignore").write_text(".coyomap/\n")
+    _map_ready(map_path)
+    out = capsys.readouterr().out
+    assert "own .gitignore hides this folder" in out and "A plain `git add" not in out, out

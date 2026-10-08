@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import get_args, get_type_hints
 
 from coyomap import assemble, buildstate, fix, prose
-from coyomap.assemble import (_infer_ce_verb, ensure_fragments_ignored, load_fragment,
+from coyomap.assemble import (_infer_ce_verb, normalize_map_gitignore, load_fragment,
                               load_fragment_paths, merge_fragments)
 from coyomap.model import (ConfigRow, ExtraSection, ModelError, ObservabilityRow,
                            ProjectModel, load_model, to_canonical_json)
@@ -315,37 +315,53 @@ def test_edge_where_passes_through_unchanged():
     assert model.edges[0].where == "[app.py](backend/app.py#L20)"
 
 
-# --- the build-fragments gitignore -------------------------------------------------
+# --- the map folder's gitignore: it hides only what is not part of the map -------------
 
-def test_ensure_fragments_ignored_creates_appends_and_is_idempotent():
+def test_normalize_map_gitignore_creates_appends_and_is_idempotent():
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
-        assert ensure_fragments_ignored(out) is True
+        assert normalize_map_gitignore(out) is True
         body = (out / ".gitignore").read_text(encoding="utf-8")
         assert body.splitlines() == list(assemble._GITIGNORE_KEEP)
-        assert ensure_fragments_ignored(out) is False  # idempotent
+        assert normalize_map_gitignore(out) is False  # idempotent
 
 
-def test_ensure_fragments_ignored_strips_stray_preindex_ignore():
+def test_normalize_map_gitignore_strips_stray_preindex_ignore():
     # preindex.json is a committed artifact — a stray ignore line (older build / hand edit) must be
     # stripped, build-fragments/ kept, and any unrelated lines left intact.
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
         (out / ".gitignore").write_text("preindex.json", encoding="utf-8")  # no trailing newline
-        assert ensure_fragments_ignored(out) is True
+        assert normalize_map_gitignore(out) is True
         assert (out / ".gitignore").read_text(encoding="utf-8").splitlines() == \
             list(assemble._GITIGNORE_KEEP)
         # a fuller stray gitignore: preindex stripped, every per-run entry present, others preserved
         (out / ".gitignore").write_text("*.log\nbuild-fragments/\npreindex.json\n", encoding="utf-8")
-        assert ensure_fragments_ignored(out) is True
+        assert normalize_map_gitignore(out) is True
         lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert lines[0] == "*.log"                                   # unrelated line preserved
         assert set(assemble._GITIGNORE_KEEP) <= set(lines)           # every per-run artifact ignored
         assert "preindex.json" not in lines                          # the committed artifact is not
-        assert ensure_fragments_ignored(out) is False  # now stable
+        assert normalize_map_gitignore(out) is False  # now stable
 
 
-def test_assemble_cli_writes_the_fragments_gitignore():
+def test_the_map_gitignore_hides_no_part_of_the_map():
+    """A build does not commit. A plain `git add .coyomap` must take the whole map, so an older
+    file's lines hiding the agents' fragments or the check report are stripped, and none is added."""
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        (out / ".gitignore").write_text("build-fragments/\nfinalize-report.json\nfinalize-report.md\n"
+                                        "/preindex.json\ndev-rebuilds/\n/build-fragments/**\n"
+                                        "build-fragments/*\nfinalize-report.*\n*.tmp\n", encoding="utf-8")
+        assert normalize_map_gitignore(out) is True
+        lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert not [line for line in lines if "build-fragments" in line or "finalize-report" in line
+                or "preindex" in line], lines
+    assert "dev-rebuilds/" in lines and "fanout-timings.json" in lines
+    assert "*.tmp" in lines, "a line of the operator's own was removed"
+
+
+def test_assemble_cli_writes_the_map_gitignore():
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "h.json"
         p.write_text(make_harvest_fragment("C1"), encoding="utf-8")
@@ -353,7 +369,8 @@ def test_assemble_cli_writes_the_fragments_gitignore():
         proc = subprocess.run(ASSEMBLE + [str(p), "--out", str(out)],
                               capture_output=True, text=True)
         assert proc.returncode == 0, proc.stderr
-        assert "build-fragments/" in (out / ".gitignore").read_text(encoding="utf-8")
+        lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "findings/" in lines and "build-fragments/" not in lines, lines
 
 
 # --- CLI end-to-end ---------------------------------------------------------------
@@ -1742,10 +1759,10 @@ def test_an_assemble_appends_its_command_with_the_reconcile_flag():
 
 def test_the_map_gitignore_keeps_the_build_state_and_findings_out():
     """The state is archived with its map and the findings reach the operator through the reports;
-    `finalize`'s `git add -f` line must not sweep either into the commit."""
+    a plain `git add .coyomap` must not sweep either into a commit."""
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
-        ensure_fragments_ignored(out)
+        normalize_map_gitignore(out)
         lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
     for entry in ("build-state.log", "build-state.prev.log", "findings/", "findings-report.md"):
         assert entry in lines, f"{entry} is not ignored in the map folder: {lines}"

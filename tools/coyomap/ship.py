@@ -537,15 +537,14 @@ def main(argv: list[str] | None = None, *, runner: Runner = default_runner) -> i
                                               f"run: coyomap ship {shlex.quote(str(state_repo))} "
                                               f"--note-file <the note file> [--partial]")
     else:
-        print("\nSHIP COMPLETE — quote finalize's verdict line in the commit message "
-              f"(gate block at {inputs.gate_block}), then commit the map, the .md, the pre-index "
-              "and provenance. finalize printed the exact `git add -f` line ABOVE, in this output — "
-              "the report file does not carry it."
+        print("\nSHIP COMPLETE — quote finalize's verdict line in your closing report "
+              f"(gate block at {inputs.gate_block}). Do not commit or stage the map: finalize named "
+              "its parts ABOVE, and whether to keep it in git is the operator's choice."
               + _coverage_line(inputs))
         buildstate.append(state_repo, "ship", f"complete — {len(plan)} step(s) ran through "
                                               f"finalize · gate block {inputs.gate_block}")
-        buildstate.append(state_repo, "end", "ship complete · next: commit with the `git add -f` "
-                                             "line ship printed")
+        buildstate.append(state_repo, "end", "ship complete · the map is ready; the build does not "
+                                             "commit it")
     return 0
 
 
