@@ -79,20 +79,21 @@ claude
 
 The map is created in your project's `.coyomap/` subdirectory. Commit it with your code if you want to share it.
 
-#### Long builds in Claude Code
+#### Using headless Claude Code
 
-A large build can fill the main session's context. Each tool, connector and plugin a session loads is described in that context, and each helper agent pays for the same descriptions on every turn. Two optional steps cut that cost; neither changes the map.
-
-- **Start the build session with only what a build uses:** the file and shell tools and the agent tool. `claude --strict-mcp-config` starts with no MCP servers; `claude plugin details <name>` shows what a plugin costs, and `claude plugin disable <name>` turns it off.
-- **Give the helpers only file and shell tools:** define an agent such as `.claude/agents/coyomap-helper.md` with `tools: Read, Write, Edit, Bash, Grep, Glob`, and tell the build when you start it to run its helpers as that agent. The fact-check wave runner is the exception: it starts the fact-checkers, so it also needs `Agent`.
-
-**Not measured yet:** whether a helper limited by `tools:` really starts with a smaller context. It is expected and has not been shown; if you try it, compare the fixed base per agent turn that `coyomap-eval cost` prints.
-
-**A headless build (`claude -p`) needs one setting.** By default a headless session stops waiting for background helpers after 10 minutes, and a build's fact-check phase runs longer than that: one build was cut off there. Start it with the limit turned off:
+To build a map with no chat window open (Claude Code's headless mode):
 
 ```
-CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p "/coyomap"
+cd coyomap
+make claude-build REPO=~/my-project
 ```
+
+Its logs go to a run folder under your project's `.coyomap/runs/`, which the command prints and git ignores. Optional: `MODEL=` and `EFFORT=` (Claude Code's defaults if left out), `PROMPT=` (default `/coyomap build a new map from scratch`).
+
+To run `claude -p` yourself, check these two settings:
+
+- `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: otherwise the session ends the build after 10 minutes of waiting for its helper agents.
+- `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`: leave it unset, or 2 or more. Some helper agents start their own helpers.
 
 ### Explore the map
 

@@ -18,7 +18,8 @@ SKILLS_DIRS := $(HOME)/.claude/skills $(HOME)/.agents/skills
 
 .PHONY: install install-eval install-retro install-dev \
         uninstall uninstall-eval uninstall-retro uninstall-dev \
-        deps dev venv clean start dev-start gates land break-check
+        deps dev venv clean start dev-start gates land break-check \
+        claude-build claude-retro claude-build-retro
 
 # Port for the local map server (the file browser + code viewer backend).
 PORT ?= 8765
@@ -80,6 +81,36 @@ land:
 # like land; the tests it runs use the main checkout's venv. Exit 1 when some break went unnoticed.
 break-check:
 	python3 tools/break_check.py --breaks $(BREAKS)
+
+# A build nobody watches, as a headless Claude Code session (`claude -p`), with its own run folder
+# under the project's .coyomap/runs/ (git ignores it): `make claude-build REPO=<repo>`. The build writes the map into the project's
+# .coyomap/ and commits nothing; it is refused `git push`. Optional: MODEL=,
+# EFFORT= (2026-10-08 used claude-opus-5-5 and medium), PROMPT= (default
+# "/coyomap build a new map from scratch"). Stdlib only, like land.
+# Every target that runs Claude is named claude-*, so a version for another agent can sit beside it.
+# PROMPT reaches the shell as an environment variable, never pasted into the command line, so a
+# prompt holding quotes stays one argument.
+export PROMPT
+CLAUDE_RUN_OPTS = $(if $(MODEL),--model "$(MODEL)") $(if $(EFFORT),--effort "$(EFFORT)")
+CLAUDE_BUILD_OPTS = $(CLAUDE_RUN_OPTS) $(if $(PROMPT),--prompt "$$PROMPT")
+CLAUDE_RETRO_OPTS = $(if $(WAIT),--wait "$(WAIT)")
+NEED_REPO = @test "$(origin REPO)" = "command line" || { echo "usage: make $@ REPO=<repo to map>"; exit 2; }
+
+claude-build:
+	$(NEED_REPO)
+	python3 tools/claude_headless.py build --repo "$(REPO)" $(CLAUDE_BUILD_OPTS)
+
+# FOR SOMEONE WORKING ON COYOMAP: the retro of a headless build (needs `make install-dev`).
+# `make claude-retro RUN=<run folder>` waits until the build's folder has been quiet for 180 s
+# (asked every 30 s, at most WAIT minutes, default 30), then runs /coyomap-retro there.
+# `make claude-build-retro REPO=<repo>` runs the build, then the retro of it: one command for a night.
+claude-retro:
+	@test -n "$(RUN)" || { echo "usage: make claude-retro RUN=<run folder>"; exit 2; }
+	python3 tools/claude_headless.py retro --run "$(RUN)" $(CLAUDE_RUN_OPTS) $(CLAUDE_RETRO_OPTS)
+
+claude-build-retro:
+	$(NEED_REPO)
+	python3 tools/claude_headless.py build-retro --repo "$(REPO)" $(CLAUDE_BUILD_OPTS) $(CLAUDE_RETRO_OPTS)
 
 # Install the coyomap skill globally for all agents (macOS/Linux). Also builds the venv and
 # installs the CLI (via `deps`) so a one-time `make install` covers everything.

@@ -135,6 +135,22 @@ which is how the main skill spent weeks telling agents to read a method doc that
 `tests/test_skill_pointers.py` keeps the copies thin enough that drift is nearly harmless, but it
 cannot see the installed files.
 
+**A build and its retro, overnight.** `make claude-build` (see the README, "Using headless
+Claude Code") has two developer siblings, which need `make install-dev`:
+
+```
+make claude-build-retro REPO=~/my-project   # the build, then /coyomap-retro of it, in the same folder
+make claude-retro RUN=~/my-project/.coyomap/runs/claude-2026-10-08_230000   # the retro of a run alone
+```
+
+The retro asks `coyomap-eval retro-precheck` every 30 s and starts once the project folder has been
+quiet for 180 s; after `WAIT=` minutes (30) it gives up and writes "retro skipped" in the run's
+`status` file. Another Claude session open on that project also counts as not quiet. It also
+refuses a map this run's build did not stamp, because a build that died early leaves the older
+map in place. `MODEL=` and
+`EFFORT=` work as for the build. Every target that runs Claude is named `claude-*`, so a version for
+another agent can sit beside it; `tools/claude_headless.py` keeps the agent-neutral steps apart.
+
 The `coyomap` package is tested with `pytest` and type-checked with `pyright` (see
 `pyrightconfig.json`). `make dev` builds the repo-local venv and installs both into it
 (alongside the editable package), so the gates run against the installed CLI:
