@@ -328,6 +328,13 @@ component count against the code-derived expectation E, the map's own `grounding
 every count that moved against the previous
 map.
 
+**Copy `compare`'s whole table into the report, not only the rows that moved.** Every hard gate,
+the granularity line and every band row, as one table:
+`metric | previous | this build | change | allowed | result`. Then its name-agreement lines (how many
+component, use-case and entity names survive). A reader who sees only the rows you picked cannot
+tell a quiet count from one you left out: the 2026-10-08 report printed 2 of the 13 band rows, and
+its dependency DRIFT (29 -> 19) went unexplained beside them.
+
 **And read `compare`'s NOTES, not only its gates and bands.** One of them is not a count and cannot
 be: the share of the auth surface's ENFORCEMENT LINES the two maps agree on, plus the files that hold
 access enforcement in one map and are named by no access rule in the other. Two rebuilds of ONE
@@ -867,7 +874,9 @@ proposed · "no check files pending" stated explicitly when the range adds none
 
 ## Product signals
 blocking problems · advisories surviving · components vs E · grounding coverage
-· deltas vs the previous map
+· the comparison table vs the previous map: every hard gate, the granularity line and every band
+row, moved or not (`metric | previous | this build | change | allowed | result`), then the
+name-agreement lines
 
 ## Process signals
 a compaction of the lead FIRST, when there was one · every L3 assertion the scorecard printed,
