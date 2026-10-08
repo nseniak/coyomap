@@ -26,7 +26,7 @@ from pathlib import Path
 from coyomap import grammar, prose, provenance
 from coyomap.anchors import parse_anchor
 from coyomap.reporting import clip, reset_full_lists, set_full_lists, shown
-from coyomap.assemble import load_fragment
+from coyomap.assemble import fragment_schema_errors, load_fragment
 from coyomap.model import ID_SHAPE, ModelError, ProjectModel, access_rules, all_elements
 from coyomap.validate_model import (
     _cadence_row_warnings,
@@ -699,7 +699,10 @@ def _run(argv: list[str] | None = None) -> int:
         try:
             m = load_fragment(text, p.name)
         except ModelError as e:
-            say(f"{p.name}: SCHEMA — {e}", kind="problem")
+            # EVERY schema fault, not only the first: one line each, so the agent fixes them all in
+            # one round. The first fault alone used to cost a lint round per fault.
+            for fault in fragment_schema_errors(text, p.name) or [str(e)]:
+                say(f"{p.name}: SCHEMA — {fault}", kind="problem")
             clean = False
             continue
         problems = lint_fragment_problems(m, repo_root, known_ids)

@@ -1000,3 +1000,35 @@ def test_the_harvest_contract_asks_for_the_owning_component():
     row = next(ln for ln in contract.splitlines()
                if ln.startswith("> | `entry_points` |") and "**trigger**" in ln)
     assert "component" in row, row
+
+
+# --- every schema error in one run (retro mcpolis-2026-10-08-#7) ------------------------------
+def test_lint_reports_every_schema_error_in_one_run(tmp_path, capsys):
+    # Three independent schema faults in three rows. The lint used to print the first and stop,
+    # so a harvest agent paid one lint round per fault: 14 of 48 harvest lint runs failed that way.
+    frag = make_fragment_file(tmp_path, "H1.json", {
+        "components": [{"id": "C1", "name": "A", "purpose": "p", "colour": "red"},
+                       {"id": "C2", "name": 7, "purpose": "p"},
+                       {"id": "C3a", "name": "C", "purpose": "p"}],
+        "edges": [{"src": "C1", "verb": "uses"}],
+    })
+    assert lint_fragment.main([str(frag)]) == 1
+    err = capsys.readouterr().err
+    schema = [ln for ln in err.splitlines() if "SCHEMA" in ln]
+    assert any("colour: unknown field" in ln for ln in schema), err
+    assert any("components[1].name: expected a string" in ln for ln in schema), err
+    assert any("edges[0]" in ln and "dst" in ln for ln in schema), err
+    assert any("'C3a' is not a valid C-id" in ln for ln in schema), err
+    assert len(schema) == 4, err
+    assert "4 problem(s)" in err.splitlines()[0], err
+
+
+def test_load_fragment_still_raises_on_the_first_schema_error():
+    # The collecting mode belongs to the lint; every other reader still stops at the first fault.
+    try:
+        make_fragment({"components": [{"id": "C1", "name": 7, "purpose": "p", "colour": "red"}]})
+    except Exception as e:  # noqa: BLE001 - the type is asserted below
+        assert type(e).__name__ == "ModelError"
+        assert "\n" not in str(e)
+    else:
+        raise AssertionError("a bad fragment must not load")

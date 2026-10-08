@@ -14,3 +14,10 @@ there, so never open or edit that folder yourself. Do not carry a finding in you
 report instead: a report can be lost on the way, and this file is collected by a tool. Do not file
 what your output already records (a refuted claim, a gap row, a rule). End your report with
 `findings: <the number you filed>`.
+
+If a finding you filed turns out wrong, take it back with the id `add` printed, never in your
+report alone:
+
+    «COYOMAP_HOME»/.venv/bin/coyomap findings withdraw --repo «REPO» <id> --why "<why it no longer holds>"
+
+The finding stays on record with the reason beside it.

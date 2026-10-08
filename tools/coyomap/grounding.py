@@ -2445,8 +2445,16 @@ def _resolves(claimed: str, pool: set[str]) -> bool:
     # exactly one file with that name. Two candidates and the claim cannot say which was read; zero
     # is a genuine miss. Matching any suffix would clear a row that cited `config.py` against a
     # `vendor/thirdparty/junk/config.py` nobody opened — clean on the shape this exists to catch.
+    #
+    # ONE FILE UNDER SEVERAL SPELLINGS IS ONE FILE. A skeptic opens a file absolute, repo-relative
+    # and from a subdirectory (`/u/repo/backend/x/a.py`, `backend/x/a.py`, `x/a.py`); counted as
+    # three candidates, its bare-name citation was ambiguous and flagged. All 8 visible flagged
+    # names on the 2026-10-08 mcpolis build were such files (18 of 24 rows). So a spelling that is
+    # a path suffix of another candidate is that candidate, and only the longest spellings count.
+    # Two DIFFERENT files (`src/a/config.py`, `vendor/b/config.py`) are suffixes of neither.
     same_name = {p for p in normed if p.rsplit("/", 1)[-1] == c}
-    return len(same_name) == 1
+    files = {p for p in same_name if not any(q.endswith("/" + p) for q in same_name)}
+    return len(files) == 1
 
 
 def _fabricated_evidence(rows: list[dict], agent_dir: Path, files: Sequence[_VerdictFile],

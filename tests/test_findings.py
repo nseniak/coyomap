@@ -283,3 +283,64 @@ if __name__ == "__main__":
             _fn()
             print(f"ok  {_name}")
     print("findings tests passed")
+
+
+# --- withdraw (retro mcpolis-2026-10-08-#18) -----------------------------------------------------
+# An agent saw one of its findings was wrong and could only say so in prose; the finding shipped in
+# the report, half retracted. `withdraw` takes it back and keeps the record of both.
+
+def test_add_prints_the_id_withdraw_takes() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        make_filed(repo, [("harvest-1", "risk", "first")])
+        code, out, err = run_findings(make_add_argv(repo, agent="harvest-1", text="second"))
+    assert code == 0, err
+    assert " as harvest-1#2 → " in out, out
+
+
+def test_withdraw_keeps_the_finding_and_its_reason_and_collect_counts_it_no_more() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        make_filed(repo, [("harvest-1", "risk", "the admin route has no guard"),
+                          ("harvest-1", "bug", "the retry sends the email twice")])
+        own = repo / ".coyomap" / "findings" / "harvest-1.jsonl"
+        before = lines_of(own)
+        code, out, err = run_findings(["withdraw", "--repo", str(repo), "harvest-1#1",
+                                       "--why", "the guard sits in the middleware, line 40"])
+        assert code == 0, err
+        assert "WITHDRAWN — harvest-1#1" in out, out
+        after = lines_of(own)
+        assert after[:2] == before, "a withdrawal deletes nothing"
+        assert json.loads(after[2])["withdraws"] == 1, after
+        # a retried agent filing the same finding again does not bring it back
+        make_filed(repo, [("harvest-1", "risk", "the admin route has no guard")])
+        code, out, _err = run_findings(["collect", "--repo", str(repo)])
+        report = (repo / ".coyomap" / "findings-report.md").read_text(encoding="utf-8")
+    assert code == 0, out
+    assert "1 from 1 agent(s): risk 0 · bug 1" in out and "· 1 withdrawn ·" in out, out
+    assert "## withdrawn (1)" in report, report
+    gone = report[report.index("## withdrawn"):]
+    assert "[harvest-1#1]" in gone and "the admin route has no guard" in gone, gone
+    assert "WITHDRAWN: the guard sits in the middleware, line 40" in gone, gone
+    assert "[harvest-1#2]" in report[:report.index("## withdrawn")], report
+
+
+def test_withdraw_refuses_every_fault_at_once_and_writes_nothing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        make_filed(repo, [("harvest-1", "risk", "the admin route has no guard")])
+        own = repo / ".coyomap" / "findings" / "harvest-1.jsonl"
+        before = own.read_text(encoding="utf-8")
+        code, _out, err = run_findings(["withdraw", "--repo", str(repo), "harvest-1#7"])
+        assert code == 2, err
+        assert "REFUSED — 2 fault(s)" in err and "line 7 of harvest-1.jsonl is no finding" in err
+        assert "no --why" in err, err
+        for bad in ("harvest-1", "nobody#1"):
+            code, _out, err = run_findings(["withdraw", "--repo", str(repo), bad, "--why", "x"])
+            assert code == 2, (bad, err)
+        assert own.read_text(encoding="utf-8") == before, "a refused withdrawal wrote something"
+        # once withdrawn, a second withdrawal is refused
+        assert run_findings(["withdraw", "--repo", str(repo), "harvest-1#1", "--why", "x"])[0] == 0
+        code, _out, err = run_findings(["withdraw", "--repo", str(repo), "harvest-1#1",
+                                        "--why", "y"])
+        assert code == 2 and "already withdrawn" in err, err

@@ -9,10 +9,11 @@ build it read 0 of 126 hand-backs: every agent handed back through a tool call, 
 only at assistant text. The lead hand-collected 57 findings from 27 agents instead, from its own
 context, which is the context a long build cannot spare.
 
-**What it does.** Two verbs and one folder:
+**What it does.** Three verbs and one folder:
 
     coyomap findings add --repo R --agent <id> --kind risk|bug|gap|contradiction \\
                          --where <path>[:<line>[-<line>]]... --text "<text>"
+    coyomap findings withdraw [--repo R] <agent>#<n> --why "<text>"
     coyomap findings collect [--repo R] [--out .coyomap/findings-report.md]
 
 `add` writes ONE JSON line into the agent's OWN file, `.coyomap/findings/<id>.jsonl`, so no two
@@ -25,6 +26,12 @@ unknown kind, no `--where`, a `--where` that is absolute, climbs out with `..`, 
 under the repo, an empty text or one over 600 characters, and a `--where` or a text holding a byte
 that is not UTF-8. A finding is one sentence about the code at a place the agent opened; a
 paragraph belongs in the code it is about.
+
+**Withdrawing.** A finding's id is `<agent>#<n>`, `n` being its line in the agent's file; `add`
+prints it. `withdraw` takes a finding back and keeps the record of it: it appends one line saying
+which finding and why, and deletes nothing. `collect` then counts the finding no more and lists it
+under its own heading, with the why. Before this verb an agent that saw it was wrong could only say
+so in prose: on the 2026-10-08 mcpolis build a half-retracted finding shipped in the report.
 
 The files are build telemetry, never map content: nothing in the map, its views or its gates reads
 them, and `assemble` keeps them out of git.
@@ -66,6 +73,8 @@ TEXT_MAX = 600
 AGENT_MAX = 128
 
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+#: A finding's id: its agent, then its line in that agent's file.
+_FINDING_ID = re.compile(r"(?P<agent>[A-Za-z0-9][A-Za-z0-9._-]*)#(?P<line>[1-9][0-9]*)")
 _WHERE = re.compile(r"(?P<path>[^:]+)(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?")
 
 #: The report's first line, which carries the total the next `collect` counts the new from.
@@ -94,6 +103,12 @@ class Finding:
     where: tuple[str, ...]
     text: str
     at: str
+    line: int = 0   # its line in the agent's file: the `n` of its id
+
+    @property
+    def id(self) -> str:
+        """`<agent>#<n>`, what `withdraw` names it by."""
+        return f"{self.agent}#{self.line}"
 
     @property
     def key(self) -> tuple[str, str, tuple[str, ...], str]:
@@ -103,13 +118,23 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class Withdrawn:
+    """A finding taken back, with the reason. The finding itself stays in its file."""
+
+    finding: Finding
+    why: str
+    at: str
+
+
+@dataclass(frozen=True)
 class Filed:
     """Everything under one repo's findings folder."""
 
-    findings: tuple[Finding, ...]   # in file order, files by name, exact repeats dropped
+    findings: tuple[Finding, ...]   # in file order, files by name, exact repeats and withdrawn dropped
     malformed: tuple[str, ...]      # one per line that is not a finding: `<file>:<n>: <why>`
     repeats: int                    # exact repeats dropped
     files: int                      # agent files read
+    withdrawn: tuple[Withdrawn, ...] = ()   # taken back by `withdraw`, in file order
 
     @property
     def agents(self) -> int:
@@ -203,7 +228,13 @@ def add_faults(repo: Path, agent: str | None, kind: str | None, where: Sequence[
 
 def add(repo: Path, agent: str | None, kind: str | None, where: Sequence[str],
         text: str | None, at: str | None = None) -> Path:
-    """File one finding into the agent's own file and return that file. Raises `FindingRefused`
+    """File one finding into the agent's own file and return that file (see `file_finding`)."""
+    return file_finding(repo, agent, kind, where, text, at)[0]
+
+
+def file_finding(repo: Path, agent: str | None, kind: str | None, where: Sequence[str],
+                 text: str | None, at: str | None = None) -> tuple[Path, str]:
+    """File one finding into the agent's own file; return that file and the finding's id. Raises `FindingRefused`
     naming every fault, before anything is written, and `OSError` when the file cannot be written.
 
     ONE `os.write` to a file opened for appending, so an agent filing two findings at once loses
@@ -211,24 +242,103 @@ def add(repo: Path, agent: str | None, kind: str | None, where: Sequence[str],
     faults = add_faults(repo, agent, kind, where, text)
     if faults or agent is None or kind is None or text is None:
         raise FindingRefused(faults)
-    row = {"agent": agent, "kind": kind, "where": [_clean_where(w) for w in where],
-           "text": redact(" ".join(text.split())), "at": at or now_minute()}
+    row: dict[str, object] = {"agent": agent, "kind": kind,
+                              "where": [_clean_where(w) for w in where],
+                              "text": redact(" ".join(text.split())), "at": at or now_minute()}
     folder = findings_dir(repo)
     folder.mkdir(exist_ok=True)
     path = folder / f"{agent}.jsonl"
-    data = (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+    return path, f"{agent}#{_append_row(path, row)}"
+
+
+def _append_row(path: Path, row: dict[str, object]) -> int:
+    """Append one JSON line to `path` with ONE `os.write`, and return its line number in the file:
+    the last line holding exactly this text, so two agents appending at once each get their own."""
+    text = json.dumps(row, ensure_ascii=False)
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
     try:
-        os.write(fd, data)
+        os.write(fd, (text + "\n").encode("utf-8"))
     finally:
         os.close(fd)
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+    return max((n for n, ln in enumerate(lines, 1) if ln == text), default=0)
+
+
+def withdraw_faults(repo: Path, finding_id: str | None, why: str | None) -> list[str]:
+    """Every reason `withdraw` would refuse, in argument order. Empty means it is written."""
+    faults: list[str] = []
+    m = _FINDING_ID.fullmatch(finding_id or "")
+    if finding_id is None:
+        faults.append("no finding id: give `<agent>#<n>`, as `add` and the report print it")
+    elif m is None:
+        faults.append(f"{finding_id!r} is not a finding id: `<agent>#<n>`, as `add` and the "
+                      f"report print it")
+    else:
+        filed = load_folder(findings_dir(repo))
+        agent, line = m.group("agent"), int(m.group("line"))
+        if any(w.finding.agent == agent and w.finding.line == line for w in filed.withdrawn):
+            faults.append(f"{finding_id} is already withdrawn")
+        elif not (findings_dir(repo) / f"{agent}.jsonl").is_file():
+            faults.append(f"no findings file for agent {agent!r} under {buildstate.FINDINGS_DIR}")
+        elif not _is_finding_line(findings_dir(repo) / f"{agent}.jsonl", agent, line):
+            faults.append(f"line {line} of {agent}.jsonl is no finding: `collect` writes each "
+                          f"finding's id into the report")
+    said = " ".join((why or "").split())
+    if not said:
+        faults.append("no --why: say why the finding no longer holds")
+    elif undecodable(said):
+        faults.append("--why holds a byte that is not UTF-8: write it again in UTF-8")
+    elif len(said) > TEXT_MAX:
+        faults.append(f"--why is {len(said)} characters, over {TEXT_MAX}: say it in one sentence")
+    return faults
+
+
+def _is_finding_line(path: Path, agent: str, line: int) -> bool:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    if not 1 <= line <= len(lines):
+        return False
+    try:
+        return isinstance(_parse(lines[line - 1], agent, line), Finding)
+    except ValueError:
+        return False
+
+
+def withdraw(repo: Path, finding_id: str | None, why: str | None,
+             at: str | None = None) -> Path:
+    """Take one finding back: append a line to its agent's file naming it and the reason, and
+    return that file. Nothing is deleted, so the finding and its withdrawal both stay on record.
+    Raises `FindingRefused` naming every fault, before anything is written."""
+    faults = withdraw_faults(repo, finding_id, why)
+    m = _FINDING_ID.fullmatch(finding_id or "")
+    if faults or m is None or why is None:
+        raise FindingRefused(faults)
+    agent = m.group("agent")
+    path = findings_dir(repo) / f"{agent}.jsonl"
+    _append_row(path, {"agent": agent, "withdraws": int(m.group("line")),
+                       "why": redact(" ".join(why.split())), "at": at or now_minute()})
     return path
 
 
 # ── reading ──────────────────────────────────────────────────────────────────────────────────────
 
-def _parse(raw: str, stem: str) -> Finding:
-    """One line of `<stem>.jsonl` as a finding. Raises `ValueError` saying why it is not one."""
+@dataclass(frozen=True)
+class _Withdrawal:
+    """One `withdraw` line: which line of the same file it takes back, and why."""
+
+    line: int
+    why: str
+    at: str
+
+
+def _parse(raw: str, stem: str, n: int = 0) -> Finding | _Withdrawal:
+    """One line of `<stem>.jsonl` (its `n`-th) as a finding or a withdrawal. Raises `ValueError`
+    saying why it is neither."""
     try:
         row: object = json.loads(raw)
     except ValueError:
@@ -240,6 +350,14 @@ def _parse(raw: str, stem: str) -> Finding:
     if not isinstance(agent, str) or agent != stem:
         raise ValueError(f"its agent is {agent!r}, not {stem!r}: each agent files only into its "
                          f"own file")
+    if "withdraws" in row:
+        line, why = row.get("withdraws"), row.get("why")
+        if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+            raise ValueError("`withdraws` is not a line number")
+        if not isinstance(why, str) or not why.strip():
+            raise ValueError("a withdrawal with no `why`")
+        return _Withdrawal(line=line, why=" ".join(why.split()),
+                           at=at if isinstance(at, str) else "")
     if kind not in KINDS:
         raise ValueError(f"kind {kind!r} is not one of {' | '.join(KINDS)}")
     if (not isinstance(where, list) or not where
@@ -248,7 +366,7 @@ def _parse(raw: str, stem: str) -> Finding:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("`text` is empty")
     return Finding(agent=agent, kind=str(kind), where=tuple(str(w) for w in where),
-                   text=" ".join(text.split()), at=at if isinstance(at, str) else "")
+                   text=" ".join(text.split()), at=at if isinstance(at, str) else "", line=n)
 
 
 def load(repo: Path) -> Filed:
@@ -263,6 +381,7 @@ def load_folder(folder: Path) -> Filed:
         return Filed(findings=(), malformed=(), repeats=0, files=0)
     out: list[Finding] = []
     malformed: list[str] = []
+    withdrawn: list[Withdrawn] = []
     seen: set[tuple[str, str, tuple[str, ...], str]] = set()
     repeats = 0
     files = sorted(folder.glob("*.jsonl"))
@@ -272,20 +391,42 @@ def load_folder(folder: Path) -> Filed:
         except OSError as exc:
             malformed.append(f"{f.name}: cannot be read ({exc.strerror or exc})")
             continue
+        own: dict[int, Finding] = {}
+        takebacks: list[tuple[int, _Withdrawal]] = []
         for n, raw in enumerate(body.splitlines(), 1):
             if not raw.strip():
                 continue
             try:
-                finding = _parse(raw, f.stem)
+                parsed = _parse(raw, f.stem, n)
             except ValueError as exc:
                 malformed.append(f"{f.name}:{n}: {exc} — {clip(redact(raw), 80)}")
+                continue
+            if isinstance(parsed, _Withdrawal):
+                takebacks.append((n, parsed))
+            else:
+                own[n] = parsed
+        # A WITHDRAWN FINDING is counted nowhere, and neither is a later exact repeat of it: a
+        # retried agent filing it again does not bring it back.
+        gone: set[tuple[str, str, tuple[str, ...], str]] = set()
+        for n, w in takebacks:
+            target = own.get(w.line)
+            if target is None:
+                malformed.append(f"{f.name}:{n}: withdraws line {w.line}, which is no finding")
+            elif target.key in gone:
+                malformed.append(f"{f.name}:{n}: withdraws {target.id} a second time")
+            else:
+                gone.add(target.key)
+                withdrawn.append(Withdrawn(finding=target, why=w.why, at=w.at))
+        for finding in own.values():
+            if finding.key in gone:
                 continue
             if finding.key in seen:
                 repeats += 1
                 continue
             seen.add(finding.key)
             out.append(finding)
-    return Filed(findings=tuple(out), malformed=tuple(malformed), repeats=repeats, files=len(files))
+    return Filed(findings=tuple(out), malformed=tuple(malformed), repeats=repeats, files=len(files),
+                 withdrawn=tuple(withdrawn))
 
 
 def counts(filed: Filed) -> str:
@@ -301,10 +442,11 @@ def verdict_line(filed: Filed, since: int | None = None, report: str | None = No
 
     `FINDINGS — 23 from 11 agent(s): risk 9 · bug 4 · gap 7 · contradiction 3 (+5 since the last
     collect) · 0 malformed → .coyomap/findings-report.md`, or `FINDINGS — none filed`."""
-    if not filed.findings and not filed.malformed:
+    if not filed.findings and not filed.malformed and not filed.withdrawn:
         return f"{title} — none filed"
     return (f"{title} — {counts(filed)}"
             + (f" (+{since} since the last collect)" if since is not None else "")
+            + (f" · {len(filed.withdrawn)} withdrawn" if filed.withdrawn else "")
             + f" · {len(filed.malformed)} malformed"
             + (f" → {report}" if report else ""))
 
@@ -351,8 +493,9 @@ def _place(path: Path, repo: Path) -> str:
 
 def report_text(filed: Filed, since: int, at: str) -> str:
     """The whole list, grouped by kind: risk, bug, gap, contradiction, then the malformed lines."""
-    title = "none filed" if not filed.findings and not filed.malformed else (
-        f"{counts(filed)} · {len(filed.malformed)} malformed")
+    title = "none filed" if not filed.findings and not filed.malformed and not filed.withdrawn else (
+        f"{counts(filed)}" + (f" · {len(filed.withdrawn)} withdrawn" if filed.withdrawn else "")
+        + f" · {len(filed.malformed)} malformed")
     out = [f"{_REPORT_TITLE}{title}", "",
            f"Collected {at} by `coyomap findings collect` from {filed.files} file(s) in "
            f"{buildstate.FINDINGS_DIR}: +{since} since the last collect"
@@ -369,7 +512,18 @@ def report_text(filed: Filed, since: int, at: str) -> str:
             continue
         for f in rows:
             places = " · ".join(f"`{w}`" for w in f.where)
-            out.append(f"- {places} — {redact(f.text)} ({f.agent}" + (f", {f.at})" if f.at else ")"))
+            out.append(f"- [{f.id}] {places} — {redact(f.text)} ({f.agent}"
+                       + (f", {f.at})" if f.at else ")"))
+        out.append("")
+    if filed.withdrawn:
+        out += [f"## withdrawn ({len(filed.withdrawn)})", "",
+                "Taken back by `coyomap findings withdraw`, and counted nowhere above. Each keeps "
+                "the finding and the reason it was withdrawn.", ""]
+        for w in filed.withdrawn:
+            f = w.finding
+            out.append(f"- [{f.id}] {f.kind} at " + " · ".join(f"`{p}`" for p in f.where)
+                       + f" — {redact(f.text)} WITHDRAWN: {redact(w.why)}"
+                       + (f" ({w.at})" if w.at else ""))
         out.append("")
     if filed.malformed:
         out += [f"## malformed lines ({len(filed.malformed)})", "",
@@ -407,7 +561,7 @@ def collect(repo: Path, out: Path | None = None, at: str | None = None) -> Colle
 
 # ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
-USAGE = f"""usage: coyomap findings <add | collect> [args...]
+USAGE = f"""usage: coyomap findings <add | withdraw | collect> [args...]
 
 Product findings the agents file as they work, and the lead collects. A finding is a bug, a risk
 (to security, privacy, money or data), a gap (a check that is missing, a path nothing guards) or a
@@ -421,19 +575,25 @@ contradiction (two parts of the code, or the code and its own docs, that disagre
       shaped like a credential is replaced before it is written. Every fault is named at once and
       nothing is written (exit 2). Filing changes nothing in the code or the map.
 
+  withdraw [--repo <repo>] <agent>#<n> --why "<why it no longer holds>"
+      Take back ONE finding, by the id `add` printed (`<agent>#<n>`, n its line in the file). One
+      line saying which finding and why is appended to that file; nothing is deleted. `collect`
+      counts the finding no more and lists it under "withdrawn" with the why. Exit 2, and nothing
+      written, on an id that names no finding, one already withdrawn, or no --why.
+
   collect [--repo <repo>] [--out <file>]
       Read every agent's file and print ONE line — the count by kind, how many are new since the
       last collect, the malformed lines, and the report it wrote (default {REPORT}),
       which holds the whole list grouped by kind. Run it when the agents are back, and open the
       report when its `risk` count grew.
 
-  --repo <repo>   the repo you are mapping. `add` needs it; `collect` defaults to the current
-                  folder, refused inside the coyomap clone.
+  --repo <repo>   the repo you are mapping. `add` needs it; `withdraw` and `collect` default to
+                  the current folder, refused inside the coyomap clone.
 
 Build telemetry, never map content: nothing in the map, its views or its gates reads these files,
 and none of them is committed."""
 
-_VERBS = ("add", "collect")
+_VERBS = ("add", "withdraw", "collect")
 
 
 def build_parser(verb: str) -> SubverbParser:
@@ -444,6 +604,9 @@ def build_parser(verb: str) -> SubverbParser:
         p.add_argument("--kind", default=None)
         p.add_argument("--where", action="extend", nargs="+", default=[])
         p.add_argument("--text", default=None)
+    elif verb == "withdraw":
+        p.add_argument("finding_id", nargs="?", default=None)
+        p.add_argument("--why", default=None)
     else:
         p.add_argument("--out", default=None)
     return p
@@ -454,7 +617,8 @@ def _cmd_add(parsed: argparse.Namespace) -> int:
         return subverb_help.usage_error(USAGE, "add", "add needs --repo <the repo you are mapping>")
     repo = Path(parsed.repo).expanduser()
     try:
-        path = add(repo, parsed.agent, parsed.kind, list(parsed.where), parsed.text)
+        path, ident = file_finding(repo, parsed.agent, parsed.kind, list(parsed.where),
+                                   parsed.text)
     except FindingRefused as exc:
         print(f"REFUSED — {len(exc.faults)} fault(s), and nothing was filed:", file=sys.stderr)
         for fault in exc.faults:
@@ -465,13 +629,36 @@ def _cmd_add(parsed: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
     try:
-        held = sum(1 for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip())
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        held = 0
+        lines = []
+    held = sum(1 for ln in lines if ln.strip())
     where = list(parsed.where)
-    print(f"FILED — {parsed.kind} at {shown([_clean_where(w) for w in where], 2)} → "
+    print(f"FILED — {parsed.kind} at {shown([_clean_where(w) for w in where], 2)} as {ident} → "
           f"{_place(path, repo)}, which now holds {held} line(s). End your report with "
-          f"`findings: <the number you filed>`.")
+          f"`findings: <the number you filed>`. If it turns out wrong, take it back with "
+          f"`coyomap findings withdraw <id> --why \"<why>\"`.")
+    return 0
+
+
+def _cmd_withdraw(parsed: argparse.Namespace) -> int:
+    try:
+        repo = buildstate.resolve_repo(parsed.repo)
+    except ValueError as exc:
+        return subverb_help.usage_error(USAGE, "withdraw", str(exc))
+    try:
+        path = withdraw(repo, parsed.finding_id, parsed.why)
+    except FindingRefused as exc:
+        print(f"REFUSED — {len(exc.faults)} fault(s), and nothing was written:", file=sys.stderr)
+        for fault in exc.faults:
+            print(f"  - {fault}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"ERROR: the withdrawal was not written ({exc.strerror or exc}: {exc.filename})",
+              file=sys.stderr)
+        return 1
+    print(f"WITHDRAWN — {parsed.finding_id}: the finding stays in {_place(path, repo)} with the "
+          f"reason beside it, and `collect` counts it no more.")
     return 0
 
 
@@ -504,7 +691,8 @@ def main(argv: list[str] | None = None) -> int:
     if verb not in _VERBS:
         print(f"coyomap findings: unknown verb '{verb}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
-        print(f"\nERROR: unknown verb '{verb}' (expected `add` or `collect`)", file=sys.stderr)
+        print(f"\nERROR: unknown verb '{verb}' (expected `add`, `withdraw` or `collect`)",
+              file=sys.stderr)
         return 2
     helped = subverb_help.handle(USAGE, verb, rest)
     if helped is not None:
@@ -513,7 +701,9 @@ def main(argv: list[str] | None = None) -> int:
         parsed = build_parser(verb).parse_args(rest)
     except ArgError as exc:
         return subverb_help.usage_error(USAGE, verb, str(exc))
-    return _cmd_add(parsed) if verb == "add" else _cmd_collect(parsed)
+    if verb == "add":
+        return _cmd_add(parsed)
+    return _cmd_withdraw(parsed) if verb == "withdraw" else _cmd_collect(parsed)
 
 
 if __name__ == "__main__":

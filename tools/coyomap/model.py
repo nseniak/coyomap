@@ -18,7 +18,7 @@ import os
 import re
 import sys
 import types
-from dataclasses import dataclass, field, fields
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Union, get_args, get_origin, get_type_hints
 
@@ -1307,16 +1307,33 @@ def to_canonical_json(m: ProjectModel) -> str:
 
 # ── structural loader (the schema-validation half of `coyomap validate`) ─────────────────────────
 
-def _check(value: object, hint: object, path: str) -> object:
+class _AlreadyReported(ModelError):
+    """Raised in collecting mode once a value's errors are in the list, so the levels above skip the
+    value without writing a second, vaguer line about it."""
+
+
+def _collect(errors: list[str] | None, e: ModelError) -> None:
+    """Collecting mode: record a fault and go on. Raising mode (`errors` is None): stop here."""
+    if errors is None:
+        raise e
+    if not isinstance(e, _AlreadyReported):
+        errors.append(str(e))
+
+
+def _check(value: object, hint: object, path: str, errors: list[str] | None = None) -> object:
     """Validate `value` against a type hint, returning the built (dataclass-ified) value.
     Handles exactly the shapes the model uses: str, int, bool, X|None, list[T], dict[str,str],
-    and nested dataclasses. Raises ModelError with the JSON path of the first violation."""
+    and nested dataclasses. Raises ModelError with the JSON path of the first violation.
+
+    With an `errors` list it COLLECTS instead: each list item and each object field is checked on
+    its own, every fault lands in the list, and the value raises `_AlreadyReported` at the end.
+    `lint-fragment` uses this so an agent fixes every fault of a fragment in one round."""
     origin = get_origin(hint)
     if origin is Union or origin is types.UnionType:  # only `X | None` appears in the model
         args = [a for a in get_args(hint) if a is not type(None)]
         if value is None:
             return None
-        return _check(value, args[0], path)
+        return _check(value, args[0], path, errors)
     if hint is str:
         if not isinstance(value, str):
             raise ModelError(f"{path}: expected a string, got {type(value).__name__}")
@@ -1333,7 +1350,18 @@ def _check(value: object, hint: object, path: str) -> object:
         if not isinstance(value, list):
             raise ModelError(f"{path}: expected an array, got {type(value).__name__}")
         (item_hint,) = get_args(hint)
-        return [_check(v, item_hint, f"{path}[{i}]") for i, v in enumerate(value)]
+        if errors is None:
+            return [_check(v, item_hint, f"{path}[{i}]") for i, v in enumerate(value)]
+        before = len(errors)
+        items: list[object] = []
+        for i, v in enumerate(value):
+            try:
+                items.append(_check(v, item_hint, f"{path}[{i}]", errors))
+            except ModelError as e:
+                _collect(errors, e)
+        if len(errors) > before:
+            raise _AlreadyReported(path)
+        return items
     if origin is dict:
         if not isinstance(value, dict):
             raise ModelError(f"{path}: expected an object, got {type(value).__name__}")
@@ -1342,7 +1370,7 @@ def _check(value: object, hint: object, path: str) -> object:
             return {str(k): _check_json_value(v, f"{path}.{k}") for k, v in value.items()}
         return {str(k): _check(v, val_hint, f"{path}.{k}") for k, v in value.items()}
     if hasattr(hint, "__dataclass_fields__"):
-        return _build(value, hint, path)  # type: ignore[arg-type]
+        return _build(value, hint, path, errors)  # type: ignore[arg-type]
     raise ModelError(f"{path}: unsupported schema type {hint!r}")  # unreachable on the fixed model
 
 
@@ -1407,24 +1435,40 @@ _RENAME_NOTES: dict[str, str] = {
 }
 
 
-def _build(data: object, cls: type, path: str):
+def _build(data: object, cls: type, path: str, errors: list[str] | None = None):
+    """Build `cls` from `data`. Stops at the first fault, or with `errors` collects them all
+    (see `_check`)."""
     if not isinstance(data, dict):
         raise ModelError(f"{path}: expected an object, got {type(data).__name__}")
     hints = get_type_hints(cls)
     kwargs: dict[str, object] = {}
     known = {f.name for f in fields(cls)}
+    before = len(errors) if errors is not None else 0
     for key in data:
         if key not in known:
             hint = _RENAMED_FIELDS.get(key)
             gone = _REMOVED_FIELDS.get(key)
-            raise ModelError(f"{path}.{key}: unknown field"
-                             + (f" — renamed to `{hint}`. {_RENAME_NOTES[key]}" if hint else "")
-                             + (f" — REMOVED. {gone}" if gone else ""))
+            _collect(errors, ModelError(
+                f"{path}.{key}: unknown field"
+                + (f" — renamed to `{hint}`. {_RENAME_NOTES[key]}" if hint else "")
+                + (f" — REMOVED. {gone}" if gone else "")))
     for f in fields(cls):
         if f.name in data:
-            kwargs[f.name] = _check(data[f.name], hints[f.name], f"{path}.{f.name}")
+            try:
+                kwargs[f.name] = _check(data[f.name], hints[f.name], f"{path}.{f.name}", errors)
+            except ModelError as e:
+                _collect(errors, e)
         # an absent field takes its dataclass default; a missing REQUIRED field (no default)
         # surfaces as the TypeError below, reported with this path
+    if errors is not None:
+        # A missing field is named here, not left to the TypeError below: with a field already
+        # faulted the constructor would also blame that field as "missing", which it is not.
+        missing = [f.name for f in fields(cls) if f.name not in data
+                   and f.default is MISSING and f.default_factory is MISSING]
+        if missing:
+            errors.append(f"{path}: missing required field(s): {', '.join(missing)}")
+        if len(errors) > before:
+            raise _AlreadyReported(path)
     try:
         return cls(**kwargs)  # missing REQUIRED fields (no default) raise TypeError
     except TypeError as e:

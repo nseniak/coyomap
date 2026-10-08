@@ -703,3 +703,35 @@ def test_a_refused_record_appends_nothing():
     assert [r[0] for r in refused] == [2, 2, 0], refused
     assert "already recorded" in refused[2][1]
     assert events == [], "only a write leaves a record line"
+
+
+# --- a why with a sentence over 20 words is refused (retro mcpolis-2026-10-08-#16) ----------------
+# 20 of the 34 long sentences on the 2026-10-08 mcpolis map were recorded lines: the readability
+# check counts every recorded why, and `record` let each one in.
+
+LONG_WHY = ("the two clauses describe one goal that the checkout team ships as a single release, "
+            "so splitting them would draw two boxes for one thing the reader sees")
+
+
+def test_a_why_with_a_sentence_over_twenty_words_is_refused_and_named():
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_extras_file(Path(td), "UC1: first.\n")
+        before = frag.read_text(encoding="utf-8")
+        code, _out, err = run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                                      "--line", "UC2: one goal, one release.",
+                                      "--line", f"UC3: {LONG_WHY}."])
+        assert code == 2, err
+        assert "28 words" in err and LONG_WHY in err, err
+        assert "UC2" not in err, "only the line with the long sentence is named"
+        assert frag.read_text(encoding="utf-8") == before, "a refused batch writes nothing"
+
+
+def test_a_long_key_is_not_counted_only_the_why():
+    # The key is a label, not a sentence: the readability check reads the why alone, and so does this.
+    key = ", ".join(f"UC{i}" for i in range(1, 26))
+    with tempfile.TemporaryDirectory() as td:
+        frag = make_extras_file(Path(td), "")
+        code, _out, err = run_record(["--map", str(frag), "--heading", "Balance exceptions",
+                                      "--line", f"{key}: one goal, one release."])
+        assert code == 0, err
+        assert "UC25" in frag.read_text(encoding="utf-8")

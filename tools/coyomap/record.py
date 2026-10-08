@@ -46,6 +46,9 @@ what are independent appends under one heading:
                    --lines-from coverage.txt
     coyomap record --headings
 
+A line whose why holds a sentence over 20 words is refused, and the sentence is named: the viewer
+shows the why, and the readability check counts it.
+
 Every line is shape-checked BEFORE anything is written, so a bad one in a batch of twenty leaves the
 fragment untouched rather than holding half a batch. `--replace` corrects one record, so it refuses
 to combine with a batch. To correct several, remove them in one call (`--remove` repeats), then
@@ -555,6 +558,21 @@ def main(argv: list[str] | None = None) -> int:
     canonical, complaint = _resolve_heading(heading)
     if complaint:
         print(f"ERROR: {complaint}", file=sys.stderr)
+        return 2
+    # A WHY WITH A SENTENCE OVER THE WORD LIMIT is refused, every line checked before anything is
+    # written. The viewer shows the why, and the readability check counts it: on the 2026-10-08
+    # mcpolis map 20 of the 34 long sentences were recorded lines, and this command had let every
+    # one of them in. The same splitter and counter as that check (`records.why_of`, then
+    # `prose.long_sentences`), so a line accepted here is never a long sentence there.
+    long_whys = [] if remove else [(ln, s) for ln in lines
+                                   for s in prose.long_sentences(records.why_of(canonical, ln))]
+    if long_whys:
+        for ln, sentence in long_whys:
+            print(f"ERROR: a sentence of {prose.word_count(sentence)} words, over the "
+                  f"{prose.SENTENCE_WORD_LIMIT}-word limit, in the why of '{clip(ln, 60)}': "
+                  f"\"{sentence}\"", file=sys.stderr)
+        print(f"REFUSED: split each sentence above into shorter ones (one idea per sentence). "
+              f"None of the {len(lines)} line(s) was written.", file=sys.stderr)
         return 2
     if seed_extras:
         path.write_text('{\n  "extras": []\n}\n', encoding="utf-8")

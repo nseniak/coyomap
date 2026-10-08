@@ -2238,3 +2238,52 @@ def test_refutations_counts_the_reworded_access_rules_past_eight_it_does_not_nam
     text = G.format_refutations([], make_unseen_rules(m), m=m, grounding_rows=rows, pinned=pinned)
     line = next(ln for ln in text.splitlines() if "re-worded after the vote" in ln)
     assert line.endswith(": BR1, BR2, BR3, BR4, BR5, BR6, BR7, BR8, +2 more"), line
+
+
+# --- one file opened under several spellings is one file (retro mcpolis-2026-10-08-#13) -----------
+# A skeptic opened `session_owner_guard.py` as an absolute path, as a repo-relative path and from
+# `backend/src/mcpolis` as `entrypoints/...`. A row citing the bare name then matched three
+# "different" files, counted as ambiguous, and was flagged: all 8 visible flagged names (18 of 24
+# rows) on the 2026-10-08 mcpolis build were files opened under 2-4 spellings.
+
+def make_reads_transcript(tmp: Path, paths: list[str]) -> Path:
+    """An agent directory whose one transcript `Read`s each of `paths`."""
+    agents = tmp / "agents"
+    agents.mkdir()
+    (agents / "agent-1.jsonl").write_text("".join(json.dumps({"message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": p}}]}}) + "\n"
+        for p in paths), encoding="utf-8")
+    return agents
+
+
+def make_bare_name_verdicts(tmp: Path, name: str) -> Path:
+    v = tmp / "v.json"
+    v.write_text(json.dumps({"grounding": [
+        {"claim": "c1", "grounded": True, "evidence": f"{name}:12", "skeptic": "s",
+         "note": f"Read {name}: it does"}]}), encoding="utf-8")
+    return v
+
+
+def test_a_bare_name_opened_under_several_spellings_of_one_file_is_read():
+    spellings = ["/Users/x/repo/backend/src/pkg/mw/session_owner_guard.py",
+                 "backend/src/pkg/mw/session_owner_guard.py",
+                 "mw/session_owner_guard.py"]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        agents = make_reads_transcript(tmp, spellings)
+        v = make_bare_name_verdicts(tmp, "session_owner_guard.py")
+        code, lines = run_lint(["--verdicts", str(v), "--agent-transcripts", str(agents)])
+    assert code == 0, lines
+    assert not any("session_owner_guard" in ln for ln in lines), lines
+
+
+def test_a_bare_name_two_different_files_share_is_still_ambiguous():
+    # The guard the one-file rule exists for: two real files named `config.py`, and the citation
+    # cannot say which one was read.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        agents = make_reads_transcript(tmp, ["src/a/config.py", "vendor/b/config.py"])
+        v = make_bare_name_verdicts(tmp, "config.py")
+        code, lines = run_lint(["--verdicts", str(v), "--agent-transcripts", str(agents)])
+    assert code == 1, lines
+    assert any("config.py" in ln for ln in lines), lines

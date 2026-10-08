@@ -83,8 +83,8 @@ Commands:
              it, `phase <name>` marks a phase and prints it, `add decision|next|wave` writes a
              line, `show` prints it.
   findings   Product findings the agents file as they work (`add`: one line, into the agent's own
-             file) and the lead collects (`collect`: one verdict line, the whole list in
-             .coyomap/findings-report.md).
+             file; `withdraw`: take one back, with the reason kept) and the lead collects
+             (`collect`: one verdict line, the whole list in .coyomap/findings-report.md).
   diff       What changed between two maps, ROW BY ROW — added / dropped / changed, with the
              fields that moved. Two assembles of the SAME work (old map vs new, before vs after a
              `fix`), never two independent builds: those agree on neither numbering nor wording.

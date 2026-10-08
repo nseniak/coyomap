@@ -44,6 +44,7 @@ from coyomap.model import (
     guard_wrong_map,
     resolve_map_path,
     _build,
+    _collect,
     _normalize_subflow_title,
     load_model,
     remap_element_ids,
@@ -162,12 +163,9 @@ def _drop_answered_interface_pointers(m: ProjectModel) -> list[str]:
     return cleared
 
 
-def load_fragment(text: str, label: str) -> ProjectModel:
-    """A fragment parsed + structurally validated as a partial model. `format` defaults to the
-    current one so agents don't have to state it; everything else validates exactly like the map —
-    INCLUDING the id-shape/prefix rule (`S1a` in a fragment must die at the authoring agent's own
-    `lint-fragment`, not a phase later at the lead's validate — the shift-left this module exists
-    for; the rule was previously run only by `load_model`)."""
+def _fragment_data(text: str, label: str) -> dict:
+    """A fragment's JSON object, with `format` defaulted and the known aliases rewritten. Raises
+    ModelError when the text is not a fragment at all (bad JSON, not an object, wrong format)."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
@@ -179,15 +177,57 @@ def load_fragment(text: str, label: str) -> ProjectModel:
         raise ModelError(f"{label}: format: expected '{FORMAT}', got {data['format']!r}")
     _normalize_subflow_title(data)  # `subflows[].title` alias — the shape agents guess by analogy
     # with Flow; five identical lint failures in one live rebuild (see model._normalize_subflow_title)
-    m = _build(data, ProjectModel, label)
+    return data
+
+
+def _id_shape_errors(data: dict, label: str) -> list[str]:
+    """Every element id of the fragment that is not its array's prefix + digits. Read from the raw
+    rows, so it also runs on a fragment that does not build."""
+    errors: list[str] = []
     for attr, prefix in ID_ARRAYS.items():
-        for i, el in enumerate(getattr(m, attr)):
-            eid = el.id
-            good = bool(ID_SHAPE.match(eid)) and re.match(r"[A-Z]+", eid).group(0) == prefix  # type: ignore[union-attr]
-            if not good:
-                raise ModelError(f"{label}: $.{attr}[{i}].id: '{eid}' is not a valid {prefix}-id "
-                                 f"(a schema id is the prefix + digits only, e.g. {prefix}3)")
+        rows = data.get(attr)
+        for i, el in enumerate(rows if isinstance(rows, list) else []):
+            eid = el.get("id") if isinstance(el, dict) else None
+            if not isinstance(eid, str):
+                continue  # a missing or non-string id is the schema check's fault, already named
+            head = re.match(r"[A-Z]+", eid)
+            if not (ID_SHAPE.match(eid) and head and head.group(0) == prefix):
+                errors.append(f"{label}: $.{attr}[{i}].id: '{eid}' is not a valid {prefix}-id "
+                              f"(a schema id is the prefix + digits only, e.g. {prefix}3)")
+    return errors
+
+
+def load_fragment(text: str, label: str) -> ProjectModel:
+    """A fragment parsed + structurally validated as a partial model. `format` defaults to the
+    current one so agents don't have to state it; everything else validates exactly like the map —
+    INCLUDING the id-shape/prefix rule (`S1a` in a fragment must die at the authoring agent's own
+    `lint-fragment`, not a phase later at the lead's validate — the shift-left this module exists
+    for; the rule was previously run only by `load_model`). Raises on the FIRST fault; see
+    `fragment_schema_errors` for all of them."""
+    data = _fragment_data(text, label)
+    m = _build(data, ProjectModel, label)
+    bad_ids = _id_shape_errors(data, label)
+    if bad_ids:
+        raise ModelError(bad_ids[0])
     return m
+
+
+def fragment_schema_errors(text: str, label: str) -> list[str]:
+    """EVERY schema fault of a fragment, in file order; empty when `load_fragment` would succeed.
+
+    `lint-fragment` prints these. It used to print `load_fragment`'s one error and stop, so each
+    fault cost the agent a lint round of its own: 14 of 48 harvest lint runs on the 2026-10-08
+    mcpolis build failed that way."""
+    try:
+        data = _fragment_data(text, label)
+    except ModelError as e:
+        return [str(e)]
+    errors: list[str] = []
+    try:
+        _build(data, ProjectModel, label, errors)
+    except ModelError as e:
+        _collect(errors, e)
+    return errors + _id_shape_errors(data, label)
 
 
 def load_map_or_fragment(path: Path) -> tuple[ProjectModel, frozenset[str] | None]:
