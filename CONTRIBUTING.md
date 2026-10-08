@@ -135,8 +135,8 @@ which is how the main skill spent weeks telling agents to read a method doc that
 `tests/test_skill_pointers.py` keeps the copies thin enough that drift is nearly harmless, but it
 cannot see the installed files.
 
-**A build and its retro, overnight.** `make claude-build` (see the README, "Using headless
-Claude Code") has two developer siblings, which need `make install-dev`:
+**A build and its retro, overnight.** `make claude-build` (see the README, "Building the map
+using headless Claude Code") has two developer siblings, which need `make install-dev`:
 
 ```
 make claude-build-retro REPO=~/my-project   # the build, then /coyomap-retro of it, in the same folder

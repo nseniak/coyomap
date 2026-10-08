@@ -79,22 +79,6 @@ claude
 
 The map is created in your project's `.coyomap/` subdirectory. Commit it with your code if you want to share it.
 
-#### Using headless Claude Code
-
-To build a map with no chat window open (Claude Code's headless mode):
-
-```
-cd coyomap
-make claude-build REPO=~/my-project
-```
-
-Its logs go to a run folder under your project's `.coyomap/runs/`, which the command prints and git ignores. Optional: `MODEL=` and `EFFORT=` (Claude Code's defaults if left out), `PROMPT=` (default `/coyomap build a new map from scratch`).
-
-To run `claude -p` yourself, check these two settings:
-
-- `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: otherwise the session ends the build after 10 minutes of waiting for its helper agents.
-- `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`: leave it unset, or 2 or more. Some helper agents start their own helpers.
-
 ### Explore the map
 
 Open the map in your browser with the coyomap viewer. It runs on your machine and shows every map you have opened.
@@ -125,6 +109,22 @@ You may use the coyomap skill to ask questions about the map and request updates
 # ask for a change to the map itself
 /coyomap rename the "API" subsystem to "Public API"
 ```
+
+### Building the map using headless Claude Code
+
+To build a map with no chat window open (Claude Code's headless mode):
+
+```
+cd coyomap
+make claude-build REPO=~/my-project
+```
+
+Its logs go to a run folder under your project's `.coyomap/runs/`, which the command prints and git ignores. Optional: `MODEL=` and `EFFORT=` (Claude Code's defaults if left out), `PROMPT=` (default `/coyomap build a new map from scratch`).
+
+To run `claude -p` yourself, check these two settings:
+
+- `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`: otherwise the session ends the build after 10 minutes of waiting for its helper agents.
+- `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`: leave it unset, or 2 or more. Some helper agents start their own helpers.
 
 ### Share the map
 
