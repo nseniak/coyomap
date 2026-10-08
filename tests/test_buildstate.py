@@ -535,6 +535,31 @@ def test_an_unknown_kind_from_a_tool_is_a_note_not_a_line() -> None:
     assert len(lines) == 3
 
 
+
+def test_a_read_after_the_build_closed_writes_no_line() -> None:
+    """Retro 2026-10-08 #8: after `ship` wrote `end`, a `findings collect` and the retrospective's
+    `grounding lint` runs added 8 lines to the log the build had already committed. A read changes
+    no map, so once the build has closed it leaves the log alone; a fix after the end opens it
+    again and is logged as before."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_state(td)
+        assert append(repo, "barrier", "VERDICTS OK — 3 file(s)"), "an open build logs its reads"
+        assert append(repo, "end", "ship complete")
+        before = make_log_lines(repo)
+        assert append(repo, "barrier", "VERDICTS OK — 3 file(s)") is False
+        assert append(repo, "findings", "FINDINGS — 2 from 2 agent(s)") is False
+        assert append(repo, "next", "commit"), "the lead's own notes still go in"
+        assert make_log_lines(repo)[:-1] == before
+        # A record after the end opens the build again, and its reads are logged.
+        assert append(repo, "record", "+1 under \"Walk jumps\"")
+        assert append(repo, "barrier", "VERDICTS OK — 3 file(s)")
+        # `phase commit` closes it as `end` does.
+        assert append(repo, "phase", "commit")
+        assert append(repo, "findings", "FINDINGS — 2 from 2 agent(s)") is False
+        assert append(repo, "phase", "verify")
+        assert append(repo, "barrier", "VERDICTS OK — 3 file(s)")
+
+
 if __name__ == "__main__":
     for _name, _fn in sorted(list(globals().items())):
         if _name.startswith("test_") and callable(_fn):

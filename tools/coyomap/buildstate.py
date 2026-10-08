@@ -21,6 +21,8 @@ a lead reads after a summary.
   * Every line goes through `credentials.redact`. A line is clipped to `LINE_CAP` characters, but a
     line that carries a command (`WHOLE_KINDS`) is kept whole: a clipped command cannot be run.
   * The file is never rewritten. It has no size bound; the view `show` prints has one.
+  * Once the build has closed (`end`, or `phase commit`), a read writes no line (`QUIET_AFTER_END`):
+    a check run after the commit, or by a retrospective, leaves the committed log as it was.
 
 Stdlib-only (the cli.py firewall). It imports provenance, reporting, credentials, home, waveplan,
 subverb_help, subverb_args and uncommitted (which names its two files), none of which imports it
@@ -68,6 +70,14 @@ KINDS: tuple[str, ...] = (
 #: The kinds `state add` writes: the lead's own two, and how a wave runner's wave ended, which the
 #: runner writes just before its report. The tools write the rest.
 ADD_KINDS: tuple[str, ...] = ("decision", "next", "wave")
+
+#: The kinds a READ writes: a check of files already there (`grounding lint`) and a count of the
+#: agents' findings (`findings collect`). Neither changes the map, so neither belongs in the log of a
+#: build that has closed. On the 2026-10-08 mcpolis build they added 8 lines after the build's own
+#: commit: 2 from the build itself and 6 from the retrospective that read it.
+QUIET_AFTER_END: tuple[str, ...] = ("barrier", "findings")
+#: The kinds that neither close a build nor open it again: the lead's own notes, and the reads above.
+_NEITHER: tuple[str, ...] = ("decision", "next", "timings", *QUIET_AFTER_END)
 
 HEADER = ("# coyomap build state: one line per event, oldest first, written by the coyomap tools.\n"
           "# Never edit it by hand. Read it with `coyomap state show --repo <repo>`.\n")
@@ -171,6 +181,8 @@ def append(repo: Path | None, kind: str, text: str) -> bool:
     if kind not in KINDS:
         _note(f"unknown kind {kind!r}")
         return False
+    if kind in QUIET_AFTER_END and _closed(repo):
+        return False
     data = _encode(event_line(kind, text))
     try:
         fd = os.open(state_path(repo), os.O_WRONLY | os.O_APPEND)
@@ -191,6 +203,21 @@ def append(repo: Path | None, kind: str, text: str) -> bool:
         _note(f"only {written} of {len(data)} bytes written")
         return False
     return True
+
+
+def _closed(repo: Path) -> bool:
+    """Has the build closed: is its last event that is not a note or a read the `end` that `ship`
+    writes, or the lead's `phase commit`? A `record`, an `assemble`, another phase, or a fresh
+    `start` opens it again, so a fix after the end is logged as before. A state that cannot be read
+    counts as open: a lost line is worse than a stray one."""
+    try:
+        state = read_state(repo)
+    except OSError:
+        return False
+    last = next((e for e in reversed(state.events) if e.kind not in _NEITHER), None) if state else None
+    if last is None:
+        return False
+    return last.kind == "end" or (last.kind == "phase" and last.text.split()[:1] == ["commit"])
 
 
 # ── reading ──────────────────────────────────────────────────────────────────────────────────────

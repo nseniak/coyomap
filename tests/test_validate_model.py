@@ -3841,6 +3841,74 @@ def test_a_claim_ADDED_since_the_pin_is_not_a_loss():
         assert not [w for w in warnings if CLAIM_LOSS_LINE in w], warnings
 
 
+def make_two_wave_pin(root: Path, m: ProjectModel, *, reworded: str, upheld: str | None = None,
+                      second_wave: bool = True) -> Path:
+    """The map on disk with a pin of TWO waves: the first wave held the map's first claim under an
+    older wording, and the second wave re-stated it as the map has it now. `upheld` adds one more
+    first-wave claim the map dropped, with a closer file upholding its refutation. With
+    `second_wave=False` the pin does not say which rows a later wave appended."""
+    from coyomap.audit_model import l2_worklist_model
+    model_path = root / "project-map.json"
+    model_path.write_text(to_canonical_json(m), encoding="utf-8")
+    (root / "project-map.md").write_text(model_to_markdown(m), encoding="utf-8")
+    items = l2_worklist_model(m)
+    first, rest = items[0], items[1:]
+    def row(claim: str, theme: str, elements: tuple[str, ...]) -> dict[str, object]:
+        return {"claim": claim, "anchor": None, "theme": theme, "elements": list(elements)}
+    rows = [row(reworded, first.theme, first.elements)]
+    rows += [row(i.claim, i.theme, i.elements) for i in rest]
+    if upheld is not None:
+        rows.append(row(upheld, "backbone", ("C1", "C9")))
+    rows.append(row(first.claim, first.theme, first.elements))      # the second wave
+    verify = root / "verify"
+    verify.mkdir(exist_ok=True)
+    payload: dict[str, object] = {"worklist": rows}
+    if second_wave:
+        payload["second_wave"] = 1
+    (verify / "worklist.json").write_text(json.dumps(payload), encoding="utf-8")
+    if upheld is not None:
+        (verify / "closer-a.json").write_text(json.dumps({"grounding": [
+            {"claim": upheld, "verdict": "uphold", "grounded": False, "skeptic": "closer"}]}),
+            encoding="utf-8")
+    return model_path
+
+
+def test_a_claim_a_later_wave_re_stated_is_not_a_loss():
+    """On the 2026-10-08 mcpolis build the advisory said 21 claims were gone, and all of them had
+    been removed on purpose: 20 re-stated and voted in wave 2. The second wave APPENDS to the pin,
+    so the pin holds the old wording and the new one while the map carries only the new one, and a
+    count by theme reads that pair as one claim lost."""
+    m = make_valid_model()
+    with tempfile.TemporaryDirectory() as td:
+        model_path = make_two_wave_pin(Path(td), m, reworded="an older wording of claim one")
+        _, warnings = validate_model(m, model_path)
+        assert not [w for w in warnings if CLAIM_LOSS_LINE in w], warnings
+    # The guard: a pin that does not say which rows a later wave added re-states nothing, so the
+    # old wording is a loss again.
+    with tempfile.TemporaryDirectory() as td:
+        model_path = make_two_wave_pin(Path(td), m, reworded="an older wording of claim one",
+                                       second_wave=False)
+        hit = [w for w in validate_model(m, model_path)[1] if CLAIM_LOSS_LINE in w]
+        assert len(hit) == 1 and hit[0].startswith("1 claim(s)"), hit
+
+
+def test_a_claim_the_closer_upheld_a_refutation_of_is_not_a_loss():
+    """The other 5 of the 25 gone claims on that build: a skeptic refuted each, the closer upheld
+    the refutation, and the build removed the claim. That removal is the correction working."""
+    m = make_valid_model()
+    with tempfile.TemporaryDirectory() as td:
+        model_path = make_two_wave_pin(Path(td), m, reworded="an older wording of claim one",
+                                       upheld="C1 calls C9")
+        assert not [w for w in validate_model(m, model_path)[1] if CLAIM_LOSS_LINE in w]
+        # The closer REJECTING the refutation keeps the claim owed: it was true, and it is gone.
+        (Path(td) / "verify" / "closer-a.json").write_text(json.dumps({"grounding": [
+            {"claim": "C1 calls C9", "verdict": "reject", "grounded": True, "skeptic": "closer"}]}),
+            encoding="utf-8")
+        hit = [w for w in validate_model(m, model_path)[1] if CLAIM_LOSS_LINE in w]
+        assert len(hit) == 1 and hit[0].startswith("1 claim(s)") and "backbone" in hit[0], hit
+        assert "1 claim(s) a later wave re-stated" in hit[0], "it says what it did not count"
+
+
 def test_full_live_coverage_is_silent():
     """The ordinary build rewords nothing after the vote, and must hear nothing about it."""
     m = make_grounded_model(claims_total=209, claims_challenged=209, claims_confirmed=209,
@@ -6340,6 +6408,27 @@ def test_a_walk_jump_sees_through_a_shared_walk():
     assert len(walk_jumps(m)) == 1 and "step 3 starts at C3" in walk_jumps(m)[0]
 
 
+def test_a_walk_jump_inside_a_shared_walk_names_the_shared_walks_step():
+    """Retro 2026-10-08 #10: 21 of 25 walk-jump warnings on the mcpolis map printed a sub-flow's
+    own step number under the use case's id. "UC6 step 1 starts at C62" was SF40's step 1, and
+    UC6's step 1 is something else, so the reader opened the wrong step."""
+    m = ProjectModel(title="T", goal="G")
+    m.use_cases = [UseCase(id="UC1", name="View")]
+    m.components = [Component(id=f"C{i}", name=n, purpose=n.lower())
+                    for i, n in ((1, "A"), (2, "B"), (3, "C"), (4, "D"))]
+    m.subflows = [SubFlow(id="SF1", name="Shared", steps=[
+        FlowStep(n=1, src="C2", dst="C3", phrase="reach C", where="src/a.py:1"),
+        FlowStep(n=2, src="C4", dst="C3", phrase="jump to D", where="src/a.py:2")])]
+    m.flows = [Flow(uc="UC1", title="View", steps=[
+        FlowStep(n=1, src="C1", dst="C2", phrase="hand it on", where="src/a.py:1"),
+        FlowStep(n=2, src="C2", dst="C3", subflow="SF1"),
+    ])]
+    out = walk_jumps(m)
+    assert len(out) == 1, out
+    assert out[0].startswith("SF1 step 2 (via UC1 step 2) starts at C4"), out[0]
+    assert "'UC1: <why this begins a new thread>'" in out[0], "the record key stays the use case"
+
+
 def test_a_recorded_walk_jump_is_a_second_thread_not_a_gap():
     """The advisory has always ended "or record 'UCn: <why this begins a new thread>' under a
     'Walk jumps' extras heading", and nothing read that heading: `record` refused the line, and a
@@ -6873,3 +6962,84 @@ def test_the_merge_advice_counts_the_keys_it_does_not_name():
                              body="\n".join(f"C{i}: a dev-only surface" for i in range(1, 6)))]
     said = next((w for w in warnings_of(m) if "repeats one reason" in w), "")
     assert "(C1, C2, C3, +2 more key(s): <why>)" in said, said
+
+
+# ── dependencies the map leaves out or leaves ungrouped (backlog row 49) ─────────────────────────
+
+UNBUCKETED_LINE = "have no authored bucket"
+UNNAMED_PACKAGE_LINE = "named by no dependency"
+
+
+def test_a_dependency_with_no_authored_bucket_is_reported():
+    """On the 2026-10-08 mcpolis map all 19 deps shipped with no bucket: the reconcile pass that
+    sets them was skipped, the viewer guessed, and 8 of the 19 guesses were wrong. `validate`
+    reported nothing, because a missing bucket was silent by design."""
+    m = make_valid_model()
+    m.deps = [Dep(id="D1", name="MongoDB", kind="datastore", type="database"),
+              Dep(id="D2", name="Sentry", kind="service", type="error tracking",
+                  bucket="Observability")]
+    hit = [w for w in warnings_of(m) if UNBUCKETED_LINE in w]
+    assert len(hit) == 1 and hit[0].startswith("1 of 2 dependencies") and "D1" in hit[0], hit
+    m.deps[0].bucket = "Data & storage"
+    assert not [w for w in warnings_of(m) if UNBUCKETED_LINE in w]
+
+
+def make_package_repo(root: Path) -> None:
+    """A repo declaring packages in all three kinds of package file, plus the kinds of declaration
+    that are NOT top-level product packages: a dev dependency, a poetry dev group, `python` itself,
+    an indirect Go module, and an e2e suite's own package file."""
+    (root / "web").mkdir()
+    (root / "web" / "package.json").write_text(json.dumps({
+        "dependencies": {"react": "^19", "react-dom": "^19", "@tanstack/react-query": "^5",
+                         "@sentry/react": "^10"},
+        "devDependencies": {"vitest": "^4"}}), encoding="utf-8")
+    (root / "api").mkdir()
+    (root / "api" / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["httpx>=0.27", "Pydantic_Settings[dotenv]>=2"]\n'
+        '[tool.poetry.dependencies]\npython = ">=3.12"\nfastapi = "^0.121"\n'
+        '[tool.poetry.group.dev.dependencies]\npytest = "^9"\n', encoding="utf-8")
+    (root / "go.mod").write_text(
+        "module example.com/x\n\ngo 1.22\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.9.1\n"
+        "\tgolang.org/x/text v0.14.0 // indirect\n)\nrequire github.com/lib/pq v1.10.9\n",
+        encoding="utf-8")
+    (root / "tests" / "e2e").mkdir(parents=True)
+    (root / "tests" / "e2e" / "package.json").write_text(json.dumps(
+        {"dependencies": {"@playwright/test": "^1"}}), encoding="utf-8")
+
+
+def test_the_package_files_declare_only_their_top_level_product_packages():
+    from coyomap.packages import declared_packages
+    with tempfile.TemporaryDirectory() as td:
+        make_package_repo(Path(td))
+        got = sorted((p.name, p.file) for p in declared_packages(Path(td)))
+    assert got == sorted([
+        ("@sentry/react", "web/package.json"), ("@tanstack/react-query", "web/package.json"),
+        ("react", "web/package.json"), ("react-dom", "web/package.json"),
+        ("fastapi", "api/pyproject.toml"), ("httpx", "api/pyproject.toml"),
+        ("Pydantic_Settings", "api/pyproject.toml"),
+        ("github.com/gin-gonic/gin", "go.mod"), ("github.com/lib/pq", "go.mod")]), got
+
+
+def test_a_declared_package_no_dependency_names_is_reported():
+    """The 2026-10-08 mcpolis rebuild went from 29 deps to 19, and React Router, Tailwind and
+    TanStack Query left the map with nothing saying so. A dep names a package by its `package`
+    field or its name, so one merged dep counts for every package it lists."""
+    m = make_valid_model()
+    m.deps = [
+        Dep(id="D1", name="React and FastAPI", kind="framework", type="web framework",
+            bucket="Web framework", package="react ^19, react-dom ^19 (web/package.json)"),
+        Dep(id="D2", name="Sentry", kind="service", type="error tracking", bucket="Observability"),
+        Dep(id="D3", name="Gin", kind="framework", type="http router", bucket="Web framework"),
+        Dep(id="D4", name="pydantic settings", kind="library", type="config", bucket="Config")]
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        make_package_repo(root)
+        _, warnings = validate_model(m, repo_root=root, check_coverage=True)
+        hit = [w for w in warnings if UNNAMED_PACKAGE_LINE in w]
+        assert len(hit) == 1, warnings
+        assert hit[0].startswith("3 top-level package(s)"), hit[0]
+        for name in ("@tanstack/react-query (web/package.json)", "httpx (api/pyproject.toml)",
+                     "github.com/lib/pq (go.mod)"):
+            assert name in hit[0], (name, hit[0])
+        # Without the tree-reading flag nothing reads the package files.
+        assert not [w for w in validate_model(m, repo_root=root)[1] if UNNAMED_PACKAGE_LINE in w]

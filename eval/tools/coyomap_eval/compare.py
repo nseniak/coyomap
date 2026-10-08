@@ -455,6 +455,7 @@ def compare(baseline: MapProfile, candidate: MapProfile, thresholds: Thresholds 
     notes.extend(_reproducibility_notes(baseline, candidate))
     notes.extend(_source_root_notes(baseline, candidate))
     notes.extend(_interface_kind_notes(baseline, candidate))
+    notes.extend(_dependency_notes(baseline, candidate))
 
     if t.deployment_linkage_must_not_drop and not baseline.deployment_units:
         # Silence here is indistinguishable from "the gate passed". A baseline blessed before this
@@ -780,6 +781,25 @@ def _interface_kind_notes(baseline: MapProfile, candidate: MapProfile) -> list[s
     return [f"{len(lost)} interface kind(s) the baseline had and the candidate has none of: "
             + ", ".join(f"{k} ({n} -> 0)" for k, n in lost)
             + " — a surface lost or re-kinded; the code decides which"]
+
+
+def _dependency_notes(baseline: MapProfile, candidate: MapProfile) -> list[str]:
+    """Deps with no authored bucket, and declared packages no dep names, whenever the candidate has
+    any. Reported, never gated, like the interface kinds above: the 2026-10-08 mcpolis rebuild went
+    from 29 deps to 19, all 19 with no bucket, and the only row that moved was `deps` itself, still
+    inside its band. A side scored before the field, or without `--repo`, reads n/a."""
+    def n(v: int | None) -> str:
+        return "n/a" if v is None else str(v)
+    out: list[str] = []
+    if candidate.deps_without_bucket:
+        out.append(f"deps with no authored bucket {n(baseline.deps_without_bucket)} -> "
+                   f"{candidate.deps_without_bucket} of {candidate.deps}: the viewer guesses their "
+                   f"groups")
+    if candidate.packages_without_dep:
+        out.append(f"declared packages no dep names {n(baseline.packages_without_dep)} -> "
+                   f"{candidate.packages_without_dep}: libraries the Dependencies view does not "
+                   f"show (`validate --check-coverage` lists them)")
+    return out
 
 
 def _reproducibility_notes(baseline: MapProfile, candidate: MapProfile) -> list[str]:

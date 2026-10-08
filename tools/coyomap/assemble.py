@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
 from coyomap import buildstate, grammar, uncommitted
+from coyomap.anchors import LINE_ANCHOR
 from coyomap.model import (
     FORMAT,
     ID_ARRAYS,
@@ -495,6 +496,8 @@ def merge_fragments(parts: list[tuple[str, ProjectModel]],
     _merge_duplicate_edges(out)  # LAST: dep-merge / actor-strip / component re-point can create exact dups
     eps_before_dup = len(out.entry_points)
     _mint_entry_point_ids(out)   # after every merge, so the minted range has no gaps
+    if notes is not None:        # after the minting, so a way in is named by its id
+        notes.extend(_shared_anchor_notes(out))
     extras_merged = _merge_extras_headings(out)
     if stats is not None:
         stats["deps_merged"] = deps_merged
@@ -1084,6 +1087,51 @@ def _mint_entry_point_ids(m: ProjectModel) -> None:
     for n, ep in enumerate(ordered, start=1):
         ep.id = f"EP{n}"
     m.entry_points = ordered
+
+
+def _shared_anchor_notes(m: ProjectModel) -> list[str]:
+    """WARNING lines for the near-duplicates the merges above leave in place: two parts at one
+    `file:line` under different names, and two ways in of one kind at one `file:line` owned by
+    different parts.
+
+    The merges take only an exact identity, on purpose (`_component_identity`,
+    `_entry_point_identity`): over-merging loses a row nobody can see. But a near-duplicate is
+    then silent. On the 2026-10-08 mcpolis build two slices each wrote the dashboard's route table
+    as a part, under two names at `App.tsx:189`, and two slices each wrote 6 ways in at the same
+    lines of `app.py` with different owners. Neither assemble nor validate said a word; the lead
+    found them by dumping all 256 ways in.
+
+    Ways in that differ only in their trigger are not reported: one call that registers several
+    routes is one line holding several ways in, all owned by one part. A part or a way in with no
+    line in its anchor is not reported either: a file holds many of each."""
+    def at_line(source: str | None) -> str:
+        src = (source or "").strip().lower()
+        return src if LINE_ANCHOR.search(src) else ""
+    parts: dict[str, list[str]] = {}
+    for c in m.components:
+        if at_line(c.source):
+            parts.setdefault(at_line(c.source), []).append(f"{c.id} '{c.name}'")
+    doors: dict[tuple[str, str], list[str]] = {}
+    for ep in m.entry_points:
+        if at_line(ep.source):
+            key = (at_line(ep.source), " ".join((ep.kind or "").split()).lower())
+            doors.setdefault(key, []).append(f"{ep.id} on {ep.component or 'no part'}")
+    owners = {k: v for k, v in doors.items()
+              if len({row.rsplit(" on ", 1)[1] for row in v}) > 1}
+    out: list[str] = []
+    shared = [f"{' and '.join(v)} at {k}" for k, v in sorted(parts.items()) if len(v) > 1]
+    if shared:
+        out.append(f"WARNING: {len(shared)} code line(s) anchor more than one part, under "
+                   f"different names: {_shown(shared, 6, sep='; ', unit='line(s)')}. Two slices "
+                   f"probably harvested one part twice. Keep one: drop the other from its fragment "
+                   f"and point its references at the one you keep.")
+    if owners:
+        rows = [f"[{kind}] {' and '.join(v)} at {src}" for (src, kind), v in sorted(owners.items())]
+        out.append(f"WARNING: {len(rows)} code line(s) hold ways in of one kind owned by different "
+                   f"parts: {_shown(rows, 6, sep='; ', unit='line(s)')}. Two slices probably wrote "
+                   f"one way in twice. Keep the one whose part really runs it, and drop the other "
+                   f"from its fragment.")
+    return out
 
 
 def _merge_duplicate_edges(m: ProjectModel) -> None:

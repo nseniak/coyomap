@@ -1749,3 +1749,39 @@ def test_the_map_gitignore_keeps_the_build_state_and_findings_out():
         lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
     for entry in ("build-state.log", "build-state.prev.log", "findings/", "findings-report.md"):
         assert entry in lines, f"{entry} is not ignored in the map folder: {lines}"
+
+
+def test_two_parts_at_one_line_under_two_names_are_warned_about():
+    """Retro 2026-10-08 #19: two slices each wrote the dashboard's route table as a part, under two
+    names at `App.tsx:189`. The merge takes only an exact (file, name) match, so both shipped and
+    nothing said so."""
+    a = make_component_fragment("C10", "Dashboard shell and route table", "frontend/src/App.tsx:189")
+    b = make_component_fragment("C30", "App router", "frontend/src/App.tsx:189")
+    model, problems, _stats, notes = merge_two(a, b)
+    assert problems == [] and [c.id for c in model.components] == ["C10", "C30"], "never merged"
+    hit = [n for n in notes if "anchor more than one part" in n]
+    assert len(hit) == 1, notes
+    assert "C10 'Dashboard shell and route table' and C30 'App router' at frontend/src/app.tsx:189" in hit[0]
+    # A whole file is not one place: two parts in one file stay silent.
+    c = make_component_fragment("C11", "Reader", "src/io.py")
+    d = make_component_fragment("C31", "Writer", "src/io.py")
+    assert not [n for n in merge_two(c, d)[3] if "anchor more than one part" in n]
+
+
+def test_two_ways_in_at_one_line_with_two_owners_are_warned_about():
+    """The same build: 6 ways in written twice at the same lines of `app.py`, once on the part
+    that runs them and once on another. Ways in that differ only in their trigger stay silent:
+    one call that registers four sign-in routes is one line holding four ways in, all one part's."""
+    def door(trigger: str, component: str) -> dict[str, str]:
+        return {"kind": "startup-hook", "trigger": trigger, "source": "app.py:1150",
+                "component": component}
+    a = json.dumps({"entry_points": [door("Boot prunes saved data", "C70")]})
+    b = json.dumps({"entry_points": [door("Standalone boot prunes data", "C3")]})
+    _model, _problems, _stats, notes = merge_two(a, b)
+    hit = [n for n in notes if "ways in of one kind owned by different parts" in n]
+    assert len(hit) == 1, notes
+    assert "[startup-hook] EP1 on C70 and EP2 on C3 at app.py:1150" in hit[0], hit[0]
+    routes = json.dumps({"entry_points": [
+        {"kind": "http-route", "trigger": t, "source": "auth.py:39", "component": "C36"}
+        for t in ("GET /authorize", "POST /token", "POST /revoke")]})
+    assert not [n for n in merge_two(routes, json.dumps({}))[3] if "ways in" in n]

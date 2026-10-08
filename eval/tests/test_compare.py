@@ -1029,3 +1029,16 @@ def test_the_files_that_lost_their_access_coverage_are_cut_at_eight_and_counted(
     note = next(n for n in compare(base, cand).notes if "named by NO access rule" in n)
     assert note.endswith("these are the ones to read first: gone0.py, gone1.py, gone2.py, gone3.py, "
                          "gone4.py, gone5.py, gone6.py, gone7.py, +2 more"), note
+
+
+def test_unbucketed_deps_and_unnamed_packages_are_noted() -> None:
+    """Backlog row 49: all 19 deps of the 2026-10-08 mcpolis map shipped with no bucket and 21
+    declared packages were named by no dep, and compare's only row that moved was `deps`. Noted,
+    never gated; a baseline scored before the fields reads n/a."""
+    old = make_profile()
+    new = make_profile(deps=19, deps_without_bucket=19, packages_without_dep=21)
+    notes = compare(old, new).notes
+    assert any("deps with no authored bucket n/a -> 19 of 19" in n for n in notes), notes
+    assert any("declared packages no dep names n/a -> 21" in n for n in notes), notes
+    assert compare(old, new).verdict == compare(old, old).verdict, "a note, never a gate"
+    assert not any("bucket" in n for n in compare(old, make_profile(deps_without_bucket=0)).notes)

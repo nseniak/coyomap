@@ -992,14 +992,21 @@ def expanded_steps_with_container(m: ProjectModel, f: Flow) -> list[tuple[str, F
     keys steps this way (`step:<uc|sf>:<n>`, impact_lib); anything that identifies an expanded step
     by `(uc, n)` alone silently merges two rows into one, keeping one row's phrase and the OTHER
     row's endpoints."""
+    return [(container, st) for _parent, container, st in expanded_steps_with_parent(m, f)]
+
+
+def expanded_steps_with_parent(m: ProjectModel, f: Flow) -> list[tuple[FlowStep, str, FlowStep]]:
+    """`expanded_steps_with_container`, plus the step of the flow that each expanded step came
+    from: the reference step for a sub-flow's steps, the step itself otherwise. What a message needs
+    to name a sub-flow's step the way a reader finds it: `SF40 step 1 (via UC6 step 3)`."""
     sfs = {sf.id: sf for sf in m.subflows}
-    out: list[tuple[str, FlowStep]] = []
+    out: list[tuple[FlowStep, str, FlowStep]] = []
     for st in f.steps:
         sf = sfs.get(st.subflow or "")
         if sf is None or not sf.steps:
-            out.append((f.uc, st))
+            out.append((st, f.uc, st))
         else:
-            out.extend((sf.id, s) for s in sf.steps)
+            out.extend((st, sf.id, s) for s in sf.steps)
     return out
 
 

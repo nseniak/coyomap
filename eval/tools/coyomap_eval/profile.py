@@ -29,6 +29,7 @@ from coyomap.impact_git import load_map_extents
 from coyomap.impact_lib import enclosing_extent
 from coyomap import audit_model, balance_lib, grammar, validate_model
 from coyomap.model import FlowStep, ModelError, ProjectModel, load_model
+from coyomap.packages import declared_packages, unnamed_packages
 
 from coyomap_eval.legacy_map import load_model_tolerating_legacy
 from coyomap.preindex_lib import expected_components  # the granularity expectation E, RE-COMPUTED
@@ -140,6 +141,15 @@ class MapProfile:
     #: validate the method text on, these plus `eval/rubric.md` are the only things that will report
     #: on it — on somebody else's build, months from now.
     interfaces_without_kind: int | None = None
+    #: Deps with no authored `bucket` (`validate_model.deps_without_bucket`). The viewer guesses a
+    #: group for each, and on the 2026-10-08 mcpolis map all 19 shipped without one and 8 of the
+    #: guesses were wrong. `None` on a profile written before the field.
+    deps_without_bucket: int | None = None
+    #: Top-level packages the repo's package files declare that no dep names
+    #: (`packages.unnamed_packages`). Needs the repo, like `coverage_flags`: `None` without `--repo`.
+    #: The 2026-10-08 mcpolis rebuild dropped from 29 deps to 19 and lost React Router, Tailwind and
+    #: TanStack Query with no count moving but `deps` itself.
+    packages_without_dep: int | None = None
     #: Counted over `theirs` surfaces ONLY, where nothing derives: an `ours` surface with ways in
     #: derives its actors from the walks, so counting it would report a full map as an empty one.
     #: A `theirs` surface with no actor is often CORRECT (a crash reporter has nobody on the far
@@ -413,8 +423,10 @@ def build_profile_from_model(m: ProjectModel, repo_root: Path | None = None,
 
     coverage_flags: int | None = None
     granularity_expected: int | None = None
+    packages_without_dep: int | None = None
     if repo_root is not None:
         root = Path(repo_root).resolve()
+        packages_without_dep = len(unnamed_packages(m.deps, declared_packages(root)))
         coverage_flags = len(compression_coverage_from_refs(
             validate_model.referenced_paths(m, root), root))
         e = expected_components(root).expected
@@ -541,6 +553,8 @@ def build_profile_from_model(m: ProjectModel, repo_root: Path | None = None,
             1 for d in m.deps
             if grammar.classify_dep(d.kind or "", d.type or "") in grammar.DEP_KINDS_SYSTEM
             and not d.interfaces and not d.not_an_interface),
+        deps_without_bucket=len(validate_model.deps_without_bucket(m)),
+        packages_without_dep=packages_without_dep,
         interfaces_without_kind=sum(
             1 for i in m.interfaces if not grammar.canonical_interface_kind(i.kind)),
         interfaces_without_actors=sum(
@@ -628,6 +642,10 @@ def _format(p: MapProfile) -> str:
         f"  audit       : {p.contradictions} contradiction(s) · {p.audit_advisories} advisory · "
         f"{p.audit_warnings} warning(s) · {p.l2_claims} L2 claim(s)",
         f"  coverage    : {cov} compression/absent flag(s)",
+        f"  deps        : {'n/a' if p.deps_without_bucket is None else p.deps_without_bucket} "
+        f"with no bucket · "
+        f"{'n/a (no --repo)' if p.packages_without_dep is None else p.packages_without_dep} "
+        f"declared package(s) no dep names",
         f"  granularity : {gran}",
         ("  balance     : n/a (profile predates the balance fields)"
          if p.fanout_in_band_pct is None else

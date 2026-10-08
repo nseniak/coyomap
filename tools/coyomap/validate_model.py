@@ -42,6 +42,7 @@ from coyomap.anchors import (
 )
 from coyomap.impact_git import Extents, load_map_extents
 from coyomap.impact_lib import enclosing_extent
+from coyomap.packages import declared_packages, unnamed_packages
 from coyomap.pysrc import parse_python
 from coyomap.model import (
     ID_ARRAYS,
@@ -65,6 +66,7 @@ from coyomap.model import (
     all_elements,
     expanded_flow_steps,
     expanded_steps_with_container,
+    expanded_steps_with_parent,
     group_forests,
     is_saved,
     record_parents,
@@ -572,13 +574,19 @@ def walk_jumps(m: ProjectModel) -> list[str]:
         if f.uc in recorded:
             continue
         reached: set[str] = set()
-        for i, st in enumerate(expanded_flow_steps(m, f)):
+        for i, (parent, container, st) in enumerate(expanded_steps_with_parent(m, f)):
             src = str(st.src)
             if i and src not in reached:
-                out.append(f"{f.uc} step {st.n} starts at {src}, which no earlier step reaches — "
+                # A step written inside a sub-flow is named by the sub-flow's own number AND the
+                # step of this walk that runs it. Named under the use case alone, "UC6 step 1" was
+                # SF40's step 1: 21 of 25 warnings on the 2026-10-08 mcpolis map pointed at a step
+                # the use case does not have.
+                where = (f"{f.uc} step {st.n}" if container == f.uc
+                         else f"{container} step {st.n} (via {f.uc} step {parent.n})")
+                out.append(f"{where} starts at {src}, which no earlier step reaches — "
                            "the walk jumps. Write the step that gets there, or record "
-                           f"'{f.uc}: <why this begins a new thread>' under a '{WALK_JUMPS_HEADING}' extras "
-                           "heading")
+                           f"'{f.uc}: <why this begins a new thread>' under a "
+                           f"'{WALK_JUMPS_HEADING}' extras heading")
             reached.add(src)
             reached.add(str(st.dst))
     return out
@@ -3733,8 +3741,8 @@ def _check_dep_buckets(m: ProjectModel) -> tuple[list[str], list[str]]:
     are ADVISORY: a diagram (external systems OR libraries, counted separately since they render as
     two diagrams) with more than the cap of distinct buckets — a proliferation nudge, NOT a gate,
     because an integration-heavy product legitimately spans many purposes; an authored bucket that is
-    neither a seed nor the catch-all (a minted synonym worth a second look); and an over-long label. A
-    missing bucket is silent — the heuristic groups it and the method prompts it."""
+    neither a seed nor the catch-all (a minted synonym worth a second look); an over-long label; and
+    a dep with no authored bucket at all (`deps_without_bucket`)."""
     problems: list[str] = []
     warnings: list[str] = []
     ext: set[str] = set()
@@ -3817,7 +3825,40 @@ def _check_dep_buckets(m: ProjectModel) -> tuple[list[str], list[str]]:
                             "near-duplicates to merge. Fine if the product genuinely spans this "
                             f"many: record '{label}: <why this many purposes are real>' under a "
                             "'Bucket vocabulary' extras heading to say so.")
+    unbucketed = deps_without_bucket(m)
+    if unbucketed:
+        warnings.append(f"{len(unbucketed)} of {len(m.deps)} dependencies have no authored "
+                        f"bucket: {_shown(unbucketed, 8)}. The viewer then guesses each group "
+                        f"from the type and the purpose, and on the 2026-10-08 mcpolis map 8 of 19 "
+                        f"guesses were wrong. Set one per dependency with the reconcile `set` "
+                        f"(`{{\"ids\": [\"D1\"], \"bucket\": \"Data & storage\"}}`).")
     return problems, warnings
+
+
+def deps_without_bucket(m: ProjectModel) -> list[str]:
+    """The ids of the deps with no authored `bucket`. A missing bucket used to be silent, because
+    the viewer guesses one; on the 2026-10-08 mcpolis map all 19 deps shipped without one, the
+    reconcile pass that sets them was skipped, and 8 of the 19 guesses put a dep in the wrong group
+    (a local file store under Identity & access, Sentry under Integrations). The eval profile counts
+    the same list."""
+    return [d.id for d in m.deps if not (d.bucket or "").strip()]
+
+
+def unnamed_package_warnings(m: ProjectModel, root: Path) -> list[str]:
+    """ADVISORY: a top-level package the repo's package files declare that no dependency names
+    (`packages.unnamed_packages`). On the 2026-10-08 mcpolis rebuild the dependencies went from 29
+    to 19, and React Router, Tailwind, TanStack Query, Pydantic and HTTPX left the map with nothing
+    saying so: no slice was asked for the libraries, and no check compared the map with the files
+    that declare them. Reads the tree, so it runs with `--check-coverage`."""
+    missing = unnamed_packages(m.deps, declared_packages(root))
+    if not missing:
+        return []
+    rows = [f"{p.name} ({p.file})" for p in missing]
+    return [f"{len(missing)} top-level package(s) the repo's package files declare are named by no "
+            f"dependency: {_shown(rows, 12)}. Each is something the product is built on, and the "
+            f"map's Dependencies view does not show it. Add a dependency for it, or list it in the "
+            f"`package` field of the dependency that covers it: one dependency may list several "
+            f"packages (\"react ^19, react-dom ^19 (frontend/package.json)\")."]
 
 
 def _check_activations(m: ProjectModel) -> list[str]:
@@ -4520,26 +4561,106 @@ _PINNED_WORKLIST = ("verify", "worklist.json")
 _CLAIM_LOSS_SHOWN = 4
 
 
-def _pinned_worklist_themes(model_path: Path) -> tuple[dict[str, int], bool] | None:
-    """`(claims per theme, was it built with the behavioural half)` from the pinned worklist beside
-    the map — `None` when no pass has pinned one, which is most maps before Phase 4.
+@dataclass(frozen=True)
+class _Pin:
+    """The pinned worklist beside the map, read once: its rows in pin order, and how many of the
+    last rows a later wave appended (`audit --since` keeps the count in `second_wave`)."""
 
-    The behavioural flag is read off the pin's own rows rather than guessed: `l2_worklist_model`
-    emits that half only when asked, so deriving the live side without it would report every
-    behavioural claim as lost."""
+    rows: tuple[dict[str, object], ...]
+    later_waves: int
+
+    @property
+    def behavioural(self) -> bool:
+        """Read off the pin's own rows rather than guessed: `l2_worklist_model` emits that half only
+        when asked, so deriving the live side without it would report every behavioural claim as
+        lost."""
+        return any(r.get("theme") == "behaviour" for r in self.rows)
+
+
+def _read_pin(model_path: Path) -> _Pin | None:
+    """The pinned worklist beside the map — `None` when no pass has pinned one, which is most maps
+    before Phase 4. Rows are de-duplicated by claim, first row kept, the way `build_record` reads
+    the pinned side."""
     path = model_path.parent.joinpath(*_PINNED_WORKLIST)
     try:
         pinned = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    rows = pinned.get("worklist") if isinstance(pinned, dict) else None
-    if not isinstance(rows, list) or not rows:
+    raw = pinned.get("worklist") if isinstance(pinned, dict) else None
+    if not isinstance(raw, list) or not raw:
         return None
-    counts: dict[str, int] = {}
-    for row in rows:
-        if isinstance(row, dict) and isinstance(row.get("theme"), str):
-            counts[row["theme"]] = counts.get(row["theme"], 0) + 1
-    return (counts, "behaviour" in counts) if counts else None
+    later = pinned.get("second_wave") if isinstance(pinned, dict) else None
+    seen: set[str] = set()
+    rows: list[dict[str, object]] = []
+    for row in raw:
+        if not (isinstance(row, dict) and isinstance(row.get("theme"), str)
+                and isinstance(row.get("claim"), str)) or row["claim"] in seen:
+            continue
+        seen.add(row["claim"])
+        rows.append(row)
+    if not rows:
+        return None
+    return _Pin(rows=tuple(rows), later_waves=later if isinstance(later, int) and later > 0 else 0)
+
+
+def _pin_key(row: dict[str, object]) -> tuple[str, tuple[str, ...]] | None:
+    """What a claim is ABOUT: its theme and its boxes. `None` for a row with no boxes (a pin written
+    before `elements` existed, or a legacy security row): nothing can say what re-states it."""
+    elements = row.get("elements")
+    if not isinstance(elements, list) or not elements:
+        return None
+    return (str(row.get("theme")), tuple(sorted(str(e) for e in elements)))
+
+
+@dataclass(frozen=True)
+class _OnPurpose:
+    """The pinned claims a build removed on purpose, by reason (`_explained_losses`)."""
+
+    restated: frozenset[str]
+    refuted: frozenset[str]
+
+
+def _explained_losses(pin: _Pin, live: set[str], upheld: set[str]) -> _OnPurpose:
+    """The pinned claims that are gone ON PURPOSE, re-stated or refuted.
+
+    * RE-STATED: a correction rewrote the claim and a LATER wave challenged the new wording. The pin
+      then holds both, the old row and the new one, and the map carries only the new one. Counted by
+      theme, that pair read as one claim lost. A later row re-states an earlier one when it comes
+      after it in the pin, sits in a later wave, says something about the same boxes under the same
+      theme, and is still in the map.
+    * REFUTATION UPHELD: a skeptic refuted the claim, the closer upheld the refutation, and the build
+      removed it. That removal is the correction working.
+
+    On the 2026-10-08 mcpolis build the advisory said 21 claims were gone. All 25 claims gone by
+    text were one of these two: 20 re-stated and voted in wave 2, the other 5 removed after an
+    upheld refutation."""
+    first_wave = len(pin.rows) - pin.later_waves
+    restating: dict[tuple[str, tuple[str, ...]], int] = {}
+    for i, row in enumerate(pin.rows):
+        key = _pin_key(row)
+        if i >= first_wave and key is not None and row["claim"] in live:
+            restating[key] = max(restating.get(key, -1), i)
+    restated: set[str] = set()
+    refuted: set[str] = set()
+    for i, row in enumerate(pin.rows):
+        claim = str(row["claim"])
+        if claim in live:
+            continue
+        key = _pin_key(row)
+        if key is not None and restating.get(key, -1) > i:
+            restated.add(claim)
+        elif claim in upheld:
+            refuted.add(claim)
+    return _OnPurpose(restated=frozenset(restated), refuted=frozenset(refuted))
+
+
+def _upheld_refutations(model_path: Path) -> set[str]:
+    """The claims whose refutation the closer upheld, read from its own files beside the map. A
+    claim two appeals disagree on is not among them: a dispute settles nothing."""
+    # LOCAL for the reason `_closer_record_warnings` gives: `grounding` imports this module.
+    from coyomap.grounding import closer_ruling, is_closer_row  # noqa: PLC0415
+    rows = [r for r in _verify_rows(model_path) if is_closer_row(r)]
+    return {c for c, word in closer_ruling(rows).items() if word == "uphold"}
 
 
 def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
@@ -4578,13 +4699,20 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
     followed it, was refused on 67 claims, and shipped 68 with no verdict."""
     if model_path is None:
         return []
-    pin = _pinned_worklist_themes(model_path)
+    pin = _read_pin(model_path)
     if pin is None:
         return []
-    pinned, behavioural = pin
+    items = l2_worklist_model(m, behavioural=pin.behavioural)
     live: dict[str, int] = {}
-    for item in l2_worklist_model(m, behavioural=behavioural):
+    for item in items:
         live[item.theme] = live.get(item.theme, 0) + 1
+    removed = _explained_losses(pin, {i.claim for i in items}, _upheld_refutations(model_path))
+    restated, refuted = removed.restated, removed.refuted
+    pinned: dict[str, int] = {}
+    for row in pin.rows:
+        if row["claim"] not in restated and row["claim"] not in refuted:
+            theme = str(row["theme"])
+            pinned[theme] = pinned.get(theme, 0) + 1
     shrunk = sorted(((theme, n, live.get(theme, 0)) for theme, n in pinned.items()
                      if live.get(theme, 0) < n), key=lambda r: (r[2] - r[1], r[0]))
     if not shrunk:
@@ -4592,8 +4720,14 @@ def _claim_loss_warnings(m: ProjectModel, model_path: Path | None) -> list[str]:
     lost = sum(was - now for _t, was, now in shrunk)
     detail = _shown([f"{theme} {was} → {now}" for theme, was, now in shrunk],
                     _CLAIM_LOSS_SHOWN, unit="theme(s)")
+    explained = ""
+    if restated or refuted:
+        explained = (f" Not counted: {len(restated)} claim(s) a later wave re-stated and "
+                     f"{len(refuted)} the closer upheld a refutation of; each pinned count above is "
+                     f"without them.")
     return [f"{lost} claim(s) the skeptics were given are GONE from the shipped map, and nothing "
-            f"re-stated them: {detail}. A correction that rewrites an element's sites removes every "
+            f"re-stated them: {detail}.{explained} A correction that rewrites an element's sites "
+            f"removes every "
             f"claim those sites carried — the fix is recorded, the claims are not, and no gate "
             f"notices. Check each shrunken theme: if the element's own sentence still asserts what "
             f"the removed anchors backed, the sentence is now unbacked. Then either re-state the "
@@ -7618,6 +7752,8 @@ def validate_model(m: ProjectModel, model_path: Path | None = None, *,
             if "granularity" not in balance_lib._exceptions(m):
                 warnings.extend(granularity_advisory(len(m.components), walk_root))
         warnings.extend(check_domain_coverage_model(m, roots, cov_dirs))
+        if walk_root is not None:
+            warnings.extend(unnamed_package_warnings(m, walk_root.resolve()))
 
     # Redundant nesting (a group whose only child is a group of the same kind).
     child_count: dict[str, int] = {}

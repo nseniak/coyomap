@@ -663,6 +663,12 @@ KNOWN_NO_ESCAPE: dict[str, str] = {
     "Library bucket '{}' is minted (not a seed)": "the minted name IS the record",
     "External bucket '{}' is minted (not a seed)": "the minted name IS the record",
     "The '{}' catch-all among {} holds {} deps": "splitting the bucket is the fix",
+    # Backlog row 49. Both have a structured answer that costs one line of the map, so there is
+    # no judgement to record: a bucket is one reconcile `set`, and a package no dep names goes in
+    # the `package` field of the dep that covers it (one dep may list several).
+    "{} of {} dependencies have no authored bucket": "set the bucket; the reconcile `set` takes it",
+    "{} top-level package(s) the repo's package files declare are named by no dependency":
+        "add a dependency, or list the package in the `package` field of the one that covers it",
     "Many purpose buckets among {}": "merging near-duplicates is the fix",
     "entry-point kind '{}' ({} row(s)) is a drift spelling": "write the canonical spelling",
     "entry-point kind(s) minted (not a seed)": "the minted kind IS the record",

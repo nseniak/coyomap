@@ -1205,3 +1205,19 @@ def test_the_profile_places_each_access_site_in_its_function_from_the_preindex_b
         assert p.auth_functions == ["a.py::delete_team", "z.py"], p.auth_functions   # a site outside every function keys on its FILE
         assert p.interface_kinds and p.interface_kinds.get("handoff") == 1, p.interface_kinds
         assert build_profile(mp.read_text(encoding="utf-8")).auth_functions is None
+
+
+# --- dependencies (backlog row 49) ------------------------------------------------
+def test_the_profile_counts_unbucketed_deps_and_packages_no_dep_names() -> None:
+    """The 2026-10-08 mcpolis rebuild shipped 19 deps, all with no bucket, and lost React Router,
+    Tailwind and TanStack Query from the map: the only count that moved was `deps`, inside its band.
+    The package count needs the repo, so without one it is None, never 0."""
+    p_no = build_profile(make_counts_map())
+    assert p_no.deps_without_bucket == 1, p_no.deps_without_bucket
+    assert p_no.packages_without_dep is None
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "package.json").write_text(json.dumps(
+            {"dependencies": {"dd-trace": "^5", "react-router": "^7"},
+             "devDependencies": {"vitest": "^4"}}), encoding="utf-8")
+        p_yes = build_profile(make_counts_map(), repo_root=Path(d))
+    assert p_yes.packages_without_dep == 2, "dd-trace and react-router; a dev tool is not counted"

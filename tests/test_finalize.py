@@ -2351,3 +2351,53 @@ def test_an_archived_maps_findings_are_the_ones_its_report_counts():
                                         "bug 0 · gap 1"), note_of(archived)
     assert note_of(live).startswith("FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1 · bug 1"), (
         note_of(live))
+
+
+# ── the gone-claims advisory counts only claims nobody removed on purpose ───────────────────────
+
+def make_pinned_repo(closer_word: str) -> tuple[Path, Path]:
+    """A repo whose pin holds the map's own claims plus one the map no longer makes, and a closer
+    file ruling `closer_word` on that one's refutation."""
+    from coyomap.audit_model import l2_worklist_model
+    from coyomap.model import load_model_path
+    root, p = make_repo()
+    rows: list[dict[str, object]] = [
+        {"claim": i.claim, "anchor": i.anchor, "theme": i.theme, "elements": list(i.elements)}
+        for i in l2_worklist_model(load_model_path(p))]
+    gone = "C2 calls C1"
+    rows.append({"claim": gone, "anchor": "src/b.py:2", "theme": "backbone",
+                 "elements": ["C1", "C2"]})
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    (verify / "worklist.json").write_text(json.dumps({"worklist": rows}), encoding="utf-8")
+    (verify / "closer-a.json").write_text(json.dumps({"grounding": [
+        {"claim": gone, "verdict": closer_word, "grounded": closer_word != "uphold",
+         "skeptic": "closer"}]}), encoding="utf-8")
+    return root, p
+
+
+def test_finalize_does_not_call_a_claim_the_closer_upheld_a_refutation_of_gone():
+    """Retro 2026-10-08 #3: the finalize report carried "21 claim(s) the skeptics were given are
+    GONE" as a no-escape advisory, and every one of the 21 had been removed on purpose. Five of them
+    were refuted, the closer upheld the refutation, and the build deleted the claim."""
+    root, p = make_pinned_repo("uphold")
+    finalize.main([str(p), "--repo", str(root)])
+    md = (root / ".coyomap" / "finalize-report.md").read_text(encoding="utf-8")
+    assert "are GONE from the shipped map" not in md, md
+    # A refutation the closer REJECTED: the claim was true, the map dropped it, and that is a loss.
+    root, p = make_pinned_repo("reject")
+    finalize.main([str(p), "--repo", str(root)])
+    md = (root / ".coyomap" / "finalize-report.md").read_text(encoding="utf-8")
+    assert "1 claim(s) the skeptics were given are GONE from the shipped map" in md, md
+
+
+def test_the_gate_block_carries_the_findings_count_the_agents_filed():
+    """Retro 2026-10-08 #24: a commit message said 213 findings, typed from memory, and was amended
+    to 211 once `findings collect` ran. The count is in the block the commit quotes, read from the
+    agents' own files when finalize runs."""
+    root, p = make_repo()
+    findings.add(root, "harvest-1", "risk", ["src/a.py:1"], "the build saw this")
+    findings.add(root, "trace-2", "gap", ["src/a.py:1"], "and this")
+    report = finalize.build_report(p, root, [])
+    block = finalize.gate_block(report, report.map_sha256)
+    assert "FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1" in block, block
