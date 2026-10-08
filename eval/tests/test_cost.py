@@ -1013,3 +1013,118 @@ def test_the_retro_method_reads_the_context_block_and_ranks_a_compaction_high():
     method = (Path(__file__).resolve().parents[1] / "retro" / "method.md").read_text(encoding="utf-8")
     assert "CONTEXT" in method and "COMPACTED" in method
     assert "compaction of the lead" in method and "HIGH" in method
+
+
+# --- nesting: a runner's time is its children's ------------------------------------
+
+
+def make_nested_agent(dir_path: Path, agent_id: str, description: str, *, start: str, end: str,
+                      parent: str | None = None) -> None:
+    """A sub-agent file named the way the harness names it (`agent-<id>.jsonl`), whose
+    `.meta.json` carries `parentAgentId` when another agent spawned it."""
+    make_spanning_agent(dir_path, agent_id, description, start=start, end=end)
+    meta: dict[str, object] = {"description": description}
+    if parent is not None:
+        meta["parentAgentId"] = parent
+        meta["spawnDepth"] = 2
+    (dir_path / f"agent-{agent_id}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def make_runner_build(tmp: Path) -> Path:
+    """The lead spawns one runner at 10:00 that runs until 10:30; the runner spawns three
+    skeptics at 10:01 that take 3, 3 and 9 minutes. Shaped on the 2026-10-08 mcpolis build,
+    where the wave-1 runner read as a 53.0-minute straggler of the lead's fan-out."""
+    records = [
+        {"type": "assistant", "timestamp": f"2026-08-02T{stamp}.000Z",
+         "message": {"id": f"m{i}", "model": "claude-opus-5", "usage": {"output_tokens": 100},
+                     "content": [{"type": "text", "text": str(i)}]}}
+        for i, stamp in enumerate(("10:00:00", "10:31:00"))
+    ]
+    session = write_jsonl(tmp / "s.jsonl", records)
+    agents = cost.subagent_dir(session)
+    make_nested_agent(agents, "r1", "Fact-check wave 1 runner",
+                      start="2026-08-02T10:00:00.000Z", end="2026-08-02T10:30:00.000Z")
+    for name, minutes in (("k1", 3), ("k2", 3), ("k3", 9)):
+        make_nested_agent(agents, name, f"skeptic {name}", parent="r1",
+                          start="2026-08-02T10:01:00.000Z",
+                          end=f"2026-08-02T10:{1 + minutes:02d}:00.000Z")
+    return session
+
+
+def test_a_runner_is_not_timed_as_a_straggler_of_the_leads_fanout():
+    with tempfile.TemporaryDirectory() as td:
+        report = cost.build_report(make_runner_build(Path(td)))
+        assert len(report.batches) == 1, report.batches
+        batch = report.batches[0]
+        assert batch["agents"] == 3.0, "the runner is no row; its three skeptics are"
+        assert round(cost._num(batch, "slowest") / 60) == 9, "the slowest SKEPTIC, not the runner"
+        assert round(cost._num(batch, "waste") / 60) == 4, "9 minutes wall minus a 5-minute mean"
+        assert batch["via"] == "Fact-check wave 1 runner"
+        assert (report.runners, report.nested) == (1, 3)
+
+
+def test_the_text_report_names_the_runner_and_its_pool(capsys):
+    with tempfile.TemporaryDirectory() as td:
+        assert cost.main([str(make_runner_build(Path(td)))]) == 0
+        out = capsys.readouterr().out
+        assert "1 runner(s) dispatched 3 of them" in out
+        assert "Fact-check wave 1 runner" in out.split("FAN-OUT")[1].split("TOKENS")[0]
+
+
+def test_children_of_a_runner_never_merge_into_the_leads_own_fanout():
+    with tempfile.TemporaryDirectory() as td:
+        session = make_runner_build(Path(td))
+        make_nested_agent(cost.subagent_dir(session), "h1", "Harvest the adapters",
+                          start="2026-08-02T10:01:30.000Z", end="2026-08-02T10:03:00.000Z")
+        report = cost.build_report(session)
+        assert sorted((str(b["via"]), b["agents"]) for b in report.batches) == [
+            ("Fact-check wave 1 runner", 3.0), ("lead", 1.0)]
+
+
+def test_an_agent_whose_parent_is_absent_is_timed_with_the_lead():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        session = write_jsonl(tmp / "s.jsonl", [
+            {"type": "assistant", "timestamp": "2026-08-02T10:00:00.000Z",
+             "message": {"id": "m", "model": "claude-opus-5", "usage": {"output_tokens": 1},
+                         "content": [{"type": "text", "text": "x"}]}}])
+        make_nested_agent(cost.subagent_dir(session), "k1", "skeptic k1", parent="gone",
+                          start="2026-08-02T10:01:00.000Z", end="2026-08-02T10:04:00.000Z")
+        report = cost.build_report(session)
+        assert [b["via"] for b in report.batches] == ["lead"]
+        assert report.runners == 0
+
+
+# --- the model's own latency, beside the per-row time -----------------------------------
+
+
+def make_reply_session(tmp: Path) -> Path:
+    """A lead brief answered at 10:00:00, one tool result at 10:00:05 replied to at 10:00:12, and
+    a second result at 10:00:20 replied to at 10:00:23: replies of 7 s and 3 s."""
+    usage = {"output_tokens": 10}
+    records: list[dict[str, object]] = []
+    records += make_assistant_records("m1", [("c1", "Bash", "rg a")], usage,
+                                      {"c1": "2026-08-02T10:00:00.000Z"})
+    records.append(make_result_record("c1", "2026-08-02T10:00:05.000Z"))
+    records += make_assistant_records("m2", [("c2", "Bash", "rg b")], usage,
+                                      {"c2": "2026-08-02T10:00:12.000Z"})
+    records.append(make_result_record("c2", "2026-08-02T10:00:20.000Z"))
+    records += make_assistant_records("m3", [("c3", "Bash", "rg c")], usage,
+                                      {"c3": "2026-08-02T10:00:23.000Z"})
+    return write_jsonl(tmp / "session.jsonl", records)
+
+
+def test_the_median_reply_is_read_from_tool_result_to_the_next_reply():
+    with tempfile.TemporaryDirectory() as td:
+        report = cost.build_report(make_reply_session(Path(td)))
+        assert report.reply_seconds == {"claude-opus-5": 5.0}, "median of 7 s and 3 s"
+
+
+def test_seconds_per_row_prints_the_model_latency_beside_it(capsys):
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        session = make_reply_session(tmp)
+        map_path = make_map(tmp / "m.json", rows=10)
+        assert cost.main([str(session), "--map", str(map_path)]) == 0
+        line = next(l for l in capsys.readouterr().out.splitlines() if "seconds per row" in l)
+        assert "model median reply 5.0s claude-opus-5" in line

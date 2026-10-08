@@ -443,6 +443,11 @@ class AgentSpan:
     minutes: float           # first record to last record, wall clock
     records: int
     started: str = ""        # the first record's timestamp, ISO 8601, for ordering re-dispatches
+    #: The text of the prompt that dispatched it. `timings record --plan` falls back to it when the
+    #: id line is missing: on the 2026-10-08 mcpolis build the wave-2 runner sent each pointer
+    #: without its first line, and all 5 voters went unrecorded although every prompt named its
+    #: voter's own brief file.
+    prompt: str = ""
 
 
 def agent_spans(subagents_dir: Path) -> list[AgentSpan]:
@@ -456,6 +461,7 @@ def agent_spans(subagents_dir: Path) -> list[AgentSpan]:
     for f in sorted(subagents_dir.glob("agent-*.jsonl")):
         stamps: list[datetime] = []
         name: str | None = None
+        prompt: str | None = None
         records = 0
         for line in f.read_text(encoding="utf-8").splitlines():
             if not line.strip():
@@ -473,7 +479,8 @@ def agent_spans(subagents_dir: Path) -> list[AgentSpan]:
                     stamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
                 except ValueError:
                     pass
-            if name is None and row.get("type") == "user":
+            if prompt is None and row.get("type") == "user":
+                prompt = _prompt_text(row.get("message"))
                 name = _agent_name(row.get("message"))
         if not stamps:
             continue
@@ -489,20 +496,26 @@ def agent_spans(subagents_dir: Path) -> list[AgentSpan]:
         minutes = (max(stamps) - min(stamps)).total_seconds() / 60
         out.append(AgentSpan(agent_id=f.stem[len("agent-"):], name=name, description=description,
                              minutes=round(minutes, 1), records=records,
-                             started=min(stamps).isoformat()))
+                             started=min(stamps).isoformat(), prompt=prompt or ""))
     return out
 
 
-def _agent_name(message: object) -> str | None:
-    """The agent's name in a user record's text, under either pointer-prompt shape."""
+def _prompt_text(message: object) -> str | None:
+    """A user record's text, or None when it carries none."""
     if not isinstance(message, dict):
         return None
     content = message.get("content")
     if isinstance(content, list):
-        text = " ".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
-    elif isinstance(content, str):
-        text = content
-    else:
+        return " ".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
+    if isinstance(content, str):
+        return content
+    return None
+
+
+def _agent_name(message: object) -> str | None:
+    """The agent's name in a user record's text, under either pointer-prompt shape."""
+    text = _prompt_text(message)
+    if text is None:
         return None
     hit = _YOU_ARE_AGENT.search(text)
     if hit:

@@ -41,7 +41,7 @@ import argparse
 import json
 import math
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -319,6 +319,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         item_args += have
     plans = list(getattr(args, "plan", None) or [])
     planned: list[str] = []
+    briefs: dict[str, str] = {}
     if plans:
         # A WAVE PLAN'S VOTERS ARE ITS SLICES, so a wave runner never types 69 ids. Their minutes
         # can only come from their transcripts: a runner reads no barrier, and a typed number for
@@ -327,11 +328,13 @@ def cmd_record(args: argparse.Namespace) -> int:
             raise ValueError("--plan names the voters, and their minutes come from their own "
                              "transcripts: pass --from-agents [<subagents dir>] with it.")
         for plan_path in plans:
-            planned += [a.id for a in load_plan(Path(plan_path)).agents]
+            voters = load_plan(Path(plan_path)).agents
+            planned += [a.id for a in voters]
+            briefs.update({a.id: str(a.brief) for a in voters})
     untimed: list[str] = []
     where: Path | None = None
     if getattr(args, "from_agents", None) is not None:
-        timed = _minutes_from_agents(args, slice_args, minute_args, planned)
+        timed = _minutes_from_agents(args, slice_args, minute_args, planned, briefs)
         slice_args, minute_args = timed.slices, timed.minutes
         untimed, where = timed.untimed, timed.where
     pairs = _pair_slices(slice_args, minute_args)
@@ -383,7 +386,8 @@ class AgentMinutes:
 
 
 def _minutes_from_agents(args: argparse.Namespace, slices: list[str], minutes: list[str],
-                         planned: Sequence[str] = ()) -> AgentMinutes:
+                         planned: Sequence[str] = (),
+                         briefs: Mapping[str, str] | None = None) -> AgentMinutes:
     """The named slices' minutes, read off their agents' transcripts.
 
     Each `--slice` names an agent the way its brief was sent (the pointer prompt's first word), or
@@ -395,7 +399,13 @@ def _minutes_from_agents(args: argparse.Namespace, slices: list[str], minutes: l
     the whole record, because it is a name somebody typed and a typo is the likely reason. A voter
     with none is LEFT OUT and named in `untimed`: one start the agent refused, or one transcript a
     session lost, made the whole wave's record refuse, and the runner recorded nothing at all. Only
-    when no name at all has a transcript is there nothing to record, and it refuses."""
+    when no name at all has a transcript is there nothing to record, and it refuses.
+
+    A voter whose name no transcript carries is matched by its BRIEF FILE, from `briefs` (voter id
+    to the brief path in its plan): the one prompt that names that file is that voter's. On the
+    2026-10-08 mcpolis build the wave-2 runner sent each pointer without its id line, and all 5
+    voters went unrecorded although every prompt named its own brief. Not by its claims file: the
+    voters of a theme with several votes share one, and no pointer names it."""
     if minutes:
         raise ValueError("--from-agents reads each slice's minutes off its transcript; do not also "
                          "pass --minutes.")
@@ -412,11 +422,19 @@ def _minutes_from_agents(args: argparse.Namespace, slices: list[str], minutes: l
     seen: dict[str, list[str]] = {}
     # The LATEST transcript wins when one name was dispatched twice (a re-run after a failure),
     # and the choice is printed: the earlier span is a different attempt, not this slice's time.
-    for span in sorted(agent_spans(where), key=lambda s: s.started):
+    spans = sorted(agent_spans(where), key=lambda s: s.started)
+    for span in spans:
         for key in (span.name, span.description):
             if key:
                 by_name[key] = span.minutes
                 seen.setdefault(key, []).append(f"{span.agent_id} ({span.minutes:.1f} min)")
+    for voter, brief in (briefs or {}).items():
+        if voter in by_name or not brief:
+            continue
+        hits = [s for s in spans if brief in s.prompt]
+        if hits:
+            by_name[voter] = hits[-1].minutes
+            seen[voter] = [f"{h.agent_id} ({h.minutes:.1f} min, by its brief file)" for h in hits]
     missing = [name for name in slices if name.strip() not in by_name]
     untimed = [name for name in planned if name.strip() not in by_name]
     if missing or (len(untimed) == len(planned) and not slices):

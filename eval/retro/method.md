@@ -413,6 +413,23 @@ Four checks, all cheap, all deterministic, each one productive on that run:
    through, and the transcript could not show it because every read of the list had been filtered.
    Pass `--lead-transcript <the build's session .jsonl>` too: without it the access-baseline leg
    looks for the RETRO's own session and cannot say which excused paths the lead never opened.
+
+   **Replay the build's LAST finalize arguments, not a bare `finalize <map>`.** Without the build's
+   `--verdicts` files and its `--access-baseline`, two legs do not run, and the advisories you match
+   are not the ones the build shipped: the 2026-10-08 mcpolis retro printed 20 against the build's
+   26. Where to find them:
+   - The build ran `ship` (the usual case). `ship` prints every step's command, indented four
+     spaces, before running it, so the finalize line starts with `    finalize `. Find the last
+     `ship` turn with `coyomap-eval transcript <session> --commands`, then read that turn with
+     `--from N --to N --full-output`. When the lead sent `ship`'s output to a file
+     (`> $S/ship5.txt`), grep `^    finalize ` in that file in the build's scratchpad.
+   - The build ran `finalize` by hand: `--commands` prints the whole command.
+   - `.coyomap/build-state.log` says WHEN the last `ship` or `finalize` ran and what it counted
+     (its `finalize` line). It does not hold the arguments; use it to check you found the last run.
+
+   Copy the line, then **drop `--emit-gate-block`** (it writes the gate block whatever `--no-write`
+   says) and add `--no-write` and `--lead-transcript`. Your advisory count should then equal the
+   build's own; say in the report which run you matched it to, and why when it does not.
 3. **Check each use case's declared `actors` against the actor of its own flow's first step**, and
    its name against its flow's title. A late rewrite left two use cases declaring one actor while
    their flows started with another, and one carrying its pre-rename flow title.
@@ -604,7 +621,13 @@ coyomap-eval transcript <transcript> --from <lo> --to <hi> --full
 
 Hand every sub-agent the same brief: **the evidence classes below**, the requirement that each
 finding carry a **turn number**, and the instruction to return findings only — no fixes, no prose
-essay. Tell each one it is reading a slice, so "I did not see X" means "not in my range", never
+essay.
+
+**Give each reader its own folder**, `.coyomap-eval/retro/<ts>/work/<reader id>/`, and tell it to
+write every scratch file there and nowhere else. Sub-agents share their parent's scratchpad, so two
+readers that each saved `slice.txt` overwrote each other: on the 2026-10-08 mcpolis retro one slice
+reader's copy was replaced by another reader's turn range, and two readers reported it. The same
+holds for the agent readers, the refuters of Step 5 and the Step 5b reader. Tell each one it is reading a slice, so "I did not see X" means "not in my range", never
 "the build skipped X".
 
 **Tell them not to time a fan-out off the raw JSONL.** A sub-agent that goes looking at the file

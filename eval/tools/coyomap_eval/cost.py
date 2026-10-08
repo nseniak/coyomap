@@ -159,6 +159,15 @@ class Actor:
     #: 1 second early lost a call it plainly made for this build. The clock still clips there, and
     #: should, because the build's time cannot start before the build did.
     bill_from: float | None = None
+    #: The harness's id for this sub-agent (its file is `agent-<id>.jsonl`). Empty for the lead.
+    agent_id: str = ""
+    #: The id of the agent that SPAWNED this one, from `parentAgentId` in its `.meta.json`. Empty
+    #: when the lead spawned it. A sub-agent can start sub-agents of its own: the 2026-10-08
+    #: mcpolis build ran each fact-check wave as one runner agent that dispatched 76 and 5
+    #: skeptics. Read flat, the wave-1 runner was a "53.0-minute straggler" and 45.0 of the
+    #: build's 118.0 straggler minutes were it supervising its own pool, while its skeptics showed
+    #: up as five more fan-outs of the lead. See `runner_ids` and `batches`.
+    parent_id: str = ""
 
     @property
     def timed_turns(self) -> tuple[Turn, ...]:
@@ -423,20 +432,35 @@ def read_agents(session: Path) -> list[Actor]:
     for path in sorted(directory.glob("agent-*.jsonl")):
         meta_path = path.with_suffix(".meta.json")
         description = ""
+        parent = ""
         if meta_path.is_file():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 if isinstance(meta, dict):
                     value = meta.get("description")
                     description = value if isinstance(value, str) else ""
+                    owner = meta.get("parentAgentId")
+                    parent = owner if isinstance(owner, str) else ""
             except ValueError:
                 description = ""
         turns = read_turns(path, include_sidechains=True)
         if not turns:
             continue
         agents.append(Actor(name=description or path.stem,
-                            role=classify(description), turns=turns))
+                            role=classify(description), turns=turns,
+                            agent_id=path.stem.removeprefix("agent-"), parent_id=parent))
     return agents
+
+
+def runner_ids(agents: Sequence[Actor]) -> set[str]:
+    """The agents that spawned other agents of this build: RUNNERS, whose time is supervision.
+
+    A runner's span is the span of its slowest child plus its own dispatch and collection, so
+    timing it as one more worker charges its whole pool's wait as one straggler. Only a parent that
+    is itself one of `agents` counts; a child whose parent is missing (a bound dropped it) is
+    timed with the lead's own fan-outs."""
+    present = {a.agent_id for a in agents if a.agent_id}
+    return {a.parent_id for a in agents if a.parent_id and a.parent_id in present}
 
 
 def bounded_agents(agents: Sequence[Actor], window: tuple[float, float],
@@ -646,6 +670,8 @@ class Batch:
     start: float
     end: float
     agents: tuple[Actor, ...]
+    #: Who dispatched this fan-out: "lead", or the runner agent's name.
+    via: str = "lead"
 
     @property
     def wall(self) -> float:
@@ -724,24 +750,68 @@ def batches(agents: Sequence[Actor], gap: float = 120.0) -> list[Batch]:
     Clustered on `launched_at`, never on the window-clipped `start`. Clipped starts are equal for
     every agent already running when the window opened, so consecutive waves fused: one bounded run
     reported 4 fan-outs where the transcript holds 5. An agent with no working time inside the
-    window is left out — it has no row to contribute."""
-    ordered = sorted((a for a in agents if a.launched_at is not None and a.start is not None),
-                     key=lambda a: a.launched_at or 0.0)
-    out: list[Batch] = []
-    current: list[Actor] = []
-    for agent in ordered:
-        if current and (agent.launched_at or 0.0) - (current[-1].launched_at or 0.0) > gap:
-            out.append(_batch(len(out), current))
-            current = []
-        current.append(agent)
-    if current:
-        out.append(_batch(len(out), current))
+    window is left out — it has no row to contribute.
+
+    CLUSTERED PER PARENT, AND A RUNNER IS NO ROW. Siblings are clustered with siblings: the lead's
+    own agents form the lead's fan-outs, and a runner's children form fan-outs `via` that runner.
+    The runner itself is left out, because it is not a worker: its span is its slowest child's plus
+    its own dispatch and collection. Timing it as one more agent of the lead's batch made the
+    wave-1 runner of the 2026-10-08 mcpolis build a 53.0-minute straggler, 45.0 minutes of "waste"
+    that was its own pool's wait, already charged to the pool's fan-outs."""
+    runners = runner_ids(agents)
+    names = {a.agent_id: a.name for a in agents if a.agent_id}
+    groups: dict[str, list[Actor]] = {}
+    for agent in agents:
+        if agent.agent_id in runners or agent.launched_at is None or agent.start is None:
+            continue
+        parent = agent.parent_id if agent.parent_id in runners else ""
+        groups.setdefault(parent, []).append(agent)
+    clusters: list[tuple[str, list[Actor]]] = []
+    for parent, members in groups.items():
+        current: list[Actor] = []
+        for agent in sorted(members, key=lambda a: a.launched_at or 0.0):
+            if current and (agent.launched_at or 0.0) - (current[-1].launched_at or 0.0) > gap:
+                clusters.append((parent, current))
+                current = []
+            current.append(agent)
+        if current:
+            clusters.append((parent, current))
+    clusters.sort(key=lambda c: min(a.launched_at or 0.0 for a in c[1]))
+    return [_batch(i, members, names.get(parent, parent) if parent else "lead")
+            for i, (parent, members) in enumerate(clusters)]
+
+
+def _batch(index: int, agents: list[Actor], via: str = "lead") -> Batch:
+    return Batch(index=index, start=min(a.start or 0.0 for a in agents),
+                 end=max(a.end or 0.0 for a in agents), agents=tuple(agents), via=via)
+
+
+def reply_latencies(actor: Actor) -> list[tuple[str, float]]:
+    """(model, seconds) from each tool result to the reply that answers it: the MODEL's latency.
+
+    Seconds per row moves with this as much as with the method: the 2026-10-08 mcpolis build read
+    3.00 -> 7.09 s per row against the build before it, and its median reply took 6.7 s against
+    2.5 s. A reader comparing two builds' per-row time has to see this number beside it, or a
+    slower model reads as a worse method. Only a reply to a tool result counts: a reply to a brief
+    or a follow-up includes the time the coordinator took to write it."""
+    out: list[tuple[str, float]] = []
+    turns = actor.timed_turns
+    for previous, turn in zip(turns, turns[1:]):
+        if previous.role != "user" or not previous.tool_results or turn.role != "assistant":
+            continue
+        a, b = _seconds(previous.timestamp), _seconds(turn.timestamp)
+        if a is not None and b is not None and b >= a:
+            out.append((turn.model or "(unknown)", b - a))
     return out
 
 
-def _batch(index: int, agents: list[Actor]) -> Batch:
-    return Batch(index=index, start=min(a.start or 0.0 for a in agents),
-                 end=max(a.end or 0.0 for a in agents), agents=tuple(agents))
+def median_reply_seconds(actors: Sequence[Actor]) -> dict[str, float]:
+    """The median reply latency per model, over every actor of the build."""
+    by_model: dict[str, list[float]] = {}
+    for actor in actors:
+        for model, seconds in reply_latencies(actor):
+            by_model.setdefault(model, []).append(seconds)
+    return {m: statistics.median(v) for m, v in sorted(by_model.items())}
 
 
 def _subtract(span: tuple[float, float],
@@ -852,7 +922,7 @@ class Report:
     unpriced_models: list[str]
     models: dict[str, int]
     by_role: dict[str, dict[str, float]]
-    batches: list[dict[str, float]]
+    batches: list[dict[str, float | str]]
     base_context_median: int
     context_per_turn: dict[str, int]
     tool_seconds: float
@@ -863,6 +933,11 @@ class Report:
     context: ContextFacts = field(default_factory=ContextFacts)
     map: dict[str, int] = field(default_factory=dict)
     per_row: dict[str, float] = field(default_factory=dict)
+    #: Sub-agents that dispatched agents of their own, and how many agents they dispatched.
+    runners: int = 0
+    nested: int = 0
+    #: Median seconds from a tool result to the reply, per model (`reply_latencies`).
+    reply_seconds: dict[str, float] = field(default_factory=dict)
 
 
 def _tool_seconds(agents: Sequence[Actor]) -> float:
@@ -970,6 +1045,7 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
 
     bases = sorted(a.base_context for a in agents if a.base_context)
     requests = sum(len(a.requests) for a in everyone)
+    runners = runner_ids(agents)
     report = Report(
         session=session.stem,
         wall_seconds=wall,
@@ -990,7 +1066,8 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
                   "median": statistics.median(b.durations) if b.agents else 0.0,
                   "mean": b.mean, "waste": b.waste, "stagger": b.stagger,
                   "cost": b.cost(cache_ttl),
-                  "thinking_share": b.thinking_share()} for b in batches(agents)],
+                  "thinking_share": b.thinking_share(), "via": b.via}
+                 for b in batches(agents)],
         base_context_median=int(statistics.median(bases)) if bases else 0,
         context_per_turn={
             "lead": (lead.totals().cache_read_input_tokens // len(lead.requests)
@@ -1002,6 +1079,9 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
         spawn_prompt_tokens=_spawn_tokens(lead),
         context=context_facts(session, lead, from_turn=from_turn, to_turn=to_turn,
                               include_sidechains=include_sidechains),
+        runners=len(runners),
+        nested=sum(1 for a in agents if a.parent_id in runners),
+        reply_seconds=median_reply_seconds(everyone),
     )
     if map_path is not None:
         facts = read_map(map_path)
@@ -1020,6 +1100,16 @@ def build_report(session: Path, *, map_path: Path | None = None, from_turn: int 
 
 def _m(seconds: float) -> str:
     return f"{seconds / 60:.1f}m"
+
+
+def _num(row: dict[str, float | str], key: str) -> float:
+    value = row.get(key, 0.0)
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _reply_text(report: Report) -> str:
+    """'6.7s claude-opus-5-5', one per model, or '' when no reply could be timed."""
+    return ", ".join(f"{s:.1f}s {m}" for m, s in report.reply_seconds.items())
 
 
 def _context_lines(report: Report) -> list[str]:
@@ -1057,23 +1147,26 @@ def format_report(report: Report) -> str:
     lines.append(f"  agents busy {_m(report.agent_busy_seconds)}"
                  f" ({100 * report.agent_busy_seconds / max(active, 1):.0f}% of active)"
                  f"   lead alone {_m(report.lead_only_seconds)}")
-    lines.append(f"  {report.agents} sub-agent(s), {report.requests} API call(s)")
+    nesting = (f" ({report.runners} runner(s) dispatched {report.nested} of them)"
+               if report.runners else "")
+    lines.append(f"  {report.agents} sub-agent(s){nesting}, {report.requests} API call(s)")
 
     lines.extend(_context_lines(report))
 
     lines.append("")
     lines.append("FAN-OUT")
     lines.append(f"  {'#':>2} {'start':>7} {'wall':>7} {'n':>3} {'slowest':>8} {'median':>7}"
-                 f" {'mean':>7} {'waste':>7} {'stagger':>8} {'$':>7} {'think':>6}")
+                 f" {'mean':>7} {'waste':>7} {'stagger':>8} {'$':>7} {'think':>6}  via")
     for b in report.batches:
-        share = b.get("thinking_share", 0.0)
-        lines.append(f"  {int(b['index']):>2} {_m(b['start']):>7} {_m(b['wall']):>7}"
-                     f" {int(b['agents']):>3} {_m(b['slowest']):>8} {_m(b['median']):>7}"
-                     f" {_m(b['mean']):>7} {_m(b['waste']):>7}"
-                     f" {b.get('stagger', 0.0):>7.1f}s {b.get('cost', 0.0):>7.2f}"
-                     f" {(f'{100 * share:.0f}%' if share else '-'):>6}")
-    waste = sum(b["waste"] for b in report.batches)
-    stagger = sum(b.get("stagger", 0.0) for b in report.batches)
+        share = _num(b, "thinking_share")
+        lines.append(f"  {int(_num(b, 'index')):>2} {_m(_num(b, 'start')):>7}"
+                     f" {_m(_num(b, 'wall')):>7} {int(_num(b, 'agents')):>3}"
+                     f" {_m(_num(b, 'slowest')):>8} {_m(_num(b, 'median')):>7}"
+                     f" {_m(_num(b, 'mean')):>7} {_m(_num(b, 'waste')):>7}"
+                     f" {_num(b, 'stagger'):>7.1f}s {_num(b, 'cost'):>7.2f}"
+                     f" {(f'{100 * share:.0f}%' if share else '-'):>6}  {b.get('via', 'lead')}")
+    waste = sum(_num(b, "waste") for b in report.batches)
+    stagger = sum(_num(b, "stagger") for b in report.batches)
     # THE TWO NUMBERS TOGETHER, always. `waste` alone reads as "reorder the dispatch", and
     # `method.md` priced that at 7.7 minutes for years on exactly that reading. `stagger` is the
     # whole ceiling on what reordering can win — every agent in a batch launches in one message —
@@ -1140,6 +1233,8 @@ def format_report(report: Report) -> str:
     lines.append(f"  tool execution inside agents        {_m(report.tool_seconds):>12}"
                  f"  ({100 * report.tool_seconds / max(sum(b['seconds'] for r, b in report.by_role.items() if r != 'lead'), 1):.0f}% of agent time)")
     lines.append(f"  lead tokens spent writing briefs    {report.spawn_prompt_tokens:>12,}")
+    if report.reply_seconds:
+        lines.append(f"  model median reply, tool result to next reply: {_reply_text(report)}")
 
     if report.map:
         lines.append("")
@@ -1148,7 +1243,9 @@ def format_report(report: Report) -> str:
         lines.append(f"  rows produced                       {m['rows']:>12,}"
                      f"  (in {m['sections']} sections)")
         lines.append(f"  cost per row                        {report.per_row['cost']:>12.4f}")
-        lines.append(f"  seconds per row                     {report.per_row['seconds']:>12.2f}")
+        reply = _reply_text(report)
+        lines.append(f"  seconds per row                     {report.per_row['seconds']:>12.2f}"
+                     + (f"  (model median reply {reply})" if reply else ""))
         challenged = m.get("claims_challenged") or m["claims_total"]
         if challenged:
             rate = 100 * m["claims_refuted"] / challenged
@@ -1194,6 +1291,10 @@ the spend — a reader that opens only the session file measures the lead and mi
   --json         the whole report as JSON, for tracking builds over time.
   --spend-out P  also write what the build cost PER ROW to P (needs --map): the spend.json that
                  `coyomap-eval run --spend` compares with the baseline's, as a rise-only band.
+
+A sub-agent that dispatched agents of its own (a fact-check wave runner) gets no fan-out row: its
+agents form rows of their own, named in the `via` column. `seconds per row` carries the model's
+median reply time beside it: a slower model raises the one with the other.
 
 Not a gate: it emits no verdict. Read it beside `coyomap-eval compare` — a change that halves
 the bill and doubles the refutation rate is not an improvement."""

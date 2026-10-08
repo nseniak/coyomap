@@ -27,3 +27,5 @@ Escalation: none on its own.
    `validate` gives a rule site in that file (the viewer's rule page shows the same ones).
    regression sign: `dump --owners` naming a component whose `files` does not list the file, or a
    component in the viewer's rule site list that `dump --owners` leaves out for that file.
+
+verified in mcpolis build of 2026-10-08 05:44 (map c0be7daa, tool 5103046)

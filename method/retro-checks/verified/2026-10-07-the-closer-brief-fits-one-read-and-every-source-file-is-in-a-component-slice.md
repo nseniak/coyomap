@@ -35,3 +35,5 @@ map: its appeals may have been judged without their map rows.
    regression sign: the harvest went out with a product source file the warning named still in no
    slice that writes components, or a harvest agent was added after the fan-out for product source
    files the warning had named. A tool's config file named in the warning is not a regression.
+
+verified in mcpolis build of 2026-10-08 05:44 (map c0be7daa, tool 5103046)

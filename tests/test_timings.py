@@ -569,3 +569,34 @@ def test_a_named_slice_with_no_transcript_still_refuses_beside_a_plan() -> None:
         written = record_path(tmp).exists()
     assert code == 2 and "'closer-w1'" in err, err
     assert not written
+
+
+def make_idless_transcript(d: Path, agent_id: str, brief: Path, start: str, end: str) -> None:
+    """A voter dispatched with its pointer's id line dropped: the prompt names only its brief,
+    the way the 2026-10-08 mcpolis wave-2 runner sent all 5 of its voters."""
+    prompt = f"{brief}\nRead it COMPLETELY and follow it — it is your entire brief."
+    rows = [{"type": "user", "timestamp": start, "message": {"role": "user", "content": prompt}},
+            {"type": "assistant", "timestamp": end, "message": {"role": "assistant", "content": []}}]
+    (d / f"agent-{agent_id}.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n",
+                                               encoding="utf-8")
+    (d / f"agent-{agent_id}.meta.json").write_text(
+        json.dumps({"description": f"Skeptic {agent_id}"}), encoding="utf-8")
+
+
+def test_a_voter_sent_without_its_id_line_is_timed_by_its_brief_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp) / "subagents"
+        d.mkdir()
+        plan = make_wave_plan(tmp, ["sec-1-a", "sec-1-b", "sec-11-a"])
+        briefs = plan.parent
+        make_idless_transcript(d, "a1", briefs / "skeptic-sec-1-a.md",
+                               "2026-10-08T05:00:00.000Z", "2026-10-08T05:07:48.000Z")
+        make_idless_transcript(d, "a2", briefs / "skeptic-sec-11-a.md",
+                               "2026-10-08T05:00:00.000Z", "2026-10-08T05:01:06.000Z")
+        code, out, err = run_timings(["record", "--repo", make_repo(tmp), "--phase", "skeptic",
+                                      "--from-agents", str(d), "--plan", str(plan)])
+        rows = read_record(tmp)
+    assert code == 0, err
+    assert [(r["slice"], r["minutes"]) for r in rows] == [("sec-1-a", 7.8), ("sec-11-a", 1.1)], rows
+    assert "1 of 3 voter(s) the plan names have no transcript" in err and "sec-1-b" in err, err
+    assert "recorded 2 slice(s)" in out, out
