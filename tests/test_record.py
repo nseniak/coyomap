@@ -26,7 +26,8 @@ from pathlib import Path
 
 from coyomap import buildstate
 from coyomap.model import ExtraSection, ProjectModel, to_canonical_json
-from coyomap.record import KNOWN_HEADINGS, USAGE, append_line, main
+from coyomap.finalize import LATE_CLAIMS_HEADING
+from coyomap.record import KNOWN_HEADINGS, LIVE_CHECKED, USAGE, append_line, main
 from test_business_rules import make_swept_model
 
 REPO = Path(__file__).resolve().parent.parent
@@ -735,3 +736,9 @@ def test_a_long_key_is_not_counted_only_the_why():
                                       "--line", f"{key}: one goal, one release."])
         assert code == 0, err
         assert "UC25" in frag.read_text(encoding="utf-8")
+
+
+def test_a_late_claim_line_is_not_tried_against_validate() -> None:
+    """`finalize`'s late-claims leg reads 'Late claims without a vote', not `validate`; trying the
+    leg's own lines against `validate` refused every one of them on the 2026-10-08 map."""
+    assert LATE_CLAIMS_HEADING not in LIVE_CHECKED
