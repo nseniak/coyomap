@@ -765,7 +765,10 @@ def test_every_assertion_id_is_unique_and_skips_the_reserved_eleven():
     # 41 came from the 2026-10-07 mcpolis retrospective: the lead's context was compacted at turn
     # 747, two of the last three builds compacted, and the summary dropped a flag the next record
     # needed. A compaction is always a HIGH finding in a retro, so the scorecard names it too.
-    assert ids == [*range(1, 11), *range(12, 19), 21, 22, 23, 24, 25, *range(26, 42)], ids
+    # 42 came from the 2026-10-08 mcpolis retrospective: six access rules written at the gate, after
+    # the last fact-check wave, shipped 13 site claims with no vote, three of them copied from the
+    # old map's text the access-baseline advisory printed.
+    assert ids == [*range(1, 11), *range(12, 19), 21, 22, 23, 24, 25, *range(26, 43)], ids
     assert 11 not in ids, "id 11 is reserved for the fixture-specific golden-map assertion"
     assert len(ids) == len(set(ids))
 
@@ -3627,3 +3630,93 @@ def test_a_runner_launched_beside_other_agents_still_counts_in_that_message():
         ToolCall(name="Agent", input={"prompt": "skeptic-b"}, id="s2"))),))
     a = P.score_turns((make_turn(0, *calls),), ctx=ctx).by_id()[3]
     assert (a.observed, a.of) == (1, 1), a
+
+
+# --- assertion 42: no rule restored after the last wave without a vote (retro 2026-10-08, #1) ----
+# Six access rules written at the gate after the second wave shipped 13 site claims with no vote;
+# three were copied from the old map's text the access-baseline advisory printed.
+
+def make_rule(rid: str, statement: str, sites: list[str]) -> dict[str, object]:
+    return {"id": rid, "statement": statement, "access": True, "risk": "a stranger reads it",
+            "sites": [{"where": w, "why": "refuses the stranger"} for w in sites]}
+
+
+def make_late_rule_map(tmp: Path, voted_late: bool, archive: bool = True) -> Path:
+    """A map with BR1 (pinned at the first wave, voted) and BR2 (written after it), its `verify/`
+    folder, and an archived map whose BR9 says what BR2 says. `voted_late` votes BR2's claim."""
+    from coyomap.audit_model import l2_worklist_model
+    from coyomap.model import load_model
+    out = tmp / ".coyomap"
+    (out / "verify").mkdir(parents=True)
+    doc = {"format": "coyomap-map", "title": "T", "goal": "g", "grounding": {
+               "claims_total": 1, "claims_challenged": 1, "claims_confirmed": 1,
+               "claims_refuted": 0, "claims_unverifiable": 0, "claims_added_since": 1},
+           "rules": [make_rule("BR1", "Only a signed-in person reads the dashboard", ["a.py:3"]),
+                     make_rule("BR2", "A sandbox file is written only inside its home folder",
+                               ["b.py:7"])]}
+    p = out / "project-map.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    live = l2_worklist_model(load_model(p.read_text(encoding="utf-8")))
+    first = [w.claim for w in live if "BR2" not in w.elements]
+    late = [w.claim for w in live if "BR2" in w.elements]
+    (out / "verify" / "worklist.json").write_text(json.dumps(
+        {"worklist": [{"claim": c} for c in first]}), encoding="utf-8")
+    voted = first + (late if voted_late else [])
+    (out / "verify" / "verdicts-security-1.json").write_text(json.dumps({"grounding": [
+        {"claim": c, "grounded": True, "evidence": "a.py:3", "skeptic": "s"} for c in voted]}),
+        encoding="utf-8")
+    if archive:
+        (out / "dev-rebuilds" / "0001").mkdir(parents=True)
+        (out / "dev-rebuilds" / "0001" / "project-map.json").write_text(json.dumps(
+            {"format": "coyomap-map", "title": "T", "goal": "g", "rules": [
+                make_rule("BR9", "A sandbox file is written only inside its home folder.",
+                          ["b.py:7"])]}), encoding="utf-8")
+    return p
+
+
+def test_a42_an_unvoted_rule_written_after_the_first_wave_scores_short_and_reads_as_copied():
+    with tempfile.TemporaryDirectory() as td:
+        ctx = P.read_score_context(make_late_rule_map(Path(td), voted_late=False))
+        a = P.assert_42_no_rule_restored_after_the_last_wave_without_a_vote((), ctx)
+    assert (a.observed, a.of) == (0, 1), a
+    rule = a.evidence[0].detail
+    assert rule["rule"] == "BR2" and rule["closest archived rule"] == "BR9", rule
+    assert isinstance(rule["ratio"], float) and rule["ratio"] >= 0.8, rule
+    assert "1 of them read as copied" in a.note and "1 claim(s) added since the pin" in a.note, a.note
+
+
+def test_a42_a_rule_a_later_wave_voted_on_scores_full():
+    with tempfile.TemporaryDirectory() as td:
+        ctx = P.read_score_context(make_late_rule_map(Path(td), voted_late=True))
+        a = P.assert_42_no_rule_restored_after_the_last_wave_without_a_vote((), ctx)
+    assert (a.observed, a.of) == (1, 1) and a.evidence == (), a
+
+
+def test_a42_is_not_applicable_without_a_map_or_a_pin():
+    a = P.assert_42_no_rule_restored_after_the_last_wave_without_a_vote((), P.ScoreContext())
+    assert a.of == 0 and "no map given" in a.note
+    with tempfile.TemporaryDirectory() as td:
+        p = make_late_rule_map(Path(td), voted_late=False)
+        for f in (p.parent / "verify").iterdir():
+            f.unlink()
+        a = P.assert_42_no_rule_restored_after_the_last_wave_without_a_vote(
+            (), P.read_score_context(p))
+    assert a.of == 0 and "no pinned worklist" in a.note, a
+
+
+def test_a42_names_the_turn_the_advisory_showed_the_old_maps_text():
+    old_form = ('1 of 1 file(s) that held ACCESS enforcement in 0001/project-map.json are named by '
+                'NO access rule in this map:\n  - b.py held BR9 "A sandbox file is written only '
+                'inside its home folder."')
+    new_form = ('1 of 1 file(s) that held ACCESS enforcement in 0001/project-map.json are named by '
+                'NO access rule in this map:\n  - b.py (line 7)')
+    turns = (make_turn(5, make_bash("coyomap ship", "u1"), results=(("u1", old_form),)),
+             make_turn(9, make_bash("coyomap ship", "u2"), results=(("u2", new_form),)),
+             make_turn(11, make_bash("cat method.md", "u3"),
+                       results=(("u3", "held ACCESS enforcement in a map"),)))
+    with tempfile.TemporaryDirectory() as td:
+        ctx = P.read_score_context(make_late_rule_map(Path(td), voted_late=False, archive=False))
+        a = P.assert_42_no_rule_restored_after_the_last_wave_without_a_vote(turns, ctx)
+    gate = {e.turn: e.detail["old map's text shown"] for e in a.evidence if e.turn}
+    assert gate == {5: True, 9: False}, a.evidence
+    assert "closest archived rule" not in a.evidence[0].detail, "no archive, no ratio"

@@ -208,6 +208,10 @@ HEADINGS: tuple[HeadingSpec, ...] = (
     HeadingSpec("Access baseline exceptions", True, DIR_KEY, SEP, strict_multi=DIR_KEY_STRICT,
                 merged_form="<path>, <path>: <why>"),
     HeadingSpec("Sweep debt", True),                # key = a `path:line` anchor (free text)
+    # A claim written after the last fact-check wave that ships with no vote: keyed by the claim's
+    # own `path:line` anchor (or the whole claim when it has none), like 'Sweep debt'. `finalize`
+    # blocks such a claim unless a line here names it.
+    HeadingSpec("Late claims without a vote", True),  # key = a `path:line` anchor (free text)
     # A step where a rule decides whose note deliberately says no condition: keyed by the step's
     # own `path:line`, like 'Sweep debt', because that anchor is what names one step of one walk.
     HeadingSpec("Condition exceptions", True),      # key = a `path:line` anchor (free text)

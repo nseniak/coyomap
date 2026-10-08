@@ -107,7 +107,7 @@ MACHINE_READ_HEADINGS: tuple[str, ...] = (
     "unclaimed surfaces", "drift exceptions", "interface exceptions",
     "bucket vocabulary", "sweep debt", "naming exceptions",
     "missing surfaces", "walk jumps", "condition exceptions", "test code exceptions",
-    "kind exceptions", "skipped screen exceptions",
+    "kind exceptions", "skipped screen exceptions", "late claims without a vote",
 )
 
 
@@ -1925,7 +1925,7 @@ def test_the_method_says_which_steps_of_a_wave_the_runner_runs():
                    "The free pass before the dispatch (the GATE below), the record, the note and "
                    "the cut of a second wave stay yours."):
         assert needed in fallback, f"the fallback lost {needed!r}: {fallback}"
-    wave = flat[flat.index("**The claims added since the pin get a SECOND WAVE, and only one.**"):]
+    wave = flat[flat.index("**The claims added since the pin get a SECOND WAVE.**"):]
     intro = wave[:wave.index(" 1. `coyomap audit <map> --batches")]
     assert "steps 2 to 4" not in intro, intro
     for needed in ("runs steps 2 and 3 and the closer in step 4",

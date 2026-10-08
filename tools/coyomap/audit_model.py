@@ -1974,6 +1974,10 @@ def _run(argv: list[str] | None = None) -> int:
               "  that the pin never held — a SECOND WAVE — as claims-added-<theme>-N.json, beside\n"
               "  the first wave's files and without touching them, at the pin's own tier, and\n"
               "  pins them: appended to that worklist, the first pin kept as worklist-wave1.json.\n"
+              "--prefix <word>- (with --since) names a LATER wave's files instead of `added-`: a\n"
+              "  late wave over the claims written after the second one is `--prefix late-`. A\n"
+              "  prefix whose verdicts-<prefix>*.json already exist is refused: re-cutting it would\n"
+              "  replace claims files that skeptics have answered.\n"
               "  Each worklist item carries `theme` (a closed, most-dangerous-first set) and\n"
               "  `drift_eligible`; `theme_counts` sizes each group. Batch the Phase-4 skeptics\n"
               "  BY THEME — the shape the Phase-4\n"
@@ -1985,9 +1989,10 @@ def _run(argv: list[str] | None = None) -> int:
     cap_raw = _opt_value(argv, "--cap")
     floor_raw = _opt_value(argv, "--floor")
     since_raw = _opt_value(argv, "--since")
+    prefix_raw = _opt_value(argv, "--prefix")
     with_prose = "--with-prose" in argv
     for flag, val in (("--batches", batches_out), ("--cap", cap_raw), ("--floor", floor_raw),
-                      ("--since", since_raw)):
+                      ("--since", since_raw), ("--prefix", prefix_raw)):
         if flag in argv and val is None:
             print(f"ERROR: {flag} needs a value (a value starting with '-' is not one)",
                   file=sys.stderr)
@@ -1996,7 +2001,7 @@ def _run(argv: list[str] | None = None) -> int:
     # exit 0: a build asking for JSON silently got prose, with no signal that its flag was a typo.
     # Every sibling command already refuses; these two were the exceptions.
     _known = ("--verbose", "--json", "--batches", "--cap", "--floor", "--with-behavioural",
-              "--with-prose", "--since")
+              "--with-prose", "--since", "--prefix")
     unknown = [a for a in argv if a.startswith("-") and a not in _known
                and not any(a.startswith(k + "=") for k in _known)]
     if unknown:
@@ -2013,7 +2018,7 @@ def _run(argv: list[str] | None = None) -> int:
         if skip:
             skip = False
             continue
-        if a in ("--batches", "--cap", "--floor", "--since"):
+        if a in ("--batches", "--cap", "--floor", "--since", "--prefix"):
             skip = True
             continue
         if not a.startswith("-"):
@@ -2029,6 +2034,11 @@ def _run(argv: list[str] | None = None) -> int:
         return 1
     findings = audit_model(m)
     behavioural = "--with-behavioural" in argv
+    if prefix_raw is not None and (since_raw is None
+                                   or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._]*-", prefix_raw)):
+        print("ERROR: --prefix names a later wave's files, so it needs --since, and it is one word "
+              "ending in `-` (`late-`)", file=sys.stderr)
+        return 2
     if since_raw is not None:
         if batches_out is None:
             print("ERROR: --since cuts a second wave's batches, so it needs --batches <dir>",
@@ -2046,7 +2056,18 @@ def _run(argv: list[str] | None = None) -> int:
             print(f"ERROR: --since {since_raw} is not a pinned worklist ({e})", file=sys.stderr)
             return 2
         worklist = [w for w in worklist if w.claim not in pinned]
-        batch_prefix = SECOND_WAVE_PREFIX
+        batch_prefix = prefix_raw or SECOND_WAVE_PREFIX
+        # A WAVE ALREADY ANSWERED is not re-cut. The cut clears its own `claims-<prefix>*` files
+        # first, so a late wave cut under the second wave's prefix replaced the claims files its
+        # verdicts answer: "there is no third wave" in method.md existed only because of this.
+        answered = sorted(Path(batches_out).glob(f"verdicts-{batch_prefix}*.json")) \
+            if batches_out is not None else []
+        if answered:
+            print(f"ERROR: {len(answered)} verdicts-{batch_prefix}*.json file(s) in {batches_out} "
+                  f"already answer a wave cut with the prefix `{batch_prefix}`; re-cutting it would "
+                  f"replace the claims files they answer. Cut the claims written since with a new "
+                  f"prefix: `--prefix late-` (method.md, the late wave).", file=sys.stderr)
+            return 2
         if not worklist:
             print(f"nothing added since the pin: every claim this map makes is in {since_raw}")
             return 0
@@ -2121,7 +2142,9 @@ def _run(argv: list[str] | None = None) -> int:
             # HERE, at the cut, like the first wave: folded at FINISH instead, a wave claim the
             # reconcile corrected after its vote lost every verdict it had.
             first = repin_second_wave(Path(since_raw or ""), worklist)
-            print(f"second wave: {len(worklist)} claim(s) added since the pin, now pinned in "
+            wave = ("second wave" if batch_prefix == SECOND_WAVE_PREFIX
+                    else f"wave `{batch_prefix}`")
+            print(f"{wave}: {len(worklist)} claim(s) added since the pin, now pinned in "
                   f"{since_raw} (the first pin is kept as {first.name}), so a claim corrected after "
                   f"its vote keeps its votes. Brief them with `coyomap contract skeptic "
                   f"--from-batches {out_dir} --prefix {batch_prefix} …`.")

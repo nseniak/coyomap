@@ -110,15 +110,18 @@ def make_lead_transcript(td: Path, read: list[str]) -> Path:
     return f
 
 
-def test_a_lost_file_is_listed_with_the_statement_and_the_why_it_held() -> None:
+def test_a_lost_file_is_listed_with_its_lines_and_nothing_the_old_map_said() -> None:
+    """Retro 2026-10-08 #1: the advisory printed old rules in full after the last wave, and the
+    lead wrote new rules from them that no skeptic read. The file and its lines only."""
     from coyomap.finalize import build_report
     with tempfile.TemporaryDirectory() as td:
         before, current = make_baseline_pair(Path(td))
         report = build_report(current, Path(td), [], before)
     leg = next(l for l in report.legs if l.name == "access baseline")
     text = leg.advisory[0]
-    assert "a/store.py held BR61 \"Every stored record carries its team\"" in text, text
-    assert "line 42: enforces it" in text, text
+    assert "  - a/store.py (line 42)\n" in text, text
+    for old in ("Every stored record carries its team", "enforces it", "BR61"):
+        assert old not in text, (old, text)
     assert "b/owner.py" not in text, "a file still named by an access rule is not lost"
 
 
@@ -136,7 +139,7 @@ def test_a_surface_file_keeps_the_claims_and_an_old_one_still_reads() -> None:
         assert load_claims(old) == {"a/store.py": [AccessClaim("BR61", "")]}
 
 
-def test_record_echoes_the_claim_an_excused_path_held() -> None:
+def test_record_echoes_the_lines_an_excused_path_held_and_not_the_claim() -> None:
     import contextlib
     import io
     from coyomap import record
@@ -149,8 +152,9 @@ def test_record_echoes_the_claim_an_excused_path_held() -> None:
                                 "--line", "c/other.py: never held one"])
     assert code == 0
     said = out.getvalue()
-    assert "a/store.py held, in 0001/project-map.json: BR61 \"Every stored record carries its " \
-           "team\"" in said, said
+    assert "a/store.py (line 42) held access in 0001/project-map.json" in said, said
+    for old in ("Every stored record carries its team", "enforces it", "BR61"):
+        assert old not in said, (old, said)
     assert "c/other.py held no access claim" in said, said
 
 
@@ -167,7 +171,7 @@ def test_an_excused_path_the_lead_never_opened_is_counted() -> None:
     leg = next(l for l in unread.legs if l.name == "access baseline")
     flagged = [a for a in leg.advisory if UNREAD_EXCUSES in a]
     assert len(flagged) == 1 and flagged[0].startswith("1 of 1 access path(s)"), leg.advisory
-    assert "a/store.py (held BR61" in flagged[0], flagged
+    assert "a/store.py (line 42)" in flagged[0] and "BR61" not in flagged[0], flagged
     leg = next(l for l in read.legs if l.name == "access baseline")
     assert not [a for a in leg.advisory if UNREAD_EXCUSES in a], leg.advisory
     leg = next(l for l in unknown.legs if l.name == "access baseline")

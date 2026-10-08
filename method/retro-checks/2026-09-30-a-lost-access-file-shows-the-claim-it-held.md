@@ -12,18 +12,24 @@ On the 2026-09-30 mcpolis build the leg named 17 paths with no claims; the lead 
 at its first `>` and missed 2 reads), 5 of the 11 answered a different claim, and four old access
 rules (team scoping of every stored record among them) left the map.
 
+Amended 2026-10-08 (retro finding mcpolis-2026-10-08-#1): the old claim's TEXT is no longer
+shown. It arrived after the last wave, and the 2026-10-08 build copied 3 old rules from it into
+the map with no vote. Each path is now listed with its lines only; items 1, 2 and 4 are reworded
+to match. See `2026-10-08-a-rule-written-after-the-last-wave-ships-only-with-a-vote.md`.
+
 Escalation: if item 3 fails, run the eval before accepting the map.
 
 ## Checks
 
 1. expect: when the build's `finalize-report.md` carries the access-baseline finding, every path
-   it lists is followed by `held BRn "<statement>"`.
-   regression sign: a listed path with no `held` clause, or the leg absent from a build whose repo
-   has `.coyomap/dev-rebuilds/`.
+   it lists is followed by its lines, `(line N)` or `(lines N, M)`, and nothing else.
+   regression sign: a listed path followed by `held BRn "<statement>"`, or the leg absent from a
+   build whose repo has `.coyomap/dev-rebuilds/`.
 
 2. expect: every `coyomap record --heading "Access baseline exceptions"` call in the lead
-   transcript prints one `<path> held, in NNNN/project-map.json: …` line per recorded path.
-   regression sign: a record call with no `held` line, or "no archived map beside this one" on a
+   transcript prints one `<path> (lines …) held access in NNNN/project-map.json` line per
+   recorded path.
+   regression sign: a record call with no such line, or "no archived map beside this one" on a
    repo that has an archive.
 
 3. expect: the shipped report carries no `excused without being opened` advisory, and
@@ -31,7 +37,7 @@ Escalation: if item 3 fails, run the eval before accepting the map.
    paths excused without being opened.
    regression sign: that advisory in the shipped report, or a count above 0 in the retro's re-run.
 
-4. expect: read against the `held` text, at most 1 of the lines recorded under "Access baseline
-   exceptions" answers a different claim than the one its path held.
-   regression sign: whys that describe the NEW map's rules instead of the lost claim (the
-   2026-09-30 build: 5 of 11).
+4. expect: read against the code at the listed lines, at most 1 of the lines recorded under
+   "Access baseline exceptions" says something the code there does not do.
+   regression sign: whys that describe the NEW map's rules instead of the code at those lines
+   (the 2026-09-30 build: 5 of 11).

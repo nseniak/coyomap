@@ -33,35 +33,31 @@ SCHEMA = "coyomap-access-surface/v1"
 class AccessClaim:
     """One thing a map said ONE file does for access: the rule, its statement, and the site.
 
-    The access-baseline leg used to name a lost file and nothing else. On the 2026-09-30 mcpolis
-    build it named 17, the lead opened none of them, and recorded 11 reasons taken from the NEW map:
-    5 of the 11 answered a different claim than the one that was lost, and 4 old rules left the map
-    altogether, team scoping of every stored record among them. A path is not a question anybody can
-    answer; the claim it held is."""
+    The statement and the why are KEPT, in the surface file, and never SHOWN to a build. The
+    access-baseline leg runs after the last fact-check wave, so any text it prints reaches a map no
+    skeptic will read again. On the 2026-10-08 mcpolis build it printed three old rules in full,
+    the lead wrote three new rules from them (text similarity 0.80 to 0.87), and their 13 site
+    claims shipped with no vote. What a build is shown is `where_lines`: the file and its lines."""
     rule: str
     statement: str
     where: str = ""
     why: str = ""
 
-    def site(self) -> str:
-        """`line 42: filters every query by the team id`, or whichever half is known."""
-        line = self.where.rsplit(":", 1)[1] if ":" in self.where else ""
-        return ": ".join(x for x in (f"line {line}" if line else "", self.why) if x)
+    def line(self) -> str:
+        """The site's line number, or "" when the anchor names a file only."""
+        tail = self.where.rsplit(":", 1)[1].strip() if ":" in self.where else ""
+        return tail if tail.isdigit() else ""
 
 
-def held(claims: list[AccessClaim]) -> str:
-    """What one file held, rule by rule, each statement once:
-    `BR61 "Every stored record carries its team" (line 42: filters by the team id; line 50: …)`."""
-    by_rule: dict[str, list[AccessClaim]] = {}
-    for c in claims:
-        by_rule.setdefault(c.rule, []).append(c)
-    parts: list[str] = []
-    for rule, cs in by_rule.items():
-        statement = next((c.statement for c in cs if c.statement), "")
-        sites = "; ".join(x for x in (c.site() for c in cs) if x)
-        parts.append((f'{rule} "{statement}"' if statement else rule)
-                     + (f" ({sites})" if sites else ""))
-    return " and ".join(parts)
+def where_lines(path: str, claims: list[AccessClaim]) -> str:
+    """`a/store.py (lines 42, 50)`: a lost file and the lines that held access there, or the
+    bare path when no line is known. NEVER a statement, a why or a rule id from the old map: a
+    build reads this after its last fact-check wave (see `AccessClaim`), and an old rule id names
+    a different rule in the new map."""
+    lines = sorted({c.line() for c in claims if c.line()}, key=int)
+    if not lines:
+        return path
+    return f"{path} (line{'s' if len(lines) > 1 else ''} {', '.join(lines)})"
 
 
 def access_files(m: ProjectModel) -> dict[str, list[str]]:
@@ -86,8 +82,9 @@ def access_files(m: ProjectModel) -> dict[str, list[str]]:
 
 
 def access_claims(m: ProjectModel) -> dict[str, list[AccessClaim]]:
-    """`{repo-relative file: [every access claim a site in it makes]}` — the worded half, kept
-    beside `access_files` so a lost file can be shown with what it held."""
+    """`{repo-relative file: [every access claim a site in it makes]}` — the worded half, kept in
+    the surface file beside `access_files`. A build is shown only each lost file's lines
+    (`where_lines`), never this text."""
     out: dict[str, list[AccessClaim]] = {}
     for rule in access_rules(m):
         for site in rule.sites:

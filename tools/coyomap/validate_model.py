@@ -4549,7 +4549,9 @@ def _grounding_live_coverage_findings(g: Grounding) -> list[str]:
             f"--from-batches .coyomap/verify --prefix added- … --votes security=3` briefs them — "
             f"then close their refutations and re-run `coyomap ship` with a new note (method.md, "
             f"the second wave). The cut pins them, so a claim corrected after its vote keeps its "
-            f"votes. Or say in "
+            f"votes. After a second wave, cut the claims written since with `--prefix late-` "
+            f"(method.md, the late wave): `finalize` blocks a claim no wave was given until one "
+            f"votes on it or a record names it. Or say in "
             f"`grounding.note` which claims were minted after the pin and why they were not "
             f"challenged — a note that says 'all N claims were challenged' is reporting the pin, "
             f"not the map."]

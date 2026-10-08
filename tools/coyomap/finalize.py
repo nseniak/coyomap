@@ -47,6 +47,7 @@ from dataclasses import asdict, dataclass, field
 from coyomap.challenge import (
     batch_claims,
     batch_theme,
+    unvoted_after_the_last_wave,
     verdict_files,
     voted_claims,
 )
@@ -59,8 +60,8 @@ from coyomap.reporting import item_lines, shown
 if TYPE_CHECKING:
     from coyomap.model import ProjectModel
 
-from coyomap.access_surface import AccessClaim, held, load_claims, lost_files
-from coyomap.audit_model import l2_worklist_model
+from coyomap.access_surface import AccessClaim, load_claims, lost_files, where_lines
+from coyomap.audit_model import WorkItem, l2_worklist_model
 from coyomap.credentials import (UNCOMMITTED_REMEDY, map_folder_files, places, redact,
                                  scan as scan_credentials)
 from coyomap.grounding import live_claims_digest, unopened, unvoted_reason
@@ -74,6 +75,15 @@ from coyomap.uncommitted import never_committed
 #: `AUDIT_EXCEPTIONS_HEADING` and `DRIFT_EXCEPTIONS_HEADING` are, so the method contract's scan for
 #: "which headings do the tools actually read" finds it without a literal at the call site.
 ACCESS_BASELINE_EXCEPTIONS_HEADING = "Access baseline exceptions"
+
+#: The extras heading the late-claims leg READS: a claim written after the last fact-check wave
+#: that ships without a vote, keyed by its `path:line` anchor (or by the whole claim when it has
+#: none), with the reason no late wave voted on it.
+LATE_CLAIMS_HEADING = "Late claims without a vote"
+
+#: The file prefix the method gives a late wave's claims and verdicts (`claims-late-*.json`):
+#: one more small wave, cut after the second (`added-`), over the claims written after it.
+LATE_WAVE_PREFIX = "late-"
 
 #: Where the durable record goes, next to the map it describes.
 REPORT_STEM = "finalize-report"
@@ -904,12 +914,14 @@ def _access_baseline_leg(map_path: Path, baseline: Path,
     legitimately reword and re-anchor; a file that lost its coverage altogether is the one signal
     that survives both.
 
-    EACH FILE WITH THE CLAIM IT HELD. The leg named paths and nothing else, and on the 2026-09-30
-    mcpolis build that list of 17 was answered without one file being opened: 11 reasons were
-    recorded from the NEW map, 5 of them about a different claim than the one lost, and four old
-    access rules left the map outright (team scoping of every stored record among them). A path is
-    not a question; the claim is. And because the record is the escape, the lead's own transcript is
-    read, when there is one, for the excused paths nobody opened."""
+    EACH FILE WITH ITS LINES, AND NOTHING THE OLD MAP SAID. On the 2026-09-30 mcpolis build a
+    bare list of 17 paths was answered without one file being opened, so the leg began printing the
+    old claim each file held. On the 2026-10-08 build that text arrived after the last fact-check
+    wave: the lead wrote three new rules from three printed old ones (text similarity 0.80 to 0.87),
+    and their site claims shipped with no vote. The line numbers are the question now; the code at
+    them is the answer; a rule written from it ships only after a late wave votes on its sites,
+    which `_late_claims_leg` holds. And because the record is the escape, the lead's own transcript
+    is read, when there is one, for the excused paths nobody opened."""
     from coyomap.assemble import load_map_or_fragment
     try:
         base = load_claims(baseline)
@@ -961,20 +973,88 @@ def _access_baseline_leg(map_path: Path, baseline: Path,
               f"when the records are deleted. A recorded gap is still a gap — re-read one by "
               f"validating a copy with its line removed.", *advisory])
     # Every file, never a `+N more`: this list IS the reading list, and a build that ran the leg
-    # would have seen 8 of its 19 names. Each with the claim it held, which is the question, and
-    # each on a line of its own (`item_lines`).
+    # would have seen 8 of its 19 names. Each with its lines, on a line of its own (`item_lines`),
+    # and NOTHING the old map said there (`where_lines`).
     return Leg("access baseline", RAN, note=note, advisory=[
         f"{len(lost)} of {len(base)} file(s) that held ACCESS enforcement in "
         f"{baseline.parent.name}/{baseline.name} are named by NO access rule in this map:\n"
-        + item_lines([f"{f} held {held(base[f])}" for f in lost], None)
-        + f"\nEach is listed with the claim it held there. The code of these {len(lost)} file(s) "
-          f"may be unchanged — check each one before shipping: open the file, then restore a rule "
-          f"that states the claim, or record why that claim no longer holds. A statement count can "
-          f"hold steady while a claim disappears, so this is not visible in "
-          f"`auth-surfaces-no-drop`. Record '<path>: <why>' under an "
-          f"'{ACCESS_BASELINE_EXCEPTIONS_HEADING}' extras heading for each one that is deliberate — "
-          f"the why answers the claim above, not the new map{excused_note}.",
+        + item_lines([where_lines(f, base[f]) for f in lost], None)
+        + f"\nEach file is listed with the lines that held access there, and never with what the "
+          f"old map said about them: this runs after the last fact-check wave, so copied text would "
+          f"ship unchecked. The code of these {len(lost)} file(s) may be unchanged — check each one "
+          f"before shipping: open the file at those lines, then write a rule from the code you "
+          f"read, which ships only after a late wave votes on its sites (method.md, the late wave), "
+          f"or record why no rule belongs there. A statement count can hold steady while a claim "
+          f"disappears, so this is not visible in `auth-surfaces-no-drop`. Record '<path>: <why>' "
+          f"under an '{ACCESS_BASELINE_EXCEPTIONS_HEADING}' extras heading for each one that is "
+          f"deliberate — the why says what the code at those lines does now{excused_note}.",
         *advisory])
+
+
+def late_claim_key(anchor: str | None, claim: str) -> str:
+    """The key a late claim is recorded under: its `path:line` anchor, or the whole claim when
+    the map gives it no anchor."""
+    return (anchor or "").strip() or claim.strip()
+
+
+def _late_claims_leg(map_path: Path) -> Leg | None:
+    """Claims the map makes that no fact-check wave was given and no skeptic voted on. BLOCKING.
+
+    A wave's cut pins what its skeptics are given, and `audit --since` cuts a second wave over the
+    claims written after the first. Nothing stopped a claim written after the LAST wave. On the
+    2026-10-08 mcpolis build the access-baseline advisory, which runs at the gate, printed three of
+    the old map's rules in full; the lead wrote six rules after the second wave, three of them
+    near word for word, and their 13 site claims shipped with only a sentence in the grounding
+    note. Three skeptics read them afterwards in about 1.5 minutes each: 2 of the 6 rules were
+    overstated, against about 99 % holding for the voted rest of that map.
+
+    BLOCKING, with an escape that names each claim. The remedy costs one small wave (method.md,
+    the late wave). A claim that cannot get one is recorded `<path:line>: <why>` under
+    `LATE_CLAIMS_HEADING`, one line per anchor, and the leg then DISCLOSES it rather than forgets
+    it. `grounding.note` is not an escape here: it is free prose, and it is what the 2026-10-08
+    build used. None when the map has no pinned worklist beside it, so there was no wave."""
+    from coyomap.assemble import load_map_or_fragment
+    try:
+        m, _present = load_map_or_fragment(map_path)
+    except Exception:                              # noqa: BLE001 — the validate leg reports it
+        return None
+    late = unvoted_after_the_last_wave(m, map_path.parent / "verify")
+    if late is None:
+        return None
+    if not late:
+        return Leg("late claims", RAN,
+                   note="every claim the map makes was given to a fact-check wave or voted on")
+    recorded = records.lines(m, LATE_CLAIMS_HEADING)
+    excused = [w for w in late if records.records_key(recorded, late_claim_key(w.anchor, w.claim))]
+    unexcused = [w for w in late if w not in excused]
+
+    def row(w: WorkItem) -> str:
+        ids = ", ".join(w.elements)
+        return (f"{late_claim_key(w.anchor, w.claim)} ({w.theme}"
+                + (f", {ids}" if ids else "") + ")")
+
+    disclosure = ([f"DISCLOSURE, not a request: {len(excused)} claim(s) written after the last "
+                   f"fact-check wave ship with no vote, recorded under '{LATE_CLAIMS_HEADING}':\n"
+                   + item_lines([row(w) for w in excused], None)
+                   + "\nA recorded claim is still unchecked. This clears when a late wave votes "
+                     "on it, or when its line is removed and it is voted."] if excused else [])
+    if not unexcused:
+        return Leg("late claims", RAN, advisory=disclosure,
+                   note=f"{len(late)} claim(s) with no vote, each recorded")
+    return Leg("late claims", RAN, advisory=disclosure, blocking=[
+        f"{len(unexcused)} claim(s) the map makes were written after the last fact-check wave and "
+        f"have no vote:\n"
+        + item_lines([row(w) for w in unexcused], None)
+        + f"\nA claim no skeptic read ships unchecked: on one build, 2 of 6 rules restored this "
+          f"way were overstated. Cut one more small wave over them (method.md, the late wave): "
+          f"`coyomap audit <map> --batches .coyomap/verify --since .coyomap/verify/worklist.json "
+          f"--prefix {LATE_WAVE_PREFIX}`, then `coyomap contract skeptic --from-batches "
+          f".coyomap/verify --prefix {LATE_WAVE_PREFIX} --votes <theme>=3` for each theme it cut, "
+          f"dispatch, `coyomap grounding lint --plan <briefs>/wave-plan.json`, a closer for its "
+          f"refutations, then `ship` again. Or, for a claim that cannot get a vote, record "
+          f"'<path:line>: <why>' under a '{LATE_CLAIMS_HEADING}' extras heading, keyed by the "
+          f"anchor listed above. `grounding.note` does not clear this."],
+        note=f"{len(late)} claim(s) with no vote, {len(excused)} of them recorded")
 
 
 #: The start of the advisory that counts excused access paths the lead never opened. Named so the
@@ -1003,7 +1083,7 @@ def _unread_excuses(excused: list[str], base: dict[str, list[AccessClaim]],
     # id is called.
     return [f"{len(never)} of {len(excused)} access path(s) {UNREAD_EXCUSES}: no tool call in the "
             f"lead's transcript reads them:\n"
-            + item_lines([f"{f} (held {held(base[f])})" for f in never], None)
+            + item_lines([where_lines(f, base[f]) for f in never], None)
             + f"\nThe transcript read is {lead_transcript.name}. A drop is recorded after reading "
               f"the file (dispatch.md). Open each one, then keep its line, correct its why, or "
               f"remove it and restore the rule."]
@@ -1125,6 +1205,7 @@ def build_report(map_path: Path, repo: Path, verdicts: list[Path],
         *([leg for leg in (_budget_leg(map_path, repo),) if leg is not None]),
         *([leg for leg in (_undispatched_prose_leg(map_path),) if leg is not None]),
         *([leg for leg in (_undispatched_claims_leg(map_path),) if leg is not None]),
+        *([leg for leg in (_late_claims_leg(map_path),) if leg is not None]),
         _credential_leg(map_path),
         _balance_leg(map_path),
         _findings_leg(map_path),
@@ -1774,9 +1855,9 @@ def main(argv: list[str] | None = None) -> int:
               "access-rule COUNT at 21 -> 21 while the file verifying an identity token's signature\n"
               "lost its claim entirely. Reading it HERE cannot contaminate the rebuild: the map is\n"
               "already written, and the commit has not happened yet. Each lost file is listed with\n"
-              "the claim it held there, and the excused files the lead's own transcript never shows\n"
-              "it opening are counted: --lead-transcript names that transcript (default: this\n"
-              "session's, from $CLAUDE_CODE_SESSION_ID).\n\n"
+              "its lines there and never with the old map's text, and the excused files the lead's\n"
+              "own transcript never shows it opening are counted: --lead-transcript names that\n"
+              "transcript (default: this session's, from $CLAUDE_CODE_SESSION_ID).\n\n"
               "Read the REPORT FILE, not this stdout: a file survives `> /dev/null` and `| tail`,\n"
               "and it carries whole lists with no `+N more`.")
         return 0

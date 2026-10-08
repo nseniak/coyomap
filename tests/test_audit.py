@@ -2711,3 +2711,72 @@ def test_the_removed_prose_batches_are_counted_past_the_fifth():
     line = next(ln for ln in err.getvalue().splitlines() if "prose batch file(s)" in ln)
     assert ("removed 7 prose batch file(s) from an earlier run (prose-1.json, prose-2.json, "
             "prose-3.json, prose-4.json, prose-5.json, +2 more)") in line, line
+
+
+# --- the late wave: one more small cut after the second (retro 2026-10-08, finding 1) -------------
+# Six access rules written at the gate, after the second wave, shipped 13 site claims with no vote:
+# a third cut under `added-` would have replaced the files the second wave's verdicts answer, so the
+# method allowed none. `--prefix late-` cuts them beside it, and re-cutting an answered prefix is
+# refused.
+
+def make_second_wave_dir(tmp: Path) -> tuple[Path, Path, Path]:
+    """`(map, pin, verify)`: a map of two edges, a pin holding every claim but `C4 writes E1`, and a
+    second wave already cut AND answered under `added-` in `verify`."""
+    doc = {"format": "coyomap-map", "title": "T", "goal": "g",
+           "components": [{"id": "C3", "name": "Reader", "purpose": "reads the record"},
+                          {"id": "C4", "name": "Writer", "purpose": "writes the record"}],
+           "entities": [{"id": "E1", "name": "Record", "meaning": "a saved row"}],
+           "edges": [{"src": "C3", "verb": "reads", "dst": "E1", "why": "w", "where": "b.py:2"},
+                     {"src": "C4", "verb": "writes", "dst": "E1", "why": "w", "where": "c.py:5"}]}
+    mp = tmp / "map.json"
+    mp.write_text(json.dumps(doc), encoding="utf-8")
+    live = [w.claim for w in audit_model.l2_worklist_model(
+        audit_model.load_model(mp.read_text(encoding="utf-8")))]
+    pin = tmp / "worklist.json"
+    pin.write_text(json.dumps({"worklist": [{"claim": c} for c in live if c != "C4 writes E1"]}),
+                   encoding="utf-8")
+    verify = tmp / "verify"
+    verify.mkdir()
+    (verify / "claims-added-backbone.json").write_text(json.dumps(
+        {"theme": "backbone", "claims": [{"claim": "an earlier late claim"}]}), encoding="utf-8")
+    (verify / "verdicts-added-backbone.json").write_text(json.dumps({"grounding": [
+        {"claim": "an earlier late claim", "grounded": True, "skeptic": "s"}]}), encoding="utf-8")
+    return mp, pin, verify
+
+
+def test_an_answered_wave_prefix_is_not_cut_again() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mp, pin, verify = make_second_wave_dir(Path(td))
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = audit_model.main([str(mp), "--batches", str(verify), "--since", str(pin)])
+        assert code == 2, err.getvalue()
+        assert "--prefix late-" in err.getvalue(), err.getvalue()
+        kept = json.loads((verify / "claims-added-backbone.json").read_text(encoding="utf-8"))
+        assert kept["claims"] == [{"claim": "an earlier late claim"}], "the answered file was replaced"
+
+
+def test_a_late_prefix_cuts_the_claims_written_since_beside_the_second_wave() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mp, pin, verify = make_second_wave_dir(Path(td))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = audit_model.main([str(mp), "--batches", str(verify), "--since", str(pin),
+                                     "--prefix", "late-"])
+        assert code == 0, out.getvalue()
+        late = sorted(verify.glob("claims-late-*.json"))
+        claims = [c["claim"] for f in late
+                  for c in json.loads(f.read_text(encoding="utf-8"))["claims"]]
+        assert claims == ["C4 writes E1"], claims
+        assert (verify / "claims-added-backbone.json").exists(), "the second wave's file went"
+        assert "C4 writes E1" in json.dumps(json.loads(pin.read_text(encoding="utf-8"))), \
+            "the late wave is pinned at the cut"
+        assert "wave `late-`" in out.getvalue(), out.getvalue()
+
+
+def test_a_prefix_without_since_or_not_ending_in_a_dash_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mp, pin, verify = make_second_wave_dir(Path(td))
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert audit_model.main([str(mp), "--batches", str(verify), "--prefix", "late-"]) == 2
+            assert audit_model.main([str(mp), "--batches", str(verify), "--since", str(pin),
+                                     "--prefix", "late"]) == 2

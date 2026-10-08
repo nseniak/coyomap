@@ -58,7 +58,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from coyomap.anchors import parse_anchor
-from coyomap.audit_model import WorkItem, l2_worklist_model, worklist_payload, write_theme_batches
+from coyomap.audit_model import (WorkItem, l2_worklist_model, pinned_claims, pinned_tier,
+                                 worklist_payload, write_theme_batches)
 from coyomap.changelog import (ChangeLog, apply, commit_matches, dump_log, element_of, gated_box,
                                load_log, touched_ids)
 from coyomap.grounding import (
@@ -77,7 +78,7 @@ from coyomap.grounding import (
     REDUNDANT_PHRASE,
 )
 from coyomap.impact_git import ImpactError, rename_map, resolve_ref, tree_paths, u0_diff
-from coyomap.model import ModelError, load_model, resolve_map_path
+from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
 from coyomap.reanchor import line_mapper, reanchor
 
 USAGE = """usage: coyomap changes challenge <log> --map <map> --before <before.json> --touched <impact.json>
@@ -280,6 +281,41 @@ def voted_claims(files: list[Path]) -> set[str]:
             continue
         out.update(str(r["claim"]) for r in rows if isinstance(r.get("claim"), str)
                    and not is_closer_row(r))
+    return out
+
+
+#: The file a build pins its fact-check worklist to, in its `verify/` folder. Every wave's cut
+#: (`audit --since`) appends to it, so it holds every claim some wave was given.
+PINNED_WORKLIST = "worklist.json"
+
+
+def unvoted_after_the_last_wave(m: ProjectModel, verify: Path) -> list[WorkItem] | None:
+    """The claims the map makes that no wave was given and no skeptic voted on, in worklist order:
+    claims written or reworded after the last wave's cut. None when `verify/` holds no pinned
+    worklist, so there was no wave to come after.
+
+    Read at the pin's own tier, as `grounding write` reads it, so a behavioural pin does not call
+    every behaviour claim new. A claim a skeptic voted on outside a cut counts as voted, as
+    `grounding.second_wave` folds it.
+
+    On the 2026-10-08 mcpolis build these were the 13 site claims of 6 access rules the lead wrote
+    after the second wave, from the old map's text the access-baseline advisory printed. 2 of the
+    6 rules turned out overstated when 3 skeptics read them afterwards."""
+    pin = verify / PINNED_WORKLIST
+    if not pin.is_file():
+        return None
+    try:
+        pinned = set(pinned_claims(pin))
+    except (OSError, ValueError, AttributeError):
+        return None
+    voted = voted_claims(verdict_files(verify))
+    out: list[WorkItem] = []
+    seen: set[str] = set()
+    for w in l2_worklist_model(m, behavioural=pinned_tier(pin)):
+        if w.claim in pinned or w.claim in voted or w.claim in seen:
+            continue
+        seen.add(w.claim)
+        out.append(w)
     return out
 
 

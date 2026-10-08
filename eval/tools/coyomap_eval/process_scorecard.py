@@ -3695,6 +3695,113 @@ def assert_41_lead_not_compacted(turns: Sequence[Turn], ctx: ScoreContext) -> As
     return Assertion(41, name, 0 if evidence else 1, 1, evidence, note)
 
 
+#: The access-baseline advisory's own count line, as `finalize` prints it in any version: both
+#: halves, so a read of the method or the tool's source that quotes one of them is not counted.
+_ACCESS_BASELINE_OUTPUT = re.compile(r"held ACCESS enforcement in \S+ are named by NO access rule")
+#: The form it printed until 2026-10-08: each lost file with the old map's rule and statement.
+_OLD_TEXT_SHOWN = re.compile(r'held BR\d+ "')
+#: A rule statement this close to an archived one (difflib ratio) reads as copied: the three rules
+#: the 2026-10-08 build copied measured 0.80, 0.84 and 0.87.
+_COPIED_RATIO = 0.8
+
+
+def _first_pin(verify: Path) -> Path | None:
+    """The worklist the FIRST wave was given: `worklist-wave1.json` once a later cut extended the
+    pin, else `worklist.json`. None when the map has no pin beside it."""
+    for name in ("worklist-wave1.json", "worklist.json"):
+        if (verify / name).is_file():
+            return verify / name
+    return None
+
+
+def _closest_archived_rule(statement: str, archived: Mapping[str, str]) -> tuple[str, float]:
+    """`(rule id, ratio)` of the archived rule whose statement is closest to `statement`."""
+    from difflib import SequenceMatcher
+    best = ("", 0.0)
+    for rid, text in archived.items():
+        ratio = SequenceMatcher(None, statement, text).ratio()
+        if ratio > best[1]:
+            best = (rid, round(ratio, 2))
+    return best
+
+
+def assert_42_no_rule_restored_after_the_last_wave_without_a_vote(
+        turns: Sequence[Turn], ctx: ScoreContext) -> Assertion:
+    """42 — every rule claim the map gained after its first fact-check wave has a vote.
+
+    A rule written after the first wave reaches a skeptic only through a later cut, the second
+    wave or the late one (method.md). On the 2026-10-08 mcpolis build the access-baseline advisory
+    printed three old rules in full after the second wave; the lead wrote six rules at the gate,
+    three of them near word for word, and their 13 site claims shipped with no vote. Read
+    afterwards by 3 skeptics, 2 of the 6 rules were overstated.
+
+    `of` counts the rule claims the shipped map makes that its first pin did not hold; `observed`
+    those a skeptic voted on (`verify/verdicts-*.json`). Each unvoted rule is evidence, with the
+    archived rule its statement is closest to and how close: a ratio of 0.8 or more reads as
+    copied. The lead transcript adds the turn the access-baseline advisory reached the lead, and
+    whether that output still carried the old map's rule text. The map's grounding record is quoted
+    in the note (`claims_added_since`, live claims with a verdict) for a reader to cross-check."""
+    name = "no rule restored after the last wave without a vote"
+    if ctx.map_path is None or ctx.grounding is None:
+        return Assertion(42, name, 0, 0, (), ctx.missing_map_note("which rules were voted"))
+    verify = Path(ctx.map_path).parent / "verify"
+    first = _first_pin(verify)
+    if first is None:
+        return Assertion(42, name, 0, 0, (), "no pinned worklist beside the map, so no wave ran")
+    try:
+        from coyomap.access_surface import newest_archived_map
+        from coyomap.audit_model import l2_worklist_model, pinned_claims, pinned_tier
+        from coyomap.challenge import verdict_files, voted_claims
+        from coyomap.model import load_model
+        m = load_model(Path(ctx.map_path).read_text(encoding="utf-8"))
+        pinned = set(pinned_claims(first))
+        tier = pinned_tier(verify / "worklist.json") or pinned_tier(first)
+    except Exception as e:                       # noqa: BLE001 — the scorecard is never a gate
+        return Assertion(42, name, 0, 0, (), f"map or pin unreadable ({e})"[:200])
+    statements = {r.id: r.statement for r in m.rules}
+    voted = voted_claims(verdict_files(verify))
+    later = [w for w in dict((w.claim, w) for w in l2_worklist_model(m, behavioural=tier)).values()
+             if w.claim not in pinned and set(w.elements) & set(statements)]
+    unvoted = [w for w in later if w.claim not in voted]
+    archived: dict[str, str] = {}
+    archive = newest_archived_map(Path(ctx.map_path).parent)
+    if archive is not None:
+        try:
+            archived = {r.id: r.statement for r in
+                        load_model(archive.read_text(encoding="utf-8")).rules}
+        except Exception:                        # noqa: BLE001 — similarity is context, not the score
+            archived = {}
+    evidence: list[Evidence] = []
+    rules = sorted({e for w in unvoted for e in w.elements if e in statements},
+                   key=lambda r: (len(r), r))
+    copied = 0
+    for rid in rules:
+        detail: dict[str, EvidenceValue] = {
+            "rule": rid, "unvoted claims": sum(1 for w in unvoted if rid in w.elements)}
+        if archived:
+            near, ratio = _closest_archived_rule(statements[rid], archived)
+            detail.update({"closest archived rule": near, "ratio": ratio})
+            copied += 1 if ratio >= _COPIED_RATIO else 0
+        evidence.append(Evidence(0, detail))
+    results = results_by_tool_use_id(turns)
+    for turn in turns:
+        for call in turn.calls_named("Bash"):
+            out = results.get(call.id, "")
+            if _ACCESS_BASELINE_OUTPUT.search(out):
+                evidence.append(Evidence(turn.index, {
+                    "what": "the access-baseline advisory reached the lead",
+                    "old map's text shown": bool(_OLD_TEXT_SHOWN.search(out))}))
+    g = ctx.grounding
+    note = (f"{len(unvoted)} of {len(later)} rule claim(s) made after the first pin have no vote, "
+            f"over {len(rules)} rule(s)"
+            + (f"; {copied} of them read as copied (ratio {_COPIED_RATIO} or more to an archived "
+               f"rule)" if archived and rules else "")
+            + f"; the grounding record says {g.get('claims_added_since', 'n/a')} claim(s) added "
+              f"since the pin, {g.get('claims_live_challenged', 'n/a')} live claim(s) with a "
+              f"verdict")
+    return Assertion(42, name, len(later) - len(unvoted), len(later), tuple(evidence), note)
+
+
 ASSERTIONS = (
     assert_1_preindex_report_used,
     assert_2_preindex_not_hand_parsed,
@@ -3734,6 +3841,7 @@ ASSERTIONS = (
     assert_39_security_theme_is_fed,
     assert_40_no_subagent_narrowed_its_own_lint,
     assert_41_lead_not_compacted,
+    assert_42_no_rule_restored_after_the_last_wave_without_a_vote,
 )
 
 
@@ -3756,7 +3864,8 @@ def score_turns(turns: Sequence[Turn], *, transcript: str = "", label: str = "",
                   assert_33_access_granularity_is_recorded,
                   assert_39_security_theme_is_fed,
                   assert_40_no_subagent_narrowed_its_own_lint,
-                  assert_41_lead_not_compacted}
+                  assert_41_lead_not_compacted,
+                  assert_42_no_rule_restored_after_the_last_wave_without_a_vote}
     assertions = tuple(fn(turns, ctx) if fn in _needs_ctx else fn(turns)  # type: ignore[operator]
                        for fn in ASSERTIONS)
     return Scorecard(transcript=transcript, turns=len(turns), assertions=assertions,

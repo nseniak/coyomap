@@ -2909,7 +2909,7 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
   Read both before writing the note: a build that read neither shipped two refuted claims and
   hand-diffed the post-pin set in python to find what the section would have listed.
 
-  **The claims added since the pin get a SECOND WAVE, and only one.** A text corrected after the
+  **The claims added since the pin get a SECOND WAVE.** A text corrected after the
   vote, or an edge written after it, is a claim no skeptic saw. With a runner, ONE `contract wave`
   brief with «PREFIX» `added-` and a new «BRIEFS» folder runs steps 2 and 3 and the closer in step
   4; step 1, the `ship` without a note in step 4 (the prepare step) and step 5 stay yours. In order:
@@ -2925,8 +2925,25 @@ changes how many agents do the work (a serial build still FANS OUT for the T7 ru
      closer hears them like the first wave's (`contract closer --from-verdicts .coyomap/verify
      --prefix added- …`);
   5. `ship --note-file <a NEW note>`. The old note counts the first pin only.
-  There is no third wave: a claim reworded while the second is reconciled is named in the note, and
-  a new cut would overwrite the second wave's files. **Never re-pin with a fresh `audit --json`:**
+  **A claim written after the last wave gets the LATE WAVE: small, pinned, and voted 3 times.**
+  The gate is where this happens: the access-baseline advisory names a file that lost its access
+  rule, with its lines, and a rule written then reaches no wave. `finalize` BLOCKS any claim the
+  map makes that no wave was given and no skeptic voted on. In order:
+  1. Write the rule from the code you read at those lines. The advisory never shows the old map's
+     words, and you never fetch them: text copied after the last wave ships unchecked.
+  2. `coyomap audit <map> --batches .coyomap/verify --since .coyomap/verify/worklist.json --prefix
+     late-` cuts only the claims written since, as `claims-late-*.json`, and pins them. The
+     `added-` prefix is refused once its verdicts exist, so the second wave's files stay whole.
+  3. `coyomap contract skeptic --from-batches .coyomap/verify --prefix late- --votes <theme>=3`
+     for each theme the cut wrote (a rule's sites are `security`), or one `contract wave` brief
+     with «PREFIX» `late-` and «VOTES» `security=3` when security is its only theme. Then steps 3
+     to 5 above, with the `late-` prefix.
+  A claim that cannot get a vote is recorded `<path:line>: <why>` under a
+  **"Late claims without a vote"** extras heading, one line per anchor `finalize` lists. `finalize` then discloses it
+  instead of blocking; a sentence in `grounding.note` does not clear it. On the build that
+  showed this, 6 rules written at the gate shipped 13 site claims with no vote, and 2 of the 6
+  were overstated. Three skeptics took about 1.5 minutes each over all 13.
+  **Never re-pin with a fresh `audit --json`:**
   `grounding write` refuses every verdict cast on the old wording. On one build 68 claims shipped
   with no verdict, 6 of them re-worded sites of access rules, because no route here reached them.
 

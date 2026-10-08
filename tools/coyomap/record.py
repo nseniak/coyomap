@@ -22,9 +22,9 @@ find-and-replace its own text two turns later with a fragile `body.find(...)` + 
     coyomap record --map .coyomap/build-fragments/extras.json --heading "Sweep debt" \\
                    --remove "<prefix>"
 
-Under "Access baseline exceptions" each recorded path is echoed with the claim it held in the
-previous map (the newest `dev-rebuilds/NNNN/` map beside this one, or `--access-baseline <file>`),
-because the why must answer THAT claim, not describe the new map.
+Under "Access baseline exceptions" each recorded path is echoed with the lines that held access in
+the previous map (the newest `dev-rebuilds/NNNN/` map beside this one, or `--access-baseline
+<file>`), and never with that map's text, because the why must say what the code at those lines does.
 
 Under a heading keyed on FREE TEXT that only `validate` reads ('Sweep debt', 'Condition
 exceptions', 'Skipped screen exceptions', 'Accepted duplications'), each new line is tried on the
@@ -87,7 +87,7 @@ import sys
 from pathlib import Path
 
 from coyomap import buildstate, prose, records
-from coyomap.access_surface import baseline_beside, held, load_claims
+from coyomap.access_surface import baseline_beside, load_claims, where_lines
 from coyomap.anchor_drift import DRIFT_EXCEPTIONS_HEADING
 from coyomap.assemble import dump_preserving, load_map_or_fragment
 from coyomap.finalize import ACCESS_BASELINE_EXCEPTIONS_HEADING
@@ -284,20 +284,22 @@ def _inert_reason(line: str, heading: str, map_path: Path) -> str:
 
 
 def echo_access_claims(path: Path, recorded: list[str], baseline: Path | None) -> None:
-    """For each path just recorded under 'Access baseline exceptions', the claim it held.
+    """For each path just recorded under 'Access baseline exceptions', the lines that held access
+    there in the previous map, and never what that map said about them.
 
-    `finalize` lists them beside its advisory; this says it again at the moment of writing, which
-    is where the 2026-09-30 mcpolis build went wrong: 11 reasons were written from the NEW map, and
-    5 of them answered a different claim than the one that was lost."""
+    Said at the moment of writing, which is where the 2026-09-30 mcpolis build went wrong: 11
+    reasons were written from the NEW map without opening one file. The old claim's TEXT is not
+    echoed: a build records these after its last fact-check wave, and on the 2026-10-08 mcpolis
+    build old text printed there became three new rules no skeptic read (`AccessClaim`)."""
     base_path = baseline or baseline_beside(path)
     if base_path is None:
-        print("note: no archived map beside this one, so the claim each path held cannot be shown; "
-              "pass --access-baseline <the previous map> to see it")
+        print("note: no archived map beside this one, so the lines each path held cannot be shown; "
+              "pass --access-baseline <the previous map> to see them")
         return
     try:
         base = load_claims(base_path)
     except Exception as exc:                       # noqa: BLE001 — any unreadable baseline is one case
-        print(f"note: {base_path} could not be read ({exc}), so the claim each path held cannot "
+        print(f"note: {base_path} could not be read ({exc}), so the lines each path held cannot "
               f"be shown")
         return
     where = f"{base_path.parent.name}/{base_path.name}"
@@ -305,8 +307,8 @@ def echo_access_claims(path: Path, recorded: list[str], baseline: Path | None) -
         for key in records.line_keys(ACCESS_BASELINE_EXCEPTIONS_HEADING, ln):
             claims = base.get(key)
             if claims:
-                print(f"  {key} held, in {where}: {held(claims)}. The why must answer THAT "
-                      f"claim: where it went, or why it no longer holds.")
+                print(f"  {where_lines(key, claims)} held access in {where}. The why must say what "
+                      f"the code at those lines does now: open them before you keep this line.")
             else:
                 print(f"  {key} held no access claim in {where}, so this line excuses nothing "
                       f"there.")

@@ -1905,8 +1905,11 @@ def make_reworded_rule_repo(elements: list[str], anchor: str) -> tuple[Path, Pat
 
 
 def _access_advisory(root: Path, p: Path, v: Path) -> str:
-    assert finalize.main([str(p), "--repo", str(root), "--verdicts", str(v)]) == 0
+    finalize.main([str(p), "--repo", str(root), "--verdicts", str(v)])
     doc = json.loads((root / ".coyomap" / "finalize-report.json").read_text())
+    # The re-worded site is a claim no wave was given, so the late-claims leg blocks it: the one
+    # blocking leg these maps may carry (retro 2026-10-08, finding 1).
+    assert [l["name"] for l in doc["legs"] if l["blocking"]] in ([], ["late claims"]), doc
     leg = next(l for l in doc["legs"] if l["name"] == "grounding refutations")
     return leg["advisory"][0]
 
@@ -2114,7 +2117,7 @@ def test_the_access_list_puts_its_count_on_a_short_first_line_and_each_file_on_i
     assert len(first) < 200, f"{len(first)} characters: {first}"
     for i in (1, 2, 3):
         own = lines_naming(text, f"src/auth/guard_{i}.py")
-        assert len(own) == 1 and own[0].startswith(f"  - src/auth/guard_{i}.py held BR{i} "), (
+        assert len(own) == 1 and own[0] == f"  - src/auth/guard_{i}.py (line {10 + i})", (
             i, text)
     # The disposition table finds the advisory and its heading by substring, in the whole text.
     assert [(d, h) for d, h, a in rows if a == text] == [
@@ -2401,3 +2404,135 @@ def test_the_gate_block_carries_the_findings_count_the_agents_filed():
     report = finalize.build_report(p, root, [])
     block = finalize.gate_block(report, report.map_sha256)
     assert "FINDINGS FILED BY AGENTS — 2 from 2 agent(s): risk 1" in block, block
+
+
+# ── a claim written after the last wave ships only with a vote (retro 2026-10-08, finding 1) ─────
+# The access-baseline advisory printed three old rules in full after the second wave; the lead
+# wrote six rules at the gate, three of them near word for word, and their 13 site claims shipped
+# with a sentence in the grounding note and no vote. 2 of the 6 were overstated.
+
+def make_late_claim_repo(record: str | None = None, voted: bool = False,
+                         note: str | None = None) -> tuple[Path, Path, str]:
+    """`(root, map, late claim)`: a repo whose pin holds every claim its map makes but the edge at
+    src/a.py:2, written after the last wave. `voted` writes a skeptic's verdict on that claim,
+    `record` a line under the late-claims heading, `note` a grounding note."""
+    from coyomap.audit_model import l2_worklist_model
+    from coyomap.model import load_model_path
+    root, p = make_repo()
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    if record is not None:
+        doc["extras"] = [{"heading": finalize.LATE_CLAIMS_HEADING, "body": record}]
+    if note is not None:
+        doc["grounding"] = {"claims_total": 1, "claims_challenged": 1, "claims_confirmed": 1,
+                            "claims_refuted": 0, "claims_unverifiable": 0, "note": note}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    live = l2_worklist_model(load_model_path(p))
+    late = next(w.claim for w in live if w.anchor == "src/a.py:2")
+    verify = root / ".coyomap" / "verify"
+    verify.mkdir()
+    (verify / "worklist.json").write_text(json.dumps({"worklist": [
+        {"claim": w.claim, "anchor": w.anchor, "theme": w.theme} for w in live
+        if w.claim != late]}), encoding="utf-8")
+    if voted:
+        (verify / "verdicts-backbone-1.json").write_text(json.dumps({"grounding": [
+            {"claim": late, "grounded": True, "evidence": "src/a.py:2", "skeptic": "s1"}]}),
+            encoding="utf-8")
+    return root, p, late
+
+
+def _late_leg(report: "finalize.FinalizeReport") -> "finalize.Leg | None":
+    return next((l for l in report.legs if l.name == "late claims"), None)
+
+
+def test_a_claim_no_wave_was_given_blocks_finalize_and_names_its_anchor():
+    root, p, _late = make_late_claim_repo()
+    report = finalize.build_report(p, root, [])
+    leg = _late_leg(report)
+    assert leg is not None and len(leg.blocking) == 1, leg
+    assert report.verdict == "BLOCKED", report.verdict
+    text = leg.blocking[0]
+    assert text.startswith("1 claim(s) the map makes were written after the last fact-check wave"), text
+    assert "  - src/a.py:2 (backbone, C1, C2)" in text, text
+    assert "--prefix late-" in text and finalize.LATE_CLAIMS_HEADING in text, text
+
+
+def test_a_late_claim_a_skeptic_voted_on_does_not_block():
+    root, p, _late = make_late_claim_repo(voted=True)
+    leg = _late_leg(finalize.build_report(p, root, []))
+    assert leg is not None and not leg.blocking and not leg.advisory, leg
+
+
+def test_a_recorded_late_claim_is_disclosed_and_not_blocked():
+    root, p, _late = make_late_claim_repo(
+        record="src/a.py:2: the code moved after the last wave and no skeptic was left to read it")
+    report = finalize.build_report(p, root, [])
+    leg = _late_leg(report)
+    assert leg is not None and not leg.blocking, leg
+    assert leg.advisory and leg.advisory[0].startswith("DISCLOSURE, not a request"), leg
+    rows = [d for d, _h, a in finalize.advisory_disposition(p, report) if a == leg.advisory[0]]
+    assert rows == ["disclosure"], rows
+
+
+def test_a_record_keyed_to_another_anchor_and_a_grounding_note_clear_nothing():
+    """The 2026-10-08 build's escape was a sentence in `grounding.note`. A note is prose; the
+    record names the claim's own anchor or it answers nothing."""
+    root, p, _late = make_late_claim_repo(
+        record="src/b.py:2: a different line", note="13 claims were added after the second wave "
+                                                    "and named here rather than cut into a wave")
+    leg = _late_leg(finalize.build_report(p, root, []))
+    assert leg is not None and len(leg.blocking) == 1, leg
+
+
+def test_a_map_with_no_pinned_worklist_has_no_late_claims_leg():
+    root, p = make_repo()
+    assert _late_leg(finalize.build_report(p, root, [])) is None
+
+
+# ── the access-baseline leg never shows the old map's words (retro 2026-10-08, finding 1) ────────
+
+#: Words only the PREVIOUS map holds, in `make_lost_access_maps`: its statements and its whys.
+_OLD_WORDS = ("Only a member of the owning team", "whatever filter the caller passed",
+              "refuses a caller outside the team")
+
+
+def test_no_statement_of_the_old_map_reaches_any_output_of_finalize_or_record():
+    """Every place the leg's text lands: the printed report and verdict lines, the written report
+    (markdown and JSON), the gate block, and `record`'s echo. One lost file, one recorded and
+    never opened, so the lost list, the disclosure and the unread count all print."""
+    from coyomap import record
+    before, after = make_lost_access_maps(3)
+    after = {**after, "extras": [{"heading": finalize.ACCESS_BASELINE_EXCEPTIONS_HEADING,
+                                  "body": "src/auth/guard_1.py: the team check moved into the "
+                                          "query layer"}]}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        out = root / ".coyomap"
+        (out / "dev-rebuilds" / "0001").mkdir(parents=True)
+        base = out / "dev-rebuilds" / "0001" / "project-map.json"
+        base.write_text(json.dumps(before), encoding="utf-8")
+        cur = out / "project-map.json"
+        cur.write_text(json.dumps(after), encoding="utf-8")
+        lead = make_lead_transcript(root, [])
+        texts: list[str] = []
+        for extra in ([], ["--no-write"]):
+            o, e = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+                finalize.main([str(cur), "--repo", str(root), "--access-baseline", str(base),
+                               "--lead-transcript", str(lead),
+                               "--emit-gate-block", str(root / "gate.md"), *extra])
+            texts += [o.getvalue(), e.getvalue()]
+        texts += [(out / "finalize-report.md").read_text(encoding="utf-8"),
+                  (out / "finalize-report.json").read_text(encoding="utf-8"),
+                  (root / "gate.md").read_text(encoding="utf-8")]
+        o = io.StringIO()
+        with contextlib.redirect_stdout(o), contextlib.redirect_stderr(io.StringIO()):
+            record.main(["--map", str(cur), "--heading", finalize.ACCESS_BASELINE_EXCEPTIONS_HEADING,
+                         "--line", "src/auth/guard_2.py: the check moved into the store"])
+        texts.append(o.getvalue())
+    report_md = texts[4]
+    assert "  - src/auth/guard_3.py (line 13)" in report_md, report_md
+    assert "excused without being opened" in report_md, report_md
+    assert "src/auth/guard_2.py (line 12) held access in 0001/project-map.json" in texts[-1], texts[-1]
+    for i, text in enumerate(texts):
+        for old in _OLD_WORDS:
+            assert old not in text, (i, old, text)
