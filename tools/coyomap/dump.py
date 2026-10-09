@@ -25,6 +25,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from coyomap.anchors import parse_anchor
+from coyomap.changelog import EDGE_PREFIX, edge_ids
 from coyomap.model import (
     Component,
     Entity,
@@ -105,13 +106,21 @@ def _address_target(m: ProjectModel, eid: str) -> tuple[str, str | None, str | N
     """What a change-log address names: (kind word, display name, canonical source, `--id` members,
     the row itself). The ids `coyomap changes` and `coyomap impact` mint for rows that carry no
     authored id: `flow:<UC>` (a use case's flow), `step:<UC|SF>:<n>` (one step, by its number),
-    `rule:<BR>:<i>` (one enforcement site, by its position), and the keyed rows `glossary:<term>`,
+    `rule:<BR>:<i>` (one enforcement site, by its position), `edge:<src>><verb>><dst>` (one arrow,
+    `#n` after it when two arrows share all three), and the keyed rows `glossary:<term>`,
     `run:<action>`, `net:<name>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`.
     A rehearsal of the update flow wrote `flow:UC6` into a log and could look it up nowhere:
     `dump --id flow:UC6` answered "not defined in the map"."""
     kind, sep, rest = eid.partition(":")
     if not sep:
         return None
+    if eid.startswith(EDGE_PREFIX):
+        rows = [asdict(e) for e in m.edges]
+        hit = next((row for aid, row in edge_ids(rows) if aid == eid), None)
+        if hit is None:
+            return None
+        edge = m.edges[next(i for i, r in enumerate(rows) if r is hit)]
+        return ("edge", f"{edge.src} {edge.verb} {edge.dst}", edge.where, [hit], edge)
     if kind == "flow":
         flow = next((f for f in m.flows if f.uc == rest), None)
         return None if flow is None else ("flow", flow.title, None, _steps_as_members(flow.steps), flow)

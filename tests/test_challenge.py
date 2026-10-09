@@ -12,7 +12,7 @@ from typing import Any
 
 from coyomap import challenge as ch
 from coyomap.audit_model import l2_worklist_model, worklist_payload
-from coyomap.changelog import apply, load_log
+from coyomap.changelog import Entry, FieldEdit, Waiver, apply, load_log
 from coyomap.grounding import build_record, main as grounding_main
 from coyomap.impact_git import compute_impact, load_map_extents
 from coyomap.impact_ripple import RippleOptions, build_impact_result
@@ -209,6 +209,24 @@ def test_every_statement_lands_in_exactly_one_bucket_for_the_right_reason():
         assert scope.touched["C1"] == "the code touched it"
         assert scope.touched["C3"] == "entry e1 names it"
         assert scope.rippled["C2"].startswith("edge:C1>calls>C2")
+
+
+def test_an_arrow_the_log_names_puts_its_own_statement_in_scope_and_not_its_ends():
+    """An arrow is a row of the log (`edge:<src>><verb>><dst>`), and its statement names its two
+    ends. Re-pointing its link changes no words, so without this the wave would carry a verdict
+    cast on the line the code rewrote."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, _pin, _head = make_update(td)
+        log = inputs.log
+        log.entries = [Entry("e1", "Gamma mail goes through a new relay", "Gamma mail takes another road.",
+                             ["edge:C3>uses>D1"],
+                             [FieldEdit("edge:C3>uses>D1", "why", None, "relays the mail")])]
+        log.waived = [Waiver("C1", "the alpha line was reworded, same meaning")]
+        applied, _ = apply(log, inputs.map_doc)
+        scope = ch.scope_update(log, inputs.before_text, applied, inputs.impact, inputs.verify, inputs.repo)
+        why = {s.item.claim: (s.reason, s.via) for s in scope.in_scope}
+        assert why["C3 uses D1"][0] == "touched" and why["C3 uses D1"][1].startswith("edge:C3>uses>D1: entry e1")
+        assert "Component C3 (Gamma) is described as: Sends gamma mail." not in why
 
 
 def test_challenge_writes_the_applied_copy_the_batches_and_the_scope_file():

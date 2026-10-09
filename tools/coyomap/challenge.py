@@ -60,8 +60,9 @@ from typing import Any, Callable
 from coyomap.anchors import parse_anchor
 from coyomap.audit_model import (WorkItem, l2_worklist_model, pinned_claims, pinned_tier,
                                  worklist_payload, write_theme_batches)
-from coyomap.changelog import (ChangeLog, apply, commit_matches, dump_log, element_of, gated_box,
-                               load_log, touched_ids)
+from coyomap.changelog import (EDGE_IDENTITY, EDGE_PREFIX, ChangeLog, apply, bare_edge_id,
+                               commit_matches, dump_log, element_of, gated_box, index_map, load_log,
+                               touched_ids)
 from coyomap.grounding import (
     _note_contradictions,
     _verdict_bucket,
@@ -418,6 +419,16 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
             touched.setdefault(box, f"entry {e.id} names it")
     for w in log.waived:
         touched.setdefault(w.id, "waived: the code touched it, the words did not change")
+    # AN ARROW the log names is a row, not a box a statement lists: its statement (`C1 reads E1`)
+    # names its two ends. Matched by the statement's own text, so naming the arrow re-argues the
+    # arrow and not every statement about its source.
+    named_arrows = {bare_edge_id(b): why for b, why in touched.items() if b.startswith(EDGE_PREFIX)}
+    arrow_claims: dict[str, str] = {}
+    for eid, (array, row) in index_map(new_doc).items():
+        why = named_arrows.get(bare_edge_id(eid)) if array == "edges" else None
+        if why:
+            src, verb, dst = (str(row.get(k) or "") for k in EDGE_IDENTITY)
+            arrow_claims.setdefault(f"{src} {verb.strip().lower()} {dst}", f"{bare_edge_id(eid)}: {why}")
     # RIPPLED: what the change reached through the map's own relations, one hop — from a hit the
     # gate counts. A ripple out of a link that merely drifted (the text moved, nothing changed) or
     # out of a file-resolution hit is the map being walked, not a change arriving.
@@ -446,6 +457,9 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
             continue
         if it.claim not in pinned_set:
             in_scope.append(Scoped(it, "changed"))
+            continue
+        if it.claim in arrow_claims:
+            in_scope.append(Scoped(it, "touched", arrow_claims[it.claim]))
             continue
         hit = next((b for b in it.elements if b in touched), None)
         if hit:

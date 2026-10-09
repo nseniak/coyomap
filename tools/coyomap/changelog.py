@@ -19,7 +19,8 @@ the agent that analyzed the code, and four tools read it:
 
 ADDRESSING. An edit names a box by id and a field by a path inside its row: `risk`,
 `sites[0].where`, `steps[n=4].phrase` (a step by its number), `fields[name=size].type` (an item by
-a key). A use case's flow is the row `flow:<UC id>`; a shared sub-flow's steps are on its own row.
+a key). A use case's flow is the row `flow:<UC id>`; a shared sub-flow's steps are on its own row;
+an arrow is `edge:<src>><verb>><dst>` (`#n` after it when two arrows share all three).
 Never a JSON pointer with an array index into the whole map: those broke the moment a row above
 moved.
 
@@ -256,12 +257,70 @@ def synthetic_id(array: str, row: dict[str, Any]) -> str | None:
     return None
 
 
+EDGE_PREFIX = "edge:"
+#: An arrow's identity: the three fields its id is spelled from. An edit may not change them.
+EDGE_IDENTITY = ("src", "verb", "dst")
+
+
+def edge_id(row: dict[str, Any]) -> str | None:
+    """The id an arrow goes by, `edge:<src>><verb>><dst>`: the spelling `coyomap impact` and
+    `reanchor` already print, so the row a reader is shown is the row a log can address."""
+    src, verb, dst = (row.get(k) for k in EDGE_IDENTITY)
+    if not all(isinstance(v, str) and v for v in (src, verb, dst)):
+        return None
+    return f"{EDGE_PREFIX}{src}>{verb}>{dst}"
+
+
+def edge_ids(rows: list[Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every arrow's id, in map order. Two arrows that share src, verb and dst (they can differ
+    only by `where` or `why`; `validate` warns on the pair) are told apart by their place among
+    THEMSELVES: `edge:C1>calls>C2#1`, `#2`. The bare id then names neither, and lint refuses it
+    with the numbered ids. The number counts only arrows of the same triple, so no other row
+    moving can shift it, and a log reads every address in the frame of the map as it was."""
+    keyed = [(edge_id(r), r) for r in rows if isinstance(r, dict)]
+    count: dict[str, int] = {}
+    for eid, _row in keyed:
+        if eid:
+            count[eid] = count.get(eid, 0) + 1
+    seen: dict[str, int] = {}
+    out: list[tuple[str, dict[str, Any]]] = []
+    for eid, row in keyed:
+        if not eid:
+            continue
+        if count[eid] == 1:
+            out.append((eid, row))
+            continue
+        seen[eid] = seen.get(eid, 0) + 1
+        out.append((f"{eid}#{seen[eid]}", row))
+    return out
+
+
+def shared_edge_ids(doc: dict[str, Any]) -> dict[str, int]:
+    """Bare arrow ids more than one arrow shares → how many: the ids that need their `#n`."""
+    count: dict[str, int] = {}
+    for r in doc.get("edges") or []:
+        eid = edge_id(r) if isinstance(r, dict) else None
+        if eid:
+            count[eid] = count.get(eid, 0) + 1
+    return {k: v for k, v in count.items() if v > 1}
+
+
+def bare_edge_id(eid: str) -> str:
+    """An arrow id without its `#n`: the triple, whatever its place among its twins."""
+    return eid.split("#", 1)[0] if eid.startswith(EDGE_PREFIX) else eid
+
+
 def index_map(doc: dict[str, Any]) -> dict[str, tuple[str, dict[str, Any]]]:
     """Every row a log can name, by id → (array, row): authored ids, a use case's flow under
-    `flow:<UC>`, keyed rows under their synthetic id, and the map's own header under `map`."""
+    `flow:<UC>`, keyed rows under their synthetic id, an arrow under `edge:<src>><verb>><dst>`
+    (`#n` when it has twins, `edge_ids`), and the map's own header under `map`."""
     out: dict[str, tuple[str, dict[str, Any]]] = {MAP_ID: (MAP_ID, doc)}
     for array, value in doc.items():
         if not isinstance(value, list):
+            continue
+        if array == "edges":
+            for eid, row in edge_ids(value):
+                out.setdefault(eid, (array, row))
             continue
         for row in value:
             if not isinstance(row, dict):
@@ -444,6 +503,11 @@ def _addition_problem(a: Addition, doc: dict[str, Any], index: dict[str, tuple[s
         missing = [k for k in spec.key if not a.row.get(k)]
         if missing:
             return f"adds a {spec.word} without its {', '.join(missing)}"
+        if a.kind == "edges":
+            sid = edge_id(a.row)
+            held = sid is not None and (sid in index or f"{sid}#1" in index)
+            return (f"adds {sid}, which the map already has: re-point its `where` with an edit "
+                    f"instead" if held else None)
         sid = synthetic_id(a.kind, a.row)
         return f"adds {sid}, which the map already has" if sid and sid in index else None
     if spec is not None:
@@ -466,15 +530,26 @@ def _added_ids(log: ChangeLog) -> set[str]:
             elif a.kind == "flows" and isinstance(a.row.get("uc"), str):
                 out.add(FLOW_PREFIX + a.row["uc"])
             else:
-                sid = synthetic_id(a.kind, a.row)
+                sid = edge_id(a.row) if a.kind == "edges" else synthetic_id(a.kind, a.row)
                 if sid:
                     out.add(sid)
     return out
 
 
+def _not_in_map(rid: str, shared: dict[str, int]) -> str:
+    """Why an id is not one the map holds, in words: a bare arrow id two arrows share says which
+    numbered ids name them."""
+    if rid in shared:
+        n = shared[rid]
+        return (f"{rid}, which {n} arrows share — name one of them as "
+                + ", ".join(f"{rid}#{k}" for k in range(1, n + 1)))
+    return f"{rid}, which is not in the map"
+
+
 def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
     p = Problems()
     index = index_map(doc)
+    shared = shared_edge_ids(doc)
     added_ids = _added_ids(log)
     removed_ids = {r for e in log.entries for r in e.removed}
     prose: list[tuple[str, str, str]] = []   # (label, box, text) of every edit a reader will meet as words
@@ -503,7 +578,8 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
             p.errors.append(f"{where}: confidence {e.confidence!r} is not one of {', '.join(CONFIDENCE_WORDS)}")
         for i in e.elements:
             if i not in index and i not in added_ids:
-                p.errors.append(f"{where}: names {i}, which is not in the map and no entry adds it")
+                p.errors.append(f"{where}: names {_not_in_map(i, shared)}"
+                                + ("" if i in shared else " and no entry adds it"))
         for i in sorted(e.ids_edited() - set(e.elements)):
             p.errors.append(f"{where}: edits {i} without naming it among its boxes")
         for ed in e.edits:
@@ -518,7 +594,11 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
                 continue
             hit = index.get(ed.id)
             if hit is None:
-                p.errors.append(f"{where}: edits {ed.id}, which is not in the map")
+                p.errors.append(f"{where}: edits {_not_in_map(ed.id, shared)}")
+                continue
+            if hit[0] == "edges" and ed.key.split(".")[0].split("[")[0] in EDGE_IDENTITY:
+                p.errors.append(f"{where}: {ed.id}.{ed.key} — an arrow's src, verb and dst are its "
+                                f"identity; remove the arrow and add the new one")
                 continue
             if ed.id == MAP_ID and ("[" in ed.key or "." in ed.key or ed.key in MAP_BOOKKEEPING
                                     or isinstance(doc.get(ed.key), (list, dict))):
@@ -573,7 +653,7 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
                 p.errors.append(f"{where}: {problem}")
         for rid in e.removed:
             if rid not in index:
-                p.errors.append(f"{where}: removes {rid}, which is not in the map")
+                p.errors.append(f"{where}: removes {_not_in_map(rid, shared)}")
             elif rid in removed_by:
                 p.errors.append(f"{where}: removes {rid}, which entry {removed_by[rid]} also removes")
             removed_by.setdefault(rid, e.id)
@@ -844,9 +924,12 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
             # A keyed row that came and went under one name (a run command whose command line
             # changed) is one box, modified.
             changed[box] = "modified" if box in changed and changed[box] != e.change else e.change
+    # An arrow is a row of its own (`edge:<src>><verb>><dst>`), credited to the box it starts
+    # from: an entry or a waiver naming either one covers it.
+    arrows: dict[str, tuple[str, str]] = {}
     for a in delta.arrows:
         if a.change != "modified" or a.classes != ["link"]:
-            changed.setdefault(a.src, f"an arrow {a.change}")
+            arrows.setdefault(f"{EDGE_PREFIX}{a.src}>{a.verb}>{a.dst}", (a.src, f"an arrow {a.change}"))
     header = [k for k in set(old_doc) | set(new_doc)
               if k not in MAP_BOOKKEEPING and not isinstance(old_doc.get(k, new_doc.get(k)), (list, dict))
               and old_doc.get(k) != new_doc.get(k)
@@ -855,20 +938,39 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
         changed[MAP_ID] = "modified (" + ", ".join(sorted(header)) + ")"
     named = log.named()
     waived = {w.id for w in log.waived}
+    said = {bare_edge_id(i) for i in named | waived}
     for box, what in sorted(changed.items()):
         if box not in named and box not in waived:
             p.errors.append(f"{box} {what} in the map, and no entry names it")
+    for eid, (src, what) in sorted(arrows.items()):
+        if eid not in said and src not in named and src not in waived:
+            p.errors.append(f"{src} {what} in the map ({eid}), and no entry names it or the arrow")
     new_index = index_map(new_doc)
+    new_edges = {bare_edge_id(i) for i in new_index if i.startswith(EDGE_PREFIX)}
     removed = {r for e in log.entries for r in e.removed}
+    removed_edges = {bare_edge_id(r) for r in removed if r.startswith(EDGE_PREFIX)}
     for box in sorted(named):
+        if box.startswith(EDGE_PREFIX) and bare_edge_id(box) in new_edges | removed_edges:
+            continue          # twins renumber when one goes; the triple is what the new map holds
         if box not in new_index and box not in removed:
             p.errors.append(f"an entry names {box}, which the new map does not hold")
-    touched = touched_ids(impact) if impact is not None else set()
+    # The rows the code touched, each with the box the gate counts it under. An arrow's hit is
+    # covered by its source box or by the arrow itself, named or waived.
+    touched_rows: dict[str, str] = {}
+    for k, imp in ((impact or {}).get("impacts") or {}).items():
+        box = gated_box(str(k), imp)
+        if box:
+            touched_rows[bare_edge_id(str(k))] = box
+    touched = set(touched_rows.values())
+    moved = set(changed) | set(arrows) | {src for src, _what in arrows.values()}
     for w in log.waived:
-        if w.id not in changed and w.id not in touched:
+        if w.id not in moved and bare_edge_id(w.id) not in moved and w.id not in touched \
+                and bare_edge_id(w.id) not in touched_rows:
             p.warnings.append(f"waived {w.id} did not change in the map"
                               + (" and the code did not touch it" if impact is not None else ""))
-    for box in sorted(touched - named - waived):
+    unsaid = {box for row, box in touched_rows.items()
+              if box not in named and box not in waived and not (row.startswith(EDGE_PREFIX) and row in said)}
+    for box in sorted(unsaid):
         p.warnings.append(f"the code touched {box} and no entry names or waives it")
     return p
 
@@ -898,7 +1000,16 @@ def _names(doc: dict[str, Any]) -> dict[str, str]:
             if isinstance(v, str) and v.strip():
                 out[rid] = v.strip()
                 break
+    # An arrow reads by its ends' names and its verb, as the map's diff phrases it.
+    for rid, (array, row) in index_map(doc).items():
+        if array == "edges":
+            out[rid] = _arrow_name(row, out)
     return out
+
+
+def _arrow_name(row: dict[str, Any], names: dict[str, str]) -> str:
+    src, verb, dst = (str(row.get(k) or "?") for k in EDGE_IDENTITY)
+    return f"{names.get(src, src)} {verb} {names.get(dst, dst)}"
 
 
 def _row_name(kind: str, row: dict[str, Any]) -> str | None:
@@ -1000,11 +1111,12 @@ def _log_names(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | No
     added_kind: dict[str, str] = {}
     for e in log.entries:
         for a in e.added:
-            rid = a.row.get("id") if isinstance(a.row.get("id"), str) else synthetic_id(a.kind, a.row)
+            rid = (a.row.get("id") if isinstance(a.row.get("id"), str)
+                   else edge_id(a.row) if a.kind == "edges" else synthetic_id(a.kind, a.row))
             if not rid:
                 continue
             added_kind[rid] = a.kind
-            name = _row_name(a.kind, a.row)
+            name = _arrow_name(a.row, names) if a.kind == "edges" else _row_name(a.kind, a.row)
             if name:
                 names.setdefault(rid, name)
     return LogNames(names, added_kind)

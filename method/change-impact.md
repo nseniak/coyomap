@@ -12,7 +12,7 @@ what the map already says.
 |---|---|---|---|
 | **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
 | **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them | the impact file, beside the log (deleted at step 7, never committed) |
-| **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by a `where` edit in the entry that read that code (step 3) |
+| **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by an edit of that link (`where`, `source`, `cadence_source`…) in the entry that read that code (step 3) |
 | **3 Read and write** | read the diff and the touched boxes; write the log. When an actor, a feature or a happy path step is added, removed or renamed, re-run the description review (Principles below) | you | `.coyomap/changes/<from>-<to>.json` |
 | **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
@@ -201,8 +201,9 @@ small logs; one per week gives one log with more entries. Either way every entry
   is your own finding, and says so in the entry's evidence.
 - **Line moves are not changes.** `coyomap reanchor` moves every link whose line only shifted, and
   lists the links into lines the code changed or files that are gone. Those are yours to read, and
-  the reading lands in the log: a link `reanchor` left behind is re-pointed by a `where` edit (on
-  `flow:UC6`, key `steps[n=3].where`; on `BR168`, key `sites[0].where`) in the entry that read that
+  the reading lands in the log: a link `reanchor` left behind is re-pointed by an edit of that link
+  (on `flow:UC6`, key `steps[n=3].where`; on `BR168`, key `sites[0].where`; on
+  `edge:C15>calls>C13`, key `where`; on `EP22`, key `cadence_source`) in the entry that read that
   code, so the move and its reason travel together. The log never carries a move `reanchor` made,
   and `check` ignores link-only changes. **A left-behind link is never waived.** A waiver says the
   box's meaning did not change; it says nothing about the link, which still points at a line the
@@ -211,9 +212,12 @@ small logs; one per week gives one log with more entries. Either way every entry
   waivers. Re-point every link `reanchor` listed, or say in the entry why the old line still acts.
 - **Waive the BOX, not the row `impact` marks.** `impact`'s text marks rows such as `step:UC6:4`
   or `edge:C15>calls>C13` with `*`; the gate counts them under the box that owns them (the use
-  case, the arrow's source component, the rule). A waiver on the row id is refused by `lint`
-  ("not in the map"); name the owning box. `impact --json` lists more rows at line or symbol
-  resolution than the text marks, because a way in (`ep:<file>:<line>`) belongs to no box.
+  case, the arrow's source component, the rule). A waiver on a step or site row id is refused by
+  `lint` ("not in the map"); name the owning box. An arrow is the exception: it is a row of the
+  log (see "Addressing an edit"), so an entry or a waiver may name the arrow itself, and that
+  covers the arrow's own hit without speaking for the rest of its source box. `impact --json`
+  lists more rows at line or symbol resolution than the text marks, because a way in
+  (`ep:<file>:<line>`) belongs to no box.
 - **Per change.** Classify a box as modified / added / removed; **ripple** by following its
   relations (arrows, flows, Happy Path steps). Verify by reading the changed code; a pure refactor
   or move with no behaviour change is a **waiver**, not an entry (keep noise down).
@@ -290,7 +294,9 @@ surface, the entry sets `interfaces` (`"was": [], "now": ["I1"]`) and removes th
 **What counts as a box for the rule.** Every row with an id; a keyed row under a synthetic id
 (`glossary:<term>`, `run:<action>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
 `net:<name>`); the map's own header under `map` (its `title`, `goal` and the other header fields —
-an edit on `map` takes one such field as its key); an arrow, credited to the box it starts from.
+an edit on `map` takes one such field as its key); an arrow under `edge:<src>><verb>><dst>`,
+credited to the box it starts from, so an entry or a waiver naming either the arrow or that box
+explains it.
 Outside the rule, because they carry no identity: `tests` and `extras` rows (added as whole rows,
 never edited), and the code-link moves.
 
@@ -314,7 +320,13 @@ the team without an admin.* `lint` warns on those words in the new text.
 `flow:<UC id>` (an edit on it is an edit on the use case, which the entry names); a shared sub-flow's
 steps are on its own row. `coyomap dump --id <UC id>` shows a flow's steps and their numbers, and
 the log's own addresses resolve the same way: `dump --id flow:UC6`, `dump --id step:UC6:3`,
-`dump --id rule:BR168:0` (that rule's first site), `dump --id glossary:<term>`. `was` must equal
+`dump --id rule:BR168:0` (that rule's first site), `dump --id glossary:<term>`, `dump --id
+edge:C15>calls>C13` (one arrow). An arrow's address is its source, verb and target, so an edit may
+re-point its `where` or reword its `why`, and an arrow that became false goes in `removed` by that
+id; its `src`, `verb` and `dst` ARE the address, and an edit of one is refused: remove the arrow
+and add the new one, whole, in `added` (kind `edges`). Two arrows that share all three (`validate`
+warns on the pair) go by number, `edge:C15>calls>C13#1` and `#2`, in map order; the bare id then
+names neither and `lint` says which numbers do. `was` must equal
 what the map holds — `lint` refuses a stale `was`, since applying it would overwrite a change
 someone else made; one field is edited by one entry, and the log's `from_commit` must be the map's
 pin. `now: null` removes the field or the list item. Every address is read in the frame of the

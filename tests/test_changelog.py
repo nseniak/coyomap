@@ -209,8 +209,79 @@ def test_an_arrow_that_came_or_went_is_explained_by_naming_its_source():
     old = make_doc()
     new = copy(old)
     new["edges"] = [{"src": "C1", "verb": "reads", "dst": "E1", "where": "srv.py:12"}]
-    assert check(make_log(make_entry(elements=["BR1"])), old, new).errors == ["C1 an arrow added in the map, and no entry names it"]
+    assert check(make_log(make_entry(elements=["BR1"])), old, new).errors == ["C1 an arrow added in the map (edge:C1>reads>E1), and no entry names it or the arrow"]
     assert check(make_log(make_entry(elements=["C1"])), old, new).ok
+    assert check(make_log(make_entry(elements=["edge:C1>reads>E1"])), old, new).ok
+
+
+# --- an arrow is a row a log can address ------------------------------------------------------
+
+def make_arrow_doc(*edges: dict[str, Any]) -> dict[str, Any]:
+    return make_doc(edges=list(edges) or [make_edge("C1", "reads", "E1", "srv.py:12")])
+
+
+def test_an_entry_re_points_an_arrows_link_by_its_id():
+    """The mcpolis update of 2026-10-09 moved 32 arrow links and removed one arrow straight in the
+    map, because the log had no id to address an arrow by."""
+    doc = make_arrow_doc()
+    log = make_log(make_entry(elements=["edge:C1>reads>E1"],
+                              edits=[FieldEdit("edge:C1>reads>E1", "where", "srv.py:12", "srv.py:40")]))
+    assert lint(log, doc).ok, lint(log, doc).errors
+    new, done = apply(log, doc)
+    assert new["edges"][0]["where"] == "srv.py:40" and done.edits == 1
+    assert check(log, doc, new).ok
+    assert check_before_write(log, doc).ok
+
+
+def test_an_entry_removes_an_arrow_that_became_false_and_the_gate_accepts_it():
+    doc = make_arrow_doc(make_edge("C1", "reads", "E1", "srv.py:12"), make_edge("C1", "writes", "E1", "srv.py:20"))
+    log = make_log(make_entry(elements=["edge:C1>writes>E1"], removed=["edge:C1>writes>E1"]))
+    new, done = apply(log, doc)
+    assert [e["verb"] for e in new["edges"]] == ["reads"] and done.removed == 1
+    assert check(log, doc, new).ok, check(log, doc, new).errors
+    assert check(make_log(make_entry(elements=["BR1"])), doc, new).errors == [
+        "C1 an arrow removed in the map (edge:C1>writes>E1), and no entry names it or the arrow"]
+
+
+def test_an_arrow_keeps_its_identity_and_is_never_added_twice():
+    doc = make_arrow_doc()
+    retarget = make_log(make_entry(elements=["edge:C1>reads>E1"],
+                                   edits=[FieldEdit("edge:C1>reads>E1", "dst", "E1", "E2")]))
+    assert "an arrow's src, verb and dst are its identity" in "\n".join(lint(retarget, doc).errors)
+    twice = make_log(make_entry(elements=["C1"], added=[Addition("edges", make_edge("C1", "reads", "E1", "srv.py:50"))]))
+    assert "adds edge:C1>reads>E1, which the map already has" in "\n".join(lint(twice, doc).errors)
+
+
+def test_two_arrows_sharing_their_ends_and_verb_are_told_apart_by_number():
+    doc = make_arrow_doc(make_edge("C1", "reads", "E1", "srv.py:12"), make_edge("C1", "reads", "E1", "srv.py:30"))
+    assert set(changelog.index_map(doc)) >= {"edge:C1>reads>E1#1", "edge:C1>reads>E1#2"}
+    bare = make_log(make_entry(elements=["edge:C1>reads>E1"], removed=["edge:C1>reads>E1"]))
+    errs = "\n".join(lint(bare, doc).errors)
+    assert "edge:C1>reads>E1, which 2 arrows share — name one of them as edge:C1>reads>E1#1, edge:C1>reads>E1#2" in errs
+    second = make_log(make_entry(elements=["edge:C1>reads>E1#2"], removed=["edge:C1>reads>E1#2"]))
+    new, _done = apply(second, doc)
+    assert [e["where"] for e in new["edges"]] == ["srv.py:12"]
+    assert check(second, doc, new).ok, check(second, doc, new).errors
+
+
+def test_an_arrow_reads_by_its_ends_names_on_the_rendered_log():
+    doc = make_arrow_doc()
+    log = make_log(make_entry(elements=["edge:C1>reads>E1"],
+                              edits=[FieldEdit("edge:C1>reads>E1", "where", "srv.py:12", "srv.py:40")]))
+    view = changelog.to_view(log, doc)
+    assert view["entries"][0]["boxes"][0]["name"] == "Server reads Thing"
+    assert view["entries"][0]["boxes"][0]["word"] == "arrow"
+    assert "Server reads Thing" in render(log, doc) and "edge:" not in render(log, doc)
+
+
+def test_a_waiver_may_name_the_arrow_the_code_touched():
+    doc = make_arrow_doc()
+    impact = {"impacts": {"edge:C1>reads>E1": {"cause": "direct", "change": "modified", "resolution": "line"}}}
+    log = make_log(waived=[Waiver("edge:C1>reads>E1", "the call was renamed, the arrow still holds")])
+    assert lint(log, doc).warnings == []
+    assert check(log, doc, doc, impact).warnings == []
+    unsaid = make_log(make_entry(elements=["BR1"]))
+    assert check(unsaid, doc, doc, impact).warnings == ["the code touched C1 and no entry names or waives it"]
 
 
 def test_the_code_s_touch_is_a_warning_when_nobody_names_or_waives_the_box():
@@ -816,7 +887,7 @@ def test_the_gate_runs_before_the_write_on_the_log_applied_to_a_copy():
     arrow = Addition("edges", make_edge("C1", "reads", "E1", "srv.py:12"))
     unnamed = make_log(make_entry(elements=["BR1"], added=[arrow]))
     p = check_before_write(unnamed, doc)
-    assert p.errors == ["C1 an arrow added in the map, and no entry names it"] and doc == before
+    assert p.errors == ["C1 an arrow added in the map (edge:C1>reads>E1), and no entry names it or the arrow"] and doc == before
     impact = {"impacts": {"C1": {"cause": "direct", "change": "modified", "resolution": "line"},
                           "E1": {"cause": "direct", "change": "modified", "resolution": "symbol"}}}
     named = make_log(make_entry(elements=["BR1", "C1"], added=[arrow]))

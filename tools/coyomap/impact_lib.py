@@ -265,6 +265,41 @@ def anchor_index(model: ProjectModel) -> list[AnchorRef]:
     return out
 
 
+def link_index(model: ProjectModel) -> list[AnchorRef]:
+    """Every code LINK the map carries: `anchor_index`, plus the links that seed no impact hit —
+    an entry point's `cadence_source`, a lifecycle's `states.source`, a channel's `source`, a
+    group's `tech_source`, a deployment variant's `source`, and a test row's cited files: the
+    file fields `validate` checks as anchors. (A deployment unit's `config_source` is free prose,
+    which `validate` reads as text; "frontend/vite.config.ts." would parse as a link to nothing.) `reanchor` moves all of them: a link it does not walk keeps its old
+    line, and the 2026-10-09 mcpolis update re-pointed 20 cadence links by hand after their
+    files shifted. The impact report keeps its own list; widening what it counts as a hit is a
+    change to the gate, decided on its own."""
+    out = anchor_index(model)
+
+    def add(r: AnchorRef | None) -> None:
+        if r is not None:
+            out.append(r)
+
+    for ep in model.entry_points:
+        add(_ref(ep.id or f"ep:{ep.source}", "entry_point", ep.cadence_source, "cadence_source",
+                 owner=ep.component))
+    for kind, rows in (("entity", model.entities), ("component", model.components)):
+        for el in rows:
+            if el.states is not None:
+                add(_ref(el.id, kind, el.states.source, "states.source"))
+    for mr in model.messaging:
+        add(_ref(f"messaging:{mr.name}", "messaging", mr.source, "source"))
+    for grp in group_forests(model):
+        add(_ref(grp.id, "group", grp.tech_source, "tech_source"))
+    for d in model.deployment:
+        for v in d.variants:
+            add(_ref(f"deployment:{d.unit}", "deployment", v.source, f"variants[env={v.env}].source"))
+    for i, tr in enumerate(model.tests):
+        for j, ev in enumerate(tr.tests):
+            add(_ref(f"tests[{i}]", "tests", ev.file, f"tests[{j}].file"))
+    return out
+
+
 def anchors_by_file(anchors: list[AnchorRef]) -> dict[str, list[AnchorRef]]:
     """File anchors grouped by exact path (dir anchors are matched separately by prefix)."""
     out: dict[str, list[AnchorRef]] = {}

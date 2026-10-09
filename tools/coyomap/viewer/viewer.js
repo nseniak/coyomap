@@ -18229,7 +18229,11 @@ function logPillHtml(b) {
   const name = (b.name || ('a removed ' + (b.word || 'box'))).replace(/`/g, '');
   const kind = (GRAPH.nodes[id] || {}).kind || LOG_PILL_KIND[b.kind] || '';
   if (b.state === 'removed' || !GRAPH.nodes[id]) {
-    const key = b.state === 'removed' ? 'removed:' + b.id
+    // An arrow has no page: it opens in context at the box it starts from, and a removed one is
+    // named, not opened.
+    const arrowSrc = b.kind === 'edges' ? id.slice('edge:'.length).split('>')[0] : '';
+    const key = b.kind === 'edges' ? (b.state === 'removed' || !GRAPH.nodes[arrowSrc] ? '' : 'arrow:' + arrowSrc)
+      : b.state === 'removed' ? 'removed:' + b.id
       : b.kind === 'subflows' ? 'sf:' + b.id : b.kind === 'glossary' ? 'glossary' : b.id === 'map' ? 'overview' : '';
     if (!key) return itemPillHtml(id, { kind, name, plain: true });
     return `<button type="button" class="item-pill item-pill-door cmp-log-pill" data-kind="${esc(kind)}" data-key="${esc(key)}" `

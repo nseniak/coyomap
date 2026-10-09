@@ -14,8 +14,9 @@ an agent doing what git already knows. This does that part, and only that part:
 
 It never judges meaning, so it runs before the agent reads anything, and the agent's log then
 carries no line moves at all (`changelog.py` ignores link-only changes on purpose). Reads git
-through `impact_git`; walks the map's anchors through `impact_lib.anchor_index`, the one list of
-where a code link can live. Stdlib-only.
+through `impact_git`; walks the map's links through `impact_lib.link_index`, the one list of
+where a code link can live (the impact report's anchors and the links that seed no hit, such as an
+entry point's `cadence_source`). Stdlib-only.
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from typing import Callable
 from coyomap.anchors import parse_anchor
 from coyomap.assemble import dump_preserving
 from coyomap.impact_git import WORKTREE, ImpactError, rename_map, resolve_ref, tree_paths, u0_diff
-from coyomap.impact_lib import AnchorRef, Hunk, anchor_index
+from coyomap.impact_lib import AnchorRef, Hunk, link_index
 from coyomap.model import ModelError, ProjectModel, group_forests, load_model_path
 
 USAGE = """usage: coyomap reanchor --map <project-map.json> [--repo <root>] [--to <ref>] [--write] [--json]
@@ -102,9 +103,15 @@ def _same(raw: str | None, ref: AnchorRef) -> bool:
 
 
 def set_anchor(m: ProjectModel, ref: AnchorRef, new: str) -> bool:
-    """Write `new` where `ref` was read from — the mirror of `impact_lib.anchor_index`, case by
+    """Write `new` where `ref` was read from — the mirror of `impact_lib.link_index`, case by
     case, matching the stored string by place so paired rows never swap. True when written."""
     k, f, eid = ref.kind, ref.field, ref.eid
+    if f == "states.source" and k in ("component", "entity"):
+        for el in (m.components if k == "component" else m.entities):
+            if el.id == eid and el.states is not None and _same(el.states.source, ref):
+                el.states.source = new
+                return True
+        return False
     if k == "component":
         for c in m.components:
             if c.id != eid:
@@ -159,6 +166,11 @@ def set_anchor(m: ProjectModel, ref: AnchorRef, new: str) -> bool:
             if eid == f"glossary:{g.term}" and _same(g.source, ref):
                 g.source = new
                 return True
+    elif k == "entry_point" and f == "cadence_source":
+        for ep in m.entry_points:
+            if (ep.id or f"ep:{ep.source}") == eid and _same(ep.cadence_source, ref):
+                ep.cadence_source = new
+                return True
     elif k == "entry_point":
         for ep in m.entry_points:
             if _same(ep.source, ref) and ep.component == ref.owner:
@@ -206,9 +218,35 @@ def set_anchor(m: ProjectModel, ref: AnchorRef, new: str) -> bool:
                 return True
     elif k == "group":
         for grp in group_forests(m):
-            if grp.id == eid and _same(grp.source, ref):
+            if grp.id != eid:
+                continue
+            if f == "source" and _same(grp.source, ref):
                 grp.source = new
                 return True
+            if f == "tech_source" and _same(grp.tech_source, ref):
+                grp.tech_source = new
+                return True
+    elif k == "messaging":
+        for mr in m.messaging:
+            if eid == f"messaging:{mr.name}" and _same(mr.source, ref):
+                mr.source = new
+                return True
+    elif k == "deployment":
+        for d in m.deployment:
+            if eid != f"deployment:{d.unit}":
+                continue
+            for v in d.variants:
+                if f == f"variants[env={v.env}].source" and _same(v.source, ref):
+                    v.source = new
+                    return True
+    elif k == "tests":
+        for i, tr in enumerate(m.tests):
+            if eid != f"tests[{i}]":
+                continue
+            for j, ev in enumerate(tr.tests):
+                if f == f"tests[{j}].file" and _same(ev.file, ref):
+                    ev.file = new
+                    return True
     return False
 
 
@@ -231,7 +269,7 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
     renamed_to = {old: new for new, old in rename_map(repo, pin_sha, to_sha).items()}
     present = tree_paths(repo, to_sha)
     by_path: dict[str, list[AnchorRef]] = {}
-    for ref in anchor_index(m):
+    for ref in link_index(m):
         if not ref.is_dir:
             by_path.setdefault(ref.path, []).append(ref)
     for path in sorted(by_path):

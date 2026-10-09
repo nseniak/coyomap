@@ -12,7 +12,7 @@ import pytest
 
 from coyomap import reanchor as ra
 from coyomap.impact_git import ImpactError
-from coyomap.impact_lib import Hunk, anchor_index
+from coyomap.impact_lib import Hunk, anchor_index, link_index
 from coyomap.model import load_model, to_canonical_json
 from coyomap.reanchor import line_mapper, reanchor, set_anchor
 
@@ -31,7 +31,11 @@ def make_map_doc(pin: str) -> dict[str, Any]:
     doc["non_entity_types"] = [{"name": "helper", "source": "svc/d.py:1"}]
     doc["edges"] = [{"src": "C1", "verb": "uses", "dst": "D1", "where": "svc/a.py:8"},
                     {"src": "C1", "verb": "uses", "dst": "D1", "where": "svc/a.py:4"}]
-    doc["entry_points"] = [{"id": "EP1", "kind": "cli", "trigger": "run it", "source": "svc/a.py:3", "component": "C1"}]
+    doc["entry_points"] = [{"id": "EP1", "kind": "cli", "trigger": "run it", "source": "svc/a.py:3", "component": "C1"},
+                           {"id": "EP2", "kind": "job", "trigger": "sweep", "source": "svc/a.py:1", "component": "C1",
+                            "activation": "self", "cadence": "every night", "cadence_source": "svc/a.py:7"},
+                           {"id": "EP3", "kind": "job", "trigger": "tidy", "source": "svc/a.py:1", "component": "C1",
+                            "activation": "self", "cadence": "hourly", "cadence_source": "svc/a.py:8"}]
     doc["rules"] = [{"id": "BR1", "name": "A guard", "statement": "A guard holds.",
                      "sites": [{"where": "svc/a.py:10", "why": "guards"}]}]
     doc["use_cases"] = [{"id": "UC1", "name": "Do it", "actors": ["R1"]}]
@@ -80,12 +84,16 @@ def test_links_follow_shifts_and_renames_and_the_rest_is_listed():
         assert moved[("C1", "files")] == ("svc/a.py:2-3", "svc/a.py:4-5")
         assert moved[("C1", "evidence")] == ("svc/a.py:9", "svc/a.py:11")
         assert moved[("ep:svc/a.py:3", "source")] == ("svc/a.py:3", "svc/a.py:5")
+        # A schedule's declaring line moves like any other link (mcpolis 2026-10-09: 20 by hand).
+        assert moved[("EP2", "cadence_source")] == ("svc/a.py:7", "svc/a.py:9")
         assert moved[("rule:BR1:0", "where")] == ("svc/a.py:10", "svc/a.py:12")
         assert moved[("step:UC1:1", "where")] == ("svc/a.py:6", "svc/a.py:8")
         assert moved[("E1", "source")] == ("svc/b.py:2", "svc/c.py:2"), "a renamed file keeps its links"
         assert moved[("edge:C1>uses>D1", "where")] == ("svc/a.py:4", "svc/a.py:6"), "the sibling arrow at line 4 moved"
         unmapped = {(u.eid, u.anchor): u.why for u in r.unmapped}
         assert unmapped[("edge:C1>uses>D1", "svc/a.py:8")] == "line changed", "the arrow on the rewritten line is the agent's"
+        assert unmapped[("EP3", "svc/a.py:8")] == "line changed", "a schedule on the rewritten line is the agent's"
+        assert m.entry_points[1].cadence_source == "svc/a.py:9" and m.entry_points[2].cadence_source == "svc/a.py:8"
         assert unmapped[("glossary:guild", "svc/d.py:1")] == "file gone" and unmapped[("net:helper", "svc/d.py:1")] == "file gone"
         assert m.components[0].source == "svc/a.py:7" and m.entities[0].source == "svc/c.py:2"
         assert sorted(e.where or "" for e in m.edges) == ["svc/a.py:6", "svc/a.py:8"], "the unmapped arrow keeps its old link"
@@ -101,7 +109,7 @@ def test_nothing_moves_when_the_map_is_at_the_commit_asked_for():
 
 
 def make_every_kind_doc() -> dict[str, Any]:
-    """A map carrying EVERY place `anchor_index` reads an anchor from, with a paired duplicate at one
+    """A map carrying EVERY place `link_index` reads a link from, with a paired duplicate at one
     line wherever two rows can share a place (two arrows, two ways in, two sites, two security rows,
     two dependency evidence rows)."""
     return {
@@ -111,7 +119,7 @@ def make_every_kind_doc() -> dict[str, Any]:
         "glossary": [{"term": "guild", "meaning": "a team", "source": "svc/d.py:1"}],
         "capabilities": [{"id": "CAP1", "name": "Mapping", "source": "cap/x.py:3"}],
         "use_cases": [{"id": "UC1", "name": "Do it", "actors": ["R1"], "capability": "CAP1"}],
-        "subsystems": [{"id": "S1", "name": "Core", "source": "core/y.py:4"}],
+        "subsystems": [{"id": "S1", "name": "Core", "source": "core/y.py:4", "tech_source": "core/pyproject.toml:3"}],
         "components": [{"id": "C1", "name": "Svc", "source": "svc/a.py:5", "files": ["svc/a.py:2-3", "svc/a.py"],
                         "evidence": [{"file": "svc/a.py:9", "why": "w"}]}],
         "deps": [{"id": "D1", "name": "Store", "where_configured": "cfg/dep.toml:7",
@@ -119,10 +127,18 @@ def make_every_kind_doc() -> dict[str, Any]:
         "interfaces": [{"id": "I1", "name": "CLI", "source": "cli/main.py:2", "evidence": [{"file": "cli/main.py:9", "why": "w"}]}],
         "run_commands": [{"action": "serve", "command": "make serve", "source": "Makefile:30"}],
         "entry_points": [{"id": "EP1", "kind": "cli", "trigger": "run it", "source": "svc/a.py:3", "component": "C1"},
-                         {"id": "EP2", "kind": "cli", "trigger": "run it again", "source": "svc/a.py:3", "component": "C1"}],
+                         {"id": "EP2", "kind": "cli", "trigger": "run it again", "source": "svc/a.py:3", "component": "C1"},
+                         {"id": "EP3", "kind": "job", "trigger": "sweep", "source": "svc/a.py:1", "component": "C1",
+                          "activation": "self", "cadence": "every night", "cadence_source": "cfg/beat.py:4"}],
         "subdomains": [{"id": "SD1", "name": "Teams", "source": "dom/z.py:6"}],
-        "entities": [{"id": "E1", "name": "Guild", "source": "svc/b.py:2"}],
+        "entities": [{"id": "E1", "name": "Guild", "source": "svc/b.py:2",
+                      "states": {"states": ["open", "closed"], "source": "svc/b.py:4"}}],
         "non_entity_types": [{"name": "helper", "source": "svc/d.py:1"}],
+        "messaging": [{"name": "JOBS", "source": "svc/q.py:3"}],
+        "deployment": [{"unit": "web", "config_source": "deploy/web.yml.",
+                        "variants": [{"env": "prod", "source": "deploy/web.yml:9"}]}],
+        "environments": ["prod"],
+        "tests": [{"targets": ["C1"], "tested": "yes", "tests": [{"file": "tests/test_a.py:4", "why": "covers it"}]}],
         "flows": [{"uc": "UC1", "title": "Do it", "steps": [
             {"n": 1, "src": "R1", "dst": "C1", "phrase": "runs it", "where": "svc/a.py:6"},
             {"n": 2, "src": "C1", "dst": "C1", "phrase": "does the shared bit", "subflow": "SF1"}]}],
@@ -138,18 +154,24 @@ def make_every_kind_doc() -> dict[str, Any]:
 
 
 def test_the_setter_writes_where_the_walker_read_for_every_kind():
-    """Every place `anchor_index` reads from, `set_anchor` can write to — the mirror is complete —
+    """Every place `link_index` reads from, `set_anchor` can write to — the mirror is complete —
     and a pair of rows at one place is written once each, never one of them twice."""
     m = load_model(json.dumps(make_every_kind_doc()))
-    refs = anchor_index(m)
+    refs = link_index(m)
     kinds = {r.kind for r in refs}
     assert kinds >= {"component", "dep", "interface", "entity", "non_entity_type", "glossary", "entry_point",
-                     "edge", "flow_step", "security", "role", "rule_site", "run_command", "group"}
+                     "edge", "flow_step", "security", "role", "rule_site", "run_command", "group",
+                     "messaging", "deployment", "tests"}
+    fields = {r.field for r in refs}
+    assert "config_source" not in fields, "a deployment unit's config is prose, never a link"
+    assert fields >= {"cadence_source", "states.source", "tech_source",
+                      "variants[env=prod].source", "tests[0].file"}
     for ref in refs:
         if ref.lo is None:
             continue
         assert set_anchor(m, ref, f"{ref.path}:{ref.lo + 100}"), (ref.eid, ref.field)
-    moved = [r for r in anchor_index(m) if r.lo is not None]
+    assert len(anchor_index(m)) < len(refs), "the impact report's anchors are a subset of the links"
+    moved = [r for r in link_index(m) if r.lo is not None]
     assert moved and all(r.lo is not None and r.lo > 100 for r in moved)
     assert len(moved) == len([r for r in refs if r.lo is not None]), "every anchored place still holds one anchor"
 
@@ -174,11 +196,11 @@ def test_the_command_reports_without_writing_and_writes_on_request(capsys):
         before = map_path.read_text()
         assert ra.main(["--map", str(map_path), "--to", head]) == 0
         out = capsys.readouterr().out
-        assert "8 link(s) moved, 3 left for the agent — not written" in out and "? edge:C1>uses>D1" in out
+        assert "11 link(s) moved, 4 left for the agent — not written" in out and "? edge:C1>uses>D1" in out
         assert map_path.read_text() == before
         assert ra.main(["--map", str(map_path), "--to", head, "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload["kind"] == "coyomap-reanchor" and payload["written"] is False and len(payload["moved"]) == 8
+        assert payload["kind"] == "coyomap-reanchor" and payload["written"] is False and len(payload["moved"]) == 11
         assert ra.main(["--map", str(map_path), "--to", head, "--write"]) == 0
         assert "written" in capsys.readouterr().out.split("—")[-1]
         assert json.loads(map_path.read_text())["components"][0]["source"] == "svc/a.py:7"

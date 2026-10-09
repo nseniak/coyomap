@@ -86,6 +86,19 @@ def make_log(doc: dict[str, Any]) -> dict[str, Any]:
             "notes": "Resolution: step precision on both screens; the sign-up seam read from the router."}
 
 
+ARROW_HEADLINE = "The gateway reaches the store by a new call"
+
+
+def make_arrow_entry(doc: dict[str, Any]) -> dict[str, Any]:
+    """An entry about one arrow alone, by its id: its link re-pointed, as `reanchor` asks."""
+    edge = next(e for e in doc["edges"] if e.get("where"))
+    eid = f"edge:{edge['src']}>{edge['verb']}>{edge['dst']}"
+    return {"id": "e3", "headline": ARROW_HEADLINE, "sentence": "The call moved to a helper of its own.",
+            "elements": [eid], "edits": [{"id": eid, "key": "where", "was": edge["where"],
+                                         "now": edge["where"].rsplit(":", 1)[0] + ":999"}],
+            "added": [], "removed": [], "evidence": [], "confidence": "verified"}
+
+
 def make_later_log(doc: dict[str, Any]) -> dict[str, Any]:
     """A second update after the first: one component's purpose reworded, nothing else. C3, not C2:
     the first update moved C2's code line, so C2 has a step of its own there."""
@@ -117,11 +130,13 @@ WARRANT = {"claims_total": 40, "claims_challenged": 40, "claims_confirmed": 39, 
 
 
 @contextmanager
-def _served_update(git: bool = True, later: bool = False, challenged: bool = False) -> Iterator[str]:
+def _served_update(git: bool = True, later: bool = False, challenged: bool = False,
+                   arrow: bool = False) -> Iterator[str]:
     """The server over the updated map, with the map as it was committed behind it and the log beside
     it. `git=False`: no history at all, so the log has no evidence. `later`: a second update on top,
     committed map in between, so the first log is no longer the latest. `challenged`: the update ran
-    its skeptic wave — the log carries the `challenge` block and the map the record with its ledger."""
+    its skeptic wave — the log carries the `challenge` block and the map the record with its ledger.
+    `arrow`: a third entry re-points one arrow's link, by the arrow's own id."""
     with tempfile.TemporaryDirectory() as td:
         folder = make_served_map(Path(td), "alpha")
         f = folder / ".coyomap" / "project-map.json"
@@ -132,6 +147,8 @@ def _served_update(git: bool = True, later: bool = False, challenged: bool = Fal
         if git:
             commit(folder, {".coyomap/project-map.json": json.dumps(old, indent=1)}, msg="Map the codebase")
         log = make_log(doc)
+        if arrow:
+            log["entries"].append(make_arrow_entry(doc))
         if challenged:
             log["challenge"] = json.loads(json.dumps(CHALLENGE))
             doc["grounding"] = json.loads(json.dumps(WARRANT))
@@ -346,6 +363,20 @@ def test_a_removed_box_opens_from_the_entry_s_pill_as_it_was_and_says_why_it_wen
         for internal in ("UC99", "R2", "C15"):
             assert internal not in text, f"an id on screen: {internal}"
         assert f"at={LOG}" in _hash(page)
+        assert not page.js_errors, page.js_errors
+
+
+def test_an_arrow_an_entry_names_reads_by_its_ends_and_opens_at_its_source() -> None:
+    with _served_update(arrow=True) as url, _page(f"{url}#v=updates&at={LOG}") as page:
+        _ready(page)
+        pill = page.locator('.cmp-log-pill[data-key^="arrow:"]')
+        assert pill.count() == 1
+        name = pill.text_content() or ""
+        assert "edge:" not in name and ">" not in name and len(name.split()) >= 3, name
+        src = (pill.get_attribute("data-key") or "").split(":", 1)[1]
+        pill.click()
+        _settle(page)
+        assert src in _hash(page), _hash(page)
         assert not page.js_errors, page.js_errors
 
 
