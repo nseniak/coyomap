@@ -7,7 +7,7 @@ runner hands to the two brief generators.
 
 - **«BRIEFS»** — a NEW absolute folder for this wave's briefs, slots files and plan; one per wave.
 - **«PREFIX»** — the wave's file prefix as one shell word: `''` for a build's first wave, `added-`
-  for its second.
+  for its second, the prefix `changes challenge` printed for an update's (`<from>-<to>-`).
 - **«VOTES»** — the `--votes` value for the security theme: `security=3` (odd, 3 or more).
 - **«POOL»** — how many skeptics may run at once: keep «POOL» + 1 under your agent's cap on running
   subagents, so it is that cap, minus 1 for this runner, minus every other agent still running.

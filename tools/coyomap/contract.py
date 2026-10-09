@@ -538,7 +538,7 @@ def _wave_slot_faults(values: dict[str, str]) -> list[str]:
     if prefix and prefix not in _EMPTY_PREFIXES and not _WAVE_PREFIX.fullmatch(prefix):
         faults.append(f"«PREFIX» is {prefix[:40]!r}: it is the wave's file prefix as one shell "
                       f"word, `''` for a build's first wave or a prefix ending in `-` for a later "
-                      f"one (`added-`)")
+                      f"one (`added-`, or an update's `<from>-<to>-`)")
     votes = values.get("VOTES") or ""
     theme, _, count = votes.partition("=")
     if votes and (not theme or not count.isdigit()):

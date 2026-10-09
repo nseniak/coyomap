@@ -2151,6 +2151,33 @@ def test_a_fill_and_a_wave_append_their_lines_to_an_open_state() -> None:
     assert state.of("next") == [], state.of("next")
 
 
+def test_one_runner_runs_an_updates_wave_over_its_own_batches_only() -> None:
+    """An update's wave (method/change-impact.md, step 5b) goes through the same runner as a
+    build's: its prefix is `<from>-<to>-`, its security batch is voted three times, and the build's
+    batches beside it are never planned. On the mcpolis update of 2026-10-09 the lead started 62
+    skeptics by hand instead, about 60 lead turns against the cap on running subagents."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo = tmp / "repo"
+        update = "65bb472-05011de-"
+        verify = make_claims_files(repo / ".coyomap" / "verify", {
+            "security": "security", "backbone": "backbone",
+            f"{update}security": "security", f"{update}rule": "rule"})
+        briefs = tmp / "briefs-update"
+        applied = str(repo / ".coyomap" / "changes" / "65bb472-05011de.applied.json")
+        wave = run_wave_fill(tmp, make_wave_values(briefs, REPO=str(repo), PREFIX=update, MAP=applied,
+                                                   AGENT_ID=f"{update}wave", CLOSER_ID=f"{update}closer"))
+        skeptics = run_contract(["skeptic", "--from-batches", str(verify), "--fill",
+                                 str(briefs / "skeptic-slots.json"), "--out-dir", str(briefs),
+                                 "--votes", "security=3", "--prefix", update])
+        plan = load_plan(briefs / "wave-plan.json")
+        skeptic_slots = json.loads((briefs / "skeptic-slots.json").read_text(encoding="utf-8"))
+    assert (wave[0], skeptics[0]) == (0, 0), (wave[2], skeptics[2])
+    assert sorted(a.id for a in plan.agents) == [f"{update}rule", f"{update}security-a",
+                                                f"{update}security-b", f"{update}security-c"]
+    assert skeptic_slots["MAP"] == applied, "the skeptics read the applied copy"
+
+
 def test_the_skeptic_briefs_leave_the_leads_next_step_alone() -> None:
     """The lead writes `next` before a long wait, and `state show` reads it back after a summary.
     A wave runner runs `--from-batches`, so a `next` written there replaced the lead's "wait for the
