@@ -427,6 +427,17 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
             touched.setdefault(box, f"entry {e.id} names it")
     for w in log.waived:
         touched.setdefault(w.id, "waived: the code touched it, the words did not change")
+    # A RELINKED ROW moved a link with no entry: the statement that link anchors is re-argued at
+    # its new line, never carried on a verdict cast at the old one. Only that statement, not its
+    # box: `changes relink` writes these from this wave's own votes, so they cost nothing, while
+    # touching the box would put statements in scope no skeptic of this wave read. One written by
+    # hand is read like any other change.
+    # An arrow id touches its own statement alone (below); any other row by the statement its link
+    # anchors.
+    for r in log.relinked:
+        if r.id.startswith(EDGE_PREFIX):
+            touched.setdefault(r.id, "relinked: its code link moved")
+    relinked_at = {(r.id, str(r.now)) for r in log.relinked if not r.id.startswith(EDGE_PREFIX)}
     # AN ARROW the log names is a row, not a box a statement lists: its statement (`C1 reads E1`)
     # names its two ends. Matched by the statement's own text, so naming the arrow re-argues the
     # arrow and not every statement about its source.
@@ -468,6 +479,10 @@ def scope_update(log: ChangeLog, before_text: str, new_doc: dict[str, Any],
             continue
         if it.claim in arrow_claims:
             in_scope.append(Scoped(it, "touched", arrow_claims[it.claim]))
+            continue
+        moved_here = next((b for b, now in relinked_at if it.anchor == now and b in it.elements), None)
+        if moved_here:
+            in_scope.append(Scoped(it, "touched", f"{moved_here}: relinked, its code link moved"))
             continue
         hit = next((b for b in it.elements if b in touched), None)
         if hit:

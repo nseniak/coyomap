@@ -150,7 +150,10 @@ build's wave:
    site's statement names its line, so the wave's verdicts and batches are re-keyed to the new text,
    the old text kept in `claim_was`: `ground` then finds the vote. It plans with `fix apply-drift`'s
    own rules (a strict majority, the map's drift exceptions, no move out of the definition, no file
-   neither end of an arrow lists) and names every correction it leaves for you. Measured: the
+   neither end of an arrow lists) and names every correction it leaves for you: a line in a list
+   an entry edits item by item (the map and the log number it differently), an arrow with twins, a
+   line another site of the same rule already holds. A `relinked` row stays in its file, and its
+   statement is in scope like any change, so one written by hand is re-argued too. Measured: the
    mcpolis update of 2026-10-09 dropped 12 such lines.
 7. **The note is the wave's, and the facts are printed for it.** `changes ground --dry-run` prints
    the `WAVE FACTS` of this wave — rows, distinct skeptic labels, the split, the multi-vote

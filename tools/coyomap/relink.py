@@ -30,7 +30,7 @@ from typing import Any
 from coyomap.audit_model import l2_worklist_model, resolve_claim
 from coyomap.challenge import pin_for, read_rows, rekey_rows, wave_files
 from coyomap.changelog import (ChangeLog, Relink, _applied, dump_log, edge_id, edge_ids, get_field,
-                               lint, load_log, set_field)
+                               index_map, load_log, set_field)
 from coyomap.fix import plan_drift_corrections
 from coyomap.grounding import worklist_is_behavioural
 from coyomap.impact_git import Extents
@@ -47,9 +47,10 @@ class Relinked:
     renames: dict[str, str] = field(default_factory=dict)  # statement text before → after
 
 
-def _address(applied: dict[str, Any], claim: str) -> tuple[str, str] | str:
-    """(box id, key) of the link a claim's anchor lives in, in the map with the log written in; or
-    why it has none a log can name."""
+def _address(applied: dict[str, Any], claim: str) -> tuple[str, str, dict[str, Any], int] | str:
+    """(box id, key, the row, the site's index) of the link a claim's anchor lives in, in the map
+    with the log written in; or why it has none a log can name. The id and key are in the APPLIED
+    map's frame: `_place` maps them back to the frame the log is written in."""
     m = load_model(json.dumps(applied))
     match = resolve_claim(m, claim)
     t = match.target
@@ -58,52 +59,74 @@ def _address(applied: dict[str, Any], claim: str) -> tuple[str, str] | str:
     if t.kind == "edge":
         row = (applied.get("edges") or [])[t.idx]
         eid = next((i for i, r in edge_ids(applied.get("edges") or []) if r is row), None)
-        return (eid, "where") if eid else "the arrow has no id"
+        return (eid, "where", row, -1) if eid else "the arrow has no id"
     if t.kind == "rule_site":
-        return (str(applied["rules"][t.idx]["id"]), f"sites[{t.sub}].where")
+        row = applied["rules"][t.idx]
+        return (str(row["id"]), f"sites[{t.sub}].where", row, t.sub)
     if t.kind == "cadence":
-        epid = str(applied["entry_points"][t.idx].get("id") or "")
-        return (epid, "cadence_source") if epid else "the way in has no id"
+        row = applied["entry_points"][t.idx]
+        epid = str(row.get("id") or "")
+        return (epid, "cadence_source", row, -1) if epid else "the way in has no id"
     if t.kind == "lifecycle":
-        rows = applied["entities"] if t.sub == 0 else applied["components"]
-        return (str(rows[t.idx]["id"]), "states.source")
+        row = (applied["entities"] if t.sub == 0 else applied["components"])[t.idx]
+        return (str(row["id"]), "states.source", row, -1)
     return f"a {t.kind} row has no address in a change log"
 
 
-def _place(log: ChangeLog, box: str, key: str, stored: str, corrected: str) -> str | None:
-    """Write the correction into the log where the link's value comes from; return where, or None
-    when the log does not carry it (then it is a `relinked` row)."""
+def _place(log: ChangeLog, doc: dict[str, Any], box: str, key: str, stored: str,
+           corrected: str, why: str) -> str:
+    """Write the correction into the log where the link's value comes from, and say where; raise
+    ValueError when the log's own frame cannot carry it safely. The address came from the map with
+    the log applied, and an entry that removes or inserts items of the same list, or one twin of an
+    arrow, numbers that list differently from the map the log is written against, so a correction
+    is written only where both frames agree:
+      a row the log adds         its own list, as it lands in the map
+      an entry edits the link     that edit's new value
+      an entry replaces the list  that edit's new list, which is the list as it lands
+      nothing in the log touches the row's list, or the arrow's twins   a `relinked` row"""
+    base = box.split("#", 1)[0]
+    head = key.split(".")[0].split("[")[0]
     for e in log.entries:
         for a in e.added:
             rid = edge_id(a.row) if a.kind == "edges" else a.row.get("id")
-            if rid == box.split("#", 1)[0] or rid == box:
+            if rid == base:
+                if box != base:
+                    raise ValueError("the log adds an arrow with twins; correct its line in the entry by hand")
                 if get_field(a.row, key) != stored:
-                    raise ValueError(f"{box}.{key}: the row entry {e.id} adds holds "
-                                     f"{get_field(a.row, key)!r}, not {stored!r}")
+                    raise ValueError(f"the row entry {e.id} adds holds {get_field(a.row, key)!r} there")
                 set_field(a.row, key, corrected)
                 return f"inside the row entry {e.id} adds"
-        for ed in e.edits:
-            if ed.id != box or not (key == ed.key or key.startswith(ed.key + ".") or key.startswith(ed.key + "[")):
-                continue
-            if key == ed.key:
-                if ed.now != stored:
-                    raise ValueError(f"{box}.{key}: entry {e.id}'s edit writes {ed.now!r}, not {stored!r}")
-                ed.now = corrected
-            else:
-                holder = {"x": ed.now}
-                rest = "x" + key[len(ed.key):]
-                if get_field(holder, rest) != stored:
-                    raise ValueError(f"{box}.{key}: entry {e.id}'s edit of {ed.key} holds "
-                                     f"{get_field(holder, rest)!r} there, not {stored!r}")
+    touching = [(e, ed) for e in log.entries for ed in e.edits
+                if ed.id == box and ed.key.split(".")[0].split("[")[0] == head]
+    if box.startswith("edge:"):
+        if box != base or any(r.startswith(base + "#") or r == base for e in log.entries for r in e.removed):
+            raise ValueError("the arrow has twins or the log removes one; correct its line by hand")
+    if not touching:
+        if box not in index_map(doc) or get_field(index_map(doc)[box][1], key) != stored:
+            raise ValueError(f"{box}.{key} does not hold {stored!r} in the map the log is written for")
+        log.relinked.append(Relink(box, key, stored, corrected, why))
+        return "as a relinked row"
+    if len(touching) == 1:
+        e, ed = touching[0]
+        if ed.key == key and ed.now == stored:
+            ed.now = corrected
+            return f"in entry {e.id}'s edit of {ed.key}"
+        if ed.key == head and "[" not in ed.key:
+            # The whole list (`sites`) or field (`states`) replaced: its new value is what lands.
+            holder = {"x": ed.now}
+            rest = "x" + key[len(ed.key):]
+            if get_field(holder, rest) == stored:
                 set_field(holder, rest, corrected)
                 ed.now = holder["x"]
-            return f"in entry {e.id}'s edit of {ed.key}"
-    return None
+                return f"in entry {e.id}'s edit of {ed.key}"
+    raise ValueError(f"an entry edits {box}'s {head} item by item, so the map and the log number it "
+                     f"differently; correct this line in that entry by hand")
 
 
 def relink(log: ChangeLog, doc: dict[str, Any], verify: Path, extents: Extents | None) -> Relinked:
     """The corrections this update's wave calls for, written into a copy of the log. `doc` is the map
-    the log is written against; nothing on disk is touched."""
+    the log is written against; nothing on disk is touched. A correction the log cannot carry
+    safely is listed in `skipped`, and the others still go."""
     # A deep copy through the file format: the log this run writes, never the caller's.
     out = Relinked(load_log(dump_log(log)))
     update = f"{log.from_commit}-{log.to_commit}"
@@ -118,12 +141,19 @@ def relink(log: ChangeLog, doc: dict[str, Any], verify: Path, extents: Extents |
         if isinstance(where, str):
             out.skipped.append(f"{claim[:100]}: {where}; re-point it by hand")
             continue
-        box, key = where
+        box, key, row, site = where
         old = stored.get(claim) or ""
-        placed = _place(out.log, box, key, old, corrected)
-        if placed is None:
-            out.log.relinked.append(Relink(box, key, old, corrected, f"read there by {update}'s skeptics"))
-            placed = "as a relinked row"
+        if site >= 0 and any(i != site and isinstance(x, dict) and x.get("where") == corrected
+                             and x.get("why") == row["sites"][site].get("why")
+                             for i, x in enumerate(row.get("sites") or [])):
+            out.skipped.append(f"{claim[:100]}: another site of {box} already says this line; the two "
+                               f"statements would become one, so decide by hand")
+            continue
+        try:
+            placed = _place(out.log, doc, box, key, old, corrected, f"read there by {update}'s skeptics")
+        except ValueError as exc:
+            out.skipped.append(f"{box}.{key} {old} → {corrected}: {exc}")
+            continue
         out.moved.append(f"{box}.{key}: {old} → {corrected} ({placed})")
     for theme, claim in plan.not_applicable + plan.unparseable:
         out.skipped.append(f"{theme}: {claim[:100]}: a kind no writer moves; re-point it by hand")
@@ -132,6 +162,14 @@ def relink(log: ChangeLog, doc: dict[str, Any], verify: Path, extents: Extents |
     if out.moved:
         out.renames = _renames(before, _applied(out.log, doc), verify, log)
     return out
+
+
+def fresh_extents(extents: Extents, changed: set[str]) -> Extents:
+    """The pre-index's symbol table without the files the update changed. The pre-index beside the
+    map is rebuilt at the close step, so during the wave it numbers those files as the from-commit
+    did, while the links and the skeptics' lines are the to-commit's: a definition there is at the
+    wrong lines. Without them `_move_refusal` falls back to its distance bound alone."""
+    return {path: rows for path, rows in extents.items() if path not in changed}
 
 
 def _renames(before: dict[str, Any], after: dict[str, Any], verify: Path, log: ChangeLog) -> dict[str, str]:
@@ -170,8 +208,3 @@ def rekey_wave(verify: Path, log: ChangeLog, renames: dict[str, str]) -> int:
         if changed:
             f.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     return n
-
-
-def check_relinked(r: Relinked, doc: dict[str, Any]) -> list[str]:
-    """The corrected log must still lint clean against the map: every relinked `was` is the map's."""
-    return lint(r.log, doc).errors

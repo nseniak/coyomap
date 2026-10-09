@@ -97,3 +97,21 @@ def test_the_command_writes_the_log_and_exits_1_on_a_clash():
         merged = json.loads((root / "log.json").read_text(encoding="utf-8"))
     assert code == 1 and "1 clash(es)" in out.getvalue() and "CLASH: BR1.risk" in out.getvalue()
     assert len(merged["entries"]) == 2
+
+
+def test_a_flow_names_its_use_case_and_an_id_a_draft_writes_is_not_given_again():
+    """Review findings: a use case and its flow in two drafts were refused as one placeholder added
+    twice; a placeholder took the number a draft had written itself; `SAML?relay` in a sentence was
+    read as a placeholder."""
+    doc = make_doc()
+    uc = {"kind": "use_cases", "row": {"id": "UC?c1", "name": "Sign in by SAML", "actors": ["R1"]}}
+    flow = {"kind": "flows", "row": {"uc": "UC?c1", "title": "Sign in by SAML", "steps": []}}
+    c = make_draft([make_draft_entry("e1", ["UC?c1"], added=[uc],
+                                     sentence="A person signs in at /sso/SAML?relay=home.")])
+    d = make_draft([make_draft_entry("e1", ["UC?c1"], added=[flow])])
+    m = merge([("c.json", c), ("d.json", d)], doc)
+    assert m.numbered == {"UC?c1": "UC2"} and m.log["entries"][1]["added"][0]["row"]["uc"] == "UC2"
+    assert "/sso/SAML?relay=home" in m.log["entries"][0]["sentence"]
+    a = make_draft([make_draft_entry("e1", ["BR2"], added=[make_new_rule("BR2", "Written by number")])])
+    b = make_draft([make_draft_entry("e1", ["BR?b1"], added=[make_new_rule("BR?b1", "By placeholder")])])
+    assert merge([("a.json", a), ("b.json", b)], doc).numbered == {"BR?b1": "BR3"}

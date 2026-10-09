@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from coyomap.changelog import FORMAT, VERSION, commit_matches, index_map
+from coyomap.model import ID_ARRAYS
 
 #: A placeholder id: the kind's letters, `?`, then a tag starting with a lowercase letter.
 PLACEHOLDER = re.compile(r"\b([A-Z]+)\?([a-z][A-Za-z0-9_]*)")
@@ -65,27 +66,39 @@ def _swap(node: Any, numbered: dict[str, str]) -> Any:
     return node
 
 
-def _added_placeholders(draft: dict[str, Any]) -> list[str]:
-    """The placeholders a draft ADDS: the `id` of a row it adds, or the `uc` of a flow it adds."""
+def _added_row_ids(draft: dict[str, Any]) -> list[str]:
+    """The `id` of every row a draft adds. A flow's `uc` names the use case it belongs to and adds
+    nothing of its own, so it is not here."""
     out: list[str] = []
     for e in draft.get("entries") or []:
         for a in (e.get("added") or []) if isinstance(e, dict) else []:
             row = a.get("row") if isinstance(a, dict) else None
-            for key in ("id", "uc"):
-                value = row.get(key) if isinstance(row, dict) else None
-                if isinstance(value, str) and PLACEHOLDER.fullmatch(value) and value not in out:
-                    out.append(value)
+            value = row.get("id") if isinstance(row, dict) else None
+            if isinstance(value, str) and value not in out:
+                out.append(value)
     return out
 
 
-def _next_free(doc: dict[str, Any]) -> dict[str, int]:
-    """The next free number of every kind of id the map holds (`BR` → 255 when BR254 is the last)."""
+def _added_placeholders(draft: dict[str, Any]) -> list[str]:
+    return [i for i in _added_row_ids(draft) if PLACEHOLDER.fullmatch(i)]
+
+
+def _next_free(doc: dict[str, Any], drafts: list[tuple[str, dict[str, Any]]]) -> dict[str, int]:
+    """The next free number of every kind of id, above the map's AND every id a draft adds by its
+    number: a draft that wrote `BR255` itself must not see a placeholder become `BR255` too."""
     top: dict[str, int] = {}
-    for rid in index_map(doc):
+    for rid in [*index_map(doc), *(i for _n, d in drafts for i in _added_row_ids(d))]:
         m = _NUMBERED.match(rid)
         if m:
             top[m.group(1)] = max(top.get(m.group(1), 0), int(m.group(2)))
     return {k: v + 1 for k, v in top.items()}
+
+
+def _kinds(doc: dict[str, Any]) -> set[str]:
+    """The letters an id of this map can start with: a placeholder is one of them, `?`, a tag. An
+    all-caps word before a `?` in a sentence or an address (`/sso/SAML?relay=…`) is not."""
+    return set(ID_ARRAYS.values()) | {"EP", "HP"} | {m.group(1) for rid in index_map(doc)
+                                                     if (m := _NUMBERED.match(rid))}
 
 
 def merge(drafts: list[tuple[str, dict[str, Any]]], doc: dict[str, Any]) -> Merged:
@@ -108,12 +121,14 @@ def merge(drafts: list[tuple[str, dict[str, Any]]], doc: dict[str, Any]) -> Merg
             if ph in adder:
                 raise ValueError(f"{ph} is added by both {adder[ph]} and {name}: give one of them another tag")
             adder[ph] = name
-    named = sorted({m.group(0) for _name, d in drafts for s in _strings(d) for m in PLACEHOLDER.finditer(s)})
+    kinds = _kinds(doc)
+    named = sorted({m.group(0) for _name, d in drafts for s in _strings(d) for m in PLACEHOLDER.finditer(s)
+                    if m.group(1) in kinds})
     orphans = [ph for ph in named if ph not in adder]
     if orphans:
         raise ValueError(f"{', '.join(orphans)} named but added by no draft: a placeholder is a box a "
                          f"draft adds")
-    free = _next_free(doc)
+    free = _next_free(doc, drafts)
     numbered: dict[str, str] = {}
     for ph in adder:                                     # draft order, then the order each adds them
         kind = ph.split("?", 1)[0]

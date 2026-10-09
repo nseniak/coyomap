@@ -38,7 +38,7 @@ from typing import Any, Callable, Literal
 
 from coyomap import subverb_help
 from coyomap.audit_model import record_gap
-from coyomap.impact_git import load_map_extents
+from coyomap.impact_git import ImpactError, diff_changes, load_map_extents, resolve_ref
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, is_empty_value, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import (DESCRIPTION_WHERE, Finding, field_findings, history_findings,
@@ -752,6 +752,9 @@ def lint(log: ChangeLog, doc: dict[str, Any], roots: list[Path] | None = None) -
                             f"the log says was {json.dumps(r.was, ensure_ascii=False)[:80]}")
         if not isinstance(r.now, str) or not r.now.strip() or r.now == r.was:
             p.errors.append(f"{where}: now must be a new link")
+        elif isinstance(r.was, str) and r.now.split(":", 1)[0] != r.was.split(":", 1)[0]:
+            p.errors.append(f"{where}: a relink stays in its file ({r.was.split(':', 1)[0]}); a link "
+                            f"that moves to another file is an edit in an entry")
     # Two edits whose targets nest write into each other: a whole list and one of its items, a
     # dict and a field in it, one item under two spellings (`fields[1]`, `fields[name=size]`), an
     # item and the removal that takes it out. One would land and vanish, or land on the wrong
@@ -1428,8 +1431,12 @@ def _main_relink(rest: list[str]) -> int:
             raise ValueError("relink needs one log and --map <map>")
         log_path, map_path = Path(rest[0]), Path(map_opt)
         log, doc = load_log(log_path.read_text(encoding="utf-8")), _read_map(map_path)
-        r = relink.relink(log, doc, map_path.parent / "verify", load_map_extents(map_path))
-    except (OSError, ValueError) as e:
+        repo = map_path.resolve().parent.parent
+        changed = {c.path for c in diff_changes(repo, resolve_ref(repo, log.from_commit),
+                                                 resolve_ref(repo, log.to_commit))}
+        r = relink.relink(log, doc, map_path.parent / "verify",
+                          relink.fresh_extents(load_map_extents(map_path), changed))
+    except (OSError, ValueError, ImpactError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
     print(f"relink — {len(r.moved)} link(s) moved to the line the skeptics read, "
@@ -1446,8 +1453,14 @@ def _main_relink(rest: list[str]) -> int:
         print("relink: the corrected log does not lint; nothing was written", file=sys.stderr)
         return 1
     if write and r.moved:
-        log_path.write_text(dump_log(r.log), encoding="utf-8")
-        n = relink.rekey_wave(map_path.parent / "verify", log, r.renames)
+        # The wave first: a log written over a wave left on its old text would find nothing left to
+        # move on a re-run, and `ground` would refuse the moved statements as never voted.
+        try:
+            n = relink.rekey_wave(map_path.parent / "verify", log, r.renames)
+            log_path.write_text(dump_log(r.log), encoding="utf-8")
+        except OSError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
         print(f"wrote {log_path}; {n} verdict row(s) re-keyed. Next: `changes lint`, `changes check`, "
               f"then step 6")
     return 0

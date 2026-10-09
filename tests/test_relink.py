@@ -12,7 +12,7 @@ from typing import Any
 from coyomap import challenge as ch
 from coyomap import relink
 from coyomap import changelog
-from coyomap.changelog import apply, lint
+from coyomap.changelog import Entry, FieldEdit, Relink, apply, lint
 
 from test_challenge import make_update, make_verdict, rule_claim
 
@@ -87,3 +87,63 @@ def test_the_command_prints_without_write_and_writes_the_log_and_the_wave_with_i
         assert written["relinked"][0]["id"] == "edge:C2>calls>C3"
         assert changelog.main(["relink", str(inputs.log_path), "--map", str(inputs.map_path)]) == 0
         assert "0 link(s) moved" in capsys.readouterr().out, "a second run finds nothing left to move"
+
+
+def make_rule_doc(inputs: ch.Inputs, sites: list[dict[str, str]]) -> None:
+    """BR4, a rule of the map the log is written against, with these sites."""
+    inputs.map_doc["rules"].append({"id": "BR4", "name": "A fourth guard", "statement": "A fourth guard holds.",
+                                    "block": "BLK1", "sites": sites})
+
+
+def test_a_site_list_an_entry_edits_item_by_item_is_left_for_the_lead_and_the_rest_still_moves():
+    """Review finding: an entry removing an earlier site renumbered the list, so relink moved the
+    wrong site and re-keyed the wrong statement's vote, silently."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, _pin, _head = make_update(td)
+        make_rule_doc(inputs, [{"where": "svc/b.py:2", "why": "zero"}, {"where": "svc/b.py:4", "why": "one"},
+                               {"where": "svc/b.py:5", "why": "two"}])
+        inputs.log.entries.append(Entry("e3", "A guard loses a check", "One check is gone.", ["BR4"],
+                                        [FieldEdit("BR4", "sites[0]", {"where": "svc/b.py:2", "why": "zero"}, None)]))
+        two = rule_claim("svc/b.py:5", "A fourth guard holds.", "two")
+        BETTER[two] = "svc/b.py:9"
+        try:
+            ch.run_challenge(inputs, cap=40, floor=0)
+            make_better_wave(inputs)
+            r = relink.relink(inputs.log, inputs.map_doc, inputs.verify, None)
+        finally:
+            del BETTER[two]
+        assert any("BR4" in line and "by hand" in line for line in r.skipped), r.skipped
+        assert not any(x.id == "BR4" for x in r.log.relinked)
+        assert any(line.startswith("edge:C2>calls>C3") for line in r.moved), "the other corrections still go"
+
+
+def test_a_move_onto_a_line_another_site_holds_is_left_for_the_lead():
+    """Review finding: two sites with one reason on one line become one statement, and a vote lost."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, _pin, _head = make_update(td)
+        make_rule_doc(inputs, [{"where": "svc/b.py:4", "why": "w"}, {"where": "svc/b.py:9", "why": "w"}])
+        first = rule_claim("svc/b.py:4", "A fourth guard holds.", "w")
+        inputs.log.entries.append(Entry("e3", "A guard is named", "It reads plainly.", ["BR4"],
+                                        [FieldEdit("BR4", "name", "A fourth guard", "The fourth guard")]))
+        BETTER[first] = "svc/b.py:9"
+        try:
+            ch.run_challenge(inputs, cap=40, floor=0)
+            make_better_wave(inputs)
+            r = relink.relink(inputs.log, inputs.map_doc, inputs.verify, None)
+        finally:
+            del BETTER[first]
+        assert any("already says this line" in line for line in r.skipped), r.skipped
+
+
+def test_a_hand_written_relinked_row_puts_its_statement_in_scope_and_stays_in_its_file():
+    """Review finding: a relinked row moved an arrow's link with no entry, and its statement was
+    carried on a verdict cast at the old line."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, _root, _pin, _head = make_update(td)
+        log = inputs.log
+        log.relinked = [Relink("edge:C3>uses>D1", "where", "svc/b.py:6", "svc/b.py:2")]
+        applied, _ = apply(log, inputs.map_doc)
+        scope = ch.scope_update(log, inputs.before_text, applied, inputs.impact, inputs.verify, inputs.repo)
+        assert "C3 uses D1" in {s.item.claim for s in scope.in_scope}
+        log.relinked = [Relink("edge:C3>uses>D1", "where", "svc/b.py:6", "svc/a.py:1")]
+        assert any("a relink stays in its file" in e for e in lint(log, inputs.map_doc).errors)
