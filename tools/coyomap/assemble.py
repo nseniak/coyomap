@@ -1237,14 +1237,13 @@ _GITIGNORE_KEEP: tuple[str, ...] = ("dev-rebuilds/", "fanout-timings.json", *unc
 # `preindex.json`: the viewer's symbol search reads it, pinned to the map's commit.
 # `build-fragments/`: the fragments each agent authored, half of the map's warrant with `verify/`.
 # Older builds ignored it as scratch, so a commit took the map without the reason to believe it.
-# `finalize-report.{json,md}`: the build's check result. It used to travel in the commit message,
-# and a build no longer writes one.
 # Every spelling seen or likely for those parts: with or without a leading "/", a folder with or
-# without its trailing "/", "/*" or "/**", and the report by its own names or a wildcard.
+# without its trailing "/", "/*" or "/**".
+# (`finalize-report.{json,md}` was one of these parts until 2026-10-09: it is a snapshot of one
+# run of the checks, false after the first update, so it is in `uncommitted` now.)
 _GITIGNORE_DROP = {f"{pre}{name}" for pre in ("", "/")
                    for name in ("preindex.json", "build-fragments", "build-fragments/",
-                                "build-fragments/*", "build-fragments/**", "finalize-report.json",
-                                "finalize-report.md", "finalize-report.*", "finalize-report*")}
+                                "build-fragments/*", "build-fragments/**")}
 
 
 def normalize_map_gitignore(out_dir: Path) -> bool:

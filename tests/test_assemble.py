@@ -347,7 +347,8 @@ def test_normalize_map_gitignore_strips_stray_preindex_ignore():
 
 def test_the_map_gitignore_hides_no_part_of_the_map():
     """A build does not commit. A plain `git add .coyomap` must take the whole map, so an older
-    file's lines hiding the agents' fragments or the check report are stripped, and none is added."""
+    file's lines hiding the agents' fragments or the pre-index are stripped, and none is added. The
+    check report is NOT part of the map: it describes one run and an update makes it false."""
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
         (out / ".gitignore").write_text("build-fragments/\nfinalize-report.json\nfinalize-report.md\n"
@@ -355,8 +356,8 @@ def test_the_map_gitignore_hides_no_part_of_the_map():
                                         "build-fragments/*\nfinalize-report.*\n*.tmp\n", encoding="utf-8")
         assert normalize_map_gitignore(out) is True
         lines = (out / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert not [line for line in lines if "build-fragments" in line or "finalize-report" in line
-                or "preindex" in line], lines
+    assert not [line for line in lines if "build-fragments" in line or "preindex" in line], lines
+    assert "finalize-report.json" in lines and "finalize-report.md" in lines
     assert "dev-rebuilds/" in lines and "fanout-timings.json" in lines
     assert "*.tmp" in lines, "a line of the operator's own was removed"
 
