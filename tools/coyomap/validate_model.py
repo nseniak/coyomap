@@ -7050,16 +7050,20 @@ def call_site_anchors(m: ProjectModel,
 
 def check_operative_lines_model(m: ProjectModel, roots: list[Path],
                                 arrivals: dict[str, set[tuple[str, int | None]]] | None = None,
-                                unknown_doors_pass: bool = False) -> list[str]:
+                                unknown_doors_pass: bool = False,
+                                only: set[tuple[str, str]] | None = None) -> list[str]:
     """ADVISORY: a call-site anchor pointing at a line that cannot be the acting statement.
 
     The deterministic half of what the Phase-4 skeptics find by reading (see
     `anchors.non_operative_reason`). Non-blocking on purpose: a drifted anchor does NOT refute the
     relationship — the edge is usually real and only its `where` is wrong — so this points, it does
-    not fail the build."""
+    not fail the build. `only` narrows the check to these `(label, anchor)` pairs of
+    `call_site_anchors`: the ones a change log adds or re-points (`changes lint`)."""
     out: list[str] = []
     cache: dict[str, list[str] | None] = {}
     for label, anchor in call_site_anchors(m, arrivals, unknown_doors_pass):
+        if only is not None and (label, anchor) not in only:
+            continue
         loc = parse_anchor(anchor)
         if loc is None or loc.lo is None:
             continue                       # a whole-file/dir anchor claims no single line

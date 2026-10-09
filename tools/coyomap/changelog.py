@@ -42,7 +42,7 @@ from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec,
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import (DESCRIPTION_WHERE, Finding, field_findings, history_findings,
                            iter_prose_fields)
-from coyomap.validate_model import validate_model
+from coyomap.validate_model import call_site_anchors, check_operative_lines_model, validate_model
 
 FORMAT = "coyomap-changes"
 VERSION = 1
@@ -65,7 +65,8 @@ USAGE = """usage: coyomap changes <verb> [options]
         map already failed before the log says "did not before this log either": the log must
         still clear it, method/change-impact.md says how); every sentence the log changes or adds
         faces the readability check and the snapshot check (no "now", "no longer", "since the…"
-        in the map's own words), as a warning
+        in the map's own words), and every call-site link it adds or re-points faces the
+        operative-line test (not a function header, a comment, a blank line), as a warning
   render <log> --map <map> [--out <file.md>]
         the log as markdown for people: entries under Product / Under the hood, boxes by name
   apply <log> --map <map> [--out <map>] [--date <YYYY-MM-DD>]
@@ -546,7 +547,10 @@ def _not_in_map(rid: str, shared: dict[str, int]) -> str:
     return f"{rid}, which is not in the map"
 
 
-def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
+def lint(log: ChangeLog, doc: dict[str, Any], roots: list[Path] | None = None) -> Problems:
+    """Is the log well formed against this map? `roots` is the repo the map describes, at the
+    to-commit: given, every call-site link the log adds or re-points faces the operative-line check
+    `validate` runs at the close step, as a warning."""
     p = Problems()
     index = index_map(doc)
     shared = shared_edge_ids(doc)
@@ -702,7 +706,23 @@ def lint(log: ChangeLog, doc: dict[str, Any]) -> Problems:
                 came = ", and did not before this log either" if problem in had else ""
                 p.errors.append(f"the map would not validate after apply{came}: {problem}")
     p.warnings.extend(_prose_warnings(log, doc, model, prose))
+    if roots and model is not None:
+        p.warnings.extend(_operative_line_warnings(doc, model, roots))
     return p
+
+
+def _operative_line_warnings(doc: dict[str, Any], after: ProjectModel, roots: list[Path]) -> list[str]:
+    """The operative-line check (`validate_model.check_operative_lines_model`) on the call-site
+    links the log adds or re-points: a link on a function header, a comment or a blank line. The
+    2026-10-09 mcpolis update wrote about 17 new rule sites the check flagged only at the close
+    step, after the wave had voted on them. A link the map already held is not judged again; a map
+    that did not load before the log has nothing to compare with, so every link is judged."""
+    try:
+        held = set(call_site_anchors(load_model(json.dumps(doc))))
+    except ModelError:
+        held = set()
+    fresh = set(call_site_anchors(after)) - held
+    return check_operative_lines_model(after, roots, only=fresh) if fresh else []
 
 
 def _problems_before(doc: dict[str, Any]) -> set[str]:
@@ -1340,7 +1360,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         doc = _read_map(Path(map_opt))
         if verb == "lint":
-            p = lint(log, doc)
+            p = lint(log, doc, [Path(map_opt).resolve().parent.parent])
             for w in p.warnings:
                 print(f"warning: {w}")
             for e in p.errors:

@@ -214,6 +214,30 @@ def test_an_arrow_that_came_or_went_is_explained_by_naming_its_source():
     assert check(make_log(make_entry(elements=["edge:C1>reads>E1"])), old, new).ok
 
 
+# --- the operative-line check at lint ---------------------------------------------------------
+
+def make_guard_repo(root: Path) -> Path:
+    """`a.py`: line 1 a function header, line 2 the line that refuses."""
+    (root / "a.py").write_text("def guard(team):\n    raise Refused(team)\n", encoding="utf-8")
+    return root
+
+
+def test_lint_warns_on_a_new_site_anchored_on_a_function_header_and_only_on_what_the_log_wrote():
+    """The 2026-10-09 mcpolis update wrote about 17 rule sites on a function header, and nothing
+    said so before the close step's `validate`, after the wave had voted on them."""
+    with tempfile.TemporaryDirectory() as td:
+        roots = [make_guard_repo(Path(td))]
+        doc = make_doc()                                         # BR1's site sits on a.py:1 already
+        new_rule = dict(make_rule("BR2", "A team is refused", where="a.py:1"), name="A team is refused")
+        log = make_log(make_entry(elements=["BR2"], added=[Addition("rules", new_rule)]))
+        warns = [w for w in lint(log, doc, roots).warnings if "operative statement" in w]
+        assert len(warns) == 1 and warns[0].startswith("BR2 site[0]") and "a Python function header" in warns[0], warns
+        good = make_log(make_entry(elements=["BR2"], added=[Addition("rules", dict(new_rule, sites=[
+            {"where": "a.py:2", "why": "guards"}]))]))
+        assert not [w for w in lint(good, doc, roots).warnings if "operative statement" in w]
+        assert not [w for w in lint(log, doc).warnings if "operative statement" in w], "no repo, no check"
+
+
 # --- an arrow is a row a log can address ------------------------------------------------------
 
 def make_arrow_doc(*edges: dict[str, Any]) -> dict[str, Any]:
