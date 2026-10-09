@@ -40,7 +40,7 @@ from coyomap.anchors import (
     parse_anchor,
     strip_anchor,
 )
-from coyomap.impact_git import Extents, load_map_extents
+from coyomap.impact_git import Extents, load_map_extents, pin_lag
 from coyomap.impact_lib import enclosing_extent
 from coyomap.packages import declared_packages, unnamed_packages
 from coyomap.pysrc import parse_python
@@ -8002,6 +8002,23 @@ def _checked_summary(stats: dict[str, int], check_sources: bool, check_coverage:
     return " · ".join(parts)
 
 
+def pin_lag_warning(m: ProjectModel, repo: Path | None) -> str | None:
+    """The warning for a map whose pin is behind the code it sits beside, or None. Read at the
+    command line only, where a repo is at hand: `validate_model` judges the map, not the clone."""
+    lag = pin_lag(repo, m.commit or "") if repo is not None else None
+    if lag is None:
+        return None
+    if not lag.known:
+        return (f"the map is pinned to {lag.pin}, which is not a commit of this repo: nothing can say "
+                f"how far the code has moved since (a map copied from another clone, or a shallow one)")
+    if lag.commits:
+        return (f"the map is pinned to {lag.pin[:10]}, and HEAD ({lag.head[:10]}) is {lag.commits} "
+                f"commit(s) past it that change the product, not counting `.coyomap/`: the map "
+                f"describes code that has moved on. Update it (`/coyomap update`) before committing "
+                f"it as current")
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Thin wrapper: whole-list mode is process-wide, so it is reset on EVERY exit path.
 
@@ -8148,6 +8165,10 @@ def _run(argv: list[str] | None = None) -> int:
                                         check_coverage=check_coverage, repo_root=repo_root,
                                         model_is_edited=ignore_exceptions, stats=vstats,
                                         silenced_out=vsilenced)
+    stale = pin_lag_warning(m, repo_root or (resolved.resolve().parent.parent
+                                             if resolved.resolve().parent.name == ".coyomap" else None))
+    if stale:
+        warnings.append(stale)
     # What the repo-reading flags actually read. Without this, `validate` and
     # `validate --check-sources` print byte-identical output on a clean map, so passing the flag is
     # indistinguishable from forgetting it — and a lead cannot tell a silent pass from a no-op.

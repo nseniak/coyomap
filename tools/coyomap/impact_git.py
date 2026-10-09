@@ -63,6 +63,44 @@ def resolve_ref(repo: Path, ref: str) -> str:
     return out.decode().strip()
 
 
+@dataclass(frozen=True)
+class PinLag:
+    """How far the code has moved past a map's pin."""
+    pin: str                  # the pin as the map spells it
+    head: str                 # HEAD, as a sha
+    known: bool               # the pin is a commit this repo has
+    commits: int = 0          # commits since the pin that change a file outside `.coyomap/`
+
+
+def pin_lag(repo: Path, pin: str) -> PinLag | None:
+    """How many commits HEAD is past the map's pin, counting only those that change the product: a
+    commit that touches nothing but `.coyomap/` (the update's own commit, a viewer tweak) moves no
+    code the map describes. None when `repo` is no git work tree, has no commit, or the map has no
+    pin. Read-only.
+
+    WHY. A map can be stale on the day it is committed: the 2026-10-09 mcpolis rebuild was built
+    at 65bb4722 in a worktree and committed 25 commits later, and nothing said so."""
+    pin = (pin or "").removesuffix("-dirty").strip()
+    if not pin:
+        return None
+    try:
+        if _git(repo, "rev-parse", "--is-inside-work-tree", ok_codes=(0, 128)).decode().strip() != "true":
+            return None
+        head = _git(repo, "rev-parse", "--verify", "HEAD^{commit}", ok_codes=(0, 128)).decode().strip()
+        if not head:
+            return None
+        if not _REF_RE.match(pin):
+            return PinLag(pin, head, known=False)
+        sha = _git(repo, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{pin}^{{commit}}",
+                   ok_codes=(0, 1, 128)).decode().strip()
+        if not sha:
+            return PinLag(pin, head, known=False)
+        count = _git(repo, "rev-list", "--count", f"{sha}..{head}", "--", ".", ":(exclude).coyomap")
+        return PinLag(pin, head, known=True, commits=int(count.decode().strip() or 0))
+    except (ImpactError, OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
 # ── the change set ────────────────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
