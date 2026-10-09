@@ -79,7 +79,8 @@ USAGE = """usage: coyomap changes <verb> [options]
         and after it — and the new map's `grounding` record must describe it (`changes ground`)
   challenge <log> --map <map> --before <before.json> --touched <impact.json>
         the update's skeptic wave, part one: which statements the change put in scope, cut into
-        claims batches beside the build's, and the applied copy of the map the skeptics read
+        claims batches beside the build's, and the applied copy of the map the skeptics read;
+        `--estimate` in place of the log: the least the wave will take, at step 1, writing nothing
   ground <log> --map <map> --before <before.json> --touched <impact.json> --note-file <path>
         part two, after `apply`: the warrant re-pinned, verdicts carried or retired, the record
         re-measured and written into the map, the log told what the wave decided
@@ -1281,7 +1282,8 @@ def main(argv: list[str] | None = None) -> int:
         # The options the two wave verbs take. Parsed in `challenge.py`; named here too so this
         # command refuses a stray one before delegating, in its own words.
         challenge_options = ("--map", "--before", "--touched", "--repo", "--cap", "--floor",
-                             "--note-file", "--dry-run", "--json", "-h", "--help")
+                             "--note-file", "--dry-run", "--json", "-h", "--help") + (
+                                 ("--estimate", "--to") if verb == "challenge" else ())
         unknown = [a for a in rest if a.startswith("-") and a not in challenge_options]
         if unknown:
             print(f"ERROR: unknown option '{unknown[0]}' for `changes {verb}`\n", file=sys.stderr)

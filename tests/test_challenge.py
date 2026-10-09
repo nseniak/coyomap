@@ -229,6 +229,27 @@ def test_an_arrow_the_log_names_puts_its_own_statement_in_scope_and_not_its_ends
         assert "Component C3 (Gamma) is described as: Sends gamma mail." not in why
 
 
+def test_the_estimate_at_step_one_is_the_scope_without_the_log_and_writes_nothing():
+    """`changes challenge --estimate`: the wave's floor before the log exists. The mcpolis update of
+    2026-10-09 guessed 15 to 30 skeptics and took 62 and a closer; the estimate says 51 and a closer
+    from step 1."""
+    with tempfile.TemporaryDirectory() as td:
+        inputs, root, pin, head = make_update(td)
+        before_files = sorted(p.name for p in inputs.verify.iterdir())
+        est = ch.estimate_wave(inputs.before_text, inputs.impact, inputs.verify, root, head, cap=40, floor=0)
+        assert sorted(p.name for p in inputs.verify.iterdir()) == before_files, "it writes nothing"
+        claims = {s.item.claim for s in est.scope.in_scope}
+        # The code touched C1: its statements are in, before any entry names anything.
+        assert "Component C1 (Alpha) is described as: Reads the alpha file." in claims and "C1 calls C2" in claims
+        # The entry's reworded C3 and its new rule are the log's own: not in the floor.
+        assert not any("Gamma" in c or "at most ten" in c for c in claims), claims
+        applied, _ = apply(inputs.log, inputs.map_doc)
+        real = ch.scope_update(inputs.log, inputs.before_text, applied, inputs.impact, inputs.verify, root)
+        assert claims <= {s.item.claim for s in real.in_scope}, "a floor under the real wave"
+        assert est.skeptics == len(est.batches) and est.batches and est.update == f"{pin}-{head}"
+        assert "skeptic(s)" in ch.format_estimate(est) and "and one closer" in ch.format_estimate(est)
+
+
 def test_challenge_writes_the_applied_copy_the_batches_and_the_scope_file():
     with tempfile.TemporaryDirectory() as td:
         inputs, root, pin, head = make_update(td)

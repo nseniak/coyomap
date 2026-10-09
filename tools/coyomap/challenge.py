@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -79,11 +80,13 @@ from coyomap.grounding import (
     REDUNDANT_PHRASE,
 )
 from coyomap.impact_git import ImpactError, rename_map, resolve_ref, tree_paths, u0_diff
-from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path
+from coyomap.model import ModelError, ProjectModel, load_model, resolve_map_path, to_canonical_json
 from coyomap.reanchor import line_mapper, reanchor
 
 USAGE = """usage: coyomap changes challenge <log> --map <map> --before <before.json> --touched <impact.json>
                                  [--repo <root>] [--cap N] [--floor N] [--json]
+       coyomap changes challenge --estimate --map <map> --before <before.json> --touched <impact.json>
+                                 [--to <ref>] [--repo <root>] [--cap N] [--floor N] [--json]
        coyomap changes ground <log> --map <map> --before <before.json> --touched <impact.json>
                               (--note-file <path> | --dry-run) [--repo <root>] [--json]
 
@@ -100,6 +103,11 @@ ground     after the wave has landed (`grounding lint` clean, the closer heard, 
            writes it into the map with one more row in `grounding.history`, and writes what the
            wave decided into the log's `challenge` block. `--dry-run` prints the NOTE FACTS the
            note is written from and writes nothing.
+
+--estimate  the size of the wave BEFORE the log is written (step 1): the statements the code change
+           alone puts in scope, the batches they cut into and the skeptics those take (security
+           three-voted, one closer). Needs no log and writes nothing. A floor, not a forecast: the
+           log then adds every statement it rewrites and every box an entry names.
 
 --before is the copy step 0 kept (`<log>.before.json`: the map before re-anchor), --touched the
 impact file step 1 wrote. `--map` is the re-anchored map for `challenge` and the APPLIED map for
@@ -879,6 +887,66 @@ def run_challenge(inp: Inputs, cap: int, floor: int) -> tuple[Scope, list[tuple[
     return scope, batches, applied_path, prefix
 
 
+#: How many voters each theme's batch takes, as the method's `--votes security=3` sets it.
+WAVE_VOTES: dict[str, int] = {"security": 3}
+
+
+@dataclass(frozen=True)
+class Estimate:
+    """The wave the code change alone calls for, before the log exists."""
+    update: str
+    scope: Scope
+    batches: list[tuple[str, int, str]]          # (file name, statements, theme)
+
+    @property
+    def skeptics(self) -> int:
+        return sum(WAVE_VOTES.get(theme, 1) for _name, _n, theme in self.batches)
+
+
+def estimate_wave(before_text: str, impact: dict[str, Any], verify: Path, repo: Path, to: str,
+                  cap: int, floor: int) -> Estimate:
+    """The wave an update will need at the least, from what step 0 and step 1 left: the map as it
+    was and the impact file. The re-anchor step is replayed in memory and the scope computed with an
+    empty log, through the same `scope_update` and `write_theme_batches` the real run uses (into a
+    scratch folder), so the estimate cannot drift from the rule. On the 2026-10-09 mcpolis update
+    the lead guessed 15 to 30 skeptics; the wave took 62 and a closer."""
+    m = load_model(before_text)
+    pin = (m.commit or "").removesuffix("-dirty")
+    to_sha = resolve_ref(repo, to)
+    log = ChangeLog(pin, to_sha[:max(7, len(pin))], "", [])
+    reanchor(m, repo, to_sha)
+    scope = scope_update(log, before_text, json.loads(to_canonical_json(m)), impact, verify, repo)
+    batches: list[tuple[str, int, str]] = []
+    items = [s.item for s in scope.in_scope]
+    if items:
+        with tempfile.TemporaryDirectory() as td:
+            for name, n in write_theme_batches(items, Path(td), cap, floor=floor):
+                batches.append((name, n, batch_theme(Path(td) / name)))
+    return Estimate(scope.update, scope, batches)
+
+
+def format_estimate(est: Estimate) -> str:
+    r = est.scope.by_reason()
+    voted = {t: v for t, v in WAVE_VOTES.items() if any(theme == t for _n, _c, theme in est.batches)}
+    lines = [f"estimate {est.update} — at least {len(est.scope.in_scope)} statement(s) to re-argue "
+             f"before the log is written ({r['touched']} on a box the code touched, {r['rippled']} on "
+             f"a box the change reached, {r['changed']} the build's list does not hold), in {len(est.batches)} batch(es): "
+             f"{est.skeptics} skeptic(s)"
+             + "".join(f", {t} ×{v}" for t, v in voted.items())
+             + (", and one closer" if est.batches else "")]
+    by_theme: dict[str, tuple[int, int]] = {}
+    for _name, n, theme in est.batches:
+        b, c = by_theme.get(theme, (0, 0))
+        by_theme[theme] = (b + 1, c + n)
+    for theme, (b, c) in by_theme.items():
+        lines.append(f"  {theme}: {c} statement(s), {b} batch(es)")
+    for n in est.scope.notes:
+        lines.append(f"  note: {n}")
+    lines.append("  The log adds every statement it rewrites or adds, and every box an entry names "
+                 "or waives: tell the operator this floor before writing the log.")
+    return "\n".join(lines)
+
+
 def run_ground(inp: Inputs, note: str, dry_run: bool) -> Fold:
     scope = scope_update(inp.log, inp.before_text, inp.map_doc, inp.impact, inp.verify, inp.repo)
     fold = fold_update(scope, inp.verify, inp.repo, inp.log)
@@ -1075,6 +1143,34 @@ def format_fold(fold: Fold, inp: Inputs, dry_run: bool) -> str:
     return "\n".join(lines)
 
 
+def _main_estimate(rest: list[str], cap_opt: str | None, floor_opt: str | None, as_json: bool) -> int:
+    map_opt, before_opt, touched_opt = _opt(rest, "--map"), _opt(rest, "--before"), _opt(rest, "--touched")
+    repo_opt, to = _opt(rest, "--repo"), _opt(rest, "--to") or "HEAD"
+    if not (map_opt and before_opt and touched_opt):
+        raise ValueError("--estimate needs --map, --before and --touched (steps 0 and 1 write them)")
+    if rest:
+        raise ValueError(f"--estimate takes no log and no other argument: {rest[0]!r}")
+    map_path = resolve_map_path(map_opt)
+    repo = Path(repo_opt) if repo_opt else map_path.parent.parent
+    try:
+        est = estimate_wave(Path(before_opt).read_text(encoding="utf-8"),
+                            _read_json(Path(touched_opt), "--touched"), map_path.parent / "verify", repo,
+                            to, int(cap_opt) if cap_opt else DEFAULT_CAP,
+                            int(floor_opt) if floor_opt else DEFAULT_FLOOR)
+    except (OSError, ImpactError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    if as_json:
+        print(json.dumps({"kind": "coyomap-wave-estimate", "update": est.update,
+                          "statements": len(est.scope.in_scope), **est.scope.by_reason(),
+                          "batches": [{"file": f, "claims": n, "theme": t} for f, n, t in est.batches],
+                          "skeptics": est.skeptics, "closer": bool(est.batches),
+                          "notes": est.scope.notes}, indent=1, ensure_ascii=False))
+    else:
+        print(format_estimate(est))
+    return 0
+
+
 def main(verb: str, rest: list[str]) -> int:
     rest = list(rest)
     if "-h" in rest or "--help" in rest:
@@ -1084,6 +1180,8 @@ def main(verb: str, rest: list[str]) -> int:
         as_json = _flag(rest, "--json")
         dry_run = _flag(rest, "--dry-run")
         cap_opt, floor_opt, note_file = _opt(rest, "--cap"), _opt(rest, "--floor"), _opt(rest, "--note-file")
+        if verb == "challenge" and _flag(rest, "--estimate"):
+            return _main_estimate(rest, cap_opt, floor_opt, as_json)
         inp = _inputs(rest)
     except (OSError, ValueError, ModelError) as e:
         print(f"ERROR: {e}\n", file=sys.stderr)
