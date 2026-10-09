@@ -1,4 +1,5 @@
 .claude/settings.json
+.claude/launch.json
 .DS_Store
 # internal/ stays out of git — design notes and working plans are the author's local
 # scratch. ONE exception: the method rationale record, which holds the incident evidence
