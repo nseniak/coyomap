@@ -44,7 +44,7 @@ from coyomap.anchor_drift import (apply_drift_exceptions, drift_findings, drift_
 from coyomap.audit_model import (EDGE_CLAIM as _EDGE_CLAIM, _move_note, apply_anchor_corrections,
                                  cross_file_refusals,
                                  l2_worklist_model, security_claim as _security_claim)
-from coyomap.impact_git import load_map_extents
+from coyomap.impact_git import Extents, load_map_extents
 from coyomap.model import ID_ARRAYS, ProjectModel, access_rules
 from coyomap.reconcile import drop_riding, repoint_riding, riding_steps
 
@@ -170,6 +170,69 @@ def _need(argv: list[str], i: int, flag: str) -> str:
 
 # ── fix apply-drift ────────────────────────────────────────────────────────────────────────────────
 
+@dataclass
+class DriftPlan:
+    """Which confirmed drifts may be written, and why each other one may not. One planner for every
+    writer: `fix apply-drift` writes the corrections into the map or the reconcile file, and
+    `changes relink` into an update's log."""
+    corrections: list[tuple[str, str]]          # (claim, corrected anchor), writable
+    records: list[dict]                          # the drift records the corrections came from
+    refused_moves: list[dict]                    # a re-anchor, not a nudge (`_move_refusal`)
+    not_applicable: list[tuple[str, str]]        # (theme, claim): a kind no writer rewrites
+    unparseable: list[tuple[str, str]]           # (theme, claim): an edge claim that does not parse
+    cross_file: list[str]                        # notes: a corrected file neither end of the edge lists
+    exception_notes: list[str]                   # notes from the map's recorded 'Drift exceptions'
+
+
+def plan_drift_corrections(m: ProjectModel, grounding: list[dict], tolerance: int,
+                           extents: Extents | None) -> DriftPlan:
+    """The corrections the skeptics' confirmed lines call for, partitioned before any write."""
+    worklist = l2_worklist_model(m)
+    # Honour `Drift exceptions` HERE too. Reporting them in `anchor-drift` while the writer stayed
+    # blind was worse than having no escape at all: the row vanished from the report and the anchor
+    # got overwritten anyway, so the operator lost the warning he was about to be clobbered by.
+    kept, exc_notes = apply_drift_exceptions(
+        m, drift_findings(worklist, grounding, tolerance, extents))
+    keep_claims = {w.claim for w, _d in kept}
+    records = [r for r in drift_records(worklist, grounding, tolerance, extents)
+               if r["claim"] in keep_claims]
+    # REPORTED, NEVER WRITTEN. A drift whose corrected line left the definition the stored anchor
+    # sits in is a re-anchor the operator has to make; applying it moved a live map's Docker-install
+    # link 174 lines onto an unrelated build command. Partitioned before EITHER write path, so a
+    # refused correction reaches neither the map nor the reconcile file's `set_anchors`.
+    refused_moves = [r for r in records if r.get("refusal")]
+    records = [r for r in records if not r.get("refusal")]
+    not_applicable: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+    corrections: list[tuple[str, str]] = []
+    for rec in records:
+        claim = rec["claim"]
+        theme = rec.get("theme") or "unknown"
+        # Partition BEFORE writing. `apply_anchor_corrections` dispatches on the claim's shape, so
+        # everything it cannot place comes back as "matches nothing" — true, and useless to a reader
+        # holding a cadence claim. The theme says which kind the claim IS, so an unwritable kind and
+        # a malformed edge claim get their own accurate message here.
+        if _EDGE_CLAIM.match(claim):
+            corrections.append((claim, rec.get("corrected") or ""))
+            continue
+        if theme not in _WRITABLE_THEMES:
+            not_applicable.append((theme, claim))
+            continue
+        if theme not in _CLAIM_SHAPED_THEMES:
+            # An EDGE-themed claim that `_EDGE_CLAIM` could not parse. Letting it reach the security
+            # writer reproduces the bug this dispatch exists to kill: `validate` accepts a multi-word
+            # verb (`C1 writes to E1`), the regex's `(\S+)` cannot match it, and the operator was
+            # told the claim "matches 0 security surfaces". It is not a security claim and there is
+            # nothing to look for — say that instead.
+            unparseable.append((theme, claim))
+            continue
+        corrections.append((claim, rec.get("corrected") or ""))
+    # Before EITHER write path: a correction refused here reaches neither the map nor the
+    # reconcile file's `set_anchors`, which `assemble` would otherwise replay on every rebuild.
+    corrections, refused = cross_file_refusals(m, corrections)
+    return DriftPlan(corrections, records, refused_moves, not_applicable, unparseable, refused, exc_notes)
+
+
 def apply_drift(argv: list[str]) -> int:
     map_path = None
     verdicts_paths: list[str] = []
@@ -211,59 +274,19 @@ def apply_drift(argv: list[str]) -> int:
     grounding, notes = load_verdicts(verdicts_paths)
     for n in notes:
         print(n)
-    worklist = l2_worklist_model(m)
     # The SAME symbol table `anchor-drift` reads, from the pre-index committed beside the map. The
     # two verbs run back-to-back on the same inputs in `ship`, so a correction this one writes must
     # be exactly the one the report a step earlier said would be written.
-    extents = load_map_extents(Path(map_path))
-    # Honour `Drift exceptions` HERE too. Reporting them in `anchor-drift` while the writer stayed
-    # blind was worse than having no escape at all: the row vanished from the report and the anchor
-    # got overwritten anyway, so the operator lost the warning he was about to be clobbered by.
-    kept, exc_notes = apply_drift_exceptions(
-        m, drift_findings(worklist, grounding, tolerance, extents))
-    for n in exc_notes:
+    plan = plan_drift_corrections(m, grounding, tolerance, load_map_extents(Path(map_path)))
+    for n in plan.exception_notes:
         print(n, file=sys.stderr)
-    keep_claims = {w.claim for w, _d in kept}
-    records = [r for r in drift_records(worklist, grounding, tolerance, extents)
-               if r["claim"] in keep_claims]
-    # REPORTED, NEVER WRITTEN. A drift whose corrected line left the definition the stored anchor
-    # sits in is a re-anchor the operator has to make; applying it moved a live map's Docker-install
-    # link 174 lines onto an unrelated build command. Partitioned before EITHER write path, so a
-    # refused correction reaches neither the map nor the reconcile file's `set_anchors`.
-    refused_moves = [r for r in records if r.get("refusal")]
-    records = [r for r in records if not r.get("refusal")]
-    _report_refused_moves(refused_moves)
-    not_applicable: list[tuple[str, str]] = []
-    unparseable: list[tuple[str, str]] = []
-    corrections: list[tuple[str, str]] = []
-    for rec in records:
-        claim = rec["claim"]
-        theme = rec.get("theme") or "unknown"
-        # Partition BEFORE writing. `apply_anchor_corrections` dispatches on the claim's shape, so
-        # everything it cannot place comes back as "matches nothing" — true, and useless to a reader
-        # holding a cadence claim. The theme says which kind the claim IS, so an unwritable kind and
-        # a malformed edge claim get their own accurate message here.
-        if _EDGE_CLAIM.match(claim):
-            corrections.append((claim, rec.get("corrected") or ""))
-            continue
-        if theme not in _WRITABLE_THEMES:
-            not_applicable.append((theme, claim))
-            continue
-        if theme not in _CLAIM_SHAPED_THEMES:
-            # An EDGE-themed claim that `_EDGE_CLAIM` could not parse. Letting it reach the security
-            # writer reproduces the bug this dispatch exists to kill: `validate` accepts a multi-word
-            # verb (`C1 writes to E1`), the regex's `(\S+)` cannot match it, and the operator was
-            # told the claim "matches 0 security surfaces". It is not a security claim and there is
-            # nothing to look for — say that instead.
-            unparseable.append((theme, claim))
-            continue
-        corrections.append((claim, rec.get("corrected") or ""))
-    _report_stuck(unparseable, not_applicable)
-    # Before EITHER write path: a correction refused here reaches neither the map nor the
-    # reconcile file's `set_anchors`, which `assemble` would otherwise replay on every rebuild.
-    corrections, refused = cross_file_refusals(m, corrections)
-    for n in refused:
+    _report_refused_moves(plan.refused_moves)
+    _report_stuck(plan.unparseable, plan.not_applicable)
+    for n in plan.cross_file:
         print(n, file=sys.stderr)
+    corrections, records = plan.corrections, plan.records
+    not_applicable, unparseable, refused_moves, refused = (plan.not_applicable, plan.unparseable,
+                                                           plan.refused_moves, plan.cross_file)
     if to_reconcile:
         # DURABLE. Writing anchors into the ASSEMBLED map is exactly what the note below warns
         # about, and a live build walked into it: 14 anchors corrected here, the map re-assembled to

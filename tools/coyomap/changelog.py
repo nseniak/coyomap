@@ -38,6 +38,7 @@ from typing import Any, Literal
 
 from coyomap import subverb_help
 from coyomap.audit_model import record_gap
+from coyomap.impact_git import load_map_extents
 from coyomap.mapdiff import KIND_OF, KINDS, diff_maps, field_deltas, field_spec, is_empty_value, looks_like_map
 from coyomap.model import ID_ARRAYS, ModelError, ProjectModel, load_model
 from coyomap.prose import (DESCRIPTION_WHERE, Finding, field_findings, history_findings,
@@ -81,6 +82,11 @@ USAGE = """usage: coyomap changes <verb> [options]
         the update's skeptic wave, part one: which statements the change put in scope, cut into
         claims batches beside the build's, and the applied copy of the map the skeptics read;
         `--estimate` in place of the log: the least the wave will take, at step 1, writing nothing
+  relink <log> --map <map> [--write]
+        after the wave and its closer, before apply: every statement the wave confirmed whose
+        skeptics read a more precise line of the same file has its link moved there, in the row the
+        log adds, in the entry's edit, or as a `relinked` row; the wave's verdicts follow the moved
+        statement's new text. Prints without --write
   merge <draft.json>... --map <map> --out <log>
         one log out of the drafts several helpers wrote in parallel: a box a draft adds goes by a
         placeholder (`BR?a1`: kind, `?`, the helper's letter, a number) and gets the next free
@@ -145,6 +151,17 @@ class Waiver:
 
 
 @dataclass
+class Relink:
+    """A code link moved to the line a fact-checker read, with no change of meaning: the skeptics
+    confirmed the statement and cited a more precise line of the same file (`changes relink`)."""
+    id: str
+    key: str           # a link field: `where`, `sites[0].where`, `cadence_source`, `states.source`
+    was: Any
+    now: Any
+    why: str = ""      # which wave's skeptics read it there
+
+
+@dataclass
 class ChangeLog:
     from_commit: str
     to_commit: str
@@ -157,6 +174,9 @@ class ChangeLog:
     #: None until then. The viewer's Update log reads it; the map's own `grounding.history`
     #: carries the same wave as the map's statement about itself.
     challenge: dict[str, Any] | None = None
+    #: Link-only corrections from the wave's own evidence (`changes relink`). No entry: a link that
+    #: moved changes no meaning, and `check` ignores link-only changes.
+    relinked: list[Relink] = field(default_factory=list)
 
     def named(self) -> set[str]:
         return {i for e in self.entries for i in e.elements}
@@ -231,8 +251,13 @@ def load_log(text: str) -> ChangeLog:
     challenge = doc.get("challenge")
     if challenge is not None and not isinstance(challenge, dict):
         raise ValueError("challenge is not an object")
+    relinked: list[Relink] = []
+    for i, r in enumerate(a_list(doc.get("relinked", []), "relinked")):
+        r = a_dict(r, f"relinked[{i}]")
+        need(r, ("id", "key", "was", "now"), f"relinked[{i}]")
+        relinked.append(Relink(str(r["id"]), str(r["key"]), r["was"], r["now"], str(r.get("why") or "")))
     return ChangeLog(str(doc["from_commit"]), str(doc["to_commit"]), str(doc["date"]), entries,
-                     waived, str(doc.get("notes") or ""), challenge)
+                     waived, str(doc.get("notes") or ""), challenge, relinked)
 
 
 def dump_log(log: ChangeLog) -> str:
@@ -240,6 +265,8 @@ def dump_log(log: ChangeLog) -> str:
     doc.update(asdict(log))
     if doc.get("challenge") is None:
         doc.pop("challenge", None)      # a log the wave has not reached carries no empty key
+    if not doc.get("relinked"):
+        doc.pop("relinked", None)
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -669,6 +696,36 @@ def lint(log: ChangeLog, doc: dict[str, Any], roots: list[Path] | None = None) -
             removed_by.setdefault(rid, e.id)
         for f in field_findings(f"{where} sentence", e.sentence):
             p.warnings.append(_finding_line(f))
+    relink_entry = Entry("relinked", "", "", [])
+    for r in log.relinked:
+        where = f"relinked {r.id}.{r.key}"
+        hit = index.get(r.id)
+        if hit is None or r.id in removed_ids:
+            p.errors.append(f"{where}: {r.id} is not a box the map keeps after this log")
+            continue
+        if field_spec(r.key.split(".")[-1].split("[")[0]).cls != "link":
+            p.errors.append(f"{where}: a relink moves a code link only, and {r.key} is not one")
+            continue
+        if (r.id, r.key) in seen_edits:
+            p.errors.append(f"{where}: also edited by entry {seen_edits[(r.id, r.key)]}; the entry's "
+                            f"edit carries the corrected line")
+            continue
+        seen_edits[(r.id, r.key)] = relink_entry.id
+        try:
+            current = get_field(hit[1], r.key)
+            chain = _chain(hit[1], r.key)
+        except ValueError as exc:
+            p.errors.append(f"{where}: {exc}")
+            continue
+        if chain is None:
+            p.errors.append(f"{where}: no such field or item in the map")
+            continue
+        chains.append((relink_entry, FieldEdit(r.id, r.key, r.was, r.now), chain))
+        if current != r.was:
+            p.errors.append(f"{where} — the map holds {json.dumps(current, ensure_ascii=False)[:80]}, "
+                            f"the log says was {json.dumps(r.was, ensure_ascii=False)[:80]}")
+        if not isinstance(r.now, str) or not r.now.strip() or r.now == r.was:
+            p.errors.append(f"{where}: now must be a new link")
     # Two edits whose targets nest write into each other: a whole list and one of its items, a
     # dict and a field in it, one item under two spellings (`fields[1]`, `fields[name=size]`), an
     # item and the removal that takes it out. One would land and vanish, or land on the wrong
@@ -846,6 +903,11 @@ def _applied(log: ChangeLog, doc: dict[str, Any], done: Applied | None = None) -
             array, row = index[rid]
             new[array] = [r for r in new[array] if r is not row]
             done.removed += 1
+    for r in log.relinked:
+        hit = _walk(index[r.id][1], r.key)
+        if hit is None:
+            raise ValueError(f"relinked {r.id}.{r.key}: no such field or item")
+        sets.append((hit[0], hit[1], r.now))
     for container, at, value in sets:
         _put(container, at, value)
         done.edits += 1
@@ -1201,6 +1263,7 @@ def to_view(log: ChangeLog, doc: dict[str, Any], old_doc: dict[str, Any] | None 
                 "edits": [edit(ed) for ed in e.edits]} for e in log.entries]
     return {"from": log.from_commit, "to": log.to_commit, "date": log.date, "entries": entries,
             "challenge": log.challenge,
+            "relinked": len(log.relinked),
             "waived": [{"id": w.id, "name": names.get(w.id), "why": w.why,
                         "word": (lambda a: KIND_OF[a].word if a in KIND_OF else "box")(
                             index[w.id][0] if w.id in index else old_index[w.id][0] if w.id in old_index else array_of_id(w.id) or "")}
@@ -1223,7 +1286,9 @@ def render(log: ChangeLog, doc: dict[str, Any]) -> str:
         return f"{n} {one if n == 1 else many}"
     lines.append(f"{count(len(log.entries), 'entry', 'entries')} · {count(n_add, 'box', 'boxes')} added · "
                  f"{n_rem} removed · {count(n_edit, 'field', 'fields')} edited"
-                 + (f" · {len(log.waived)} touched without a change of meaning" if log.waived else ""))
+                 + (f" · {len(log.waived)} touched without a change of meaning" if log.waived else "")
+                 + (f" · {count(len(log.relinked), 'code link', 'code links')} moved to the line a "
+                    f"fact-checker read" if log.relinked else ""))
     # An entry is told in full once, under the first group it touches; under the other group it is
     # a headline and the boxes of that group, so a reader of Under the hood still sees it.
     told: set[str] = set()
@@ -1276,6 +1341,48 @@ def _opt(args: list[str], name: str) -> str | None:
     return None
 
 
+def _main_relink(rest: list[str]) -> int:
+    helped = subverb_help.handle(USAGE, "relink", rest)
+    if helped is not None:
+        return helped
+    from coyomap import relink  # noqa: PLC0415 — it imports this module; loaded on use
+    try:
+        write = "--write" in rest
+        if write:
+            rest.remove("--write")
+        map_opt = _opt(rest, "--map")
+        bad = [a for a in rest if a.startswith("-")]
+        if bad:
+            raise ValueError(f"unknown option '{bad[0]}'")
+        if not map_opt or len(rest) != 1:
+            raise ValueError("relink needs one log and --map <map>")
+        log_path, map_path = Path(rest[0]), Path(map_opt)
+        log, doc = load_log(log_path.read_text(encoding="utf-8")), _read_map(map_path)
+        r = relink.relink(log, doc, map_path.parent / "verify", load_map_extents(map_path))
+    except (OSError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    print(f"relink — {len(r.moved)} link(s) moved to the line the skeptics read, "
+          f"{len(r.skipped)} left for you, {len(r.renames)} statement(s) re-keyed"
+          + ("" if write else " — not written (add --write)"))
+    for line in r.moved:
+        print(f"  moved {line}")
+    for line in r.skipped:
+        print(f"  left  {line}")
+    errors = lint(r.log, doc).errors
+    if errors:
+        for e in errors:
+            print(f"error: {e}", file=sys.stderr)
+        print("relink: the corrected log does not lint; nothing was written", file=sys.stderr)
+        return 1
+    if write and r.moved:
+        log_path.write_text(dump_log(r.log), encoding="utf-8")
+        n = relink.rekey_wave(map_path.parent / "verify", log, r.renames)
+        print(f"wrote {log_path}; {n} verdict row(s) re-keyed. Next: `changes lint`, `changes check`, "
+              f"then step 6")
+    return 0
+
+
 def _main_merge(rest: list[str]) -> int:
     helped = subverb_help.handle(USAGE, "merge", rest)
     if helped is not None:
@@ -1321,6 +1428,8 @@ def main(argv: list[str] | None = None) -> int:
         return challenge.main(verb, rest)
     if verb == "merge":
         return _main_merge(rest)
+    if verb == "relink":
+        return _main_relink(rest)
     if verb not in ("lint", "render", "apply", "check"):
         print(f"ERROR: unknown verb '{verb}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
