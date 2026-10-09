@@ -13,7 +13,7 @@ what the map already says.
 | **0 Gate** | the worktree must be clean; the log's folder must be committable; copy the map aside | `git status --porcelain -- . ':(exclude).coyomap'` must print nothing — an untracked product file refuses the update too: commit it or ignore it first. `git check-ignore -q .coyomap/changes/<from>-<to>.json` and `git check-ignore -q .coyomap/verify/claims-<from>-<to>-x.json` must both FAIL (see the tracked-folder rule). Then `mkdir -p .coyomap/changes && cp .coyomap/project-map.json .coyomap/changes/<from>-<to>.before.json` — the copy is what `challenge` and `ground` read as `--before`, so a typo in its name surfaces only after the wave was paid for | `.coyomap/changes/<from>-<to>.before.json`, a copy of the map as it is now (`check` reads it as `--old` at step 6). This copy and step 1's impact file both stay until step 7 is clean; neither is ever committed |
 | **1 Touched** | which boxes the code change reaches | `coyomap impact --map .coyomap/project-map.json --json > .coyomap/changes/<from>-<to>.impact.json`, and read the text form too: a hit marked `*` is one the gate counts. Run it BEFORE step 2: it reads the links where the pin left them. Then size the wave: `coyomap changes challenge --estimate --map .coyomap/project-map.json --before .coyomap/changes/<from>-<to>.before.json --touched .coyomap/changes/<from>-<to>.impact.json` prints the least the step-5b wave will take (statements, batches, skeptics with security ×3, one closer), and writes nothing. Tell the operator that line before step 3: the log only adds to it (mcpolis, 2026-10-09: the estimate says 51 skeptics, the wave took 62; the guess without it was 15 to 30) | the impact file, beside the log (deleted at step 7, never committed) |
 | **2 Re-anchor** | move the code links whose lines only shifted | `coyomap reanchor --map .coyomap/project-map.json --write` | the map: the links, and the canonical rewrite may spell out a default field the map had left implicit. The links it lists as left behind are yours: each is re-pointed by an edit of that link (`where`, `source`, `cadence_source`…) in the entry that read that code (step 3) |
-| **3 Read and write** | read the diff and the touched boxes; write the log. When an actor, a feature or a happy path step is added, removed or renamed, re-run the description review (Principles below) | you | `.coyomap/changes/<from>-<to>.json` |
+| **3 Read and write** | read the diff and the touched boxes; write the log (a large diff: helpers write drafts and `coyomap changes merge` joins them, see below). When an actor, a feature or a happy path step is added, removed or renamed, re-run the description review (Principles below) | you | `.coyomap/changes/<from>-<to>.json` |
 | **4 Lint** | the log fits the map | `coyomap changes lint <log> --map .coyomap/project-map.json` | nothing |
 | **5 Gate** | the log explains every change it makes, before anything is written | `coyomap changes check <log> --map .coyomap/project-map.json --touched .coyomap/changes/<from>-<to>.impact.json` — the log applied to a copy of the map in memory | nothing. A gap sends you back to step 3, with the map untouched |
 | **5b Challenge** | the statements the update wrote, and the ones its change reached, re-argued by fresh-context skeptics — before anything is written | `coyomap changes challenge <log> --map .coyomap/project-map.json --before .coyomap/changes/<from>-<to>.before.json --touched .coyomap/changes/<from>-<to>.impact.json`, then ONE wave runner runs the whole wave: `coyomap contract wave --fill <slots.json> --out <brief> --brief <from>-<to>-wave` and one agent on the pointer it prints (Step 5b below says how to fill it). An upheld refutation amends the log and sends you back to step 4 | `.coyomap/changes/<from>-<to>.applied.json` (the copy the skeptics read) and `<from>-<to>.scope.json` (scratch, deleted at step 7); the wave's `claims-<from>-<to>-*.json` and `verdicts-<from>-<to>-*.json` under `.coyomap/verify/`, which stay: they are the map's warrant |
@@ -44,6 +44,26 @@ what the map already says.
   once and leaves the next log ignored again.
 - **The commit IS the acceptance.** Nothing else marks it; the map's pin and the log's `to_commit`
   agree, and the next update starts from there.
+
+## Step 3 on a large diff — helpers in parallel, one log
+
+When one reader cannot hold the diff (mcpolis, 2026-10-09: 31 commits, 303 files, six helpers),
+split step 3. You stay the only author of the log; the helpers write drafts.
+
+1. **Cut the diff by commit**, in commit order, into shares of similar size; a commit is never split.
+   Each helper gets its commits, the impact file and the map, and writes ONE draft in the log's own
+   shape to a scratch folder outside the repo.
+2. **A box a draft adds goes by a placeholder**, never a number: its kind's letters, `?`, the
+   helper's letter, a number (`BR?a1`, `EP?b2`, `UC?c1`). Any draft may name it so, in any field or
+   id (`flow:UC?c1`, `edge:C?a1>calls>C3`). Two helpers guessing "the next free number" pick the
+   same one.
+3. **A helper checks its own draft** by merging it alone and linting that: `coyomap changes merge
+   <draft> --map .coyomap/project-map.json --out <scratch>/check.json`, then `changes lint` on it.
+4. **You merge**: `coyomap changes merge <drafts in commit order> --map .coyomap/project-map.json
+   --out .coyomap/changes/<from>-<to>.json`. It numbers every placeholder from the next free id of
+   its kind, renumbers the entries, joins waivers and notes, and keeps once an edit two drafts made
+   with the same words. A field two drafts edit with different words is a CLASH, listed with both
+   drafts, and the command exits 1: you write the one edit, then go on to step 4.
 
 ## Step 5b — the wave: an update is argued with, like a build
 

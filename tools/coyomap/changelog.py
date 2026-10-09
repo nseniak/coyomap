@@ -81,6 +81,11 @@ USAGE = """usage: coyomap changes <verb> [options]
         the update's skeptic wave, part one: which statements the change put in scope, cut into
         claims batches beside the build's, and the applied copy of the map the skeptics read;
         `--estimate` in place of the log: the least the wave will take, at step 1, writing nothing
+  merge <draft.json>... --map <map> --out <log>
+        one log out of the drafts several helpers wrote in parallel: a box a draft adds goes by a
+        placeholder (`BR?a1`: kind, `?`, the helper's letter, a number) and gets the next free
+        number of its kind, everywhere it is named; entries are renumbered, waivers joined; two
+        entries editing one field with different words are listed, and the command exits 1
   ground <log> --map <map> --before <before.json> --touched <impact.json> --note-file <path>
         part two, after `apply`: the warrant re-pinned, verdicts carried or retired, the record
         re-measured and written into the map, the log told what the wave decided
@@ -1271,6 +1276,29 @@ def _opt(args: list[str], name: str) -> str | None:
     return None
 
 
+def _main_merge(rest: list[str]) -> int:
+    helped = subverb_help.handle(USAGE, "merge", rest)
+    if helped is not None:
+        return helped
+    from coyomap import changes_merge  # noqa: PLC0415 — it imports this module; loaded on use
+    try:
+        map_opt, out_opt = _opt(rest, "--map"), _opt(rest, "--out")
+        bad = [a for a in rest if a.startswith("-")]
+        if bad:
+            raise ValueError(f"unknown option '{bad[0]}'")
+        if not (map_opt and out_opt and rest):
+            raise ValueError("merge needs the drafts, --map <map> and --out <log>")
+        drafts = [(Path(p).name, json.loads(Path(p).read_text(encoding="utf-8"))) for p in rest]
+        merged = changes_merge.merge(drafts, _read_map(Path(map_opt)))
+    except (OSError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    Path(out_opt).write_text(changes_merge.dump(merged), encoding="utf-8")
+    print(changes_merge.format_merged(merged, len(drafts)))
+    print(f"wrote {out_opt}")
+    return 1 if merged.clashes else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -1291,6 +1319,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from coyomap import challenge  # noqa: PLC0415 — it imports this module; loaded on use
         return challenge.main(verb, rest)
+    if verb == "merge":
+        return _main_merge(rest)
     if verb not in ("lint", "render", "apply", "check"):
         print(f"ERROR: unknown verb '{verb}'\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
