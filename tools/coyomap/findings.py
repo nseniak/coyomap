@@ -81,7 +81,7 @@ _WHERE = re.compile(r"(?P<path>[^:]+)(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?")
 _REPORT_TITLE = "# Agent findings — "
 _REPORT_TOTAL = re.compile(r"^# Agent findings — (?:(\d+) from |none filed)")
 #: A finding's line in the report: `- [<agent>#<n>] ...`, under its kind or under "withdrawn".
-_REPORT_ID = re.compile(r"^- \[([^\]\s]+#\d+)\] ")
+_REPORT_ID = re.compile(r"^\s*- \[([^\]\s]+#\d+)\] ")
 
 
 def findings_dir(repo: Path) -> Path:
@@ -145,6 +145,17 @@ class Filed:
 
     def of_kind(self, kind: str) -> tuple[Finding, ...]:
         return tuple(f for f in self.findings if f.kind == kind)
+
+    def at_one_place(self, kind: str) -> list[list[Finding]]:
+        """This kind's findings, those sharing their FIRST place folded together, in file order.
+        Three voters of one security batch read the same code and file the same gap: on the
+        2026-10-09 mcpolis update the seat-cap gap came three times and one bug three times, 18
+        findings at 14 places. The first place is the one the agent leads with; sharing any place
+        would chain unrelated findings through one busy line."""
+        groups: dict[str, list[Finding]] = {}
+        for f in self.of_kind(kind):
+            groups.setdefault(f.where[0] if f.where else f.id, []).append(f)
+        return list(groups.values())
 
 
 class FindingRefused(ValueError):
@@ -518,14 +529,23 @@ def report_text(filed: Filed, since: int, at: str) -> str:
            "The map changes only when a finding shows the map is wrong.", ""]
     for kind in KINDS:
         rows = filed.of_kind(kind)
-        out += [f"## {kind} ({len(rows)})", ""]
+        groups = filed.at_one_place(kind)
+        out += [f"## {kind} ({len(rows)}" + (f", at {len(groups)} places" if len(groups) < len(rows) else "")
+                + ")", ""]
         if not rows:
             out += ["None filed.", ""]
             continue
-        for f in rows:
-            places = " · ".join(f"`{w}`" for w in f.where)
-            out.append(f"- [{f.id}] {places} — {redact(f.text)} ({f.agent}"
-                       + (f", {f.at})" if f.at else ")"))
+        for first, *more in groups:
+            places = " · ".join(f"`{w}`" for w in first.where)
+            out.append(f"- [{first.id}] {places} — {redact(first.text)} ({first.agent}"
+                       + (f", {first.at})" if first.at else ")"))
+            # A finding filed again at the same place, by another agent: its id and any place of
+            # its own, under the first, so the list reads one gap once and keeps every id.
+            for f in more:
+                extra = [w for w in f.where if w not in first.where]
+                out.append(f"  - [{f.id}] filed at the same place too"
+                           + (", and at " + " · ".join(f"`{w}`" for w in extra) if extra else "")
+                           + f" ({f.agent}" + (f", {f.at})" if f.at else ")"))
         out.append("")
     if filed.withdrawn:
         out += [f"## withdrawn ({len(filed.withdrawn)})", "",

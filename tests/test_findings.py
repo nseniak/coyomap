@@ -217,6 +217,30 @@ def test_collect_writes_the_whole_list_and_counts_the_new() -> None:
     assert report.index("the admin route") < report.index("the retry sends")
 
 
+def test_three_voters_filing_one_gap_at_one_place_read_once_and_keep_every_id() -> None:
+    """The three security voters of one batch read the same code: on the 2026-10-09 mcpolis update
+    `collect` listed the seat-cap gap three times, each with a second place of its own."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        for agent, second in (("sec-a", "src/routes.py:1"), ("sec-b", "src/auth.py:1"), ("sec-c", None)):
+            where = ("src/auth.py:2",) + ((second,) if second else ())
+            code, _out, err = run_findings(make_add_argv(repo, agent=agent, kind="gap", where=where,
+                                                         text=f"the cap is checked outside the lock ({agent})"))
+            assert code == 0, err
+        make_filed(repo, [("trace-1", "gap", "no test covers the refund path")])
+        code, out, _err = run_findings(["collect", "--repo", str(repo)])
+        report = (repo / ".coyomap" / "findings-report.md").read_text(encoding="utf-8")
+        again = run_findings(["collect", "--repo", str(repo)])[1]
+    assert code == 0 and "4 from 4 agent(s)" in out, out
+    assert "## gap (4, at 2 places)" in report, report
+    assert report.count("the cap is checked outside the lock") == 1, "one gap, told once"
+    for fid in ("sec-a#1", "sec-b#1", "sec-c#1", "trace-1#1"):
+        assert f"[{fid}]" in report, (fid, report)
+    assert "  - [sec-b#1] filed at the same place too, and at `src/auth.py:1` (sec-b" in report, report
+    assert "  - [sec-c#1] filed at the same place too (sec-c" in report, report
+    assert "(+0 since the last collect)" in again, "a folded id still counts as listed"
+
+
 def test_collect_keeps_the_good_lines_beside_a_malformed_one() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo = make_repo(td)
