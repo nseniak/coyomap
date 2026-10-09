@@ -100,6 +100,33 @@ def test_links_follow_shifts_and_renames_and_the_rest_is_listed():
         assert r.files == 2
 
 
+def test_twin_arrows_two_lines_apart_each_keep_their_own_link():
+    """Review finding: written one at a time, the first arrow moved onto the second's old line and
+    then matched the second ref and moved again, so the two arrows swapped links, and `changes
+    check` read the swap as no change."""
+    with tempfile.TemporaryDirectory() as td:
+        root, pin, head = make_repo(td)
+        doc = make_map_doc(pin)
+        doc["edges"] = [{"src": "C1", "verb": "uses", "dst": "D1", "where": "svc/a.py:2", "why": "first"},
+                        {"src": "C1", "verb": "uses", "dst": "D1", "where": "svc/a.py:4", "why": "second"}]
+        m = load_model(json.dumps(doc))
+        reanchor(m, root, head)
+        assert [(e.why, e.where) for e in m.edges] == [("first", "svc/a.py:4"), ("second", "svc/a.py:6")]
+
+
+def test_a_way_in_with_no_id_moves_its_schedule_link_with_its_source():
+    """Review finding: the schedule link's ref is keyed by the way in's OLD source, and the source
+    was written first, so the schedule link was neither moved nor listed."""
+    with tempfile.TemporaryDirectory() as td:
+        root, pin, head = make_repo(td)
+        doc = make_map_doc(pin)
+        doc["entry_points"] = [{"kind": "job", "trigger": "sweep", "source": "svc/a.py:3", "component": "C1",
+                                "activation": "self", "cadence": "nightly", "cadence_source": "svc/a.py:7"}]
+        m = load_model(json.dumps(doc))
+        reanchor(m, root, head)
+        assert (m.entry_points[0].source, m.entry_points[0].cadence_source) == ("svc/a.py:5", "svc/a.py:9")
+
+
 def test_nothing_moves_when_the_map_is_at_the_commit_asked_for():
     with tempfile.TemporaryDirectory() as td:
         root, pin, _head = make_repo(td)

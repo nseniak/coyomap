@@ -24,7 +24,7 @@ import json
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from coyomap.anchors import parse_anchor
 from coyomap.assemble import dump_preserving
@@ -102,152 +102,145 @@ def _same(raw: str | None, ref: AnchorRef) -> bool:
     return loc is not None and loc.path == ref.path and loc.lo == ref.lo and loc.hi == ref.hi
 
 
-def set_anchor(m: ProjectModel, ref: AnchorRef, new: str) -> bool:
-    """Write `new` where `ref` was read from — the mirror of `impact_lib.link_index`, case by
-    case, matching the stored string by place so paired rows never swap. True when written."""
+#: One place a link is stored: an object and the attribute holding it, or a list and the index.
+Slot = tuple[object, str | int]
+
+
+def _slots(m: ProjectModel, ref: AnchorRef) -> Iterator[Slot]:
+    """Every place in the model holding `ref`'s link — the mirror of `impact_lib.link_index`, case
+    by case, matched by the stored string's PLACE, so `a.py:3` and `a.py#L3` are one link."""
     k, f, eid = ref.kind, ref.field, ref.eid
+
+    def at(holder: object, attr: str) -> Iterator[Slot]:
+        value = getattr(holder, attr, None)
+        if isinstance(value, str) and _same(value, ref):
+            yield (holder, attr)
+
+    def among(items: list[str]) -> Iterator[Slot]:
+        for i, x in enumerate(items):
+            if _same(x, ref):
+                yield (items, i)
+
     if f == "states.source" and k in ("component", "entity"):
         for el in (m.components if k == "component" else m.entities):
-            if el.id == eid and el.states is not None and _same(el.states.source, ref):
-                el.states.source = new
-                return True
-        return False
+            if el.id == eid and el.states is not None:
+                yield from at(el.states, "source")
+        return
     if k == "component":
         for c in m.components:
-            if c.id != eid:
-                continue
-            if f == "source" and _same(c.source, ref):
-                c.source = new
-                return True
-            if f == "files":
-                for i, x in enumerate(c.files):
-                    if _same(x, ref):
-                        c.files[i] = new
-                        return True
-            if f == "evidence":
-                for ev in c.evidence:
-                    if _same(ev.file, ref):
-                        ev.file = new
-                        return True
-    elif k == "dep":
-        for d in m.deps:
-            if d.id != eid:
-                continue
-            if f == "where_configured" and _same(d.where_configured, ref):
-                d.where_configured = new
-                return True
-            for ev in d.evidence:
-                if _same(ev.file, ref):
-                    ev.file = new
-                    return True
-    elif k == "interface":
-        for i in m.interfaces:
-            if i.id != eid:
-                continue
-            if f == "source" and _same(i.source, ref):
-                i.source = new
-                return True
-            for ev in i.evidence:
-                if _same(ev.file, ref):
-                    ev.file = new
-                    return True
+            if c.id == eid:
+                if f == "source":
+                    yield from at(c, "source")
+                elif f == "files":
+                    yield from among(c.files)
+                elif f == "evidence":
+                    for ev in c.evidence:
+                        yield from at(ev, "file")
+    elif k in ("dep", "interface"):
+        for row in (m.deps if k == "dep" else m.interfaces):
+            if row.id == eid:
+                if f in ("where_configured", "source"):
+                    yield from at(row, f)
+                else:
+                    for ev in row.evidence:
+                        yield from at(ev, "file")
     elif k == "entity":
         for e in m.entities:
-            if e.id == eid and _same(e.source, ref):
-                e.source = new
-                return True
+            if e.id == eid:
+                yield from at(e, "source")
     elif k == "non_entity_type":
         for n in m.non_entity_types:
-            if eid == f"net:{n.name}" and _same(n.source, ref):
-                n.source = new
-                return True
+            if eid == f"net:{n.name}":
+                yield from at(n, "source")
     elif k == "glossary":
         for g in m.glossary:
-            if eid == f"glossary:{g.term}" and _same(g.source, ref):
-                g.source = new
-                return True
+            if eid == f"glossary:{g.term}":
+                yield from at(g, "source")
     elif k == "entry_point" and f == "cadence_source":
         for ep in m.entry_points:
-            if (ep.id or f"ep:{ep.source}") == eid and _same(ep.cadence_source, ref):
-                ep.cadence_source = new
-                return True
+            if (ep.id or f"ep:{ep.source}") == eid and ep.component == ref.owner:
+                yield from at(ep, "cadence_source")
     elif k == "entry_point":
         for ep in m.entry_points:
-            if _same(ep.source, ref) and ep.component == ref.owner:
-                ep.source = new
-                return True
+            if ep.component == ref.owner:
+                yield from at(ep, "source")
     elif k == "edge":
         for ed in m.edges:
-            if f"edge:{ed.src}>{ed.verb}>{ed.dst}" == eid and _same(ed.where, ref):
-                ed.where = new
-                return True
+            if f"edge:{ed.src}>{ed.verb}>{ed.dst}" == eid:
+                yield from at(ed, "where")
     elif k == "flow_step":
-        for fl in m.flows:
-            for st in fl.steps:
-                if f"step:{fl.uc}:{st.n}" == eid and _same(st.where, ref):
-                    st.where = new
-                    return True
-        for sf in m.subflows:
-            for st in sf.steps:
-                if f"step:{sf.id}:{st.n}" == eid and _same(st.where, ref):
-                    st.where = new
-                    return True
+        for owner, steps in ([(fl.uc, fl.steps) for fl in m.flows] + [(sf.id, sf.steps) for sf in m.subflows]):
+            for st in steps:
+                if f"step:{owner}:{st.n}" == eid:
+                    yield from at(st, "where")
     elif k == "security":
-        for s in m.security:
-            if eid == f"security:{s.surface}" and _same(s.source, ref):
-                s.source = new
-                return True
+        for sec in m.security:
+            if eid == f"security:{sec.surface}":
+                yield from at(sec, "source")
     elif k == "role":
         for r in m.roles:
-            if r.id != eid:
-                continue
-            for rel in (r.relations or []):
-                if _same(rel.source, ref):
-                    rel.source = new
-                    return True
+            if r.id == eid:
+                for rel in (r.relations or []):
+                    yield from at(rel, "source")
     elif k == "rule_site":
         for br in m.rules:
             for i, site in enumerate(br.sites):
-                if f"rule:{br.id}:{i}" == eid and _same(site.where, ref):
-                    site.where = new
-                    return True
+                if f"rule:{br.id}:{i}" == eid:
+                    yield from at(site, "where")
     elif k == "run_command":
-        for r in m.run_commands:
-            if eid == f"run:{r.action}" and _same(r.source, ref):
-                r.source = new
-                return True
+        for rc in m.run_commands:
+            if eid == f"run:{rc.action}":
+                yield from at(rc, "source")
     elif k == "group":
         for grp in group_forests(m):
-            if grp.id != eid:
-                continue
-            if f == "source" and _same(grp.source, ref):
-                grp.source = new
-                return True
-            if f == "tech_source" and _same(grp.tech_source, ref):
-                grp.tech_source = new
-                return True
+            if grp.id == eid and f in ("source", "tech_source"):
+                yield from at(grp, f)
     elif k == "messaging":
         for mr in m.messaging:
-            if eid == f"messaging:{mr.name}" and _same(mr.source, ref):
-                mr.source = new
-                return True
+            if eid == f"messaging:{mr.name}":
+                yield from at(mr, "source")
     elif k == "deployment":
         for d in m.deployment:
-            if eid != f"deployment:{d.unit}":
-                continue
-            for v in d.variants:
-                if f == f"variants[env={v.env}].source" and _same(v.source, ref):
-                    v.source = new
-                    return True
+            if eid == f"deployment:{d.unit}":
+                for v in d.variants:
+                    if f == f"variants[env={v.env}].source":
+                        yield from at(v, "source")
     elif k == "tests":
         for i, tr in enumerate(m.tests):
-            if eid != f"tests[{i}]":
-                continue
-            for j, ev in enumerate(tr.tests):
-                if f == f"tests[{j}].file" and _same(ev.file, ref):
-                    ev.file = new
-                    return True
-    return False
+            if eid == f"tests[{i}]":
+                for j, ev in enumerate(tr.tests):
+                    if f == f"tests[{j}].file":
+                        yield from at(ev, "file")
+
+
+def locate_anchor(m: ProjectModel, ref: AnchorRef, taken: set[tuple[int, str | int]]) -> Slot | None:
+    """The one place `ref`'s link is stored that no earlier ref of this run has claimed. Two rows
+    that hold the same link (twin arrows at one line, two ways in at one source) each get their own."""
+    for slot in _slots(m, ref):
+        key = (id(slot[0]), slot[1])
+        if key not in taken:
+            taken.add(key)
+            return slot
+    return None
+
+
+def _write(slot: Slot, new: str) -> None:
+    holder, at = slot
+    if isinstance(holder, list):
+        holder[int(at)] = new
+    else:
+        setattr(holder, str(at), new)
+
+
+def set_anchor(m: ProjectModel, ref: AnchorRef, new: str) -> bool:
+    """Write `new` where `ref` was read from. True when written. A run moving many links locates
+    them all before writing any (`reanchor`): writing one at a time let a moved link match the next
+    ref's old place, so two arrows sharing their ends two lines apart swapped links, and the gate
+    read the swap as no change."""
+    slot = locate_anchor(m, ref, set())
+    if slot is not None:
+        _write(slot, new)
+    return slot is not None
 
 
 # ── the run ───────────────────────────────────────────────────────────────────────────────────────
@@ -272,6 +265,9 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
     for ref in link_index(m):
         if not ref.is_dir:
             by_path.setdefault(ref.path, []).append(ref)
+    # LOCATE EVERY LINK BEFORE WRITING ANY: a link written early could match a later ref's old place.
+    taken: set[tuple[int, str | int]] = set()
+    writes: list[tuple[Slot, Move]] = []
     for path in sorted(by_path):
         new_path = renamed_to.get(path, path)
         refs = by_path[path]
@@ -287,8 +283,8 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
         for ref in refs:
             old = _anchor_text(path, ref.lo or 0, ref.hi)
             if ref.lo is None:
-                if new_path != path and set_anchor(m, ref, new_path):
-                    report.moved.append(Move(ref.eid, ref.field, path, new_path))
+                if new_path != path and (slot := locate_anchor(m, ref, taken)) is not None:
+                    writes.append((slot, Move(ref.eid, ref.field, path, new_path)))
                 continue
             lo = to_t(ref.lo)
             hi = to_t(ref.hi) if ref.hi is not None else None
@@ -298,8 +294,11 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
             new = _anchor_text(new_path, lo, hi)
             if new == old:
                 continue
-            if set_anchor(m, ref, new):
-                report.moved.append(Move(ref.eid, ref.field, old, new))
+            if (slot := locate_anchor(m, ref, taken)) is not None:
+                writes.append((slot, Move(ref.eid, ref.field, old, new)))
+    for slot, move in writes:
+        _write(slot, move.new)
+        report.moved.append(move)
     return report
 
 

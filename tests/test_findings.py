@@ -233,12 +233,24 @@ def test_three_voters_filing_one_gap_at_one_place_read_once_and_keep_every_id() 
         again = run_findings(["collect", "--repo", str(repo)])[1]
     assert code == 0 and "4 from 4 agent(s)" in out, out
     assert "## gap (4, at 2 places)" in report, report
-    assert report.count("the cap is checked outside the lock") == 1, "one gap, told once"
+    assert report.count("the cap is checked outside the lock") == 3, "told in full once, shortened under it"
     for fid in ("sec-a#1", "sec-b#1", "sec-c#1", "trace-1#1"):
         assert f"[{fid}]" in report, (fid, report)
-    assert "  - [sec-b#1] filed at the same place too, and at `src/auth.py:1` (sec-b" in report, report
-    assert "  - [sec-c#1] filed at the same place too (sec-c" in report, report
+    assert "  - [sec-b#1] filed at the same line too, and at `src/auth.py:1` — the cap is checked outside the lock (sec-b) (sec-b" in report, report
+    assert "  - [sec-c#1] filed at the same line too — the cap" in report, report
     assert "(+0 since the last collect)" in again, "a folded id still counts as listed"
+
+
+def test_two_findings_that_lead_with_a_bare_file_are_not_folded() -> None:
+    """Review finding: folding on a bare file hid a second, different bug's words."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = make_repo(td)
+        for agent, text in (("trace-1", "the refund path double-charges a card"),
+                            ("trace-2", "the export drops the last row")):
+            assert run_findings(make_add_argv(repo, agent=agent, kind="bug", where=("src/auth.py",), text=text))[0] == 0
+        run_findings(["collect", "--repo", str(repo)])
+        report = (repo / ".coyomap" / "findings-report.md").read_text(encoding="utf-8")
+    assert "## bug (2)" in report and "- [trace-2#1] `src/auth.py` — the export drops the last row" in report, report
 
 
 def test_collect_keeps_the_good_lines_beside_a_malformed_one() -> None:

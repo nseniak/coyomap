@@ -274,6 +274,9 @@ def test_an_arrow_keeps_its_identity_and_is_never_added_twice():
     assert "an arrow's src, verb and dst are its identity" in "\n".join(lint(retarget, doc).errors)
     twice = make_log(make_entry(elements=["C1"], added=[Addition("edges", make_edge("C1", "reads", "E1", "srv.py:50"))]))
     assert "adds edge:C1>reads>E1, which the map already has" in "\n".join(lint(twice, doc).errors)
+    arrow = Addition("edges", make_edge("C1", "writes", "E1", "srv.py:50"))
+    both = make_log(make_entry("e1", elements=["C1"], added=[arrow]), make_entry("e2", elements=["C1"], added=[arrow]))
+    assert "entry e2: adds edge:C1>writes>E1, which entry e1 adds too" in lint(both, doc).errors
 
 
 def test_two_arrows_sharing_their_ends_and_verb_are_told_apart_by_number():
@@ -286,6 +289,29 @@ def test_two_arrows_sharing_their_ends_and_verb_are_told_apart_by_number():
     new, _done = apply(second, doc)
     assert [e["where"] for e in new["edges"]] == ["srv.py:12"]
     assert check(second, doc, new).ok, check(second, doc, new).errors
+
+
+def test_naming_one_twin_does_not_explain_a_change_to_the_other():
+    """Review findings: naming `#1` covered a hand change to `#2`'s why, and a twin number the map
+    never had (`#7`) passed the after-write gate."""
+    doc = make_arrow_doc(make_edge("C1", "reads", "E1", "srv.py:12", why="first"),
+                         make_edge("C1", "reads", "E1", "srv.py:30", why="second"))
+    log = make_log(make_entry(elements=["edge:C1>reads>E1#1"],
+                              edits=[FieldEdit("edge:C1>reads>E1#1", "where", "srv.py:12", "srv.py:14")]))
+    new, _done = apply(log, doc)
+    new["edges"][1]["why"] = "changed by hand"
+    errors = check(log, doc, new).errors
+    assert len(errors) == 1 and "has twins, so only an entry naming C1" in errors[0], errors
+    drop = make_log(make_entry(elements=["edge:C1>reads>E1#2"], removed=["edge:C1>reads>E1#2"]))
+    dropped, _done = apply(drop, doc)
+    assert check(drop, doc, dropped).ok, "removing a twin by its number explains its removal"
+    dropped["edges"][0]["why"] = "changed by hand"
+    assert not check(drop, doc, dropped).ok, "and nothing more"
+    single = make_arrow_doc()
+    ghost = make_log(make_entry(elements=["edge:C1>reads>E1#7"]))
+    moved = copy(single)
+    moved["edges"][0]["why"] = "changed"
+    assert "edge:C1>reads>E1#7, which the new map does not hold" in "\n".join(check(ghost, single, moved).errors)
 
 
 def test_an_arrow_reads_by_its_ends_names_on_the_rendered_log():

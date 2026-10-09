@@ -95,8 +95,13 @@ def pin_lag(repo: Path, pin: str) -> PinLag | None:
                    ok_codes=(0, 1, 128)).decode().strip()
         if not sha:
             return PinLag(pin, head, known=False)
-        count = _git(repo, "rev-list", "--count", f"{sha}..{head}", "--", ".", ":(exclude).coyomap")
-        return PinLag(pin, head, known=True, commits=int(count.decode().strip() or 0))
+        count = int(_git(repo, "rev-list", "--count", f"{sha}..{head}", "--", ".",
+                         ":(exclude).coyomap").decode().strip() or 0)
+        # Commits are not code: a pinned branch squash-merged or rebased leaves the pin off HEAD's
+        # line with the same files. No difference outside `.coyomap/` is no lag.
+        if count and not _git(repo, "diff", "--name-only", sha, head, "--", ".", ":(exclude).coyomap").strip():
+            count = 0
+        return PinLag(pin, head, known=True, commits=count)
     except (ImpactError, OSError, ValueError, subprocess.TimeoutExpired):
         return None
 

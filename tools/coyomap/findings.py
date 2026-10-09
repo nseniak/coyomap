@@ -81,6 +81,8 @@ _WHERE = re.compile(r"(?P<path>[^:]+)(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?")
 _REPORT_TITLE = "# Agent findings — "
 _REPORT_TOTAL = re.compile(r"^# Agent findings — (?:(\d+) from |none filed)")
 #: A finding's line in the report: `- [<agent>#<n>] ...`, under its kind or under "withdrawn".
+#: A place that names a line (`src/auth.py:2`), not only a file.
+_LINE_PLACE = re.compile(r":\d+(?:-\d+)?$")
 _REPORT_ID = re.compile(r"^\s*- \[([^\]\s]+#\d+)\] ")
 
 
@@ -151,10 +153,12 @@ class Filed:
         Three voters of one security batch read the same code and file the same gap: on the
         2026-10-09 mcpolis update the seat-cap gap came three times and one bug three times, 18
         findings at 14 places. The first place is the one the agent leads with; sharing any place
-        would chain unrelated findings through one busy line."""
+        would chain unrelated findings through one busy line. Only a place that names a LINE folds:
+        two findings that both lead with a bare file are as likely two problems as one."""
         groups: dict[str, list[Finding]] = {}
         for f in self.of_kind(kind):
-            groups.setdefault(f.where[0] if f.where else f.id, []).append(f)
+            first = f.where[0] if f.where else ""
+            groups.setdefault(first if _LINE_PLACE.search(first) else f.id, []).append(f)
         return list(groups.values())
 
 
@@ -539,13 +543,14 @@ def report_text(filed: Filed, since: int, at: str) -> str:
             places = " · ".join(f"`{w}`" for w in first.where)
             out.append(f"- [{first.id}] {places} — {redact(first.text)} ({first.agent}"
                        + (f", {first.at})" if first.at else ")"))
-            # A finding filed again at the same place, by another agent: its id and any place of
-            # its own, under the first, so the list reads one gap once and keeps every id.
+            # A finding filed again at the same line, by another agent: its id, any place of its
+            # own and its words shortened, under the first, so the list reads one problem once and
+            # still shows when the second agent saw something else there.
             for f in more:
                 extra = [w for w in f.where if w not in first.where]
-                out.append(f"  - [{f.id}] filed at the same place too"
+                out.append(f"  - [{f.id}] filed at the same line too"
                            + (", and at " + " · ".join(f"`{w}`" for w in extra) if extra else "")
-                           + f" ({f.agent}" + (f", {f.at})" if f.at else ")"))
+                           + f" — {clip(redact(f.text), 140)} ({f.agent}" + (f", {f.at})" if f.at else ")"))
         out.append("")
     if filed.withdrawn:
         out += [f"## withdrawn ({len(filed.withdrawn)})", "",

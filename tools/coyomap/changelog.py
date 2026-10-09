@@ -554,20 +554,18 @@ def _addition_problem(a: Addition, doc: dict[str, Any], index: dict[str, tuple[s
     return f"adds a row to {a.kind!r}, which is not a map array"
 
 
+def _added_id(a: Addition) -> str | None:
+    """The id a row this log adds goes by, or None for a row with no identity (a test group)."""
+    rid = a.row.get("id")
+    if isinstance(rid, str) and rid:
+        return rid
+    if a.kind == "flows" and isinstance(a.row.get("uc"), str):
+        return FLOW_PREFIX + a.row["uc"]
+    return edge_id(a.row) if a.kind == "edges" else synthetic_id(a.kind, a.row)
+
+
 def _added_ids(log: ChangeLog) -> set[str]:
-    out: set[str] = set()
-    for e in log.entries:
-        for a in e.added:
-            rid = a.row.get("id")
-            if isinstance(rid, str) and rid:
-                out.add(rid)
-            elif a.kind == "flows" and isinstance(a.row.get("uc"), str):
-                out.add(FLOW_PREFIX + a.row["uc"])
-            else:
-                sid = edge_id(a.row) if a.kind == "edges" else synthetic_id(a.kind, a.row)
-                if sid:
-                    out.add(sid)
-    return out
+    return {i for e in log.entries for a in e.added if (i := _added_id(a))}
 
 
 def _not_in_map(rid: str, shared: dict[str, int]) -> str:
@@ -743,6 +741,14 @@ def lint(log: ChangeLog, doc: dict[str, Any], roots: list[Path] | None = None) -
             elif cha[:len(chb)] == chb:
                 p.errors.append(f"entry {ea.id}: edits {eda.id}.{eda.key}, inside {edb.key}, which entry "
                                 f"{eb.id} {'removes' if edb.now is None else 'edits'}")
+    adders: dict[str, str] = {}
+    for e in log.entries:
+        for a in e.added:
+            aid = _added_id(a)
+            if aid and aid in adders:
+                p.errors.append(f"entry {e.id}: adds {aid}, which entry {adders[aid]} adds too")
+            elif aid:
+                adders[aid] = e.id
     for w in log.waived:
         if w.id not in index:
             p.warnings.append(f"waived {w.id} is not in the map")
@@ -1014,10 +1020,10 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
             changed[box] = "modified" if box in changed and changed[box] != e.change else e.change
     # An arrow is a row of its own (`edge:<src>><verb>><dst>`), credited to the box it starts
     # from: an entry or a waiver naming either one covers it.
-    arrows: dict[str, tuple[str, str]] = {}
+    arrows: list[tuple[str, str, str]] = []          # (bare arrow id, its source box, the change)
     for a in delta.arrows:
         if a.change != "modified" or a.classes != ["link"]:
-            arrows.setdefault(f"{EDGE_PREFIX}{a.src}>{a.verb}>{a.dst}", (a.src, f"an arrow {a.change}"))
+            arrows.append((f"{EDGE_PREFIX}{a.src}>{a.verb}>{a.dst}", a.src, a.change))
     header = [k for k in set(old_doc) | set(new_doc)
               if k not in MAP_BOOKKEEPING and not isinstance(old_doc.get(k, new_doc.get(k)), (list, dict))
               and old_doc.get(k) != new_doc.get(k)
@@ -1030,16 +1036,44 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
     for box, what in sorted(changed.items()):
         if box not in named and box not in waived:
             p.errors.append(f"{box} {what} in the map, and no entry names it")
-    for eid, (src, what) in sorted(arrows.items()):
-        if eid not in said and src not in named and src not in waived:
-            p.errors.append(f"{src} {what} in the map ({eid}), and no entry names it or the arrow")
+    # Twin arrows (one triple, several rows) cannot be told apart in the map's diff, which pairs
+    # them by triple: naming one twin must not cover a change to the other, so a change to a twin
+    # is covered only by its source box.
+    # A twin the log itself removes or adds is counted against the diff's removals and additions of
+    # that triple, one for one.
+    twins = set(shared_edge_ids(old_doc)) | set(shared_edge_ids(new_doc))
+    by_log: dict[tuple[str, str], int] = {}
+    for e in log.entries:
+        for r in e.removed:
+            if r.startswith(EDGE_PREFIX):
+                by_log[(bare_edge_id(r), "removed")] = by_log.get((bare_edge_id(r), "removed"), 0) + 1
+        for a in e.added:
+            aid = edge_id(a.row) if a.kind == "edges" else None
+            if aid:
+                by_log[(aid, "added")] = by_log.get((aid, "added"), 0) + 1
+    seen_arrows: set[tuple[str, str]] = set()
+    for eid, src, change in sorted(arrows):
+        if src in named or src in waived:
+            continue
+        if eid not in twins:
+            if eid not in said and (eid, change) not in seen_arrows:
+                p.errors.append(f"{src} an arrow {change} in the map ({eid}), and no entry names it or the arrow")
+            seen_arrows.add((eid, change))
+            continue
+        left = by_log.get((eid, change), 0)
+        if left:
+            by_log[(eid, change)] = left - 1
+            continue
+        p.errors.append(f"{src} an arrow {change} in the map ({eid}), and no entry names it or the arrow; "
+                        f"{eid} has twins, so only an entry naming {src}, or removing or adding that "
+                        f"arrow, explains it")
     new_index = index_map(new_doc)
-    new_edges = {bare_edge_id(i) for i in new_index if i.startswith(EDGE_PREFIX)}
+    old_index = index_map(old_doc)
     removed = {r for e in log.entries for r in e.removed}
-    removed_edges = {bare_edge_id(r) for r in removed if r.startswith(EDGE_PREFIX)}
     for box in sorted(named):
-        if box.startswith(EDGE_PREFIX) and bare_edge_id(box) in new_edges | removed_edges:
-            continue          # twins renumber when one goes; the triple is what the new map holds
+        if box.startswith(EDGE_PREFIX) and (box in old_index or box in removed) \
+                and any(bare_edge_id(i) == bare_edge_id(box) for i in new_index):
+            continue          # twins renumber when one goes; the arrow the log named was in the map
         if box not in new_index and box not in removed:
             p.errors.append(f"an entry names {box}, which the new map does not hold")
     # The rows the code touched, each with the box the gate counts it under. An arrow's hit is
@@ -1050,7 +1084,7 @@ def check(log: ChangeLog, old_doc: dict[str, Any], new_doc: dict[str, Any],
         if box:
             touched_rows[bare_edge_id(str(k))] = box
     touched = set(touched_rows.values())
-    moved = set(changed) | set(arrows) | {src for src, _what in arrows.values()}
+    moved = set(changed) | {eid for eid, _src, _change in arrows} | {src for _eid, src, _change in arrows}
     for w in log.waived:
         if w.id not in moved and bare_edge_id(w.id) not in moved and w.id not in touched \
                 and bare_edge_id(w.id) not in touched_rows:

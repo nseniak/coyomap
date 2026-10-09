@@ -15,7 +15,7 @@ from coyomap import validate_model
 from coyomap.impact_git import pin_lag
 from coyomap.model import to_canonical_json
 
-from test_impact import commit, make_model
+from test_impact import commit, git_run, make_model
 
 
 def make_pinned_repo(root: Path) -> str:
@@ -75,3 +75,16 @@ def test_a_pin_the_repo_does_not_have_is_named_and_no_repo_is_silence():
     with tempfile.TemporaryDirectory() as td:
         path = write_map(Path(td), "0123abc")
         assert pin_lag(Path(td), "0123abc") is None and stale_warnings(path) == []
+
+
+def test_a_pin_off_heads_line_with_the_same_code_is_not_lag():
+    """Review finding: a squash-merged branch leaves the pin off HEAD's line, the same code on both."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        base = commit(root, {"svc/a.py": "x = 1\n"}, msg="base")
+        git_run(root, "checkout", "-q", "-b", "side")
+        pin = commit(root, {"svc/a.py": "x = 2\n"}, msg="on the side")
+        git_run(root, "checkout", "-q", base)
+        commit(root, {"svc/a.py": "x = 2\n"}, msg="the same change, squashed")
+        lag = pin_lag(root, pin)
+        assert lag is not None and lag.known and lag.commits == 0
