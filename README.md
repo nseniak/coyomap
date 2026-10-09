@@ -4,7 +4,7 @@
 
 **Know what your agents are building.**
 
-An interactive map, from features to code.
+An interactive map of your project, from features to code.
 
 ## Why coyomap?
 
