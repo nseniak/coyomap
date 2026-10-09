@@ -232,6 +232,10 @@ def anchor_index(model: ProjectModel) -> list[AnchorRef]:
         add(_ref(f"glossary:{g.term}", "glossary", g.source, "source"))
     for ep in model.entry_points:
         add(_ref(f"ep:{ep.source}", "entry_point", ep.source, "source", owner=ep.component))
+        # The line DECLARING a self-started way in's schedule is often far from its own source: a
+        # changed cron line is a change to that way in, under the way in's own id, which belongs to
+        # no box, so the gate counts nothing new and `challenge` re-argues the schedule statement.
+        add(_ref(f"ep:{ep.source}", "entry_point", ep.cadence_source, "cadence_source", owner=ep.component))
     for ed in model.edges:
         if ed.where:
             add(_ref(f"edge:{ed.src}>{ed.verb}>{ed.dst}", "edge", ed.where, "where"))
@@ -267,7 +271,7 @@ def anchor_index(model: ProjectModel) -> list[AnchorRef]:
 
 def link_index(model: ProjectModel) -> list[AnchorRef]:
     """Every code LINK the map carries: `anchor_index`, plus the links that seed no impact hit —
-    an entry point's `cadence_source`, a lifecycle's `states.source`, a channel's `source`, a
+    a lifecycle's `states.source`, a channel's `source`, a
     group's `tech_source`, a deployment variant's `source`, and a test row's cited files: the
     file fields `validate` checks as anchors. (A deployment unit's `config_source` is free prose,
     which `validate` reads as text; "frontend/vite.config.ts." would parse as a link to nothing.) `reanchor` moves all of them: a link it does not walk keeps its old
@@ -280,9 +284,6 @@ def link_index(model: ProjectModel) -> list[AnchorRef]:
         if r is not None:
             out.append(r)
 
-    for ep in model.entry_points:
-        add(_ref(ep.id or f"ep:{ep.source}", "entry_point", ep.cadence_source, "cadence_source",
-                 owner=ep.component))
     for kind, rows in (("entity", model.entities), ("component", model.components)):
         for el in rows:
             if el.states is not None:

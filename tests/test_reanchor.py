@@ -14,7 +14,7 @@ from coyomap import reanchor as ra
 from coyomap.impact_git import ImpactError
 from coyomap.impact_lib import Hunk, anchor_index, link_index
 from coyomap.model import load_model, to_canonical_json
-from coyomap.reanchor import line_mapper, reanchor, set_anchor
+from coyomap.reanchor import line_mapper, locate_anchor, reanchor
 
 from test_impact import commit, make_model
 
@@ -83,7 +83,7 @@ def test_links_follow_shifts_and_renames_and_the_rest_is_listed():
         assert moved[("C1", "source")] == ("svc/a.py:5", "svc/a.py:7")
         assert moved[("C1", "files")] == ("svc/a.py:2-3", "svc/a.py:4-5")
         assert moved[("C1", "evidence")] == ("svc/a.py:9", "svc/a.py:11")
-        assert moved[("ep:svc/a.py:3", "source")] == ("svc/a.py:3", "svc/a.py:5")
+        assert moved[("EP1", "source")] == ("svc/a.py:3", "svc/a.py:5"), "a way in is listed by its own id"
         # A schedule's declaring line moves like any other link (mcpolis 2026-10-09: 20 by hand).
         assert moved[("EP2", "cadence_source")] == ("svc/a.py:7", "svc/a.py:9")
         assert moved[("rule:BR1:0", "where")] == ("svc/a.py:10", "svc/a.py:12")
@@ -193,10 +193,20 @@ def test_the_setter_writes_where_the_walker_read_for_every_kind():
     assert "config_source" not in fields, "a deployment unit's config is prose, never a link"
     assert fields >= {"cadence_source", "states.source", "tech_source",
                       "variants[env=prod].source", "tests[0].file"}
+    taken: set[tuple[int, str | int]] = set()
+    slots = []
     for ref in refs:
         if ref.lo is None:
             continue
-        assert set_anchor(m, ref, f"{ref.path}:{ref.lo + 100}"), (ref.eid, ref.field)
+        slot = locate_anchor(m, ref, taken)        # every link located before any is written
+        assert slot is not None, (ref.eid, ref.field)
+        slots.append((slot, f"{ref.path}:{ref.lo + 100}"))
+    for slot, new in slots:
+        holder, at = slot
+        if isinstance(holder, list):
+            holder[int(at)] = new
+        else:
+            setattr(holder, str(at), new)
     assert len(anchor_index(m)) < len(refs), "the impact report's anchors are a subset of the links"
     moved = [r for r in link_index(m) if r.lo is not None]
     assert moved and all(r.lo is not None and r.lo > 100 for r in moved)

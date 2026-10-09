@@ -112,6 +112,9 @@ KINDS: list[KindSpec] = [
     KindSpec("components", "component", "components", "hood", None, ("name",), ("purpose",)),
     KindSpec("deps", "dependency", "dependencies", "hood", None, ("name",), ("used_for",)),
     KindSpec("edges", "arrow", "arrows", "hood", ("src", "verb", "dst"), (), ("why",)),
+    # A channel is keyed by its name, like a deployment unit: nothing points AT it. Until 2026-10-09
+    # it was in no kind, so a change to one passed `changes check` unseen.
+    KindSpec("messaging", "channel", "channels", "hood", ("name",), ("name",), ()),
     KindSpec("deployment", "deployment unit", "deployment units", "hood", ("unit",), ("unit",), ()),
     KindSpec("config", "config key", "config keys", "hood", ("key",), ("key",), ("purpose",)),
     KindSpec("observability", "signal", "signals", "hood", ("signal",), ("signal",), ()),

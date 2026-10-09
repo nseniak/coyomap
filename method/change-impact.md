@@ -335,7 +335,7 @@ surface, the entry sets `interfaces` (`"was": [], "now": ["I1"]`) and removes th
 
 **What counts as a box for the rule.** Every row with an id; a keyed row under a synthetic id
 (`glossary:<term>`, `run:<action>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
-`net:<name>`); the map's own header under `map` (its `title`, `goal` and the other header fields —
+`net:<name>`, `messaging:<name>` for a channel); the map's own header under `map` (its `title`, `goal` and the other header fields —
 an edit on `map` takes one such field as its key); an arrow under `edge:<src>><verb>><dst>`,
 credited to the box it starts from, so an entry or a waiver naming either the arrow or that box
 explains it.
@@ -368,7 +368,9 @@ re-point its `where` or reword its `why`, and an arrow that became false goes in
 id; its `src`, `verb` and `dst` ARE the address, and an edit of one is refused: remove the arrow
 and add the new one, whole, in `added` (kind `edges`). Two arrows that share all three (`validate`
 warns on the pair) go by number, `edge:C15>calls>C13#1` and `#2`, in map order; the bare id then
-names neither and `lint` says which numbers do. `was` must equal
+names neither and `lint` says which numbers do. Rows keyed by a name do the same: two config rows
+with one key are `config:PORT#1` and `#2`. A change to one twin is explained only by naming that
+twin (one named twin explains one changed twin), or, for an arrow, by naming its source box. `was` must equal
 what the map holds — `lint` refuses a stale `was`, since applying it would overwrite a change
 someone else made; one field is edited by one entry, and the log's `from_commit` must be the map's
 pin. `now: null` removes the field or the list item. Every address is read in the frame of the

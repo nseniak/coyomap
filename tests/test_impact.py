@@ -28,6 +28,7 @@ from coyomap.impact_lib import (
 )
 from coyomap.model import (
     Component,
+    EntryPoint,
     Dep,
     Edge,
     Entity,
@@ -240,6 +241,19 @@ def test_worktree_body_edit_hits_symbol_rung() -> None:
         core = compute_impact(root, model, EXTENTS, pin, WORKTREE)
         assert one(core, "E1").resolution == "symbol" and one(core, "E1").change == "modified"
         assert one(core, "edge:C1>uses>D1").resolution == "symbol"  # line 9 is inside the ±3 window
+
+
+def test_a_changed_schedule_line_hits_its_way_in() -> None:
+    """A way in's schedule is often declared far from its own source; a changed cron line is a
+    change to that way in, under the way in's own id."""
+    with tempfile.TemporaryDirectory() as td:
+        root, pin, model = make_repo(td)
+        model.entry_points = [EntryPoint(id="EP1", kind="job", trigger="sweep", source="README.md:1",
+                                         component="C1", cadence="nightly", cadence_source="svc/guild.py:12")]
+        (root / "svc/guild.py").write_text(GUILD_V1.replace("def helper", "def helper2"), encoding="utf-8")
+        core = compute_impact(root, model, EXTENTS, pin, WORKTREE)
+        hit = one(core, "ep:README.md:1")
+        assert hit.field == "cadence_source" and hit.change == "modified"
 
 
 def test_committed_rename_plus_edit_no_false_delete() -> None:

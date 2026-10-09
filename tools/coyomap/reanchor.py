@@ -158,7 +158,7 @@ def _slots(m: ProjectModel, ref: AnchorRef) -> Iterator[Slot]:
                 yield from at(g, "source")
     elif k == "entry_point" and f == "cadence_source":
         for ep in m.entry_points:
-            if (ep.id or f"ep:{ep.source}") == eid and ep.component == ref.owner:
+            if f"ep:{ep.source}" == eid and ep.component == ref.owner:
                 yield from at(ep, "cadence_source")
     elif k == "entry_point":
         for ep in m.entry_points:
@@ -265,6 +265,16 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
     for ref in link_index(m):
         if not ref.is_dir:
             by_path.setdefault(ref.path, []).append(ref)
+    # A way in is listed by its own id (EP22), the one a log edits it by, not by `ep:<its source>`
+    # — when exactly one way in holds that link; two at one source stay under the shared name.
+    def shown(ref: AnchorRef) -> str:
+        if ref.kind != "entry_point":
+            return ref.eid
+        ids = [ep.id for ep in m.entry_points
+               if f"ep:{ep.source}" == ref.eid and ep.component == ref.owner
+               and _same(ep.cadence_source if ref.field == "cadence_source" else ep.source, ref)]
+        return ids[0] if len(ids) == 1 and ids[0] else ref.eid
+
     # LOCATE EVERY LINK BEFORE WRITING ANY: a link written early could match a later ref's old place.
     taken: set[tuple[int, str | int]] = set()
     writes: list[tuple[Slot, Move]] = []
@@ -273,7 +283,7 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
         refs = by_path[path]
         if new_path not in present:
             for ref in refs:
-                report.unmapped.append(Unmapped(ref.eid, ref.field, _anchor_text(path, ref.lo or 0, ref.hi), "file gone"))
+                report.unmapped.append(Unmapped(shown(ref), ref.field, _anchor_text(path, ref.lo or 0, ref.hi), "file gone"))
             continue
         hunks = u0_diff(repo, pin_sha, path, to_sha, new_path).hunks
         if not hunks and new_path == path:
@@ -284,18 +294,18 @@ def reanchor(m: ProjectModel, repo: Path, to: str = "HEAD") -> ReanchorReport:
             old = _anchor_text(path, ref.lo or 0, ref.hi)
             if ref.lo is None:
                 if new_path != path and (slot := locate_anchor(m, ref, taken)) is not None:
-                    writes.append((slot, Move(ref.eid, ref.field, path, new_path)))
+                    writes.append((slot, Move(shown(ref), ref.field, path, new_path)))
                 continue
             lo = to_t(ref.lo)
             hi = to_t(ref.hi) if ref.hi is not None else None
             if lo is None or (ref.hi is not None and hi is None):
-                report.unmapped.append(Unmapped(ref.eid, ref.field, old, "line changed"))
+                report.unmapped.append(Unmapped(shown(ref), ref.field, old, "line changed"))
                 continue
             new = _anchor_text(new_path, lo, hi)
             if new == old:
                 continue
             if (slot := locate_anchor(m, ref, taken)) is not None:
-                writes.append((slot, Move(ref.eid, ref.field, old, new)))
+                writes.append((slot, Move(shown(ref), ref.field, old, new)))
     for slot, move in writes:
         _write(slot, move.new)
         report.moved.append(move)

@@ -238,6 +238,40 @@ def test_lint_warns_on_a_new_site_anchored_on_a_function_header_and_only_on_what
         assert not [w for w in lint(log, doc).warnings if "operative statement" in w], "no repo, no check"
 
 
+# --- rows keyed by a name ---------------------------------------------------------------------
+
+def test_a_changed_channel_is_a_gap_until_an_entry_names_it():
+    """Channels were in no kind of the map's diff, so a change to one passed the gate unseen."""
+    doc = make_doc(messaging=[{"name": "JOBS", "kind": "queue", "publishers": ["C1"], "consumers": [],
+                               "source": "srv.py:3"}])
+    new = copy(doc)
+    new["messaging"][0]["consumers"] = ["C1"]
+    assert check(make_log(make_entry(elements=["BR1"])), doc, new).errors == [
+        "messaging:JOBS modified in the map, and no entry names it"]
+    log = make_log(make_entry(elements=["messaging:JOBS"],
+                              edits=[FieldEdit("messaging:JOBS", "consumers", [], ["C1"])]))
+    assert lint(log, doc).ok, lint(log, doc).errors
+    applied, _done = apply(log, doc)
+    assert applied["messaging"][0]["consumers"] == ["C1"] and check(log, doc, applied).ok
+
+
+def test_two_config_rows_with_one_key_go_by_number_and_one_does_not_explain_the_other():
+    """27 rows of two live maps share a key (coyomap's own: 8 config rows); a log could address none."""
+    doc = make_doc(config=[{"key": "PORT", "purpose": "the web port"}, {"key": "PORT", "purpose": "the worker port"}])
+    assert {"config:PORT#1", "config:PORT#2"} <= set(changelog.index_map(doc))
+    log = make_log(make_entry(elements=["config:PORT#2"],
+                              edits=[FieldEdit("config:PORT#2", "purpose", "the worker port", "the queue port")]))
+    assert lint(log, doc).ok, lint(log, doc).errors
+    new, _done = apply(log, doc)
+    assert [r["purpose"] for r in new["config"]] == ["the web port", "the queue port"]
+    assert check(log, doc, new).ok, check(log, doc, new).errors
+    new["config"][0]["purpose"] = "changed by hand"
+    errors = check(log, doc, new).errors
+    assert len(errors) == 1 and "config:PORT has twins, and the log names 1 of them for 2 change(s)" in errors[0], errors
+    bare = make_log(make_entry(elements=["config:PORT"]))
+    assert "config:PORT, which 2 rows share" in "\n".join(lint(bare, doc).errors)
+
+
 # --- an arrow is a row a log can address ------------------------------------------------------
 
 def make_arrow_doc(*edges: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +318,7 @@ def test_two_arrows_sharing_their_ends_and_verb_are_told_apart_by_number():
     assert set(changelog.index_map(doc)) >= {"edge:C1>reads>E1#1", "edge:C1>reads>E1#2"}
     bare = make_log(make_entry(elements=["edge:C1>reads>E1"], removed=["edge:C1>reads>E1"]))
     errs = "\n".join(lint(bare, doc).errors)
-    assert "edge:C1>reads>E1, which 2 arrows share — name one of them as edge:C1>reads>E1#1, edge:C1>reads>E1#2" in errs
+    assert "edge:C1>reads>E1, which 2 rows share — name one of them as edge:C1>reads>E1#1, edge:C1>reads>E1#2" in errs
     second = make_log(make_entry(elements=["edge:C1>reads>E1#2"], removed=["edge:C1>reads>E1#2"]))
     new, _done = apply(second, doc)
     assert [e["where"] for e in new["edges"]] == ["srv.py:12"]

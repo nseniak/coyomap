@@ -108,7 +108,8 @@ def _address_target(m: ProjectModel, eid: str) -> tuple[str, str | None, str | N
     authored id: `flow:<UC>` (a use case's flow), `step:<UC|SF>:<n>` (one step, by its number),
     `rule:<BR>:<i>` (one enforcement site, by its position), `edge:<src>><verb>><dst>` (one arrow,
     `#n` after it when two arrows share all three), and the keyed rows `glossary:<term>`,
-    `run:<action>`, `net:<name>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`.
+    `run:<action>`, `net:<name>`, `config:<key>`, `deployment:<unit>`, `observability:<signal>`,
+    `messaging:<name>`.
     A rehearsal of the update flow wrote `flow:UC6` into a log and could look it up nowhere:
     `dump --id flow:UC6` answered "not defined in the map"."""
     kind, sep, rest = eid.partition(":")
@@ -143,11 +144,21 @@ def _address_target(m: ProjectModel, eid: str) -> tuple[str, str | None, str | N
         "config": ("config_key", list(m.config), "key", None),
         "deployment": ("deployment_unit", list(m.deployment), "unit", "config_source"),
         "observability": ("signal", list(m.observability), "signal", "where_emitted"),
+        "messaging": ("channel", list(m.messaging), "name", "source"),
     }
     if kind not in keyed:
         return None
     word, rows, key_field, source_field = keyed[kind]
-    row = next((r for r in rows if getattr(r, key_field, None) == rest), None)
+    same = [r for r in rows if getattr(r, key_field, None) == rest]
+    twin = re.match(r"^(.*)#(\d+)$", rest)
+    if not same and twin:
+        # Rows sharing one key go by number (`config:PORT#2`), as a change log names them.
+        group = [r for r in rows if getattr(r, key_field, None) == twin.group(1)]
+        n = int(twin.group(2))
+        same = [group[n - 1]] if len(group) > 1 and 1 <= n <= len(group) else []
+    elif len(same) > 1:
+        return None                  # the bare key of twins names neither; the numbers do
+    row = same[0] if same else None
     if row is None:
         return None
     source = getattr(row, source_field, None) if source_field else None

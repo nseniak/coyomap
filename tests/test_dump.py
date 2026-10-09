@@ -305,7 +305,7 @@ def test_id_resolves_the_change_log_s_own_addresses():
     """`flow:UC6`, `step:UC6:3`, `rule:BR168:0`, `glossary:<term>`: the ids a change log names a
     flow, a step, an enforcement site and a keyed row by. A rehearsal wrote them into a log and
     `dump --id` answered "not defined in the map" for every one."""
-    from coyomap.model import BusinessRule, Edge, GlossaryRow, RuleSite, RunRow
+    from coyomap.model import BusinessRule, ConfigRow, Edge, GlossaryRow, RuleSite, RunRow
     m = _model_with_a_flow()
     m.rules = [BusinessRule(id="BR1", statement="A guard holds.", name="A guard",
                             sites=[RuleSite(where="backend/auth.py:50", why="refuses a stranger")])]
@@ -334,6 +334,10 @@ def test_id_resolves_the_change_log_s_own_addresses():
     assert arrow is not None and arrow["kind"] == "edge" and arrow["source"] == "backend/a.py:3"
     twin = resolve_id(m, "edge:C1>reads>E1#2")
     assert twin is not None and twin["source"] == "backend/a.py:12", "two arrows sharing their ends go by number"
+    m.config = [ConfigRow(key="PORT", purpose="web"), ConfigRow(key="PORT", purpose="worker")]
+    twin = resolve_id(m, "config:PORT#2")
+    assert twin is not None and resolved_members(twin)[0]["purpose"] == "worker"
+    assert resolve_id(m, "config:PORT") is None, "the bare key of twins names neither"
     for missing in ("flow:UC9", "step:UC1:9", "step:SF9:1", "rule:BR1:1", "rule:BR9:0", "glossary:nope", "run:nope", "bogus:x",
                     "edge:C1>reads>E1", "edge:C9>calls>C2"):
         assert resolve_id(m, missing) is None and record_of(m, missing) is None, missing
